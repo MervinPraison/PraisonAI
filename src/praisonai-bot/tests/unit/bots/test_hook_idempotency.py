@@ -218,7 +218,21 @@ class TestBuildIdempotencyStore:
         from praisonaiagents.gateway import InMemoryIdempotencyStore
         from praisonai_bot.bots import build_idempotency_store
 
-        assert isinstance(build_idempotency_store("redis"), InMemoryIdempotencyStore)
+        assert isinstance(
+            build_idempotency_store("totally-unknown"), InMemoryIdempotencyStore
+        )
+
+    def test_redis_backend_falls_back_to_durable_sqlite(self, tmp_path):
+        # #4768: ``redis`` is not implemented, but it must not silently downgrade
+        # to per-process memory. It falls back to the *durable* SQLite store
+        # (still cross-restart dedup, and cross-replica with a shared file).
+        from praisonai_bot.bots import (
+            SqliteIdempotencyStore,
+            build_idempotency_store,
+        )
+
+        store = build_idempotency_store("redis", path=tmp_path / "idem.sqlite")
+        assert isinstance(store, SqliteIdempotencyStore)
 
     def test_none_backend_is_durable_by_default(self, tmp_path):
         # Issue #4339: unset backend -> durable SQLite store, not in-memory.
@@ -253,6 +267,32 @@ class TestDurabilityDegradation:
         # #4339: the operator-facing reason must be redacted — the raw store
         # path (and any backend detail) stays in logs, never in health/status.
         assert str(bad_path) not in match[0].reason
+        clear_durability_degraded("idempotency")
+
+    def test_redis_backend_records_degraded(self, tmp_path):
+        # #4768: selecting ``store_backend="redis"`` when no Redis backend is
+        # implemented must *report* the degradation (per-replica dedup), not
+        # silently pass as protected — mirroring the SQLite-failure path so the
+        # operator is not misled into thinking cross-replica dedup is active.
+        from praisonai_bot.bots import (
+            SqliteIdempotencyStore,
+            build_idempotency_store,
+        )
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+
+        clear_durability_degraded("idempotency")
+        store = build_idempotency_store("redis", path=tmp_path / "idem.sqlite")
+        # Durable fallback keeps ingress working (not silent per-process memory).
+        assert isinstance(store, SqliteIdempotencyStore)
+        owners = durability_degraded_owners()
+        match = [o for o in owners if o.owner_id == "durability:idempotency"]
+        assert match
+        assert "per-replica" in match[0].reason
+        # The redacted reason must never echo the backend file path.
+        assert str(tmp_path) not in match[0].reason
         clear_durability_degraded("idempotency")
 
     def test_successful_build_clears_stale_degradation(self, tmp_path):
