@@ -8,6 +8,7 @@ Provides CLI commands for launching PraisonAI servers:
 - praisonai serve tools - Launch tools as MCP server
 - praisonai serve a2a - Launch A2A server
 - praisonai serve a2u - Launch A2U event stream server
+- praisonai serve jobs - Launch async jobs API server
 - praisonai serve unified - Launch unified server with all providers
 
 All servers include the unified discovery endpoint at /__praisonai__/discovery.
@@ -49,6 +50,7 @@ class ServeHandler:
     - tools: Launch tools as MCP server
     - a2a: Launch A2A server
     - a2u: Launch A2U event stream server
+    - jobs: Launch async jobs API server
     - unified: Launch unified server
     """
     
@@ -87,6 +89,7 @@ class ServeHandler:
             "tools": self.cmd_tools,
             "a2a": self.cmd_a2a,
             "a2u": self.cmd_a2u,
+            "jobs": self.cmd_jobs,
             "unified": self.cmd_unified,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -117,6 +120,7 @@ Launch PraisonAI servers with unified discovery support.
   tools             Launch tools as MCP server
   a2a               Launch A2A protocol server
   a2u               Launch A2U event stream server
+  jobs              Launch async jobs API server
   unified           Launch unified server with all providers
 
 [bold]Common Options:[/bold]
@@ -142,7 +146,12 @@ Launch PraisonAI servers with unified discovery support.
   praisonai serve mcp --transport http --port 8080
   praisonai serve tools --port 8081
   praisonai serve a2a --port 8082
+  praisonai serve jobs --port 8005
   praisonai serve unified --port 8765
+
+[bold]Jobs Options:[/bold]
+  --port <port>     Server port (default: 8005)
+  --db <path>       SQLite path for job persistence (PRAISONAI_JOBS_DB_PATH)
 
 [bold]Discovery:[/bold]
   All servers expose /__praisonai__/discovery for unified endpoint discovery.
@@ -796,6 +805,44 @@ Launch PraisonAI servers with unified discovery support.
         
         return app
     
+    def cmd_jobs(self, args: List[str]) -> int:
+        """Launch the async jobs API server."""
+        spec = {
+            "host": {"default": self.DEFAULT_HOST},
+            "port": {"default": 8005, "type": "int"},
+            "db": {"default": None},
+            "reload": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+
+        # Persist jobs and idempotency keys across restarts when --db is given.
+        # start_server() reads PRAISONAI_JOBS_DB_PATH via the jobs store default.
+        if parsed.get("db"):
+            os.environ["PRAISONAI_JOBS_DB_PATH"] = parsed["db"]
+
+        try:
+            self._print_success(f"Starting jobs server on {parsed['host']}:{parsed['port']}")
+            print("  Submit: POST /api/v1/runs")
+            print("  Health: /health")
+
+            from praisonai.jobs import start_server
+
+            start_server(
+                host=parsed["host"],
+                port=parsed["port"],
+                reload=parsed["reload"],
+            )
+
+        except ImportError as e:
+            self._print_error(f"Missing dependency: {e}")
+            print("Install with: pip install praisonai[serve]")
+            return self.EXIT_GENERAL_ERROR
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+
+        return self.EXIT_SUCCESS
+
     def cmd_unified(self, args: List[str]) -> int:
         """Launch unified server with all providers."""
         spec = {

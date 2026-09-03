@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 75 | **Documented:** 75 | **Parity:** 100.0%
+> **Categories:** 76 | **Documented:** 75 | **Parity:** 98.7%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -8,10 +8,10 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 
 | Metric | Count |
 |--------|-------|
-| Feature Categories | 75 |
+| Feature Categories | 76 |
 | **Documented Categories** | **75** |
-| **Undocumented Categories** | **0** |
-| **Parity** | **100.0%** |
+| **Undocumented Categories** | **1** |
+| **Parity** | **98.7%** |
 
 ## Documented Categories
 
@@ -26,49 +26,49 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Auto Generation | 14 | 3 | 620 |
 | ✅ Autonomy | 5 | 1 | 164 |
 | ✅ Bots | 5 | 1 | 184 |
-| ✅ Budget | 1 | 1 | 197 |
+| ✅ Budget | 2 | 1 | 197 |
 | ✅ CLI | 2 | 1 | 159 |
 | ✅ Caching | 2 | 1 | 249 |
-| ✅ Chunking | 2 | 2 | 299 |
+| ✅ Chunking | 4 | 2 | 299 |
 | ✅ Citations | 3 | 1 | 156 |
-| ✅ Code Execution | 6 | 4 | 464 |
+| ✅ Code Execution | 7 | 4 | 464 |
 | ✅ Conditions | 1 | 1 | 372 |
 | ✅ Configuration | 3 | 1 | 272 |
-| ✅ Context Management | 17 | 2 | 345 |
+| ✅ Context Management | 32 | 2 | 345 |
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 14 | 2 | 469 |
 | ✅ Display | 20 | 1 | 342 |
-| ✅ Embeddings | 6 | 3 | 813 |
+| ✅ Embeddings | 12 | 3 | 813 |
 | ✅ Evaluation | 8 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 4 | 1 | 159 |
 | ✅ Failover | 2 | 1 | 160 |
-| ✅ Files | 10 | 1 | 151 |
+| ✅ Files | 11 | 1 | 151 |
 | ✅ Flow | 4 | 1 | 164 |
 | ✅ Gateway | 6 | 1 | 401 |
-| ✅ Guardrails | 6 | 3 | 744 |
+| ✅ Guardrails | 16 | 3 | 744 |
 | ✅ Handoffs | 12 | 1 | 179 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
 | ✅ Jobs | 8 | 1 | 156 |
-| ✅ Knowledge | 3 | 2 | 312 |
-| ✅ LLM | 6 | 2 | 279 |
+| ✅ Knowledge | 5 | 2 | 312 |
+| ✅ LLM | 10 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 180 |
-| ✅ MCP | 17 | 4 | 870 |
-| ✅ Memory | 17 | 4 | 783 |
+| ✅ MCP | 20 | 4 | 870 |
+| ✅ Memory | 19 | 4 | 783 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 2 | 1 | 162 |
 | ✅ Observability | 6 | 28 | 2318 |
-| ✅ Optimizer | 1 | 1 | 162 |
+| ✅ Optimizer | 3 | 1 | 162 |
 | ✅ Output | 3 | 1 | 220 |
 | ✅ Parallel Execution | 3 | 2 | 256 |
 | ✅ Planning | 11 | 2 | 525 |
 | ✅ Plugins | 9 | 2 | 710 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 24 | 116 | 8141 |
+| ✅ Providers | 25 | 116 | 8141 |
 | ✅ PubSub | 1 | 1 | 149 |
-| ✅ Query | 3 | 2 | 246 |
-| ✅ RAG | 6 | 2 | 386 |
+| ✅ Query | 7 | 2 | 246 |
+| ✅ RAG | 16 | 2 | 386 |
 | ✅ Realtime | 2 | 1 | 150 |
 | ✅ Reflection | 3 | 1 | 147 |
 | ✅ Retrieval | 5 | 1 | 150 |
@@ -76,7 +76,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Sandbox | 8 | 2 | 132 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
-| ✅ Sessions | 3 | 2 | 433 |
+| ✅ Sessions | 14 | 2 | 433 |
 | ✅ Skills | 7 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 4 | 1 | 165 |
@@ -85,13 +85,19 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
 | ✅ Tools | 34 | 15 | 3267 |
-| ✅ Tracing | 8 | 3 | 477 |
-| ✅ Vector Store | 6 | 2 | 530 |
+| ✅ Tracing | 11 | 3 | 477 |
+| ✅ Vector Store | 7 | 2 | 530 |
 | ✅ Video | 2 | 1 | 150 |
 | ✅ Vision | 2 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
 | ✅ Web | 4 | 1 | 150 |
 | ✅ Workflows | 7 | 3 | 720 |
+
+## Undocumented Categories (Need Documentation)
+
+| Category | Features |
+|----------|----------|
+| ❌ Process | 2 |
 
 ## Documentation Without Features
 
