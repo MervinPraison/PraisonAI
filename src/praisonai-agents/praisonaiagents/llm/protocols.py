@@ -271,15 +271,10 @@ class LLMProviderAdapterProtocol(Protocol):
                 return False
             
             def should_summarize_tools(self, iter_count: int) -> bool:
-                return iter_count >= 3  # Ollama-specific threshold
+                return iter_count >= 1  # Ollama-specific threshold
             
-            def format_tools(self, tools) -> list:
-                return tools  # No special formatting needed
-            
-            def post_tool_iteration(self, state) -> None:
-                if state.get('empty_response') and state.get('tools'):
-                    # Add Ollama-specific tool summary
-                    state['summary'] = "Tool results processed"
+            def supports_streaming_with_tools(self) -> bool:
+                return False  # Ollama doesn't reliably stream with tools
         ```
     """
     
