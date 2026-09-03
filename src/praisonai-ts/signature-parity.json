@@ -1686,7 +1686,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2364",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2389",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -1943,7 +1943,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:1717",
+        "location": "src/praisonai-ts/src/agent/simple.ts:1742",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],

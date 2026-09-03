@@ -199,7 +199,7 @@ TS-only members: `dependencies`?
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:831`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1717`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1742`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -211,7 +211,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3101`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2364`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2389`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
