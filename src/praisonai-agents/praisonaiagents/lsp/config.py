@@ -66,6 +66,12 @@ def resolve_servers(user_servers: Optional[Dict[str, Dict]] = None) -> Dict[str,
     the result is byte-for-byte ``DEFAULT_SERVERS``.  The merge is shallow at the
     per-language level (a user language entry replaces the built-in entry for
     that key) and keeps the helper lazy and dependency-free.
+
+    Command/args are treated as a unit: when a user swaps ``command`` for a
+    different executable without supplying ``args``, the built-in ``args`` are
+    dropped rather than inherited, so arguments belonging to the replaced server
+    (e.g. ``--stdio`` for ``typescript-language-server``) are never passed to an
+    unrelated replacement binary.
     """
     if not user_servers:
         return DEFAULT_SERVERS
@@ -74,7 +80,12 @@ def resolve_servers(user_servers: Optional[Dict[str, Dict]] = None) -> Dict[str,
         if not isinstance(server, dict):
             continue
         base = dict(merged.get(language, {}))
+        overrides_command = (
+            "command" in server and server["command"] != base.get("command")
+        )
         base.update(server)
+        if overrides_command and "args" not in server:
+            base["args"] = []
         merged[language] = base
     return merged
 

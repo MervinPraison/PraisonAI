@@ -490,6 +490,29 @@ class TestResolveServers:
         merged = resolve_servers({"bogus": "not-a-dict"})
         assert "bogus" not in merged
 
+    def test_command_only_override_drops_inherited_args(self):
+        # Overriding only the command must not leak the replaced server's args
+        # (e.g. typescript-language-server's `--stdio`) to a different binary.
+        user = {"typescript": {"command": "my-ts-server"}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["command"] == "my-ts-server"
+        assert merged["typescript"]["args"] == []
+        # Non-command fields still fall back to the built-in entry.
+        assert merged["typescript"]["extensions"] == [".ts", ".tsx"]
+        # Original default is untouched.
+        assert DEFAULT_SERVERS["typescript"]["args"] == ["--stdio"]
+
+    def test_command_override_with_explicit_args_kept(self):
+        user = {"typescript": {"command": "my-ts-server", "args": ["--lsp"]}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["args"] == ["--lsp"]
+
+    def test_same_command_override_keeps_args(self):
+        # Overriding other fields while keeping the same command retains args.
+        user = {"typescript": {"root_markers": ["deno.json", ".git"]}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["args"] == ["--stdio"]
+
 
 class TestConfigurableRegistry:
     """LSPConfig / detection / probe consult the merged registry."""
