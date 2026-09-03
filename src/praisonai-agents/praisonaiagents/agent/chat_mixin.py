@@ -4923,6 +4923,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_history = durable_context.restore_messages(
                             list(stream_history)
                         )
+                    stream_sampling_kwargs = {}
+                    if kwargs.get('max_tokens') is not None:
+                        stream_sampling_kwargs['max_tokens'] = kwargs['max_tokens']
+                    if kwargs.get('top_p') is not None:
+                        stream_sampling_kwargs['top_p'] = kwargs['top_p']
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=self._build_system_prompt(
@@ -4946,7 +4951,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.execute_tool
                         ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=self._resolve_max_tool_calls()
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
+                        **stream_sampling_kwargs
                     ):
                         response_content += chunk
                         yield chunk
@@ -5021,6 +5027,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         "temperature": kwargs.get('temperature', 1.0),
                         "stream": True
                     }
+                    if kwargs.get('max_tokens') is not None:
+                        completion_args["max_tokens"] = kwargs['max_tokens']
+                    if kwargs.get('top_p') is not None:
+                        completion_args["top_p"] = kwargs['top_p']
                     if formatted_tools:
                         completion_args["tools"] = formatted_tools
                     
