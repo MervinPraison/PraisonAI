@@ -83,6 +83,10 @@ from .protocols import (
     GatewayIdlePolicyProtocol,
     GatewayIdlePolicy,  # backward-compat alias
     ScaleToZeroPolicy,
+    # Gateway freeze-thaw (involuntary host-suspend gap) recovery (Issue #4767)
+    ThawDecision,
+    ThawPolicyProtocol,
+    WallClockGapThawPolicy,
     # Gateway graceful-drain on shutdown (Issue #2375)
     DrainDecision,
     GatewayDrainPolicyProtocol,
@@ -370,6 +374,10 @@ __all__ = [
     "GatewayIdlePolicyProtocol",
     "GatewayIdlePolicy",
     "ScaleToZeroPolicy",
+    # Gateway freeze-thaw (involuntary host-suspend gap) recovery (Issue #4767)
+    "ThawDecision",
+    "ThawPolicyProtocol",
+    "WallClockGapThawPolicy",
     "DrainDecision",
     "GatewayDrainPolicyProtocol",
     "DrainTimeoutPolicy",
