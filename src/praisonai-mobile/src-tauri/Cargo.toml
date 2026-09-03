@@ -24,14 +24,35 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# openExternal: `plugin:opener|open_url` in adapters/src/tauri/bridge.ts. Until
+# this was here that invoke rejected, the bridge swallowed it, and on iOS
+# (no window.open) openExternal returned true having done nothing.
+tauri-plugin-opener = "2"
+# Android's system back gesture, delivered to Rust so `shell::back::Gate` can
+# arbitrate it. In-repo: it is a Kotlin OnBackPressedCallback plus a Channel,
+# and no published plugin routes the press through Rust. Inert off Android.
+tauri-plugin-back-gesture = { path = "plugins/back-gesture" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
+
+# The in-repo plugin is a member so the CI commands run from this directory
+# (`cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo check
+# --lib --target ...`) build and lint it too. As a bare path dependency it
+# would compile with lints capped and its own tests would never run.
+[workspace]
+members = ["plugins/back-gesture"]
+default-members = [".", "plugins/back-gesture"]
 
 [dev-dependencies]
 # The shell logic is tested without a Tauri app: emitting and falling back are
 # injected traits, so the arbitration is exercised on a laptop.
 serde_json = "1"
+# `test` gives the mock runtime, which is what lets tests/wiring.rs build the
+# REAL builder chain (`configure`) and put a real `Window` through
+# `shell::on_window_event`. A dev-dependency, so the feature is not compiled
+# into the app: resolver v2 keeps dev-only features out of the lib build.
+tauri = { version = "2", features = ["test"] }
 
 [profile.release]
 codegen-units = 1

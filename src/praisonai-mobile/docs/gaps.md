@@ -442,9 +442,15 @@ setting can return the day its consumer does.
 What actually remains for praisonai-mobile, all of it unbuilt rather than
 broken:
 
-- **The platform half of the shell.** The Rust crate has the event names and
-  the pure decision functions; no iOS or Android code observes safe-area,
-  keyboard height or lifecycle yet, so none of the four events is ever emitted.
+- **The keyboard half of the shell, and an iOS back.** The Rust crate now
+  emits three of the four events: `lifecycle` from Tauri's suspend/resume/focus
+  window events, `safe-area-changed` (an empty payload, meaning "re-read the
+  CSS") on resize and scale change, and `back-gesture` from Android's system
+  back via the in-repo `tauri-plugin-back-gesture`, answered through
+  `back_gesture_result`. `keyboard-height` is still never emitted natively --
+  the TypeScript reads `visualViewport` instead, and would take a native event
+  as an override -- and nothing installs an iOS edge-swipe back. Haptics and
+  share have no plugin; the bridge's invokes for them reject and degrade.
 - **Route→view dispatch.** `ui/src/screens.ts` and `app/src/mount.ts` are built
   and tested, and `main.ts` imports neither. Tapping "Settings" pushes onto a
   stack nothing reads.
