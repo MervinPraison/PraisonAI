@@ -233,6 +233,25 @@ assert('final trigger alone is incomplete', !mg.finalClaudeCompletedOnSha(
   '2026-06-27T09:55:00Z'
 ));
 
+// Two FINAL triggers <60s apart: an earlier reply must not complete the latest FINAL.
+const twoFinalsEarlyReply = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:00:20Z' },
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:40Z' },
+];
+assert(
+  'earlier reply does not complete latest FINAL when triggers are close',
+  !mg.finalClaudeCompletedOnSha(twoFinalsEarlyReply, '2026-06-27T09:55:00Z')
+);
+const twoFinalsLateReply = [
+  ...twoFinalsEarlyReply,
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:01:10Z' },
+];
+assert(
+  'reply after latest FINAL completes it',
+  mg.finalClaudeCompletedOnSha(twoFinalsLateReply, '2026-06-27T09:55:00Z')
+);
+
 assert('recent scan comment detected', mg.hasRecentMergeGateScanComment([
   { body: '**Merge gate scan** — eligible', created_at: new Date().toISOString() },
 ]));

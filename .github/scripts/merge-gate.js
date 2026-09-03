@@ -321,9 +321,21 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
     new Date(a.created_at) > new Date(b.created_at) ? a : b
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
+  // When two FINAL triggers land close together, a completion reply belonging to
+  // an earlier trigger must not satisfy the latest one. Clamp the backward skew so
+  // it never reaches past the previous FINAL trigger.
+  const priorFinal = finals
+    .filter((f) => new Date(f.created_at).getTime() < finalTime)
+    .reduce((a, b) => (a && new Date(a.created_at) > new Date(b.created_at) ? a : b), null);
+  const priorTime = priorFinal ? new Date(priorFinal.created_at).getTime() : -Infinity;
+  // Apply a small backward clock-skew tolerance only when the previous FINAL is
+  // far enough away that it cannot claim the reply; otherwise require the reply
+  // strictly after the latest FINAL trigger to avoid cross-trigger misattribution.
+  const skewSafe = finalTime - priorTime > 60000;
+  const minReplyTime = skewSafe ? finalTime - 60000 : finalTime;
   return comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= finalTime - 60000;
+    return new Date(c.created_at).getTime() >= minReplyTime;
   });
 }
 
