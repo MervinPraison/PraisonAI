@@ -137,6 +137,27 @@ class TestNonStreamingFallbackRunsTools:
         assert state["turns"] == 2, "a failing tool aborted the turn"
         assert "".join(out).strip()
 
+    def test_it_stops_at_max_tool_calls_per_turn(self):
+        """The fallback must honour the same per-turn guardrail as the other loops."""
+        llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+        state = {"ran": 0}
+
+        def always_calls(**kwargs):
+            message = types.SimpleNamespace(content=None, tool_calls=[_tool_call()])
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(message=message, finish_reason="tool_calls")])
+
+        def execute(name, args, *a, **kw):
+            state["ran"] += 1
+            return get_weather(**args)
+
+        llm._completion_with_retry = always_calls
+        list(llm.get_response_stream(prompt="weather?", system_prompt="x",
+                                     tools=[get_weather], execute_tool_fn=execute,
+                                     max_tool_calls_per_turn=3))
+        assert state["ran"] == 3, (
+            "the fallback ran tools past max_tool_calls_per_turn")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

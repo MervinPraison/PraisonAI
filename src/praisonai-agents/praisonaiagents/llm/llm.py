@@ -4546,6 +4546,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     is_ollama = self._is_ollama_provider()
                     fallback_iterations = 0
+                    tool_call_count = 0
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
                         fallback_iterations += 1
@@ -4592,7 +4593,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             yield content
 
+                        # Enforce the same per-turn guardrail the streaming and
+                        # non-streaming loops apply, so the fallback cannot run
+                        # tools past the caller's configured limit.
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(
+                                f"Tool call limit reached ({max_tool_calls_per_turn}). "
+                                "Stopping to prevent infinite loop.")
+                            break
+                        if tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(
+                                f"Limiting batch to {remaining_calls} tool calls to stay "
+                                f"within limit of {max_tool_calls_per_turn}.")
+
                         for tool_call in tool_calls:
+                            tool_call_count += 1
                             function_name, arguments, tool_call_id = (
                                 self._extract_tool_call_info(tool_call, is_ollama))
                             if self._tool_arguments_parse_failed(arguments):
