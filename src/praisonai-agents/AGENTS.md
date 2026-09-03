@@ -2,6 +2,13 @@
 
 > **For AI Agents and Developers**: This document provides the complete context needed to work with the PraisonAI ecosystem, including design principles, architecture, repository structure, and implementation guidelines.
 
+> **Active workstream — local model runtimes.** If your task touches local inference
+> (Ollama, LM Studio, llama.cpp, vLLM, MLX, `transformers serve`), provider detection,
+> `llm/adapters/`, or the `praisonaiagents/local/` package, read
+> [`docs/local-model-layer/README.md`](docs/local-model-layer/README.md) **before editing**.
+> It carries the measured ground truth, the invariants, and a file-ownership table that
+> prevents concurrent work orders from corrupting each other.
+
 ---
 
 ## 1. What is PraisonAI?
