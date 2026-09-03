@@ -4906,7 +4906,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             original_verbose = self.verbose
             self.verbose = False
             memory_prefetch_context = self._prefetch_memory(prompt)
-            
+
+            # Ephemeral attachments (images / data URIs) are folded into a
+            # multimodal prompt so streaming turns reach vision models too,
+            # matching chat()/achat(). The text prompt is kept intact through
+            # knowledge retrieval below and the multimodal content is built
+            # afterwards, so knowledge augmentation never flattens the image.
+            # Only the text is stored in history.
+            attachments = kwargs.get('attachments')
+
             # For custom LLM path, use the new get_response_stream generator
             if self._using_custom_llm:
                 # Handle knowledge search
@@ -4922,6 +4930,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             knowledge_content = "\n".join(search_results)
                         actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+                if attachments:
+                    actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)
@@ -5030,6 +5041,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             knowledge_content = "\n".join(search_results)
                         actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+                if attachments:
+                    actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)

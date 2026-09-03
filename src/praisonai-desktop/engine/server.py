@@ -2055,8 +2055,16 @@ class Handler(BaseHTTPRequestHandler):
             chat_id = payload.get("chat_id") or session
             regenerate_of = payload.get("regenerate_of")
             tools_on = payload.get("tools", True) is not False
+            # Images arrive as data: URIs and go to the agent as attachments= so a
+            # vision model actually sees them; text-like files keep being folded
+            # into the prompt as before. Nothing binary is ever stringified.
+            media_attachments = []
             for att in (payload.get("attachments") or [])[:5]:
                 nm = str(att.get("name", "file"))[:120]
+                url = att.get("url")
+                if isinstance(url, str) and url.startswith("data:"):
+                    media_attachments.append(url)
+                    continue
                 body = str(att.get("text", ""))[:100_000]
                 prompt = f"{prompt}\n\n--- attached: {nm} ---\n{body}"
         except (ValueError, TypeError):
@@ -2147,8 +2155,10 @@ class Handler(BaseHTTPRequestHandler):
                                          "seconds": ev["seconds"]})
                 return shown
 
-            for chunk in agent.start(turn_prompt, stream=True,
-                                     **_llm_overrides(load_settings())):
+            start_kwargs = dict(_llm_overrides(load_settings()))
+            if media_attachments:
+                start_kwargs["attachments"] = media_attachments
+            for chunk in agent.start(turn_prompt, stream=True, **start_kwargs):
                 # Counted here too. This call drains the queue, so discarding
                 # its result meant the tally further down always read zero
                 # unless the loop body never ran at all -- and the tests only

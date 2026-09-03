@@ -1803,14 +1803,31 @@ function renderChips(){
     const c=document.createElement('span'); c.className='chip';
     c.innerHTML='<b></b><span></span><span class="x">&times;</span>';
     c.querySelector('b').textContent=a.name;
-    c.querySelector('span').textContent=(a.text.length/1024).toFixed(1)+' kB';
+    const kb=(a.text!=null ? a.text.length : (a.size||0))/1024;
+    c.querySelector('span').textContent=kb.toFixed(1)+' kB';
     c.querySelector('.x').onclick=()=>{ attached.splice(i,1); renderChips(); };
     chips.appendChild(c);
+  });
+}
+function readAsDataURL(f){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result||''));
+    r.onerror=()=>rej(r.error);
+    r.readAsDataURL(f);
   });
 }
 async function addFiles(list){
   for(const f of [...list].slice(0,5)){
     if(f.size>2000000){ fail('File too large', f.name+' is over 2 MB.',''); continue; }
+    // Images (and PDFs) go to the model as bytes, not stringified text, so a
+    // vision model actually sees them. Everything else keeps the text path.
+    const t=(f.type||'').toLowerCase();
+    if(t.startsWith('image/') || t==='application/pdf'){
+      const url=await readAsDataURL(f);
+      attached.push({name:f.name, url, size:f.size});
+      continue;
+    }
     const text=await f.text();
     // Clipped here, while the chip reports the real size, so a truncated file
     // can never be mistaken for a complete one.
