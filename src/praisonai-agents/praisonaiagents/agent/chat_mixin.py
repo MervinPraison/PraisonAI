@@ -5010,6 +5010,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_sampling_kwargs['max_tokens'] = kwargs['max_tokens']
                     if kwargs.get('top_p') is not None:
                         stream_sampling_kwargs['top_p'] = kwargs['top_p']
+                    # reasoning_effort travelled the same route as max_tokens
+                    # and top_p -- collected by the caller, forwarded into
+                    # start(), and then dropped, because this enumeration never
+                    # listed it. llm.py already consumes it from here.
+                    _stream_effort = kwargs.get(
+                        'reasoning_effort', getattr(self, 'reasoning_effort', None))
+                    if _stream_effort is not None:
+                        stream_sampling_kwargs['reasoning_effort'] = _stream_effort
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
@@ -5134,6 +5142,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         completion_args["max_tokens"] = kwargs['max_tokens']
                     if kwargs.get('top_p') is not None:
                         completion_args["top_p"] = kwargs['top_p']
+                    # Native reasoning control. resolve_reasoning_params returns
+                    # {} for "off", for an unset level, and for a model with no
+                    # reasoning knob, so the default stays a no-op; a reasoning
+                    # model gets reasoning_effort and Anthropic/Gemini get their
+                    # thinking budget. completion_args is copied into
+                    # followup_args below, so tool follow-ups inherit it.
+                    _effort = kwargs.get(
+                        'reasoning_effort', getattr(self, 'reasoning_effort', None))
+                    if _effort is not None:
+                        try:
+                            from ..thinking.effort import resolve_reasoning_params
+                            completion_args.update(
+                                resolve_reasoning_params(_effort, self.llm))
+                        except ImportError:
+                            pass
                     if formatted_tools:
                         completion_args["tools"] = formatted_tools
                     
