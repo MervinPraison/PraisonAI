@@ -3,7 +3,9 @@ Live integration tests for Ollama tool calling.
 
 These tests require:
 1. Ollama running locally (default: http://localhost:11434)
-2. olmo-3 model pulled: ollama pull olmo-3
+2. A tools-capable model pulled (default olmo-3; CI uses qwen3:0.6b)
+   Override with PRAISONAI_OLLAMA_TEST_MODEL, e.g.
+       export PRAISONAI_OLLAMA_TEST_MODEL=qwen3:0.6b
 3. Environment variable: PRAISONAI_TEST_OLLAMA=1
 
 Run with:
@@ -20,6 +22,11 @@ pytestmark = pytest.mark.skipif(
     not os.getenv("PRAISONAI_TEST_OLLAMA"),
     reason="Ollama live tests disabled. Set PRAISONAI_TEST_OLLAMA=1 to enable."
 )
+
+
+# CI overrides this with a small, fast model; local runs keep olmo-3 so an
+# existing developer workflow is unchanged.
+OLLAMA_MODEL = "ollama/" + os.getenv("PRAISONAI_OLLAMA_TEST_MODEL", "olmo-3")
 
 
 def calculator(a: int, b: int) -> int:
@@ -53,6 +60,47 @@ def ollama_available():
     return True
 
 
+class TestOllamaCIMinimum:
+    """The minimum contract a local model must satisfy: a tool call round-trips.
+
+    Deliberately narrow. Measured on qwen3:0.6b, this exact configuration
+    (forced tool usage, temperature 0, one arithmetic step) passed 6/6, while
+    the default configuration passed 3/4 and multi-step prompts were worse.
+    Those live in TestOllamaToolCallingLive, which CI runs informationally.
+
+    This is the class the required CI step runs, so it must not grow into a
+    general behaviour suite.
+    """
+
+    def test_tool_call_round_trips(self, ollama_available):
+        from praisonaiagents import Agent
+
+        invocations = []
+
+        def add(a: int, b: int) -> int:
+            """Add two integers together.
+
+            Args:
+                a: First number to add
+                b: Second number to add
+            """
+            invocations.append((a, b))
+            return a + b
+
+        agent = Agent(
+            name="CI Calculator",
+            llm={"model": OLLAMA_MODEL, "force_tool_usage": "always", "temperature": 0},
+            tools=[add],
+        )
+        result = agent.chat("Compute 17 + 25. You MUST use the calculator tool.")
+
+        # Both halves matter. qwen3:0.6b answers "17 + 25 = 42" correctly with no
+        # tools at all, so an answer-only assertion is satisfied by a model that
+        # ignores tools entirely.
+        assert invocations == [(17, 25)], f"tool was not invoked: {invocations!r}"
+        assert "42" in str(result), f"tool result did not round-trip: {result!r}"
+
+
 class TestOllamaToolCallingLive:
     """Live tests for Ollama tool calling with olmo-3."""
 
@@ -62,9 +110,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Calculator Agent",
-            llm="ollama/olmo-3",
-            tools=[calculator],
-            verbose=True
+            llm=OLLAMA_MODEL,
+            tools=[calculator]
         )
         
         result = agent.chat("Compute 17 + 25. You MUST use the calculator tool.")
@@ -79,10 +126,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Calculator Agent",
-            llm="ollama/olmo-3",
-            tools=[calculator],
-            force_tool_usage="always",
-            verbose=True
+            llm={"model": OLLAMA_MODEL, "force_tool_usage": "always"},
+            tools=[calculator]
         )
         
         result = agent.chat("What is 17 plus 25?")
@@ -97,9 +142,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Calculator Agent",
-            llm="ollama/olmo-3",
-            tools=[calculator],
-            verbose=True
+            llm=OLLAMA_MODEL,
+            tools=[calculator]
         )
         
         result = agent.chat(
@@ -115,9 +159,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Calculator Agent",
-            llm="ollama/olmo-3",
-            tools=[calculator],
-            verbose=True
+            llm=OLLAMA_MODEL,
+            tools=[calculator]
         )
         
         result = agent.chat(
@@ -135,10 +178,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Calculator Agent",
-            llm="ollama/olmo-3",
-            tools=[calculator],
-            max_tool_repairs=3,
-            verbose=True
+            llm={"model": OLLAMA_MODEL, "max_tool_repairs": 3},
+            tools=[calculator]
         )
         
         result = agent.chat("Calculate 100 + 200 using the calculator tool.")
@@ -152,9 +193,8 @@ class TestOllamaToolCallingLive:
         
         agent = Agent(
             name="Direct Agent",
-            llm="ollama/olmo-3",
+            llm=OLLAMA_MODEL,
             tools=[],  # No tools
-            verbose=True
         )
         
         result = agent.chat("What is 17 + 25?")
@@ -176,9 +216,8 @@ class TestOllamaToolCallingDebugLogging:
         with caplog.at_level(logging.DEBUG):
             agent = Agent(
                 name="Calculator Agent",
-                llm="ollama/olmo-3",
-                tools=[calculator],
-                verbose=True
+                llm=OLLAMA_MODEL,
+                tools=[calculator]
             )
             
             result = agent.chat("Compute 5 + 3 using the calculator tool.")
@@ -202,7 +241,7 @@ if __name__ == "__main__":
     if not check_ollama_available():
         print("ERROR: Ollama is not running at localhost:11434")
         print("Start Ollama with: ollama serve")
-        print("Pull model with: ollama pull olmo-3")
+        print("Pull model with: ollama pull $PRAISONAI_OLLAMA_TEST_MODEL")
         exit(1)
     
     print("Ollama is available. Running tests...")
@@ -213,9 +252,8 @@ if __name__ == "__main__":
     
     agent = Agent(
         name="Calculator Agent",
-        llm="ollama/olmo-3",
-        tools=[calculator],
-        verbose=True
+        llm=OLLAMA_MODEL,
+        tools=[calculator]
     )
     
     print("Test 1: Basic tool call")
