@@ -3382,6 +3382,150 @@ GatewayIdlePolicy = GatewayIdlePolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway freeze-thaw (involuntary host-suspend gap) recovery (Issue #4767)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ThawDecision:
+    """Result of a freeze-thaw (host-suspend gap) evaluation.
+
+    Attributes:
+        suspended: Whether an involuntary host-suspend gap was detected
+            since the previous observation.
+        gap_seconds: Estimated duration the host was frozen (0.0 when not
+            suspended).
+        restart_transports: Whether the wrapper should re-probe / restart
+            outbound channel sockets (idle-gated) because they may be
+            silently half-dead after the freeze.
+        reconcile_schedule: Whether the wrapper should reconcile the
+            scheduler (coalesce missed cron fires) against the gap instead
+            of letting wall-clock catch-up storm on resume.
+    """
+
+    suspended: bool
+    gap_seconds: float = 0.0
+    restart_transports: bool = False
+    reconcile_schedule: bool = False
+
+
+@runtime_checkable
+class ThawPolicyProtocol(Protocol):
+    """Protocol for freeze-thaw (involuntary host-suspend) detection.
+
+    Pure, import-free decision contract consumed by the wrapper's
+    ``BotOS`` run-loop. The wrapper ticks the policy with a matched pair
+    of ``time.monotonic()`` and ``time.time()`` readings; the policy
+    compares the elapsed monotonic delta against the elapsed wall-clock
+    delta and returns a :class:`ThawDecision`. On Linux ``CLOCK_MONOTONIC``
+    does not advance while the host is suspended, so a wall-clock delta
+    that runs far ahead of the monotonic delta is a positive signature of
+    a freeze the process could not otherwise observe. Concrete recovery
+    (restart channel sockets when idle, refresh presence, reconcile the
+    scheduler) lives in the wrapper; this contract keeps the *detection*
+    testable in isolation.
+    """
+
+    def observe(self, *, monotonic_now: float, wall_now: float) -> ThawDecision:
+        """Return a :class:`ThawDecision` for the supplied clock readings."""
+        ...
+
+
+class WallClockGapThawPolicy:
+    """Config-driven default freeze-thaw detector.
+
+    The default referenced by ``gateway.thaw:`` blocks in ``gateway.yaml``
+    and the ``BotOS(..., thaw_policy=...)`` Python surface. It is
+    intentionally minimal and dependency-free so the decision lives in
+    core and is provable in isolation; the wrapper owns the side effects
+    (restart channel sockets, refresh presence, reconcile the scheduler).
+
+    A suspend gap is detected when, between two consecutive
+    :meth:`observe` calls, the wall-clock delta ran ahead of the monotonic
+    delta by more than ``gap_threshold_s`` *and* the monotonic clock itself
+    stayed near-frozen (advanced by no more than one tick plus a small
+    tolerance). Both conditions are the true signature of a frozen host:
+    wall-clock jumps forward while ``CLOCK_MONOTONIC`` stalls. The reported
+    ``gap_seconds`` is the wall-vs-monotonic divergence — the time the host
+    was actually frozen.
+
+    Requiring the monotonic delta to stay near-frozen distinguishes a real
+    host suspend from a forward *wall-clock correction* (NTP step / manual
+    clock set) that occurs while the process is running normally: in the
+    correction case monotonic keeps advancing on schedule, so no recovery
+    is requested and healthy transports/schedule are left untouched.
+
+    The first observation only seeds the baseline and never reports a gap,
+    so the default preserves current behaviour when no freeze occurs.
+
+    Example::
+
+        WallClockGapThawPolicy(tick_interval_s=15.0, gap_threshold_s=60.0)
+    """
+
+    def __init__(
+        self,
+        tick_interval_s: float = 15.0,
+        gap_threshold_s: float = 60.0,
+        enabled: bool = True,
+    ):
+        if tick_interval_s <= 0:
+            raise ValueError(
+                f"tick_interval_s must be > 0, got {tick_interval_s!r}"
+            )
+        if gap_threshold_s <= 0:
+            raise ValueError(
+                f"gap_threshold_s must be > 0, got {gap_threshold_s!r}"
+            )
+        self.tick_interval_s = float(tick_interval_s)
+        self.gap_threshold_s = float(gap_threshold_s)
+        self.enabled = bool(enabled)
+        self._last_monotonic: Optional[float] = None
+        self._last_wall: Optional[float] = None
+
+    def observe(self, *, monotonic_now: float, wall_now: float) -> ThawDecision:
+        if not self.enabled:
+            return ThawDecision(suspended=False)
+
+        prev_monotonic = self._last_monotonic
+        prev_wall = self._last_wall
+        self._last_monotonic = monotonic_now
+        self._last_wall = wall_now
+
+        # First tick only seeds the baseline; nothing to compare against.
+        if prev_monotonic is None or prev_wall is None:
+            return ThawDecision(suspended=False)
+
+        monotonic_delta = monotonic_now - prev_monotonic
+        wall_delta = wall_now - prev_wall
+        # Divergence: how far wall-clock ran ahead of the process's own
+        # elapsed (monotonic) time — i.e. the frozen window.
+        divergence = wall_delta - monotonic_delta
+
+        # A real host suspend freezes CLOCK_MONOTONIC: it stalls, so across
+        # the gap it advances by less than one scheduled tick. A forward
+        # wall-clock *correction* (NTP step / manual set) instead leaves
+        # monotonic advancing in step with the loop — a full tick or more —
+        # proving the process kept running. Requiring monotonic to have
+        # stalled below one tick rejects that false positive so healthy
+        # transports and the scheduler are left untouched.
+        monotonic_frozen = monotonic_delta < self.tick_interval_s
+        gap_detected = (
+            divergence > self.gap_threshold_s
+            and monotonic_frozen
+        )
+        if not gap_detected:
+            return ThawDecision(suspended=False)
+
+        return ThawDecision(
+            suspended=True,
+            gap_seconds=divergence,
+            restart_transports=True,
+            reconcile_schedule=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Gateway graceful-drain on shutdown (Issue #2375)
 # ---------------------------------------------------------------------------
 
