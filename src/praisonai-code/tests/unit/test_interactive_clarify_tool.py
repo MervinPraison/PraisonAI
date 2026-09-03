@@ -24,7 +24,7 @@ from praisonai_code.cli.features.interactive_tools import (
 _clarify_available = True
 try:  # pragma: no cover - environment dependent
     import praisonaiagents.tools.clarify  # noqa: F401
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _clarify_available = False
 
 requires_clarify = pytest.mark.skipif(
@@ -77,6 +77,7 @@ def test_channel_unavailable_when_not_tty(monkeypatch):
 def test_channel_available_when_tty(monkeypatch):
     monkeypatch.delenv("PRAISON_NO_CLARIFY", raising=False)
     monkeypatch.delenv("PRAISON_OUTPUT_MODE", raising=False)
+    monkeypatch.delenv("CI", raising=False)
 
     class _TTY:
         def isatty(self):
@@ -88,6 +89,8 @@ def test_channel_available_when_tty(monkeypatch):
 
 
 def test_channel_unavailable_with_no_clarify_env(monkeypatch):
+    monkeypatch.delenv("CI", raising=False)
+
     class _TTY:
         def isatty(self):
             return True
@@ -95,6 +98,21 @@ def test_channel_unavailable_with_no_clarify_env(monkeypatch):
     monkeypatch.setattr(it.sys, "stdin", _TTY(), raising=False)
     monkeypatch.setattr(it.sys, "stdout", _TTY(), raising=False)
     monkeypatch.setenv("PRAISON_NO_CLARIFY", "1")
+    assert it._interactive_channel_available() is False
+
+
+def test_channel_unavailable_in_ci_even_with_tty(monkeypatch):
+    """CI runners can allocate pseudo-terminals; never prompt when CI is set."""
+    monkeypatch.delenv("PRAISON_NO_CLARIFY", raising=False)
+    monkeypatch.delenv("PRAISON_OUTPUT_MODE", raising=False)
+
+    class _TTY:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(it.sys, "stdin", _TTY(), raising=False)
+    monkeypatch.setattr(it.sys, "stdout", _TTY(), raising=False)
+    monkeypatch.setenv("CI", "true")
     assert it._interactive_channel_available() is False
 
 
@@ -106,6 +124,7 @@ def test_channel_unavailable_with_json_output(monkeypatch):
     monkeypatch.setattr(it.sys, "stdin", _TTY(), raising=False)
     monkeypatch.setattr(it.sys, "stdout", _TTY(), raising=False)
     monkeypatch.delenv("PRAISON_NO_CLARIFY", raising=False)
+    monkeypatch.delenv("CI", raising=False)
     monkeypatch.setenv("PRAISON_OUTPUT_MODE", "json")
     assert it._interactive_channel_available() is False
 

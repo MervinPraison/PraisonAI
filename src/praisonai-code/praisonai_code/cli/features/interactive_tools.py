@@ -260,6 +260,14 @@ def _interactive_channel_available() -> bool:
     if no_clarify in ("1", "true", "yes"):
         return False
 
+    # CI runners can allocate pseudo-terminals, so both streams may report as
+    # TTYs while no human is present to answer. Treat any truthy ``CI`` signal
+    # as headless and withhold the tool, so an unattended run falls back to the
+    # core best-judgment path instead of blocking on ``input()``.
+    ci = os.environ.get("CI", "").strip().lower()
+    if ci not in ("", "0", "false", "no"):
+        return False
+
     # A structured/JSON output mode is a machine consumer; never prompt.
     output_mode = os.environ.get("PRAISON_OUTPUT_MODE", "").strip().lower()
     if output_mode in ("json", "stream-json", "actions"):
