@@ -295,6 +295,38 @@ class TestDurabilityDegradation:
         assert str(tmp_path) not in match[0].reason
         clear_durability_degraded("idempotency")
 
+    def test_redis_backend_sqlite_failure_reports_in_memory_not_per_replica(
+        self, tmp_path
+    ):
+        # #4768: when ``redis`` is selected AND the durable SQLite fallback also
+        # fails, dedup is process-local (lost on restart). The recorded fact must
+        # stay the more severe ``in-memory`` reason, not be overwritten with the
+        # milder ``per-replica`` reason (which would mask the durability loss).
+        from praisonai_bot.bots import build_idempotency_store
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+        from praisonaiagents.gateway import InMemoryIdempotencyStore
+
+        clear_durability_degraded("idempotency")
+        # A path under a file (not a dir) makes the SQLite store fail to open.
+        bad_parent = tmp_path / "afile"
+        bad_parent.write_text("x")
+        bad_path = bad_parent / "idem.sqlite"
+        store = build_idempotency_store("redis", path=bad_path)
+        # Ingress keeps working, but only per-process (memory) now.
+        assert isinstance(store, InMemoryIdempotencyStore)
+        owners = durability_degraded_owners()
+        match = [o for o in owners if o.owner_id == "durability:idempotency"]
+        assert match
+        # The recorded reason must reflect the true (worse) state: in-memory,
+        # not the masked per-replica downgrade.
+        assert "in-memory" in match[0].reason
+        assert "per-replica" not in match[0].reason
+        assert str(bad_path) not in match[0].reason
+        clear_durability_degraded("idempotency")
+
     def test_successful_build_clears_stale_degradation(self, tmp_path):
         # #4339: a same-process rebuild (e.g. a config hot-reload) that restores
         # the durable store must clear a prior degradation so health/status stop

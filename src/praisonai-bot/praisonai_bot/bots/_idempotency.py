@@ -222,6 +222,14 @@ def build_idempotency_store(
         return Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite"
 
     def _sqlite():
+        """Build the durable SQLite store, returning ``(store, durable)``.
+
+        ``durable`` is ``True`` when the SQLite store came up, ``False`` when it
+        could not be initialised and this fell back to the in-memory store (and
+        recorded the more severe ``running in-memory`` degraded fact). Callers
+        that layer their own degraded fact (e.g. the redis fallback) must not
+        overwrite that in-memory fact when ``durable`` is ``False``.
+        """
         try:
             store_path = Path(path) if path else _default_path()
             store = SqliteIdempotencyStore(
@@ -236,7 +244,7 @@ def build_idempotency_store(
             from ._session import clear_durability_degraded
 
             clear_durability_degraded("idempotency")
-            return store
+            return store, True
         except Exception as e:
             # Keep the raw exception (which may embed a filesystem path) in the
             # log only; the operator-facing reason stays redacted so health()
@@ -252,7 +260,7 @@ def build_idempotency_store(
                 "idempotency",
                 reason="durable idempotency store unavailable (running in-memory)",
             )
-            return _memory()
+            return _memory(), False
 
     # ``None`` means "no explicit choice" → durable by default. ``"memory"``
     # must be asked for; only then do we run non-durably by intent.
@@ -262,7 +270,8 @@ def build_idempotency_store(
     if backend == "memory":
         return _memory()
     if backend == "sqlite":
-        return _sqlite()
+        store, _durable = _sqlite()
+        return store
     if backend == "redis":
         # A cross-replica Redis idempotency backend is not yet implemented in
         # the wrapper (unlike ``RedisTurnLock`` for the turn lock). Selecting it
@@ -284,13 +293,21 @@ def build_idempotency_store(
         # Build the SQLite fallback first: its success path clears any prior
         # idempotency degradation, so we must record the redis-unavailable fact
         # *after* it, or the just-recorded fact would be cleared immediately.
-        store = _sqlite()
-        from ._session import record_durability_degraded
+        store, durable = _sqlite()
+        if durable:
+            # SQLite came up: dedup is durable (cross-restart, and cross-replica
+            # with a shared state file) but still not the requested cross-replica
+            # Redis backend — record the per-replica downgrade.
+            from ._session import record_durability_degraded
 
-        record_durability_degraded(
-            "idempotency",
-            reason="redis idempotency backend not available (running per-replica)",
-        )
+            record_durability_degraded(
+                "idempotency",
+                reason="redis idempotency backend not available (running per-replica)",
+            )
+        # If SQLite *also* failed, ``_sqlite()`` already recorded the more severe
+        # "running in-memory" fact (dedup is process-local and lost on restart).
+        # Do NOT overwrite it with the milder "per-replica" reason, which would
+        # mask the loss of restart durability from health / gateway status (#4768).
         return store
     logger.debug(
         "Idempotency store_backend %r not available; using in-memory default",
