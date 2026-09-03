@@ -35,6 +35,15 @@ curl -fsSL https://praison.ai/install.sh | bash
     <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
   </a>
   <br>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  </a>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
+  </a>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
+  </a>
 </div>
 
 <p align="center">
@@ -57,18 +66,6 @@ curl -fsSL https://praison.ai/install.sh | bash
     <p align="center">
       <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
     </p>
-  </a>
-</div>
-
-<div align="center">
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
   </a>
 </div>
 
