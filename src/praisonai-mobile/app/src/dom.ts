@@ -16,7 +16,7 @@
 import type { Op } from "../../ui/src/render/reconcile.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
 import { en, type Strings } from "../../ui/src/i18n/strings.ts";
-import { accessibleName } from "../../ui/src/a11y/names.ts";
+import { accessibleName, userRowNames } from "../../ui/src/a11y/names.ts";
 import { UNKNOWN } from "../../ui/src/format.ts";
 
 export interface RowNodes {
@@ -64,6 +64,37 @@ function paint(el: HTMLElement, row: Row, strings: Strings): void {
   else el.setAttribute("aria-label", name);
 
   switch (row.kind) {
+    case "user": {
+      // Three independent signals, only one of which is a colour: the row hugs
+      // the opposite edge (app.css), it carries `data-speaker="user"`, and it
+      // opens with a visually-hidden "You said:". A conversation whose two
+      // sides are told apart by background colour alone is one a screen-reader
+      // user hears as a single voice -- the defect a11y/names.ts exists for,
+      // with alignment standing in for hue.
+      el.dataset["speaker"] = "user";
+      el.dataset["state"] = row.state;
+      el.textContent = "";
+      const names = userRowNames(strings, row);
+      const speaker = el.ownerDocument.createElement("span");
+      // Content, NOT an aria-label. See a11y/names.ts: labelling the row would
+      // replace the message in the accessibility tree and cost the reader the
+      // ability to navigate their own words.
+      speaker.className = "sr-only";
+      speaker.textContent = names.speaker;
+      const said = el.ownerDocument.createElement("span");
+      said.className = "user-text";
+      said.textContent = row.text;
+      el.append(speaker, said);
+      if (names.note !== null) {
+        // Sent, and not on disk. Said in words and shown as an element, so it
+        // survives both a screen reader and a colour-blind glance.
+        const note = el.ownerDocument.createElement("span");
+        note.className = "user-note";
+        note.textContent = names.note;
+        el.append(note);
+      }
+      return;
+    }
     case "text":
       el.textContent = row.text;
       el.classList.toggle("streaming", row.streaming);

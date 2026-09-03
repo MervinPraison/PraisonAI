@@ -50,6 +50,48 @@ export type RowTone = "neutral" | "pending" | "success" | "failure" | "warning";
 /** What the user can do about an error. Chosen by `kind`, never by message. */
 export type Recovery = "retry" | "settings" | "none";
 
+/**
+ * Where the user's own message stands.
+ *
+ * Three states, not a boolean, because "not saved yet" and "finished and never
+ * saved" are different facts and only one of them is worth telling anyone
+ * about. A row that said `saved: false` for the whole of a normal streaming
+ * turn would be crying wolf for the several seconds that matter least.
+ *
+ * `sent` while the turn is live; `stored` once the engine reported the index it
+ * WROTE; `unstored` when the turn finished and no index came back.
+ */
+export type UserRowState = "sent" | "stored" | "unstored";
+
+/**
+ * The user's own message.
+ *
+ * The row kind this file did not have. There were seven -- text, reasoning,
+ * tool, approval, error, notice, dropped -- and every one of them describes
+ * something the ASSISTANT did, so a real tap on Send produced a transcript
+ * containing only the reply. The conversation was drawn with one side missing.
+ *
+ * It carries no `tone`. Tone is the vocabulary for "did this work", and
+ * whether a message was understood is the reply's business, not the message's.
+ * What the row DOES carry is `state`, which is about storage and nothing else.
+ */
+export interface UserRow {
+  readonly kind: "user";
+  readonly id: string;
+  readonly text: string;
+  /**
+   * Optimistic or confirmed, decided by `end.userIndex` and never by the fact
+   * that we sent something.
+   *
+   * `isPersisted` is the sanctioned reader of that index (transcript.ts) and it
+   * is the same predicate that decides whether Fork and Delete are offered. Two
+   * copies of that rule is one copy that gets it wrong, and here the wrong one
+   * would tell the user their message is filed away when a reopen will not find
+   * it.
+   */
+  readonly state: UserRowState;
+}
+
 export interface TextRow {
   readonly kind: "text";
   readonly id: string;
@@ -127,6 +169,7 @@ export interface DroppedRow {
 }
 
 export type Row =
+  | UserRow
   | ReasoningRow
   | TextRow
   | ToolRowView
@@ -275,6 +318,30 @@ export function buildTranscript(
 ): TranscriptView {
   const rows: Row[] = [];
   const streaming = turn.phase === "streaming";
+
+  // FIRST, above everything the assistant produced -- including `reasoning`,
+  // which is the model already thinking about it. A question that renders below
+  // its own answer is not a conversation, and position is the only thing that
+  // says which reply belongs to which prompt once a chat is more than one turn
+  // long.
+  //
+  // "" draws nothing rather than an empty bubble, for the same reason an empty
+  // text block draws nothing: `initialTurn` and the state `setChat` installs
+  // both have no prompt, and a blank row in a fresh chat is a message the user
+  // did not send.
+  if (turn.prompt !== "") {
+    rows.push({
+      kind: "user",
+      // A constant, not an index. There is exactly one prompt per turn, so the
+      // id is stable across every publish of that turn -- which is what lets
+      // the reconciler UPDATE the row when it goes from `sent` to `stored`
+      // rather than removing and re-inserting it. A remove/insert pair is the
+      // flicker, and it would also drop the user's text selection mid-stream.
+      id: "user",
+      text: turn.prompt,
+      state: turn.phase !== "ended" ? "sent" : isPersisted(turn) ? "stored" : "unstored",
+    });
+  }
 
   if (turn.reasoning !== "") {
     rows.push({ kind: "reasoning", id: "reasoning", text: turn.reasoning });

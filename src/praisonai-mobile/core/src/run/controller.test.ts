@@ -1501,3 +1501,51 @@ test("a finished turn leaves no timer running", async () => {
     `a turn that ended must stop its ticker; live intervals: ${JSON.stringify(time.intervalMs)}`,
   );
 });
+
+// ---- the prompt on the turn -------------------------------------------------
+
+test("the turn carries the prompt that was actually SENT", async () => {
+  // No engine reports the prompt back -- `start` carries ids and nothing else
+  // -- so the reducer can never learn it from the stream. The controller is the
+  // only place that has it, and this is the seam that hands it over. Without
+  // it the transcript layer has nothing to build a user row from and the
+  // conversation is drawn with one side missing.
+  const h = harness(SCRIPTS.happy);
+  await h.controller.send("what is the answer?");
+  assert.equal(h.last().turn.prompt, "what is the answer?");
+});
+
+test("a QUEUED prompt is not on the turn until its own run begins", async () => {
+  // The optimistic-vs-confirmed decision, at the layer that owns it. The row is
+  // seeded when a run is ISSUED, not when send() is called -- so a prompt still
+  // waiting behind another turn is not yet on screen claiming to have been
+  // asked, and the answer streaming above it is not captioned with the wrong
+  // question.
+  const h = harness(SCRIPTS.happy);
+  const first = h.controller.send("one");
+  const second = h.controller.send("two");
+
+  // The publish send() makes when "two" is ENQUEUED, which happens while "one"
+  // is still in flight and before any run for "two" has been issued.
+  const queued = h.views.find((v) => v.queue.items.some((i) => i.text === "two"));
+  assert.ok(queued !== undefined, "the second prompt was never queued");
+  assert.equal(queued.turn.prompt, "one", "a queued prompt must not caption the running turn");
+  // And no publish, at any point, showed "two" on a turn that had not begun.
+  const early = h.views.filter((v) => v.turn.prompt === "two" && v.turn.phase === "idle" && v.queue.items.length > 0);
+  assert.deepEqual(early, [], "a prompt still in the queue was put on the turn");
+
+  await Promise.all([first, second]);
+  assert.equal(h.last().turn.prompt, "two", "the queued prompt captions its own turn once it runs");
+});
+
+test("switching chats takes the previous conversation's prompt with it", async () => {
+  // `setChat` installs `initialTurn` precisely so a new conversation cannot
+  // inherit the last one's transcript. A prompt left behind would put the
+  // previous chat's question at the top of the next one -- the same leak that
+  // brought a pending approval back with live buttons.
+  const h = harness(SCRIPTS.happy);
+  await h.controller.send("one");
+  assert.equal(h.controller.view().turn.prompt, "one");
+  h.controller.setChat("another-chat");
+  assert.equal(h.controller.view().turn.prompt, "");
+});

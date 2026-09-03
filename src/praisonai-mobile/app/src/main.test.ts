@@ -1111,6 +1111,111 @@ test("a turn sent AFTER reopening a chat lands below the history, not above it",
   app?.dispose();
 });
 
+test("opening another chat mid-run keeps that run's answer OUT of it", async () => {
+  // The cross-chat leak (greptile P1). New chat and deleting the open chat both
+  // stop the run in flight before reseeding the screen; Open chat did not. So a
+  // run still streaming in the conversation you LEFT kept going, and its
+  // terminal publish -- which the controller always emits, even on abort --
+  // reconciled the old chat's answer into the transcript just seeded with the
+  // chat you OPENED, where it was then promoted into history and reopened there.
+  //
+  // Two defences, both asserted here: Open chat now stops the previous run, and
+  // the app drops any publish arriving for a chat that has issued no turn of its
+  // own -- so even the guaranteed terminal frame paints nothing into the wrong
+  // conversation.
+  const { dom, http, platform } = harness();
+
+  // Chat A's run stays open: `start` and a `delta`, then the stream hangs until
+  // the test releases it -- exactly the shape of a reply still in flight.
+  //
+  // Released through a NAMED ACCESSOR rather than by calling `release?.()`, for
+  // two reasons that turn out to be the same reason.
+  //
+  // The compiler's: `release` is assigned only inside the stream's `start`
+  // callback, and TypeScript's control-flow analysis does not follow
+  // assignments made inside a callback. At the call site below it is therefore
+  // still narrowed to the `null` it was initialised with, `?.` short-circuits,
+  // and the call target is `never` -- TS2349, "Type 'never' has no call
+  // signatures".
+  //
+  // The test's: that narrowing is right about the risk. `release?.()` on a null
+  // releaser silently does NOTHING. Chat A's run would never terminate, no
+  // terminal publish would ever be emitted, and every assertion below -- all of
+  // which say chat B is free of chat A's rows -- would pass for the wrong
+  // reason, proving only that a leak that never happened did not happen. An
+  // optional call is the wrong tool for a value the test depends on. This one
+  // fails loudly instead.
+  let release: (() => void) | null = null;
+  const releaseChatA = (): void => {
+    assert.ok(release !== null, "chat A's stream never opened, so there was nothing to release");
+    release();
+  };
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(sse([["start", { msg_id: "mA", run_id: "rA" }]])));
+        controller.enqueue(enc.encode(sse([["delta", { msg_id: "mA", text: "LEAKED-ANSWER-A" }]])));
+        release = () => {
+          controller.enqueue(
+            enc.encode(
+              sse([["end", { msg_id: "mA", user_index: 0, assistant_index: 1, versions: 1, active: 0 }]]),
+            ),
+          );
+          controller.close();
+        };
+      },
+    }),
+  }));
+
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  // A second, stored conversation to open into. Recorded through the session so
+  // the chat list has a real row to tap.
+  await app!.session.record("chat B question", "chat B answer");
+
+  // Start chat A's run and let it stream the delta, but NOT the end.
+  submit(dom, "chat A question");
+  await settle(80);
+  assert.match(transcriptRows(dom).join("\n"), /LEAKED-ANSWER-A/, "chat A never started streaming");
+
+  // Open chat B WHILE chat A is still in flight.
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+
+  // Now let chat A's run finish. Its terminal publish must not reach chat B.
+  releaseChatA();
+  await settle(120);
+
+  // Chat B shows its OWN stored conversation and nothing else. With the leak
+  // present, chat A's terminated run publishes into B as a spurious error row
+  // (its turn was cleared by `setChat`, so its `end` lands on an idle turn and
+  // `finish` synthesises "the engine produced no output") plus a "before_start"
+  // dropped row -- both belonging to a run that was never chat B's.
+  const rows = transcriptRows(dom);
+  const joined = rows.join("\n");
+  assert.match(joined, /chat B question/, `chat B's own history was lost:\n${joined}`);
+  assert.match(joined, /chat B answer/, `chat B's own answer was lost:\n${joined}`);
+  assert.equal(
+    rows.some((r) => r.startsWith("row row-error") || r.startsWith("row row-dropped")),
+    false,
+    `the previous chat's terminated run leaked a row into the opened conversation:\n${joined}`,
+  );
+  assert.equal(
+    joined.includes("LEAKED-ANSWER-A") || joined.includes("chat A question"),
+    false,
+    `the previous chat's message leaked into the opened conversation:\n${joined}`,
+  );
+  // Exactly chat B's two rows -- nothing appended below them.
+  assert.equal(rows.length, 2, `chat B must show only its own turn:\n${joined}`);
+  app?.dispose();
+});
+
 test("a storage failure while the chat list loads stays LOCAL, not fatal", async () => {
   // The list load was a floating `void (async ...)()` with no rejection
   // handler. A StoragePort rejection -- SecurityError, QuotaExceeded -- reached
@@ -2040,5 +2145,380 @@ test("New chat starts the model with a blank memory, not the previous conversati
   await settle(120);
 
   assert.deepEqual(histories[1], [], `the new chat must start empty:\n${JSON.stringify(histories)}`);
+  await app?.dispose();
+});
+
+// ---- your own message, on screen --------------------------------------------
+//
+// The plainest defect the app had: you typed, tapped Send, and only the reply
+// appeared. `ui/src/transcript/view-model.ts` defined seven row kinds and not
+// one of them was the user, so there was nothing for any renderer to draw.
+// These drive the whole composition root -- composer, controller, reducer, view
+// model, reconciler, DOM -- because every layer below was individually correct
+// and the conversation still came out with one side missing.
+
+/** The transcript's rows, in order, as `kind|text` so ORDER can be asserted. */
+const transcriptRows = (dom: ReturnType<typeof createFakeDom>): string[] => {
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  return (transcript.children as { className: string; textContent: string }[]).map(
+    (c) => `${c.className}|${c.textContent}`,
+  );
+};
+
+test("your own message appears in the transcript, above the reply", async () => {
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "Paris." }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  submit(dom, "what is the capital of France");
+  await settle(120);
+
+  const rows = transcriptRows(dom);
+  const mine = rows.findIndex((r) => r.startsWith("row row-user"));
+  assert.notEqual(mine, -1, `the user's own message never rendered:\n${rows.join("\n")}`);
+  assert.match(rows[mine] ?? "", /what is the capital of France/);
+
+  // Above the answer, which is the only thing that says which reply belongs to
+  // which question once the conversation is longer than one turn.
+  const reply = rows.findIndex((r) => r.startsWith("row row-text") && r.includes("Paris."));
+  assert.notEqual(reply, -1, `the reply never rendered:\n${rows.join("\n")}`);
+  assert.ok(mine < reply, `the question must render above its answer:\n${rows.join("\n")}`);
+  app?.dispose();
+});
+
+test("a send the composer REFUSES leaves nothing on screen", async () => {
+  // The optimistic-vs-confirmed rule, end to end: a message that was never sent
+  // must not be sitting in the transcript looking sent. The composer refuses a
+  // second submit while a turn is in flight (composer.ts rule 1) and that
+  // refusal must be total -- the row is seeded when a run is ISSUED, so a
+  // refused submit produces no turn and therefore no row.
+  const { dom, http, platform } = harness();
+  // A stream held OPEN between frames, so the turn is genuinely still running
+  // when the second submit arrives. `sseResponse` delivers everything at once,
+  // which would let the first turn finish and make the second submit a
+  // perfectly ordinary send.
+  const frames = sse([
+    ["start", { msg_id: "m1", run_id: "r1" }],
+    ["delta", { msg_id: "m1", text: "first answer" }],
+    ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+  ]).split(/(?<=\n\n)/).filter((f) => f !== "");
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const next = frames.shift();
+        if (next === undefined) return controller.close();
+        await new Promise((r) => setTimeout(r, 150));
+        controller.enqueue(new TextEncoder().encode(next));
+      },
+    }),
+  }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "the one I sent");
+  // Long enough for `start` to arrive and the button to become Stop.
+  await settle(250);
+  const stopping = dom.find((n) => n.dataset["action"] === "stop");
+  assert.ok(stopping, "the turn was not still running -- the refusal path is untested");
+  submit(dom, "REFUSED-while-busy");
+  await settle(500);
+
+  const all = transcriptRows(dom).join("\n");
+  assert.match(all, /the one I sent/, `the sent message must be on screen:\n${all}`);
+  assert.equal(
+    all.includes("REFUSED-while-busy"),
+    false,
+    `a message the composer refused was painted as though it had been sent:\n${all}`,
+  );
+  app?.dispose();
+});
+
+test("a turn that FAILED keeps the message on screen and says it was not saved", async () => {
+  // The other half of the same rule. The message WAS sent -- the engine got it
+  // and answered 401 -- so removing it would hide the question the error is
+  // about. But `end.userIndex` never arrived, so it is not in the stored
+  // conversation and the row must not imply that it is.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () => ({ ok: false, status: 401, headers: {}, body: streamOf("nope") }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "a question nobody answered");
+  await settle(150);
+
+  const rows = transcriptRows(dom);
+  const mine = rows.find((r) => r.startsWith("row row-user"));
+  assert.ok(mine, `a failed turn must still show what was asked:\n${rows.join("\n")}`);
+  assert.match(mine, /a question nobody answered/);
+  assert.match(mine, /not saved/i, `a message that reached no disk must say so:\n${mine}`);
+  app?.dispose();
+});
+
+test("a REOPENED conversation shows the user's messages as the USER's", async () => {
+  // `historyRows` mapped both roles to a `text` row -- the kind that means "the
+  // model said this" -- so a reopened conversation painted the user's questions
+  // in the assistant's clothes. The two sides were rendered identically and a
+  // screen reader heard one voice. The prompt is ALREADY on disk with its role;
+  // it was the role that was being discarded.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+
+  const rows = transcriptRows(dom);
+  const mine = rows.findIndex((r) => r.startsWith("row row-user"));
+  assert.notEqual(mine, -1, `the reopened conversation showed no user message:\n${rows.join("\n")}`);
+  assert.match(rows[mine] ?? "", /what is the capital of France/);
+  // And the reply is still the assistant's, in order.
+  const reply = rows.findIndex((r) => r.startsWith("row row-text") && r.includes("Paris"));
+  assert.notEqual(reply, -1, `the stored answer was lost:\n${rows.join("\n")}`);
+  assert.ok(mine < reply, `a reopened conversation must read in order:\n${rows.join("\n")}`);
+  // The question must NOT be painted as model output.
+  assert.equal(
+    (rows[mine] ?? "").startsWith("row row-text"),
+    false,
+    "the user's stored message was rendered as the assistant's",
+  );
+  app?.dispose();
+});
+
+test("a finished turn stays on screen when the NEXT one begins", async () => {
+  // The controller publishes only the CURRENT turn and resets it per run, so
+  // the reconciler saw the previous turn's ids missing and removed every one of
+  // them. Measured on main: after a second Send the transcript contained the
+  // second answer and nothing else -- the first question and its reply gone
+  // from a conversation that was still open. Invisible while there were no user
+  // rows (one anonymous paragraph replacing another) and glaring with them.
+  const { dom, http, platform } = harness();
+  let n = 0;
+  http.on("/chat", () => {
+    n += 1;
+    const id = `m${n}`;
+    return sseResponse(
+      sse([
+        ["start", { msg_id: id, run_id: `r${n}` }],
+        ["delta", { msg_id: id, text: `ANSWER-${n}` }],
+        ["end", { msg_id: id, user_index: 2 * n - 2, assistant_index: 2 * n - 1, versions: 1, active: 0 }],
+      ]),
+    );
+  });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "QUESTION-1");
+  await settle(150);
+  submit(dom, "QUESTION-2");
+  await settle(150);
+
+  const rows = transcriptRows(dom);
+  const at = (needle: string): number => {
+    const i = rows.findIndex((r) => r.includes(needle));
+    assert.notEqual(i, -1, `"${needle}" is not on screen:\n${rows.join("\n")}`);
+    return i;
+  };
+  // All four, in the order they happened.
+  assert.ok(at("QUESTION-1") < at("ANSWER-1"), `turn 1 is out of order:\n${rows.join("\n")}`);
+  assert.ok(at("ANSWER-1") < at("QUESTION-2"), `turn 1 was erased by turn 2:\n${rows.join("\n")}`);
+  assert.ok(at("QUESTION-2") < at("ANSWER-2"), `turn 2 is out of order:\n${rows.join("\n")}`);
+  // And nothing was drawn twice: promotion must move a turn, not copy it.
+  assert.equal(rows.filter((r) => r.includes("QUESTION-1")).length, 1, "the first question rendered twice");
+  app?.dispose();
+});
+
+test("New chat clears the finished turns too, not just the live one", async () => {
+  // The promotion above gives the screen a second place a previous
+  // conversation can hide in. `setChat` clears the controller's turn; it cannot
+  // know about rows the app promoted, so New chat has to drop those as well or
+  // the "fresh" chat opens on the last one.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "an answer" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  submit(dom, "the old conversation");
+  await settle(150);
+  assert.match(transcriptRows(dom).join("\n"), /the old conversation/);
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle(60);
+  assert.equal(
+    transcriptRows(dom).join("\n").includes("the old conversation"),
+    false,
+    "a new chat opened on the previous conversation's messages",
+  );
+  app?.dispose();
+});
+
+// ---- the transcript and the model's memory, held to each other ---------------
+//
+// Two "histories" meet in `mount` and they are NOT the same list. #4816 replays
+// `Session.current()` onto a fresh agent every turn -- only what `record()`
+// actually wrote. This PR keeps every finished turn on screen, written or not,
+// because a question you asked and the error that answered it both belong in
+// the transcript.
+//
+// So they can legitimately differ, and the danger is that they differ SILENTLY:
+// a turn rendered as though it were part of the conversation while the model
+// has never heard of it. These pin the agreement in both directions, and pin
+// the one divergence to the row that announces itself.
+
+/** An Agent that records the history it was restored with and fails one turn. */
+function agentFailingTurn(failOn: number, answers: readonly string[]): {
+  readonly module: unknown;
+  readonly histories: { role: string; content: string }[][];
+} {
+  const histories: { role: string; content: string }[][] = [];
+  let turn = 0;
+  class Flaky {
+    lastStopReason: "completed" | null = "completed";
+    private restored: { role: string; content: string }[] = [];
+    setHistory(messages: readonly { role: string; content: string }[]): void {
+      this.restored = messages.map((m) => ({ role: m.role, content: m.content }));
+    }
+    async *streamEvents(
+      _prompt: string,
+    ): AsyncGenerator<{ type: "text"; delta: string } | { type: "finish"; text: string }> {
+      histories.push(this.restored);
+      const mine = turn++;
+      if (mine === failOn) throw new Error("the provider dropped the connection");
+      const text = answers[mine] ?? "";
+      // The DELTA as well as the finish. An agent that only ever yields
+      // `finish` produces a turn with no text, which `finish()` in
+      // transcript.ts correctly turns into error{empty} -- so the transcript
+      // would be all error rows and the assertions below would be measuring
+      // the harness rather than the app.
+      yield { type: "text", delta: text } as const;
+      yield { type: "finish", text } as const;
+    }
+  }
+  return { module: Flaky, histories };
+}
+
+/** The user rows on screen, as `state|text`. */
+const userRowsOnScreen = (dom: ReturnType<typeof createFakeDom>): string[] => {
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  return (transcript.children as { className: string; textContent: string; dataset: Record<string, string> }[])
+    .filter((c) => c.className.includes("row-user"))
+    .map((c) => `${c.dataset["state"]}|${c.textContent}`);
+};
+
+test("every turn the model is told about is on screen, in the same order", async () => {
+  // The agreeing direction. `Session.current()` is what the engine replays and
+  // what `historyRows` paints on reopen, so a stored turn cannot be in one and
+  // missing from the other -- and the promoted rows must not reorder it.
+  const { module, histories } = agentFailingTurn(-1, ["Paris.", "About 2.1 million."]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+
+  submit(dom, "What is the capital of France?");
+  await settle(120);
+  submit(dom, "And its population?");
+  await settle(120);
+
+  // What the model was told on the second turn...
+  const told = histories[1] ?? [];
+  assert.deepEqual(
+    told,
+    [
+      { role: "user", content: "What is the capital of France?" },
+      { role: "assistant", content: "Paris." },
+    ],
+    "the follow-up must carry the exchange it follows",
+  );
+
+  // ...must all be on screen, in that order. Not "present somewhere": a
+  // transcript that shows the same turns in a different order than the model
+  // was given them is a conversation the two parties remember differently.
+  const shown = transcriptRows(dom);
+  let cursor = -1;
+  for (const message of told) {
+    const at = shown.findIndex((r, i) => i > cursor && r.includes(message.content));
+    assert.notEqual(at, -1, `the model was told "${message.content}" and the screen never showed it:\n${shown.join("\n")}`);
+    cursor = at;
+  }
+  // And every user row that claims to be stored is one the model has.
+  assert.deepEqual(
+    userRowsOnScreen(dom).filter((r) => r.startsWith("stored|")).map((r) => r.slice("stored|".length)),
+    ["You said:What is the capital of France?", "You said:And its population?"],
+    "a row claiming to be stored must be a turn that was really written",
+  );
+  await app?.dispose();
+});
+
+test("a turn the model was NEVER told about is the one row that says it was not saved", async () => {
+  // The diverging direction, and the reason the divergence is allowed. The
+  // second turn fails, so `record()` is never called and the model is never
+  // told -- but the question stays on screen above the error explaining what
+  // happened to it. What must NOT happen is that it looks like an ordinary,
+  // remembered message: the row is `unstored` and says so in words.
+  const { module, histories } = agentFailingTurn(1, ["Paris.", "", "Still here."]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+
+  submit(dom, "remembered question");
+  await settle(120);
+  submit(dom, "LOST-QUESTION");
+  await settle(150);
+  submit(dom, "third question");
+  await settle(150);
+
+  // All three are on screen -- the failed one is not swept away.
+  const rows = userRowsOnScreen(dom);
+  assert.equal(rows.length, 3, `every question asked belongs on screen:\n${rows.join("\n")}`);
+  assert.match(rows[1] ?? "", /LOST-QUESTION/);
+
+  // The failed one, and ONLY the failed one, is marked not-saved.
+  assert.ok((rows[0] ?? "").startsWith("stored|"), `turn 1 was written and must say so: ${rows[0]}`);
+  assert.ok((rows[1] ?? "").startsWith("unstored|"), `turn 2 was never written: ${rows[1]}`);
+  assert.ok((rows[2] ?? "").startsWith("stored|"), `turn 3 was written: ${rows[2]}`);
+  assert.match(rows[1] ?? "", /not in the stored conversation/i);
+
+  // And the model, on the third turn, was told about turn 1 and NOT turn 2.
+  const told = histories[2] ?? [];
+  assert.deepEqual(
+    told,
+    [
+      { role: "user", content: "remembered question" },
+      { role: "assistant", content: "Paris." },
+    ],
+    `the model must be told exactly what was stored:\n${JSON.stringify(told)}`,
+  );
+  assert.equal(
+    JSON.stringify(told).includes("LOST-QUESTION"),
+    false,
+    "a turn that was never stored must not reach the model",
+  );
   await app?.dispose();
 });

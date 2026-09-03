@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { apply, finish, initialTurn, isPersisted, type TurnState, noteDropped } from "./transcript.ts";
+import { apply, beginTurn, finish, initialTurn, isPersisted, type TurnState, noteDropped } from "./transcript.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 
 const M = "m1";
@@ -526,4 +526,39 @@ test("a tool_result is matched by callId, never by tool NAME", () => {
   assert.deepEqual(first?.args, { cmd: "one" }, "and keep its own arguments");
   assert.equal(second?.status, "failed", "the resolved call takes the result");
   assert.equal(second?.output, "boom");
+});
+
+// ---- the prompt -------------------------------------------------------------
+
+test("the prompt SURVIVES the engine's start event", () => {
+  // `start` rebuilds the turn from `initialTurn`, whose prompt is "". Without
+  // carrying it the user's message is painted the instant the run is issued and
+  // erased by the engine's very first frame -- your own words appearing and
+  // then vanishing, which is the original defect with a stutter in front of it.
+  //
+  // The prompt is NOT in the event stream: `start` carries ids and nothing
+  // else, so once dropped here it cannot be recovered from anything.
+  const turn = apply(beginTurn("what is the capital of France"), start);
+  assert.equal(turn.prompt, "what is the capital of France");
+  assert.equal(turn.phase, "streaming");
+});
+
+test("the prompt survives a failure that arrives BEFORE start", () => {
+  // The common case on a phone -- 401, 403, offline, a wrong baseUrl -- reaches
+  // `apply` while the turn is still idle and is applied through the
+  // idle-and-error branch. The message was really sent, so it must still be on
+  // screen above the error explaining what happened to it.
+  const turn = apply(beginTurn("hello"), {
+    type: "error", msgId: M, kind: "auth", message: "invalid api key",
+  });
+  assert.equal(turn.prompt, "hello");
+  assert.equal(turn.outcome?.type, "error");
+});
+
+test("a turn nobody prompted has no prompt", () => {
+  // `initialTurn` is what `setChat` installs when the user switches
+  // conversations. A prompt left on it would put the previous chat's question
+  // at the top of the next one.
+  assert.equal(initialTurn.prompt, "");
+  assert.equal(run(start, delta("hi")).prompt, "");
 });

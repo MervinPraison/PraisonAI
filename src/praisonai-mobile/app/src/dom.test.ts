@@ -671,3 +671,67 @@ test("the visible status is repainted on update too", () => {
   const status = row?.children.find((c: any) => c.className === "tool-status");
   assert.equal(status?._text, en.toolStatus("ok"));
 });
+
+// ---- the user's own message -------------------------------------------------
+
+const userRow = (text: string, state: "sent" | "stored" | "unstored" = "sent"): Row =>
+  ({ kind: "user", id: "u0", text, state });
+
+test("a user's message is set as TEXT, never as markup", () => {
+  // The same guarantee as the assistant's rows, and it is NOT covered by them:
+  // this is a separate `paint` branch with its own assignments. A message can
+  // be pasted from anywhere, and a shared conversation is read by someone else.
+  const { host, created } = fakeDoc();
+  const payload = '<img src=x onerror="alert(1)">';
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "u0", index: 0, row: userRow(payload) }]);
+
+  const row = created.find((el) => el.dataset.rowId === "u0");
+  assert.ok(row, "the user row element was not created");
+  assert.equal(row._html, "", "innerHTML must never be written");
+  const said = row.children.find((c: any) => c.className === "user-text");
+  assert.equal(said?._text, payload, "the payload must land as text");
+});
+
+test("a user row announces the speaker WITHOUT labelling away the message", () => {
+  // Two halves of one rule. An aria-label would replace the message in the
+  // accessibility tree and cost the reader word-by-word navigation of their own
+  // words (a11y/names.ts rule 3) -- so there must be none. But with none and
+  // nothing else, the only thing distinguishing the user's row from the model's
+  // is CSS alignment and a background colour, neither of which a screen reader
+  // can see -- so the speaker is rendered as visually-hidden CONTENT, first.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "u0", index: 0, row: userRow("hello") }]);
+  const row = created.find((el) => el.dataset.rowId === "u0");
+
+  assert.equal(row.getAttribute("aria-label"), null, "a user row must not be labelled away");
+  const first = row.children[0];
+  assert.equal(first?.className, "sr-only", "the speaker must be the FIRST thing announced");
+  assert.match(first?._text ?? "", /you/i);
+  // And it must be in the tree at all -- `display: none` would remove it.
+  assert.equal(row.dataset.speaker, "user", "the row must say which side it is");
+});
+
+test("a message that was never stored SAYS so, once and only when true", () => {
+  // `end.userIndex` reported nothing, so the message is on screen and will not
+  // be in the conversation when it is reopened. Told in words and as an
+  // element, so it survives both a screen reader and a colour-blind glance.
+  const { host, created } = fakeDoc();
+  const nodes = emptyNodes();
+  applyOps(host, nodes, [{ kind: "insert", id: "u0", index: 0, row: userRow("hello", "sent") }]);
+  const row = created.find((el) => el.dataset.rowId === "u0");
+  assert.equal(row.children.some((c: any) => c.className === "user-note"), false,
+    "a live message must not be accused of being lost");
+
+  applyOps(host, nodes, [{ kind: "update", id: "u0", row: userRow("hello", "stored") }]);
+  assert.equal(row.children.some((c: any) => c.className === "user-note"), false);
+  assert.equal(row.dataset.state, "stored");
+
+  applyOps(host, nodes, [{ kind: "update", id: "u0", row: userRow("hello", "unstored") }]);
+  const note = row.children.find((c: any) => c.className === "user-note");
+  assert.ok(note, "a message the engine never wrote must say so");
+  assert.match(note._text, /not saved/i);
+  // Repainted in place, so the row cannot keep a stale note either.
+  applyOps(host, nodes, [{ kind: "update", id: "u0", row: userRow("hello", "stored") }]);
+  assert.equal(row.children.some((c: any) => c.className === "user-note"), false,
+    "a stale 'not saved' note survived the confirmation");
+});

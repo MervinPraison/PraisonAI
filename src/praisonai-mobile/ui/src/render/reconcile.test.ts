@@ -232,3 +232,25 @@ test("an unchanged approval row still produces nothing", () => {
   const first = reconcile(emptyRender, [row]);
   assert.deepEqual(reconcile(first.next, [row]).ops, []);
 });
+
+test("a user row whose storage state changed is UPDATED, not left stale", () => {
+  // `signatureOf` is how a row learns it changed. A `user` case that folded in
+  // only the text would leave the row saying whatever it said at insert time --
+  // so a message that ended up NOT stored would keep reading as an ordinary
+  // sent one, which is the failure-that-looks-like-success this package is
+  // written against, on the user's own words.
+  const sent = { kind: "user", id: "user", text: "hello", state: "sent" } as const;
+  const unstored = { ...sent, state: "unstored" } as const;
+
+  const first = reconcile(emptyRender, [sent]);
+  const second = reconcile(first.next, [unstored]);
+  assert.deepEqual(
+    second.ops,
+    [{ kind: "update", id: "user", row: unstored }],
+    "the confirmation must repaint the row",
+  );
+
+  // And the same text with the same state emits nothing: a row that "changed"
+  // on every publish is a node rebuilt on every token.
+  assert.deepEqual(reconcile(second.next, [unstored]).ops, []);
+});

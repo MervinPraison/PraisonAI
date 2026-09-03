@@ -48,6 +48,7 @@ import type {
   NoticeRow,
   Row,
   ToolRowView,
+  UserRow,
 } from "../transcript/view-model.ts";
 import type { Strings } from "../i18n/strings.ts";
 
@@ -94,6 +95,46 @@ export function droppedRowName(strings: Strings, row: DroppedRow): string {
   return strings.droppedEvents(row.count, row.reasons);
 }
 
+/** The two things a user row says besides the message itself. */
+export interface UserRowNames {
+  /** Announced BEFORE the message, and hidden visually. */
+  readonly speaker: string;
+  /** A storage note, both spoken and seen, or null when there is nothing to
+   *  say -- which is the ordinary case. */
+  readonly note: string | null;
+}
+
+/**
+ * What a user row says beyond its own words.
+ *
+ * A user row is distinguished on screen by which edge it hugs and what colour
+ * it is. Both are CSS; neither reaches the accessibility tree. So without a
+ * spoken speaker a screen-reader user arrowing through a conversation hears an
+ * undifferentiated run of paragraphs and cannot tell their own question from
+ * the answer to it -- the same "conveyed exclusively by hue" defect this file
+ * was written against, with alignment standing in for hue.
+ *
+ * The speaker is NOT an `aria-label`, and `accessibleName` returns null for
+ * this kind on purpose (rule 3 in the header). A label would replace the
+ * message in the accessibility tree and cost the reader the ability to
+ * navigate their own words by word, sentence or character. It is rendered as
+ * visually-hidden text INSIDE the row, ahead of the message, so the speaker is
+ * announced and the message stays browsable.
+ *
+ * `note` is produced only for `unstored`: the turn ENDED and `end.userIndex`
+ * never arrived, so the message on screen will not be there when the
+ * conversation is reopened. `sent` is the ordinary streaming state and `stored`
+ * the ordinary finished one -- annotating either would hang a caveat on every
+ * message in the transcript, and a warning that is always on is a warning
+ * nobody reads.
+ */
+export function userRowNames(strings: Strings, row: UserRow): UserRowNames {
+  return {
+    speaker: strings.speakerUser,
+    note: row.state === "unstored" ? strings.userNotStored : null,
+  };
+}
+
 /**
  * The name for any row, or null when the row's own text is its name.
  *
@@ -101,6 +142,12 @@ export function droppedRowName(strings: Strings, row: DroppedRow): string {
  */
 export function accessibleName(strings: Strings, row: Row): string | null {
   switch (row.kind) {
+    case "user":
+      // Rule 3, applied to the OTHER speaker. A user row is prose exactly like
+      // a text row, and an aria-label on it would replace the message with a
+      // summary of the message. The speaker is announced instead by
+      // `userRowNames`, which is content and therefore additive.
+      return null;
     case "text":
     case "reasoning":
       return null;

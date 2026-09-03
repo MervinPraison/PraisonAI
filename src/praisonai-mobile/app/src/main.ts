@@ -590,14 +590,35 @@ export function stopNotice(stopped: boolean, strings: Strings): string | null {
  * (a re-open paints the same rows, not duplicates) and cannot collide with a
  * live turn's `text:N` ids -- a collision would make the first streamed
  * paragraph update a history row in place instead of appending after it.
+ *
+ * THE ROLE DECIDES THE ROW KIND, and this is the second half of the missing
+ * user message. `StoredMessage.role` has been `"user" | "assistant"` since the
+ * repository was written and this function threw it away, mapping both to a
+ * `text` row -- the kind that means "the model said this". So a reopened
+ * conversation did paint the user's questions, in the assistant's clothes: the
+ * two sides of the conversation were rendered identically, and a screen reader
+ * heard one voice. The prompt is ALREADY on disk, so there is no second source
+ * of truth to invent here -- only a role that had to stop being discarded.
+ *
+ * A stored message is `stored` by definition: it was read back off the disk it
+ * is asking about.
  */
 export function historyRows(messages: readonly StoredMessage[]): readonly Row[] {
-  return messages.map((message, index) => ({
-    kind: "text",
-    id: `history:${index}:${message.role}`,
-    text: message.content,
-    streaming: false,
-  }));
+  return messages.map((message, index) =>
+    message.role === "user"
+      ? {
+          kind: "user",
+          id: `history:${index}:user`,
+          text: message.content,
+          state: "stored",
+        }
+      : {
+          kind: "text",
+          id: `history:${index}:assistant`,
+          text: message.content,
+          streaming: false,
+        },
+  );
 }
 
 /** `createApp`, with a thrown failure turned into the same typed result the
@@ -743,13 +764,109 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const nodes: RowNodes = emptyNodes();
   let announcer: AnnouncerState = initialAnnouncer;
 
-  // A reopened conversation's stored messages, as reconciler rows. The
-  // controller only ever publishes the CURRENT turn -- it resets to
-  // `initialTurn` on each run -- so history is not in the RunView. It is held
-  // here and PREPENDED to every reconcile, so a follow-up turn's rows land
-  // below it and a reconcile never emits `remove` for history it did not know
-  // about. Empty for a fresh chat; cleared on New chat.
-  let history: readonly Row[] = [];
+  /**
+   * Everything ABOVE the turn now on screen: a reopened conversation's stored
+   * messages, plus every turn this session has already finished.
+   *
+   * The controller only ever publishes the CURRENT turn -- it resets to
+   * `beginTurn(prompt)` on each run -- so neither is in the RunView. Both are
+   * held here and PREPENDED to every reconcile, so a follow-up turn's rows land
+   * below them and a reconcile never emits `remove` for rows it did not know
+   * about. Empty for a fresh chat; cleared on New chat.
+   *
+   * `priorRows`, NOT `history`, and the distinction is worth the longer name.
+   * `history` in this file now means CONVERSATION MEMORY -- the
+   * `ConversationHistory` the in-process engine replays onto a fresh agent
+   * every turn, read from `Session.current()`. This is a list of RENDERED ROWS.
+   * The two are close but not equal, and calling both `history` shadowed one
+   * with the other inside `mount`:
+   *
+   *   - Conversation memory holds only what `record()` actually WROTE. A turn
+   *     that failed was never offered for persistence, so the model is never
+   *     told about it.
+   *   - These rows hold every finished turn, persisted or not, because a
+   *     question you asked and the error that answered it both belong on
+   *     screen -- removing them would hide the failure.
+   *
+   * That divergence is deliberate and it is SAID OUT LOUD rather than left to
+   * be discovered: a turn on screen that is not in the stored conversation
+   * renders its user row as `unstored`, which reads "Not saved -- this message
+   * is not in the stored conversation". `main.test.ts` asserts the agreement in
+   * both directions, so a change that starts feeding the model rows it never
+   * stored -- or drops a stored turn off the screen -- fails by name.
+   */
+  let priorRows: readonly Row[] = [];
+
+  /**
+   * The rows of the turn currently on screen, and the turn they belong to.
+   *
+   * A finished turn used to be ERASED by the next one. The controller publishes
+   * only the current turn, so the moment `runTurn` installed a fresh state the
+   * reconciler saw the previous turn's ids missing from the next row list and
+   * emitted `remove` for every one of them. Measured on main before this
+   * change, with two questions asked in one session: after the second Send the
+   * transcript contained the second answer AND NOTHING ELSE -- the first
+   * question and its reply were gone from a conversation that was still open.
+   *
+   * That is invisible while the transcript has no user rows (one anonymous
+   * paragraph replaces another) and glaring once it has them, which is why it
+   * is fixed here rather than left: a "your message" row that disappears the
+   * next time you speak is not the feature.
+   *
+   * So a turn that has ENDED is moved into `priorRows` when the NEXT one
+   * begins.
+   * Not when it ends: at that moment it is still the live turn, still carrying
+   * its tool cards, its usage and its error row, and moving it early would
+   * either duplicate those rows or drop them at the exact instant the answer
+   * lands.
+   *
+   * Ids are namespaced per turn (`t0:`, `t1:`, ...) from the moment they are
+   * built, not rewritten at promotion time. Two turns both produce `text:0`,
+   * and a shared id is how a keyed renderer paints one row's content into
+   * another row's node. Keying up front also means promotion changes no id at
+   * all, so it emits no ops: the rows already on screen stay exactly where they
+   * are instead of being removed and rebuilt under the user.
+   */
+  let liveRows: readonly Row[] = [];
+  let turnSeq = 0;
+  let turnEnded = false;
+
+  /** A turn's rows, namespaced so no two turns can claim the same id. Both
+   *  turns of a two-turn chat produce `text:0`; see `liveRows`. */
+  const keyed = (rows: readonly Row[], seq: number): readonly Row[] =>
+    rows.map((row) => ({ ...row, id: `t${seq}:${row.id}` }));
+
+  /**
+   * Whether a publish from the controller belongs to the chat now on screen.
+   *
+   * Stopping the previous chat's run on a switch aborts it, but the abort still
+   * drives one FINAL publish (the controller always paints the terminal frame,
+   * see controller.ts) -- and that frame carries the OLD chat's turn. Left
+   * ungated it reconciles the old answer or a "Stopped" row into the transcript
+   * we have just seeded with the NEW chat's history, and it is then promoted
+   * into `priorRows` and reopens there. `setChat` cannot help: by the time the
+   * late publish lands the controller already reports the new chat's id.
+   *
+   * So every chat switch sets this false -- from that point the only publishes
+   * worth painting are for a turn THIS chat issued -- and `submit` sets it true
+   * for the turn it is about to start. A stale terminal publish from the run we
+   * left arrives while false and is dropped; the new chat's own first frame
+   * (`beginTurn`, from inside `send`) arrives after `submit` re-armed it.
+   */
+  let expectingTurn = false;
+
+  /** Forget every turn on screen. Shared by New chat, Open chat and deleting
+   *  the chat that is open, because getting one of the three resets wrong is
+   *  how a previous conversation's rows leak into the next one. */
+  const clearTurns = (): void => {
+    priorRows = [];
+    liveRows = [];
+    turnSeq = 0;
+    turnEnded = false;
+    // A switched-to chat has issued no turn yet, so any publish still arriving
+    // is the run we just left painting its last frame into the wrong chat.
+    expectingTurn = false;
+  };
 
   // ---- composer state (draft, key policy, autosize) ----------------------
   // The composer is data now, not just a <textarea>: a draft that survives a
@@ -775,12 +892,31 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   };
 
   const publish = (view: RunView): void => {
+    // Drop a frame from the run we switched away from. A chat switch stops the
+    // previous run, but the abort still drives one terminal publish carrying
+    // the OLD chat's turn; painting it here reconciles that turn into the chat
+    // we just opened. `expectingTurn` is armed only by the turn THIS chat
+    // issued (see `submit`), so an idle, cleared chat drops the straggler and
+    // stays empty. See `expectingTurn`.
+    if (!expectingTurn) return;
+
+    // A new turn has begun and the previous one had ended: keep it. See
+    // `liveRows` -- without this the answer above is removed by the very
+    // reconcile that draws the new question.
+    if (turnEnded && view.turn.phase !== "ended") {
+      priorRows = [...priorRows, ...liveRows];
+      turnSeq += 1;
+    }
+    turnEnded = view.turn.phase === "ended";
+
     const built = buildTranscript(view.turn, view.approvals);
-    // History first, then the live turn. `history` is empty for a fresh chat,
-    // so this is a no-op there; for a reopened chat it keeps the restored
-    // conversation ABOVE the turn now streaming and inside the render state, so
-    // the diff updates the live rows without removing the history.
-    const rows = history.length === 0 ? built.rows : [...history, ...built.rows];
+    liveRows = keyed(built.rows, turnSeq);
+    // Prior rows first, then the live turn. `priorRows` is empty for a fresh chat
+    // that has not finished a turn yet, so this is a no-op there; otherwise it
+    // keeps the restored conversation and every completed turn ABOVE the turn
+    // now streaming and inside the render state, so the diff updates the live
+    // rows without removing what is above them.
+    const rows = priorRows.length === 0 ? liveRows : [...priorRows, ...liveRows];
     const diff = reconcile(render, rows);
     applyOps(transcript, nodes, diff.ops, strings);
     render = diff.next;
@@ -1353,8 +1489,9 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // the same id".
         app.controller.setChat(mintChatId());
         app.session.reset();
-        // A fresh chat has no history to keep above the next turn.
-        history = [];
+        // A fresh chat has no history to keep above the next turn, and no
+        // finished turn to promote into it.
+        clearTurns();
         render = emptyRender;
         nodes.nodes.clear();
         announcer = initialAnnouncer;
@@ -1458,7 +1595,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
           void app.controller.stop();
           app.controller.setChat(mintChatId());
           app.session.reset();
-          history = [];
+          clearTurns();
           render = emptyRender;
           nodes.nodes.clear();
           announcer = initialAnnouncer;
@@ -1532,6 +1669,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // list back into a stored transcript.
         const opened = await app.session.open(intent.chatId);
         if (!opened) return;
+        // Stop the previous chat's run FIRST, exactly as New chat and deleting
+        // the open chat already do. Without this, a run still in flight from the
+        // conversation being left keeps streaming, and its terminal `publish()`
+        // reconciles the old chat's answer or error row into the transcript we
+        // are about to seed with THIS chat's history -- where it is then promoted
+        // into `priorRows` and reopens with the wrong conversation. `setChat`
+        // clears the controller's turn, but it cannot cancel a run the engine is
+        // still driving; only `stop()` does.
+        void app.controller.stop();
         app.controller.setChat(intent.chatId);
         render = emptyRender;
         nodes.nodes.clear();
@@ -1550,8 +1696,12 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // `publish` keeps it in the same coordinate system the stream appends to
         // AND makes it survive the next turn's reconcile.
         const chat = app.session.current();
-        history = chat === null ? [] : historyRows(chat.messages);
-        const seeded = reconcile(render, history);
+        // The turns of the PREVIOUS conversation go with it -- including one
+        // that is mid-flight. Reopening a chat into another chat's rows is the
+        // same leak `setChat` was added for, one layer up.
+        clearTurns();
+        priorRows = chat === null ? [] : historyRows(chat.messages);
+        const seeded = reconcile(render, priorRows);
         applyOps(transcript, nodes, seeded.ops, strings);
         render = seeded.next;
         app.router.push({ name: "chat", chatId: intent.chatId });
@@ -1575,6 +1725,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     input.value = "";
     syncComposer();
     if (result.sent === null) return; // refused while a turn is in flight
+    // Arm the transcript for THIS chat's own turn. A switch left `expectingTurn`
+    // false so a straggling publish from the run we left is dropped; issuing a
+    // run here is the moment publishes become ours to paint again. Set before
+    // `send`, which publishes `beginTurn` synchronously on the way in.
+    expectingTurn = true;
     await app.controller.send(result.sent);
   };
 

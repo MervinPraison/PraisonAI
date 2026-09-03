@@ -168,6 +168,27 @@ export interface Strings {
   readonly durationHoursMinutes: (hours: string, minutes: string) => string;
 
   // ---- transcript --------------------------------------------------------
+  /**
+   * Who said it, for a reader who cannot see which side of the screen a row
+   * sits on.
+   *
+   * Rendered INSIDE the user's row as visually-hidden text rather than as an
+   * `aria-label` on it. An aria-label replaces the element's content in the
+   * accessibility tree, and a11y/names.ts rule 3 spells out what that costs on
+   * a row whose content is prose: the reader loses word, sentence and character
+   * navigation and gets one unbrowsable blob. That reasoning was written about
+   * the model's paragraphs and applies word for word to the user's own.
+   */
+  readonly speakerUser: string;
+  /**
+   * "Sent, and not stored."
+   *
+   * Shown only when the turn has FINISHED without the engine reporting an
+   * index -- cancelled, errored, or a write that failed. Not while streaming:
+   * a row that says "not saved" for the whole of a normal answer is crying
+   * wolf during the seconds it matters least.
+   */
+  readonly userNotStored: string;
   /** The turn was cancelled. */
   readonly stopped: string;
   readonly streaming: string;
@@ -369,6 +390,10 @@ export const en: Strings = {
   durationMinutesSeconds: (minutes, seconds) => `${minutes}m ${seconds}s`,
   durationHoursMinutes: (hours, minutes) => `${hours}h ${minutes}m`,
 
+  speakerUser: "You said:",
+  // Says what happened AND what it means, because "unsaved" alone leaves the
+  // user to guess whether reopening the chat will find it. It will not.
+  userNotStored: "Not saved — this message is not in the stored conversation",
   stopped: "Stopped",
   streaming: "Responding",
   reasoningLabel: "Reasoning",
