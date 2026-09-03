@@ -93,14 +93,24 @@ class Rules:
     aliases: Dict[str, Dict[str, str]] = field(default_factory=dict)
     flattened: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
     default_equivalences: List[Tuple[Any, Any]] = field(default_factory=list)
+    #: ``(python expression text, typescript token)`` pairs. Separate from
+    #: ``default_equivalences`` because a Python *expression* default (a module
+    #: sentinel such as ``_UNSET``) is not a literal and must not be compared
+    #: against literals of the same spelling.
+    default_expr_equivalences: List[Tuple[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Rules':
         data = data or {}
         equivalences = []
+        expr_equivalences = []
         for item in data.get('default_equivalences') or []:
-            equivalences.append((item.get('python'), item.get('typescript')))
+            if 'python_expr' in item:
+                expr_equivalences.append((item['python_expr'], item.get('typescript')))
+            else:
+                equivalences.append((item.get('python'), item.get('typescript')))
         return cls(
+            default_expr_equivalences=expr_equivalences,
             case=data.get('case', 'snake_to_camel'),
             aliases={k: dict(v or {}) for k, v in (data.get('aliases') or {}).items()},
             flattened={k: {p: list(f) for p, f in (v or {}).items()}
@@ -275,6 +285,13 @@ def defaults_equivalent(py: Param, ts: Param, rules: Rules) -> bool:
             return True
     for py_eq, ts_eq in rules.default_equivalences:
         if py.default_kind == 'literal' and py_value == py_eq and type(py_value) is type(py_eq):
+            if ts_token == ts_eq and type(ts_token) is type(ts_eq):
+                return True
+    # A Python module-level sentinel (``_UNSET``) and TypeScript's `undefined`
+    # are the same "the caller passed nothing" marker; only the spelling of the
+    # sentinel differs, so the two sides resolve identically.
+    for py_expr, ts_eq in rules.default_expr_equivalences:
+        if py.default_kind == 'expr' and py_value == py_expr:
             if ts_token == ts_eq and type(ts_token) is type(ts_eq):
                 return True
     return False

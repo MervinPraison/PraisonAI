@@ -284,6 +284,50 @@ class TestDefaultsAndRequired:
         _, ev = run([sig('python', py)], [sig('typescript', ts)], waivers=[waiver(f'{SURFACE}.cache')])
         assert ev.ok
 
+    def test_python_sentinel_expr_matches_typescript_undefined(self):
+        """`_UNSET` and `undefined` are the same "caller passed nothing" marker.
+
+        Python spells the marker as a module-level object because `None` is a
+        legal value for the parameter; TypeScript has a native one. Both sides
+        then resolve the same value, so this is not a gap.
+        """
+        rules = C.Rules(
+            aliases={SURFACE: {}}, flattened={SURFACE: {}},
+            default_equivalences=[(None, 'undefined')],
+            default_expr_equivalences=[('_UNSET', 'undefined')],
+        )
+        py = [py_param('requires_approval', default='_UNSET', default_kind='expr')]
+        ts = [ts_param('requiresApproval')]  # no ctor default -> undefined
+        comps, ev = run([sig('python', py)], [sig('typescript', ts)], rules=rules)
+        assert ev.ok, ev.failures
+        assert row(comps, 'requires_approval').gap is None
+
+    def test_control_unlisted_sentinel_expr_is_still_a_mismatch(self):
+        """Only the sentinels named in rules.yaml are equivalent to undefined."""
+        rules = C.Rules(
+            aliases={SURFACE: {}}, flattened={SURFACE: {}},
+            default_equivalences=[(None, 'undefined')],
+            default_expr_equivalences=[('_UNSET', 'undefined')],
+        )
+        py = [py_param('requires_approval', default='compute_default()', default_kind='expr')]
+        ts = [ts_param('requiresApproval')]
+        comps, ev = run([sig('python', py)], [sig('typescript', ts)], rules=rules)
+        assert not ev.ok
+        assert row(comps, 'requires_approval').gap.kind == 'default'
+
+    def test_control_sentinel_expr_does_not_match_a_literal_of_the_same_spelling(self):
+        """An expression default and a string literal are different things."""
+        rules = C.Rules(
+            aliases={SURFACE: {}}, flattened={SURFACE: {}},
+            default_equivalences=[(None, 'undefined')],
+            default_expr_equivalences=[('_UNSET', 'undefined')],
+        )
+        py = [py_param('requires_approval', default='_UNSET', default_kind='literal')]
+        ts = [ts_param('requiresApproval')]
+        comps, ev = run([sig('python', py)], [sig('typescript', ts)], rules=rules)
+        assert not ev.ok
+        assert row(comps, 'requires_approval').gap.kind == 'default'
+
     def test_type_class_mismatch_is_a_warning_not_a_failure(self):
         py = [py_param('timeout', default=30, type_class='number')]
         ts = [ts_param('timeout', default=30, default_kind='literal', type_class='string')]
@@ -490,7 +534,9 @@ class TestTsExtractor:
         assert params['markdown']['type_class'] == 'boolean'
         assert params['tools']['type_class'] == 'array'
         start = {p['name']: p for p in by_key['Agent.start']['params']}
-        assert start['prompt']['required'] is True and start['prompt']['type_class'] == 'string'
+        # `prompt` is optional on both sides: Python's `start(prompt=None)`
+        # falls back to the agent's instructions, and TypeScript now does too.
+        assert start['prompt']['required'] is False and start['prompt']['type_class'] == 'string'
         assert start['onToken']['required'] is False and start['onToken']['type_class'] == 'callable'
 
     @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
@@ -660,6 +706,147 @@ export class Detector {
         assert params['config']['required'] is False
         # Control: its members are still flattened, so both spellings resolve.
         assert 'threshold' in params and params['threshold']['default'] == 3
+
+
+class TestBareConstructorAsMethod:
+    """`kind: method, name: constructor` addresses a class's constructor declaration.
+
+    Ported classes whose constructor takes plain positional parameters and no
+    options interface (FileTracker, Knowledge) are only checkable this way.
+    """
+
+    FIXTURE = """
+export interface TrackerOptions {
+  retries?: number;
+}
+export class Tracker {
+  constructor(a: string, b: number = 3) {
+    void a;
+    void b;
+  }
+  scan(target: string, deep: boolean = false): number {
+    void target;
+    return deep ? 1 : 0;
+  }
+}
+export class Configured {
+  constructor(label: string, options: TrackerOptions = {}) {
+    const r = options.retries ?? 5;
+    void label;
+    void r;
+  }
+}
+export class Bare {
+  private x = 1;
+  ping(): number { return this.x; }
+}
+export interface RunOptions {
+  deep?: boolean;
+}
+export type RunOptionsInput = RunOptions | { shallow?: boolean };
+export class Overloaded {
+  run(target?: string, options?: RunOptions): number;
+  run(target?: string, options?: RunOptionsInput): number {
+    void target;
+    void options;
+    return 1;
+  }
+}
+"""
+
+    @staticmethod
+    def _fake_repo(tmp_path):
+        src = tmp_path / 'src' / 'praisonai-ts' / 'src'
+        src.mkdir(parents=True)
+        (src / 'tracker.ts').write_text(TestBareConstructorAsMethod.FIXTURE)
+        return tmp_path
+
+    @staticmethod
+    def _target(surface, name, cls):
+        return {'surface': surface, 'file': 'tracker.ts', 'kind': 'method', 'name': name, 'cls': cls}
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_constructor_params_are_reported_with_defaults_and_requiredness(self, tmp_path):
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [self._target('Tracker.__init__', 'constructor', 'Tracker')])
+        assert [p['name'] for p in items[0]['params']] == ['a', 'b']
+        params = {p['name']: p for p in items[0]['params']}
+        assert params['a']['required'] is True
+        assert params['a']['default'] is None and params['a']['default_kind'] is None
+        assert params['a']['kind'] == 'positional' and params['a']['type_class'] == 'string'
+        assert params['b']['required'] is False
+        assert params['b']['default'] == 3 and params['b']['default_kind'] == 'literal'
+        assert params['b']['type_class'] == 'number'
+        assert items[0]['extra']['resolved_class'] == 'Tracker'
+        assert items[0]['location'].endswith('/tracker.ts:6')  # the constructor line
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_constructor_options_object_is_still_flattened(self, tmp_path):
+        """A constructor addressed this way keeps the options-interface flattening."""
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [self._target('Configured.__init__', 'constructor', 'Configured')])
+        params = {p['name']: p for p in items[0]['params']}
+        assert set(params) == {'label', 'options', 'retries'}
+        assert params['label']['required'] is True
+        assert params['retries']['default'] == 5 and params['retries']['via'] == 'options'
+        assert items[0]['extra']['options_interfaces'] == ['options: TrackerOptions']
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_control_class_without_constructor_is_a_loud_error(self, tmp_path):
+        """Control: a missing constructor must fail the extraction, not report zero params."""
+        repo = self._fake_repo(tmp_path)
+        with pytest.raises(C.ToolingError) as excinfo:
+            C.run_ts_extractor(repo, [self._target('Bare.__init__', 'constructor', 'Bare')])
+        message = str(excinfo.value)
+        assert 'Bare.__init__' in message and 'Bare' in message and 'constructor' in message
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_control_missing_class_is_named_in_the_error(self, tmp_path):
+        repo = self._fake_repo(tmp_path)
+        with pytest.raises(C.ToolingError) as excinfo:
+            C.run_ts_extractor(repo, [self._target('Nope.__init__', 'constructor', 'Nope')])
+        assert 'class Nope not found' in str(excinfo.value)
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_control_ordinary_method_is_unchanged(self, tmp_path):
+        """Control: `kind: method` on a named method behaves exactly as before."""
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [self._target('Tracker.scan', 'scan', 'Tracker')])
+        params = {p['name']: p for p in items[0]['params']}
+        assert [p['name'] for p in items[0]['params']] == ['target', 'deep']
+        assert params['target']['required'] is True and params['target']['type_class'] == 'string'
+        assert params['deep']['required'] is False and params['deep']['default'] is False
+        assert items[0]['extra']['resolved_class'] == 'Tracker'
+        assert 'options_interfaces' not in items[0]['extra']
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_control_overloaded_method_still_reads_its_first_overload(self, tmp_path):
+        """Control: an overloaded method keeps reporting its leading (public) signature.
+
+        This is the shape of the real `AgentTeam.start`: the documented overload
+        names an interface that flattens, while the implementation widens to a
+        union type alias with nothing to flatten. Preferring the implementation
+        would silently drop `deep` and report a false parity gap.
+        """
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [self._target('Overloaded.run', 'run', 'Overloaded')])
+        params = {p['name']: p for p in items[0]['params']}
+        assert set(params) == {'target', 'options', 'deep'}
+        assert params['options']['type_text'] == 'RunOptions'
+        assert params['deep']['via'] == 'options'
+        assert items[0]['extra']['options_interfaces'] == ['options: RunOptions']
 
 
 class TestStalenessIgnoresLineNumbers:

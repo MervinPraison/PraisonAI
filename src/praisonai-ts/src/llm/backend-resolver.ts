@@ -22,6 +22,7 @@ import { getEnv } from './openaiClientOptions';
 // the AI SDK itself: backend.ts defers `import('ai')` until the first call.
 import { createAISDKBackend } from './providers/ai-sdk';
 import { createProvider } from './providers';
+import { resolveDefaultModel } from './default-model';
 
 export type BackendSource = 'ai-sdk' | 'native' | 'custom' | 'legacy';
 
@@ -267,9 +268,11 @@ export function resolveBackendSync(
  * Get default model string
  */
 export function getDefaultModel(): string {
-  return getEnv('OPENAI_MODEL_NAME') || 
-         getEnv('PRAISONAI_MODEL') || 
-         'openai/gpt-4o-mini';
+  // Delegates to the shared provider walk so this and `new Agent({})` cannot
+  // disagree about what "the default model" is (Python parity:
+  // `Agent._resolve_default_model`). The bare `gpt-4o-mini` fallback parses to
+  // the openai provider, exactly as the old `openai/gpt-4o-mini` did.
+  return resolveDefaultModel();
 }
 
 // Re-export types

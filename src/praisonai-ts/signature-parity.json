@@ -7,12 +7,12 @@
         "camelCase": 8,
         "exact": 29,
         "flattened": 2,
-        "mismatches": 4,
+        "mismatches": 6,
         "missing": 0,
         "params": 42,
         "ts_only": 14,
         "ts_total": 59,
-        "waived": 4
+        "waived": 6
       },
       "params": [
         {
@@ -75,15 +75,18 @@
           "canonical": "goal",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=`config.instructions` (TS `goal`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "goal",
           "required": false,
           "ts": {
             "canonical": "goal",
-            "default": null,
-            "default_kind": null,
+            "default": "config.instructions",
+            "default_kind": "expr",
             "kind": "property",
             "name": "goal",
             "required": false,
@@ -93,22 +96,25 @@
           "ts_name": "goal",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": null,
+          "waived": "Agent.__init__.goal",
           "warnings": []
         },
         {
           "canonical": "backstory",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=`config.instructions` (TS `backstory`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "backstory",
           "required": false,
           "ts": {
             "canonical": "backstory",
-            "default": null,
-            "default_kind": null,
+            "default": "config.instructions",
+            "default_kind": "expr",
             "kind": "property",
             "name": "backstory",
             "required": false,
@@ -118,7 +124,7 @@
           "ts_name": "backstory",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": null,
+          "waived": "Agent.__init__.backstory",
           "warnings": []
         },
         {
@@ -176,7 +182,7 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=`llmName || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'` (TS `model`)",
+            "detail": "default differs: python=null typescript=`llmName || resolveDefaultModel()` (TS `model`)",
             "kind": "default"
           },
           "kind": "positional",
@@ -185,7 +191,7 @@
           "required": false,
           "ts": {
             "canonical": "model",
-            "default": "llmName || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'",
+            "default": "llmName || resolveDefaultModel()",
             "default_kind": "expr",
             "kind": "property",
             "name": "model",
@@ -1215,8 +1221,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:744",
-        "location": "src/praisonai-ts/src/agent/simple.ts:112"
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:753",
+        "location": "src/praisonai-ts/src/agent/simple.ts:113"
       }
     },
     "Agent.chat": {
@@ -1686,7 +1692,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2426",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2476",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -1699,22 +1705,19 @@
         "camelCase": 0,
         "exact": 1,
         "flattened": 0,
-        "mismatches": 1,
+        "mismatches": 0,
         "missing": 0,
         "params": 1,
         "ts_only": 20,
         "ts_total": 21,
-        "waived": 1
+        "waived": 0
       },
       "params": [
         {
           "canonical": "prompt",
           "default": null,
           "default_kind": "literal",
-          "gap": {
-            "detail": "is optional in Python but required in TypeScript (TS `prompt`)",
-            "kind": "required"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "exact",
           "name": "prompt",
@@ -1725,14 +1728,14 @@
             "default_kind": null,
             "kind": "positional",
             "name": "prompt",
-            "required": true,
+            "required": false,
             "type_class": "string",
             "type_text": "string"
           },
           "ts_name": "prompt",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": "Agent.start.prompt",
+          "waived": null,
           "warnings": []
         }
       ],
@@ -1943,7 +1946,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:1778",
+        "location": "src/praisonai-ts/src/agent/simple.ts:1824",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -3096,6 +3099,56 @@
         "location": "src/praisonai-ts/src/escalation/pipeline.ts:51"
       }
     },
+    "FileTracker.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 1,
+        "exact": 0,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 1,
+        "ts_only": 0,
+        "ts_total": 1,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "stateFile",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "state_file",
+          "required": false,
+          "ts": {
+            "canonical": "stateFile",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "stateFile",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string | null"
+          },
+          "ts_name": "stateFile",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:333",
+        "resolved_class": "FileTracker"
+      },
+      "ts_only": [],
+      "typescript": {
+        "location": "src/praisonai-ts/src/knowledge/indexing.ts:552",
+        "resolved_class": "FileTracker"
+      }
+    },
     "GoalEngineer.__init__": {
       "counts": {
         "alias": 0,
@@ -3336,7 +3389,7 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=`nested.name || `handoff_to_${config.agent.name}`` (TS `name`)",
+            "detail": "default differs: python=null typescript=`nested.name || defaultHandoffToolName(config.agent.name)` (TS `name`)",
             "kind": "default"
           },
           "kind": "positional",
@@ -3345,7 +3398,7 @@
           "required": false,
           "ts": {
             "canonical": "name",
-            "default": "nested.name || `handoff_to_${config.agent.name}`",
+            "default": "nested.name || defaultHandoffToolName(config.agent.name)",
             "default_kind": "expr",
             "kind": "property",
             "name": "name",
@@ -3364,7 +3417,7 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=`nested.description || `Transfer conversation to ${config.agent.name}`` (TS `description`)",
+            "detail": "default differs: python=null typescript=`nested.description || defaultHandoffToolDescription(config.agent as any)` (TS `description`)",
             "kind": "default"
           },
           "kind": "positional",
@@ -3373,7 +3426,7 @@
           "required": false,
           "ts": {
             "canonical": "description",
-            "default": "nested.description || `Transfer conversation to ${config.agent.name}`",
+            "default": "nested.description || defaultHandoffToolDescription(config.agent as any)",
             "default_kind": "expr",
             "kind": "property",
             "name": "description",
@@ -3627,8 +3680,83 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:671",
-        "location": "src/praisonai-ts/src/agent/handoff.ts:435"
+        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:714",
+        "location": "src/praisonai-ts/src/agent/handoff.ts:478"
+      }
+    },
+    "Knowledge.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 2,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 2,
+        "ts_only": 0,
+        "ts_total": 2,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "config",
+          "required": false,
+          "ts": {
+            "canonical": "config",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "config",
+            "required": false,
+            "type_class": "object",
+            "type_text": "KnowledgeStoreConfig | null"
+          },
+          "ts_name": "config",
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "verbose",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "verbose",
+          "required": false,
+          "ts": {
+            "canonical": "verbose",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "verbose",
+            "required": false,
+            "type_class": "union",
+            "type_text": "number | boolean | null"
+          },
+          "ts_name": "verbose",
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/knowledge.py:54",
+        "resolved_class": "Knowledge"
+      },
+      "ts_only": [],
+      "typescript": {
+        "location": "src/praisonai-ts/src/knowledge/knowledge.ts:166",
+        "resolved_class": "Knowledge"
       }
     },
     "LLM.__init__": {
@@ -6466,12 +6594,12 @@
         "camelCase": 5,
         "exact": 5,
         "flattened": 0,
-        "mismatches": 4,
+        "mismatches": 3,
         "missing": 0,
         "params": 11,
         "ts_only": 3,
         "ts_total": 14,
-        "waived": 4
+        "waived": 3
       },
       "params": [
         {
@@ -6535,7 +6663,7 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=``Function ${config.name}`` (TS `description`)",
+            "detail": "default differs: python=null typescript=``Tool: ${config.name}`` (TS `description`)",
             "kind": "default"
           },
           "kind": "keyword",
@@ -6544,7 +6672,7 @@
           "required": false,
           "ts": {
             "canonical": "description",
-            "default": "`Function ${config.name}`",
+            "default": "`Tool: ${config.name}`",
             "default_kind": "expr",
             "kind": "property",
             "name": "description",
@@ -6687,10 +6815,7 @@
           "canonical": "requiresApproval",
           "default": "_UNSET",
           "default_kind": "expr",
-          "gap": {
-            "detail": "default differs: python=`_UNSET` typescript=undefined (TS `requiresApproval`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "keyword",
           "match": "camelCase",
           "name": "requires_approval",
@@ -6708,7 +6833,7 @@
           "ts_name": "requiresApproval",
           "type_class": "union",
           "type_text": "Union[bool, str]",
-          "waived": "tool().requires_approval",
+          "waived": null,
           "warnings": []
         },
         {
@@ -6805,150 +6930,157 @@
   },
   "totals": {
     "alias": 9,
-    "camelCase": 87,
-    "exact": 121,
+    "camelCase": 88,
+    "exact": 123,
     "flattened": 2,
     "mismatches": 21,
     "missing": 0,
-    "params": 219,
-    "surfaces": 15,
+    "params": 222,
+    "surfaces": 17,
     "ts_only": 85,
-    "ts_total": 309,
+    "ts_total": 312,
     "waived": 21
   },
   "waivers": [
     {
       "expires": null,
       "issue": null,
+      "key": "Agent.__init__.backstory",
+      "owner": "praisonai-ts",
+      "reason": "Same value, resolved at a different moment. TS stores `config.backstory || config.instructions` (or \"I am an AI assistant\") in the constructor; Python's `self.backstory = backstory or instructions` (agent.py) produces the identical string in the body. Verified equal for the instruction-only, role-only and bare forms."
+    },
+    {
+      "expires": null,
+      "issue": null,
       "key": "Agent.__init__.caching",
       "owner": "praisonai-ts",
-      "reason": "TS cache is a boolean defaulting to false; Python None resolves a caching preset"
+      "reason": "Both SDKs default to NO caching, by different routes. Python's `caching=None` resolves to `CachingConfig(enabled=True)` and assigns `self.cache = True`, but `Agent.cache` is written and never read anywhere in praisonaiagents, so the default caches nothing; TS defaults `cache` to false, which its response cache honours. Aligning the literal would turn caching ON in TS and diverge from Python's observable behaviour, so the difference is deliberate. Pinned by tests/unit/agent/parity-waiver-gaps.test.ts (\"caching default\")."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.goal",
+      "owner": "praisonai-ts",
+      "reason": "Same value, resolved at a different moment. TS stores `config.goal || config.instructions` (or \"Help the user with their tasks\") in the constructor; Python's `self.goal = goal or instructions` (agent.py) produces the identical string in the body."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.model",
       "owner": "praisonai-ts",
-      "reason": "TS resolves the model from env then gpt-4o-mini; Python resolves per available credential"
+      "reason": "Same resolution, run eagerly. TS now calls `resolveDefaultModel()` (src/llm/default-model.ts), a byte-for-byte port of Python's `Agent._PROVIDER_DEFAULT_MODELS` / `_resolve_default_model`, so the same environment yields the same model on both sides. What still differs is only the moment: TS resolves in the constructor, Python inside the body, and TS additionally honours `PRAISONAI_MODEL` (a TypeScript-only alias)."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.name",
       "owner": "praisonai-ts",
-      "reason": "TS generates a unique Agent_<id> name; Python defaults to \"Agent\""
+      "reason": "TS generates `Agent_<random>`; Python leaves `name` None for an instruction-only agent and uses \"Agent\" otherwise. Neither is a stable contract (every unnamed Python agent collides on \"Agent\", and `Handoff` on a None-named Python agent raises AttributeError), and TS exposes no name-keyed lookup like Python's `AgentTeam.get_agent_details`. The one place the random name used to reach the model -- the handoff tool name -- is now sanitised by `defaultHandoffToolName`."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.role",
       "owner": "praisonai-ts",
-      "reason": "TS folds role/goal/backstory into instructions; role falls back to goal or backstory text"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Agent.start.prompt",
-      "owner": "praisonai-ts",
-      "reason": "TS start requires a prompt; Python None falls back to the task description"
+      "reason": "Same value, resolved at a different moment. TS now stores `config.role || 'Assistant'` in the constructor, matching Python's `self.role = role or \"Assistant\"`, so `agent.role` reads back the same string on both sides. The system-prompt TEXT built from role/goal/ backstory still differs between the two SDKs -- that is a separate, untracked gap, not covered by this waiver."
     },
     {
       "expires": null,
       "issue": null,
       "key": "AgentTeam.__init__.process",
       "owner": "praisonai-ts",
-      "reason": "TS treats an undefined process as sequential, the Python default"
+      "reason": "TS treats an undefined process as sequential, the Python default. NOTE (verified, out of scope for this key): the accepted DOMAIN differs -- TS implements `process: \"parallel\"` with Promise.all, which Python rejects with a ValueError, and TS validates nothing, so a typo runs sequentially instead of raising."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Handoff.__init__.tool_description_override",
       "owner": "praisonai-ts",
-      "reason": "TS derives \"Transfer conversation to <agent>\"; Python derives the same in the body"
+      "reason": "Same derived string, built at a different moment. `defaultHandoffToolDescription` now produces Python's `Transfer task to <name> (<role>) - <goal>` exactly (it previously said \"Transfer conversation to <name>\", which the model saw). Only the moment of derivation differs."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Handoff.__init__.tool_name_override",
       "owner": "praisonai-ts",
-      "reason": "TS derives handoff_to_<agent> when unset; Python derives the same in the body"
+      "reason": "Same derived string, built at a different moment. `defaultHandoffToolName` now produces Python's `transfer_to_<lowercased, spaces-to-underscores name>` exactly (it previously said `handoff_to_<raw name>`, which could contain a space and be rejected by the provider). Only the moment of derivation differs."
     },
     {
       "expires": null,
       "issue": null,
       "key": "PraisonAIError.__init__.run_id",
       "owner": "praisonai-ts",
-      "reason": "TS assigns a run id at construction; Python leaves it None and fills it when the run starts"
+      "reason": "Both sides mint a UUID at construction -- Python's `self.run_id = run_id or str(uuid.uuid4())` (errors.py) is NOT lazy. Only the declared default differs. Edge case: `runId: ''` survives TS's `??` but is replaced by Python's `or`."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Session.__init__.user_id",
       "owner": "praisonai-ts",
-      "reason": "TS sets \"default_user\" eagerly; Python resolves the same value lazily"
+      "reason": "Both sides assign eagerly with the same truthiness rule -- Python's `self.user_id = user_id or \"default_user\"` (session/api.py), TS's `config.userId || 'default_user'`. Only the declared default differs."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.action",
       "owner": "praisonai-ts",
-      "reason": "TS action mirrors description; Python resolves the same in the body"
+      "reason": "TS action mirrors description; Python's `self.action = action if action is not None else description` resolves the same in the body."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.depends_on",
       "owner": "praisonai-ts",
-      "reason": "TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias)"
+      "reason": "TS dependsOn falls back to context then []; Python's `if depends_on is not None` gives dependsOn the same precedence, including an explicit empty list. TS additionally exposes no `dependsOn` read-back property (Python's returns `context`)."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.description",
       "owner": "praisonai-ts",
-      "reason": "TS description falls back to action at construction; Python resolves the same in the body"
+      "reason": "TS description falls back to action at construction; Python's `if action is not None and description is None: description = action` resolves the same in the body. TS stores '' where Python stores None for a handler-only task; both are falsy and no branch differs."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.expected_output",
       "owner": "praisonai-ts",
-      "reason": "TS fills \"Complete the task successfully\" at construction; Python does so lazily"
+      "reason": "Both sides fill \"Complete the task successfully\" eagerly in __init__ -- Python's `expected_output if expected_output is not None else ...` is NOT lazy. Only the declared default differs."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.guardrails",
       "owner": "praisonai-ts",
-      "reason": "TS guardrails falls back to guardrail; Python resolves the same precedence in the body"
+      "reason": "Identical precedence: the plural wins over the singular on both sides (Python `guardrails if guardrails is not None else guardrail`). TS omits Python's DeprecationWarning for the singular spelling and additionally exposes a `guardrails` read-back property Python lacks."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.id",
       "owner": "praisonai-ts",
-      "reason": "TS assigns a UUID at construction; Python assigns an id lazily"
+      "reason": "Both sides mint a UUID at construction; Python's `str(uuid.uuid4()) if id is None else str(id)` is NOT lazy. NOTE (verified): an EXPLICIT id is coerced to str by Python but kept as a number by TS, so `Task(id=5).id` is \"5\" in Python and 5 in TypeScript."
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.routing",
       "owner": "praisonai-ts",
-      "reason": "TS routing falls back to condition; Python resolves the same in the body"
+      "reason": "TS routing falls back to condition, as Python does, and a plain-dict routing value lands identically on both sides. NOTE (verified, wider than this key): TS lists `routing` in ENGINE_LEVEL_OPTIONS, so any value raises a `notYetHonoured` notice and never reaches execution, whereas Python's workflow executor reads it."
     },
     {
       "expires": null,
       "issue": null,
       "key": "tool().description",
       "owner": "praisonai-ts",
-      "reason": "TS derives a default description from the tool name; Python leaves it None and infers from the docstring"
+      "reason": "Same fallback string, built at a different moment. TS now derives `Tool: <name>`, matching Python's `description or func.__doc__ or f\"Tool: {self.name}\"` (it previously said `Function <name>`, which shipped in the tool schema the model reads). TS has no docstring to fall back to between the two."
     },
     {
       "expires": null,
       "issue": null,
       "key": "tool().func",
       "owner": "praisonai-ts",
-      "reason": "TS execute is required; Python func is optional because @tool can be applied bare"
+      "reason": "TS execute is required; Python's `func` is optional only so `@tool` can be applied bare, and `FunctionTool.__init__` still requires it."
     },
     {
       "expires": null,
@@ -6956,13 +7088,6 @@
       "key": "tool().name",
       "owner": "praisonai-ts",
       "reason": "TS cannot infer a name from an anonymous function; Python infers it from __name__"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "tool().requires_approval",
-      "owner": "praisonai-ts",
-      "reason": "Python uses an _UNSET sentinel to detect explicit use; TS uses undefined"
     }
   ]
 }

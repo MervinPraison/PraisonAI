@@ -53,3 +53,7 @@ default_equivalences:
   - {python: 0.0, typescript: 0}
   - {python: true, typescript: true}
   - {python: false, typescript: false}
+  # A Python module-level "not passed" sentinel is TypeScript's `undefined`.
+  # Both sides then resolve the same value and emit the same deprecation
+  # notice; only the spelling of the sentinel differs.
+  - {python_expr: _UNSET, typescript: undefined}

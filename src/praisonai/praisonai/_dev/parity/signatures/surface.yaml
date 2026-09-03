@@ -79,6 +79,12 @@ surfaces:
     python: {file: errors.py, class: PraisonAIError, function: __init__}
     typescript: {file: errors-base.ts, kind: interface, name: PraisonAIErrorOptions, ctorClass: PraisonAIError}
 
-  # TODO: FileTracker.__init__ and Knowledge.__init__ take positional constructor
-  # parameters with no options interface; add them once ts_extract can address a
-  # bare `constructor` under `kind: method`.
+  # Constructors with plain positional parameters and no options interface are
+  # addressed as `kind: method, name: constructor` plus the owning class.
+  - key: FileTracker.__init__
+    python: {file: knowledge/indexing.py, class: FileTracker, function: __init__}
+    typescript: {file: knowledge/indexing.ts, kind: method, name: constructor, cls: FileTracker}
+
+  - key: Knowledge.__init__
+    python: {file: knowledge/knowledge.py, class: Knowledge, function: __init__}
+    typescript: {file: knowledge/knowledge.ts, kind: method, name: constructor, cls: Knowledge}

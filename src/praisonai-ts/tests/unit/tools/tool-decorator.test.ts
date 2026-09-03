@@ -31,7 +31,8 @@ describe('Tool Decorator', () => {
         name: 'test',
         execute: async () => 'result',
       });
-      expect(myTool.description).toBe('Function test');
+      // Python parity: `FunctionTool` falls back to `Tool: <name>`.
+      expect(myTool.description).toBe('Tool: test');
     });
 
     it('should support category', () => {
