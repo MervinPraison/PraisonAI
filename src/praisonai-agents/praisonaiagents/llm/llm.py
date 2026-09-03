@@ -713,8 +713,11 @@ Respond with ONLY a valid JSON tool call in this format:
         if not self.model:
             return False
         
-        # Direct ollama/ prefix -- the user speaking explicitly, always wins.
-        if self.model.startswith("ollama/"):
+        # An explicit Ollama route prefix -- the user speaking, always wins.
+        # "ollama_chat/" is litellm's recommended prefix for Ollama tool calling
+        # and resolves to provider "ollama" in _detect_provider, so omitting it
+        # here made this predicate disagree with the adapter that gets selected.
+        if self.model.startswith(("ollama/", "ollama_chat/")):
             return True
 
         # A base_url says WHERE the server is, not WHAT it serves. Only let it
@@ -4417,6 +4420,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._tool_parse_error_message(function_name, tool_call_id)
                                 )
                                 continue
+                            # Validate and filter arguments for Ollama provider.
+                            # Pre-dispatch, so this is streaming-safe: nothing has
+                            # been yielded that would need retracting. Weak local
+                            # models routinely emit arguments belonging to a
+                            # different function, and dispatching those calls the
+                            # user's tool with parameters it never declared.
+                            if is_ollama and tools:
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools)
                             tool_calls_batch.append(ToolCall(
                                 function_name=function_name,
                                 arguments=arguments, 
@@ -4623,6 +4635,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages.append(
                                     self._tool_parse_error_message(function_name, tool_call_id))
                                 continue
+                            # Validate and filter arguments for Ollama provider.
+                            # Pre-dispatch, so this is streaming-safe: nothing has
+                            # been yielded that would need retracting. Weak local
+                            # models routinely emit arguments belonging to a
+                            # different function, and dispatching those calls the
+                            # user's tool with parameters it never declared.
+                            if is_ollama and tools:
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools)
                             try:
                                 tool_result = execute_tool_fn(function_name, arguments)
                             except Exception as tool_error:  # noqa: BLE001
