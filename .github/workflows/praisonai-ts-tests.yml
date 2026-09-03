@@ -1,0 +1,70 @@
+# Does praisonai-ts still pass its own tests?
+#
+# It has a suite -- 2,000+ tests -- and until now nothing ran it. The only
+# workflow with `working-directory: src/praisonai-ts` builds the package and
+# checks the webview bundle; the two other mentions of `npm test` in this
+# directory are a comment and a line of prose telling a reviewer to run it by
+# hand. So the suite was green the way an unread report is green.
+#
+# That mattered the moment the suite grew: PR #4755 added ~880 tests for the
+# Python-parity port and not one of them would have run here. A test nobody
+# executes is worse than no test, because it is counted as cover.
+#
+# Deliberately narrow, like its webview sibling: it runs only when
+# praisonai-ts changes, installs only what it needs, and asserts two things --
+# the package typechecks, and its tests pass.
+name: praisonai-ts tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/tests/**'
+      - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/jest.config.ts'
+      - 'src/praisonai-ts/tsconfig*.json'
+      - '.github/workflows/praisonai-ts-tests.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/tests/**'
+      - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/jest.config.ts'
+      - 'src/praisonai-ts/tsconfig*.json'
+      - '.github/workflows/praisonai-ts-tests.yml'
+
+concurrency:
+  group: praisonai-ts-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: unit tests
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: src/praisonai-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      # `npm install --legacy-peer-deps`, matching praisonai-ts-webview.yml:
+      # the lockfile is gitignored so `npm ci` has nothing to read, and the
+      # dependency tree does not resolve without the flag (bedrock-agentcore
+      # wants a peer of @strands-agents/sdk that is not installed).
+      - name: Install
+        run: npm install --no-audit --no-fund --legacy-peer-deps
+      - name: Typecheck
+        run: npx tsc --noEmit -p .
+      # PRAISONAI_PARITY_SILENT quiets the one-line notices that options
+      # accepted for Python parity print when they are not yet honoured; they
+      # are deliberate output, not failures, and they drown the test log.
+      - name: Tests
+        run: npm test
+        env:
+          PRAISONAI_PARITY_SILENT: '1'

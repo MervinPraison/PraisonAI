@@ -159,13 +159,19 @@ describe('Parity Features Integration Tests', () => {
   // P1: KNOWLEDGE / SESSION / CHUNKING
   // =========================================================================
   describe('P1: Knowledge, Session, Chunking', () => {
-    test('Knowledge - add then search (text fallback without embeddings)', async () => {
+    test('Knowledge - store then search (Python knowledge.py surface)', async () => {
+      // `Knowledge` is the store class ported from praisonaiagents/knowledge/knowledge.py:
+      // text goes in through store(), files through add(), and search() returns a
+      // SearchResult envelope rather than a bare array.
       const kb = new Knowledge();
-      await kb.add({ id: 'doc-1', content: 'test source' });
-      const results = await kb.search('test');
-      expect(results).toHaveLength(1);
-      expect(results[0].document.id).toBe('doc-1');
-      expect(await kb.search('unrelated')).toHaveLength(0);
+      const added = await kb.store('test source', { userId: 'u1' });
+      expect(added.success).toBe(true);
+      const found = await kb.search('test', { userId: 'u1' });
+      expect(found.query).toBe('test');
+      expect(found.results.map((r) => r.text)).toContain('test source');
+      // Control: a query that matches nothing returns the same envelope, empty.
+      const empty = await kb.search('unrelated-xyzzy', { userId: 'u1' });
+      expect(empty.results).toHaveLength(0);
     });
 
     test('Session - state and message management', () => {
