@@ -6,6 +6,7 @@ Provides configuration dataclasses for gateway and session settings.
 
 from dataclasses import dataclass, field
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -17,6 +18,9 @@ from typing import (
     Tuple,
     runtime_checkable,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime import cost
+    from .protocols import TurnExecutorProtocol
 
 
 # ---------------------------------------------------------------------------
@@ -854,6 +858,14 @@ class GatewayConfig:
     control: "EmergencyStopConfig" = field(
         default_factory=lambda: EmergencyStopConfig()
     )
+    # Issue #4766: per-session turn-execution seam. Selects *where* a session's
+    # agent turn runs (see ``TurnExecutorProtocol``). ``None`` (the default)
+    # resolves to ``InProcessTurnExecutor`` at runtime — today's on-loop
+    # behaviour, byte-for-byte, with no dependency introduced. Supplying an
+    # isolated executor (subprocess / container / remote, in the wrapper)
+    # contains a wedged/runaway turn to its own worker instead of forcing the
+    # whole-process ``os._exit`` remedy.
+    executor: "Optional[TurnExecutorProtocol]" = None
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -977,6 +989,13 @@ class GatewayConfig:
             "liveness": self.liveness.to_dict(),
             "turn_lock": self.turn_lock.to_dict(),
             "control": self.control.to_dict(),
+            # Report the active executor type so ``gateway doctor`` can surface
+            # it; ``None`` means the in-process default (today's behaviour).
+            "executor": (
+                type(self.executor).__name__
+                if self.executor is not None
+                else "inprocess"
+            ),
         }
     
     @property

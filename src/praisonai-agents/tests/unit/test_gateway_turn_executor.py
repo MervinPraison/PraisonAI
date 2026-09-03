@@ -78,3 +78,23 @@ async def test_inprocess_teardown_is_noop():
     ex = InProcessTurnExecutor()
     p = await ex.place("sess-1")
     assert await ex.teardown(p, reason="wedged") is None
+
+
+def test_gateway_config_executor_defaults_to_none():
+    """Issue #4766: the config exposes an ``executor`` seam, unset by default
+    (``None`` ⇒ in-process, today's behaviour)."""
+    from praisonaiagents.gateway import GatewayConfig
+
+    cfg = GatewayConfig()
+    assert cfg.executor is None
+    # ``to_dict`` reports the resolved executor for doctor/observability.
+    assert cfg.to_dict()["executor"] == "inprocess"
+
+
+def test_gateway_config_accepts_explicit_executor():
+    from praisonaiagents.gateway import GatewayConfig
+
+    ex = InProcessTurnExecutor()
+    cfg = GatewayConfig(executor=ex)
+    assert cfg.executor is ex
+    assert cfg.to_dict()["executor"] == "InProcessTurnExecutor"
