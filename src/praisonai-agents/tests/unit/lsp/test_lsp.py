@@ -14,7 +14,7 @@ from praisonaiagents.lsp.types import (
 )
 from praisonaiagents.lsp.config import (
     LSPConfig, DEFAULT_SERVERS, detect_language, detect_root_uri, probe,
-    path_to_uri,
+    path_to_uri, resolve_servers,
 )
 from praisonaiagents.lsp.client import LSPClient
 
@@ -447,6 +447,138 @@ class TestPathToUri:
         uri = detect_root_uri(str(f))
         assert uri is not None
         assert "%20" in uri and "%23" in uri
+
+
+# =============================================================================
+# Configurable server registry tests
+# =============================================================================
+
+class TestResolveServers:
+    """Tests for resolve_servers() merge of user config over DEFAULT_SERVERS."""
+
+    def test_none_returns_defaults_unchanged(self):
+        assert resolve_servers(None) is DEFAULT_SERVERS
+        assert resolve_servers({}) is DEFAULT_SERVERS
+
+    def test_adds_new_language(self):
+        user = {
+            "java": {
+                "command": "jdtls",
+                "args": ["--stdio"],
+                "extensions": [".java"],
+                "root_markers": ["pom.xml", ".git"],
+                "install_hint": "install eclipse.jdt.ls",
+            }
+        }
+        merged = resolve_servers(user)
+        assert "java" in merged
+        assert merged["java"]["command"] == "jdtls"
+        # Built-ins preserved and untouched.
+        assert merged["python"]["command"] == "pylsp"
+        assert "java" not in DEFAULT_SERVERS
+
+    def test_overrides_shipped_language(self):
+        user = {"python": {"command": "pyright-langserver", "args": ["--stdio"]}}
+        merged = resolve_servers(user)
+        assert merged["python"]["command"] == "pyright-langserver"
+        # Fields not overridden fall back to the built-in entry.
+        assert merged["python"]["extensions"] == [".py", ".pyi"]
+        # Original default is not mutated.
+        assert DEFAULT_SERVERS["python"]["command"] == "pylsp"
+
+    def test_ignores_non_dict_entries(self):
+        merged = resolve_servers({"bogus": "not-a-dict"})
+        assert "bogus" not in merged
+
+    def test_command_only_override_drops_inherited_args(self):
+        # Overriding only the command must not leak the replaced server's args
+        # (e.g. typescript-language-server's `--stdio`) to a different binary.
+        user = {"typescript": {"command": "my-ts-server"}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["command"] == "my-ts-server"
+        assert merged["typescript"]["args"] == []
+        # Non-command fields still fall back to the built-in entry.
+        assert merged["typescript"]["extensions"] == [".ts", ".tsx"]
+        # Original default is untouched.
+        assert DEFAULT_SERVERS["typescript"]["args"] == ["--stdio"]
+
+    def test_command_override_with_explicit_args_kept(self):
+        user = {"typescript": {"command": "my-ts-server", "args": ["--lsp"]}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["args"] == ["--lsp"]
+
+    def test_same_command_override_keeps_args(self):
+        # Overriding other fields while keeping the same command retains args.
+        user = {"typescript": {"root_markers": ["deno.json", ".git"]}}
+        merged = resolve_servers(user)
+        assert merged["typescript"]["args"] == ["--stdio"]
+
+
+class TestConfigurableRegistry:
+    """LSPConfig / detection / probe consult the merged registry."""
+
+    JAVA = {
+        "java": {
+            "command": "jdtls",
+            "args": ["--stdio"],
+            "extensions": [".java"],
+            "root_markers": ["pom.xml", ".git"],
+            "install_hint": "install eclipse.jdt.ls",
+            "initialization_options": {"foo": "bar"},
+        }
+    }
+
+    def test_configured_language_resolves(self):
+        config = LSPConfig(language="java", servers=self.JAVA)
+        assert config.command == "jdtls"
+        assert config.args == ["--stdio"]
+        assert config.initialization_options == {"foo": "bar"}
+
+    def test_unconfigured_unknown_still_raises(self):
+        with pytest.raises(ValueError):
+            LSPConfig(language="cobol", servers=self.JAVA)
+
+    def test_override_replaces_default_command(self):
+        user = {"python": {"command": "pyright-langserver", "args": ["--stdio"]}}
+        config = LSPConfig(language="python", servers=user)
+        assert config.command == "pyright-langserver"
+        assert config.args == ["--stdio"]
+
+    def test_detect_language_honours_custom_extension(self):
+        assert detect_language("App.java", self.JAVA) == "java"
+        # Without config the same extension is unknown.
+        assert detect_language("App.java") is None
+
+    def test_probe_uses_configured_server(self, monkeypatch):
+        import praisonaiagents.lsp.config as cfg
+        monkeypatch.setattr(cfg.shutil, "which", lambda cmd: "/usr/bin/" + cmd)
+        available, command, hint = probe("java", self.JAVA)
+        assert available is True
+        assert command == "jdtls"
+
+    def test_detect_root_uri_uses_custom_markers(self, tmp_path):
+        (tmp_path / "pom.xml").write_text("<project/>\n")
+        sub = tmp_path / "src" / "main"
+        sub.mkdir(parents=True)
+        f = sub / "App.java"
+        f.write_text("class App {}\n")
+        root = detect_root_uri(str(f), servers=self.JAVA)
+        assert root == f"file://{tmp_path}"
+
+    def test_client_threads_servers_into_config(self):
+        client = LSPClient(language="java", servers=self.JAVA)
+        assert client.config.command == "jdtls"
+
+    def test_client_configured_language_start_preflight(self, monkeypatch):
+        import asyncio
+        import praisonaiagents.lsp.client as client_mod
+        monkeypatch.setattr(client_mod.shutil, "which", lambda cmd: None)
+        client = LSPClient(language="java", servers=self.JAVA)
+        ok = asyncio.run(client.start())
+        assert ok is False
+        assert client.last_error is not None
+        assert "jdtls" in client.last_error
+        assert "eclipse.jdt.ls" in client.last_error
 
 
 if __name__ == "__main__":

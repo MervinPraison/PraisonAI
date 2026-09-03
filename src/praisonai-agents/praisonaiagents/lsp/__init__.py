@@ -46,6 +46,7 @@ __all__ = [
     "detect_root_uri",
     "probe",
     "DEFAULT_SERVERS",
+    "resolve_servers",
 ]
 
 
@@ -64,7 +65,7 @@ def __getattr__(name: str):
         return locals()[name]
     
     if name in ("LSPConfig", "detect_language", "detect_root_uri", "probe",
-                "DEFAULT_SERVERS"):
+                "DEFAULT_SERVERS", "resolve_servers"):
         from . import config
         return getattr(config, name)
     

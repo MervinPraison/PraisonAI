@@ -56,18 +56,54 @@ DEFAULT_SERVERS = {
 }
 
 
-def _extension_map() -> Dict[str, str]:
+def resolve_servers(user_servers: Optional[Dict[str, Dict]] = None) -> Dict[str, Dict]:
+    """Return the effective server registry: ``DEFAULT_SERVERS`` merged with
+    user-supplied entries.
+
+    User entries override built-ins per language key and add new languages, so
+    shipped defaults keep working and a project can register a sixth language or
+    pin a different server without editing package source.  With no user config
+    the result is byte-for-byte ``DEFAULT_SERVERS``.  The merge is shallow at the
+    per-language level (a user language entry replaces the built-in entry for
+    that key) and keeps the helper lazy and dependency-free.
+
+    Command/args are treated as a unit: when a user swaps ``command`` for a
+    different executable without supplying ``args``, the built-in ``args`` are
+    dropped rather than inherited, so arguments belonging to the replaced server
+    (e.g. ``--stdio`` for ``typescript-language-server``) are never passed to an
+    unrelated replacement binary.
+    """
+    if not user_servers:
+        return DEFAULT_SERVERS
+    merged = dict(DEFAULT_SERVERS)
+    for language, server in user_servers.items():
+        if not isinstance(server, dict):
+            continue
+        base = dict(merged.get(language, {}))
+        overrides_command = (
+            "command" in server and server["command"] != base.get("command")
+        )
+        base.update(server)
+        if overrides_command and "args" not in server:
+            base["args"] = []
+        merged[language] = base
+    return merged
+
+
+def _extension_map(servers: Optional[Dict[str, Dict]] = None) -> Dict[str, str]:
     """Return a ``{extension: language}`` map derived from the registry."""
     mapping: Dict[str, str] = {}
-    for language, server in DEFAULT_SERVERS.items():
+    for language, server in resolve_servers(servers).items():
         for ext in server.get("extensions", []):
             mapping.setdefault(ext.lower(), language)
     return mapping
 
 
-def detect_language(file_path: str) -> Optional[str]:
+def detect_language(
+    file_path: str, servers: Optional[Dict[str, Dict]] = None
+) -> Optional[str]:
     """Resolve the LSP language id for ``file_path`` by extension, else ``None``."""
-    return _extension_map().get(os.path.splitext(file_path)[1].lower())
+    return _extension_map(servers).get(os.path.splitext(file_path)[1].lower())
 
 
 def path_to_uri(path: str) -> str:
@@ -80,7 +116,11 @@ def path_to_uri(path: str) -> str:
     return Path(os.path.abspath(path)).as_uri()
 
 
-def detect_root_uri(file_path: str, language: Optional[str] = None) -> Optional[str]:
+def detect_root_uri(
+    file_path: str,
+    language: Optional[str] = None,
+    servers: Optional[Dict[str, Dict]] = None,
+) -> Optional[str]:
     """Discover the workspace root for ``file_path`` from the nearest root marker.
 
     Walks up from the file's directory looking for a language-appropriate root
@@ -88,8 +128,9 @@ def detect_root_uri(file_path: str, language: Optional[str] = None) -> Optional[
     ``.git`` …).  Returns a ``file://`` URI for the nearest matching directory,
     or ``None`` when no marker is found so the caller can fall back to the CWD.
     """
-    language = language or detect_language(file_path)
-    server = DEFAULT_SERVERS.get(language) if language else None
+    registry = resolve_servers(servers)
+    language = language or detect_language(file_path, servers)
+    server = registry.get(language) if language else None
     markers = server.get("root_markers", []) if server else [".git"]
     start = os.path.dirname(os.path.abspath(file_path))
     current = start
@@ -103,7 +144,9 @@ def detect_root_uri(file_path: str, language: Optional[str] = None) -> Optional[
         current = parent
 
 
-def probe(language: str) -> Tuple[bool, Optional[str], Optional[str]]:
+def probe(
+    language: str, servers: Optional[Dict[str, Dict]] = None
+) -> Tuple[bool, Optional[str], Optional[str]]:
     """Check whether the language server for ``language`` is on ``PATH``.
 
     Returns ``(available, command, install_hint)``.  ``available`` is ``True``
@@ -111,7 +154,7 @@ def probe(language: str) -> Tuple[bool, Optional[str], Optional[str]]:
     ``command`` and ``install_hint`` describe what is missing and how to install
     it so the degradation can be surfaced instead of silently swallowed.
     """
-    server = DEFAULT_SERVERS.get(language)
+    server = resolve_servers(servers).get(language)
     if not server:
         return False, None, None
     command = server["command"]
@@ -129,13 +172,23 @@ class LSPConfig:
     root_uri: Optional[str] = None
     initialization_options: Dict = field(default_factory=dict)
     timeout: float = 30.0
+    servers: Optional[Dict[str, Dict]] = None
     
     def __post_init__(self):
-        # Use default server if not specified
+        # Use default server if not specified, consulting the effective registry
+        # (built-ins deep-merged with any user-supplied ``servers``) so a
+        # configured sixth language resolves instead of raising.
         if self.command is None:
-            if self.language in DEFAULT_SERVERS:
-                server = DEFAULT_SERVERS[self.language]
+            registry = resolve_servers(self.servers)
+            if self.language in registry:
+                server = registry[self.language]
                 self.command = server["command"]
-                self.args = list(server["args"])
+                self.args = list(server.get("args", []))
+                if not self.initialization_options and server.get(
+                    "initialization_options"
+                ):
+                    self.initialization_options = dict(
+                        server["initialization_options"]
+                    )
             else:
                 raise ValueError(f"No default server for language: {self.language}")
