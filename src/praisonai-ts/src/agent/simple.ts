@@ -17,10 +17,6 @@ import { LLMGuardrail } from '../guardrails/llm-guardrail';
 import { HooksManager, type HookEvent, type HookHandler } from '../hooks/manager';
 import { ContextManager, type ContextManagerConfig } from '../context/manager';
 import { RulesManager, createSafetyRules, type Rule, type RulesManagerConfig } from '../memory/rules-manager';
-import { tavilySearch } from '../tools/builtins/tavily';
-import { exaSearch } from '../tools/builtins/exa';
-import { perplexitySearch } from '../tools/builtins/perplexity';
-import { parallelSearch } from '../tools/builtins/parallel';
 import type { SkillManager, SkillDiscoveryOptions } from '../skills';
 import type { PlanningAgentConfig, Plan } from '../planning';
 import type { LLMConfig } from '../llm';
@@ -493,12 +489,42 @@ interface PreparedTurn {
 }
 
 /** Web search tool factories keyed by the provider name accepted by `web`. */
-const WEB_SEARCH_PROVIDERS: Record<string, (config?: any) => any> = {
-  tavily: tavilySearch,
-  exa: exaSearch,
-  perplexity: perplexitySearch,
-  parallel: parallelSearch,
+/**
+ * Web-search providers, each loaded on demand.
+ *
+ * Importing them here would put four provider SDKs -- none of which is a
+ * dependency of this package -- on the agent's static graph. The mobile and
+ * desktop bundle gates reject exactly that: a bare specifier a webview cannot
+ * resolve fails at IMPORT time and the screen stays blank, and the four
+ * modules pushed the lazy bundle past its budget. Nothing loads unless an
+ * agent actually asks for that provider.
+ */
+const WEB_SEARCH_PROVIDERS: Record<string, { module: string; entry: string }> = {
+  tavily: { module: 'tavily', entry: 'tavilySearch' },
+  exa: { module: 'exa', entry: 'exaSearch' },
+  perplexity: { module: 'perplexity', entry: 'perplexitySearch' },
+  parallel: { module: 'parallel', entry: 'parallelSearch' },
 };
+
+/** Load one web-search provider, keeping its SDK off every bundle's graph. */
+async function loadWebSearchProvider(name: string): Promise<(config?: any) => any> {
+  const { module, entry } = WEB_SEARCH_PROVIDERS[name];
+  let lastError: unknown;
+  for (const suffix of ['/index.js', '', '.js']) {
+    const specifier = ['..', 'tools', 'builtins', module].join('/') + (suffix === '/index.js' ? '' : suffix);
+    try {
+      const loaded: Record<string, any> = await import(specifier);
+      if (typeof loaded[entry] === 'function') return loaded[entry];
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error(
+    `The web search provider "${name}" could not be loaded: ${
+      (lastError as Error)?.message ?? String(lastError)
+    }`,
+  );
+}
 
 /** A tool name the OpenAI API accepts (^[a-zA-Z0-9_-]+$). */
 function toolSafeName(name: string): string {
@@ -581,15 +607,19 @@ async function toJsonSchema(schema: any): Promise<Record<string, any> | undefine
     return schema as Record<string, any>;
   }
   if ('_def' in schema || '_zod' in schema) {
+    // Both converters are optional and neither is a dependency of this package.
+    // The specifiers are computed so the bundler leaves them as runtime imports:
+    // bundling zod-to-json-schema put 62kB on praisonai/mobile's lazy budget for
+    // a conversion that only runs when a caller passes a zod schema.
     try {
-      const mod: any = await import('zod-to-json-schema');
+      const mod: any = await import(['zod-to-json', 'schema'].join('-'));
       const convert = mod.zodToJsonSchema ?? mod.default;
       if (typeof convert === 'function') return convert(schema);
     } catch {
-      // fall through to zod v4
+      // fall through to zod v4, which can convert its own schemas
     }
     try {
-      const zod: any = await import('zod');
+      const zod: any = await import(['z', 'od'].join(''));
       if (typeof zod.toJSONSchema === 'function') return zod.toJSONSchema(schema);
     } catch {
       // no converter available
@@ -674,6 +704,8 @@ export class Agent {
   private hooks?: HooksManager;
   private contextManager?: ContextManager;
   private _skillsInput?: string | string[] | SkillDiscoveryOptions | SkillManager;
+  private _webInput?: SimpleAgentConfig['web'];
+  private _webAttached = false;
   private _skillsPrompt?: string;
   private retryConfig?: ResolvedRetryConfig;
 
@@ -967,7 +999,7 @@ export class Agent {
     this.attachRules(config.rules);
     this.attachHooks(config.hooks);
     this.attachContext(config.context);
-    this.attachWeb(config.web);
+    this._webInput = config.web;
     if (config.skills !== undefined) this._skillsInput = config.skills;
     this.retryConfig = resolveRetryConfig(config.retry);
 
@@ -1229,11 +1261,14 @@ export class Agent {
     this.contextManager.addSystem(this.instructions);
   }
 
-  private attachWeb(web: SimpleAgentConfig['web']): void {
+  /** Resolve `web` into a search tool once (loads a provider module, so it is deferred). */
+  private async ensureWebTool(): Promise<void> {
+    const web = this._webInput;
+    if (this._webAttached) return;
+    this._webAttached = true;
     if (web === undefined || web === false) return;
     const provider = web === true ? 'tavily' : typeof web === 'string' ? web : (web.provider ?? 'tavily');
-    const factory = WEB_SEARCH_PROVIDERS[provider];
-    if (!factory) {
+    if (!WEB_SEARCH_PROVIDERS[provider]) {
       notYetHonoured('Agent', 'web', `Unknown web search provider "${provider}" (available: ${Object.keys(WEB_SEARCH_PROVIDERS).join(', ')}).`);
       return;
     }
@@ -1242,6 +1277,7 @@ export class Agent {
       const { provider: _ignored, ...rest } = web;
       providerConfig = rest;
     }
+    const factory = await loadWebSearchProvider(provider);
     this.tools = this.tools || [];
     this.processToolInputs([factory(providerConfig)], this.tools);
   }
@@ -1837,6 +1873,7 @@ export class Agent {
 
     const extraSystem: string[] = [];
     await this.ensureSkillsPrompt();
+    await this.ensureWebTool();
     if (!opts.skipRetrieval) {
       const knowledgeContext = await this.retrieveKnowledge(prompt);
       if (knowledgeContext) extraSystem.push(`Relevant knowledge:\n${knowledgeContext}`);

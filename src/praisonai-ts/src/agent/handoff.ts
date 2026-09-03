@@ -15,7 +15,8 @@
 import type { EnhancedAgent } from './enhanced';
 import { ToolRegistry, FunctionTool } from '../tools/decorator';
 import { notYetHonoured } from '../utils/parity-notice';
-import { PraisonAIError, type AgentErrorKind, type LegacyErrorCategory } from '../errors';
+// Import the base module, not the barrel: see the note at the top of errors-base.ts.
+import { PraisonAIError, type AgentErrorKind, type LegacyErrorCategory } from '../errors-base';
 
 // ============================================================================
 // Constants (Python Parity)

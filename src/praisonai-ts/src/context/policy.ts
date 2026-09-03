@@ -19,43 +19,16 @@
  * static tables below.
  */
 
+import { CompactionRoute, CompactionStrategy } from './compaction-types';
+import type { CompactionRouteType, CompactionStrategyType } from './compaction-types';
+export { CompactionRoute, CompactionStrategy } from './compaction-types';
+export type { CompactionRouteType, CompactionStrategyType } from './compaction-types';
+
 // ============================================================================
 // Enums
 // ============================================================================
 
-/**
- * Routes for context handling decisions.
- * Python parity with `CompactionRoute(str, Enum)` in context/protocols.py.
- */
-export const CompactionRoute = {
-  /** Context fits, proceed normally. */
-  FITS: 'fits',
-  /** Need compaction before LLM call. */
-  COMPACT_NEEDED: 'compact_needed',
-  /** Truncate tool results first. */
-  TRUNCATE_TOOLS: 'truncate_tools',
-  /** Both compaction and truncation needed. */
-  COMPACT_THEN_TRUNCATE: 'compact_then_truncate',
-} as const;
 
-export type CompactionRouteType = typeof CompactionRoute[keyof typeof CompactionRoute];
-
-/**
- * Strategy for context compaction.
- * Python parity with `CompactionStrategy(str, Enum)` in context/protocols.py.
- */
-export const CompactionStrategy = {
-  /** Remove oldest messages. */
-  TRUNCATE: 'truncate',
-  /** Summarize old messages. */
-  SUMMARISE: 'summarise',
-  /** Remove old tool outputs. */
-  DROP_OLDEST_TOOLS: 'drop_oldest_tools',
-  /** Keep recent messages only. */
-  SLIDING_WINDOW: 'sliding_window',
-} as const;
-
-export type CompactionStrategyType = typeof CompactionStrategy[keyof typeof CompactionStrategy];
 
 const COMPACTION_STRATEGY_VALUES: readonly string[] = Object.values(CompactionStrategy);
 

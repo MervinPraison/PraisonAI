@@ -5,11 +5,8 @@
  */
 
 import { randomUUID } from '../utils/uuid';
-import {
-    CompactionStrategy,
-    type ContextBudgetResult,
-    type ContextCompactionPolicyProtocol,
-} from './policy';
+import { CompactionStrategy } from './compaction-types';
+import type { ContextBudgetResult, ContextCompactionPolicyProtocol } from './policy';
 
 /**
  * Context item

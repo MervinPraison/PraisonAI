@@ -77,7 +77,7 @@ surfaces:
 
   - key: PraisonAIError.__init__
     python: {file: errors.py, class: PraisonAIError, function: __init__}
-    typescript: {file: errors.ts, kind: interface, name: PraisonAIErrorOptions, ctorClass: PraisonAIError}
+    typescript: {file: errors-base.ts, kind: interface, name: PraisonAIErrorOptions, ctorClass: PraisonAIError}
 
   # TODO: FileTracker.__init__ and Knowledge.__init__ take positional constructor
   # parameters with no options interface; add them once ts_extract can address a

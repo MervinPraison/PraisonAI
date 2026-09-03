@@ -344,12 +344,21 @@ describe('Agent.__init__ parity: wired options', () => {
     expect(unhonouredOptions()).toContain('Agent.context');
   });
 
-  it('web: registers the selected search tool; an unknown provider is reported', () => {
+  it('web: registers the selected search tool; an unknown provider is reported', async () => {
+    // The provider modules are loaded on demand (they pull SDKs a webview cannot
+    // resolve), so the tool appears on the first turn rather than at construction.
     const names = (agent: Agent) => ((agent as any).tools ?? []).map((t: any) => t.function?.name);
-    expect(names(new Agent({ instructions: 'x', web: true, ...quiet }))).toContain('tavilySearch');
-    expect(names(new Agent({ instructions: 'x', web: 'exa', ...quiet }))).toContain('webSearch'); // Exa's tool name
-    expect(names(new Agent({ instructions: 'x', web: { provider: 'perplexity' }, ...quiet }))).toContain('perplexitySearch');
-    new Agent({ instructions: 'x', web: 'bogus', ...quiet });
+    const withWeb = async (web: any) => {
+      const agent = new Agent({ instructions: 'x', web, ...quiet });
+      await agent.chat('hi');
+      return names(agent);
+    };
+    expect(await withWeb(true)).toContain('tavilySearch');
+    expect(await withWeb('exa')).toContain('webSearch'); // Exa's tool name
+    expect(await withWeb({ provider: 'perplexity' })).toContain('perplexitySearch');
+    // Control: nothing is registered before the first turn.
+    expect(names(new Agent({ instructions: 'x', web: true, ...quiet }))).not.toContain('tavilySearch');
+    await withWeb('bogus');
     expect(unhonouredOptions()).toContain('Agent.web');
   });
 

@@ -1215,8 +1215,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:712",
-        "location": "src/praisonai-ts/src/agent/simple.ts:116"
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:744",
+        "location": "src/praisonai-ts/src/agent/simple.ts:112"
       }
     },
     "Agent.chat": {
@@ -1686,7 +1686,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2389",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2426",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -1943,7 +1943,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:1742",
+        "location": "src/praisonai-ts/src/agent/simple.ts:1778",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -3627,8 +3627,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:670",
-        "location": "src/praisonai-ts/src/agent/handoff.ts:434"
+        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:671",
+        "location": "src/praisonai-ts/src/agent/handoff.ts:435"
       }
     },
     "LLM.__init__": {
@@ -4481,8 +4481,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/errors.ts:239",
-        "location": "src/praisonai-ts/src/errors.ts:212"
+        "ctor_location": "src/praisonai-ts/src/errors-base.ts:169",
+        "location": "src/praisonai-ts/src/errors-base.ts:142"
       }
     },
     "Session.__init__": {
