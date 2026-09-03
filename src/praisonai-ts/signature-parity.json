@@ -1692,7 +1692,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2476",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2457",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -1946,7 +1946,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:1824",
+        "location": "src/praisonai-ts/src/agent/simple.ts:1810",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2698,7 +2698,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:397",
+        "location": "src/praisonai-ts/src/agent/team.ts:383",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
@@ -3680,8 +3680,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:714",
-        "location": "src/praisonai-ts/src/agent/handoff.ts:478"
+        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:721",
+        "location": "src/praisonai-ts/src/agent/handoff.ts:485"
       }
     },
     "Knowledge.__init__": {
@@ -6434,7 +6434,7 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/types.ts:327",
+        "ctor_location": "src/praisonai-ts/src/agent/types.ts:322",
         "location": "src/praisonai-ts/src/agent/types.ts:64"
       }
     },

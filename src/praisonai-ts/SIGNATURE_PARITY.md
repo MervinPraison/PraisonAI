@@ -130,7 +130,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 ### `Task.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
-- TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:327`)
+- TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:322`)
 - Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 62
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -201,7 +201,7 @@ TS-only members: `dependencies`?
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1824`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1810`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -213,7 +213,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3101`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2476`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2457`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -241,7 +241,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:397`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:383`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -255,7 +255,7 @@ TS-only members: `options`?
 ### `Handoff.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:320`
-- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:478` (ctor `src/praisonai-ts/src/agent/handoff.ts:714`)
+- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:485` (ctor `src/praisonai-ts/src/agent/handoff.ts:721`)
 - Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
