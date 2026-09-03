@@ -1187,6 +1187,54 @@ def _apply_env(cfg: dict) -> None:
         _unset_if_ours("OPENAI_API_KEY")
 
 
+def model_needs_litellm(model: str) -> bool:
+    """Whether this model id would take praisonaiagents' custom-LLM path.
+
+    A string model id containing a slash routes through LiteLLM in
+    praisonaiagents (agent.py: `elif isinstance(llm, str) and "/" in llm`).
+    Bare names go to the plain-OpenAI client instead. The desktop provisions
+    only the base package, which does not depend on litellm, so a slashed id
+    imports nothing and fails on the first turn -- this predicts that before it
+    is saved.
+    """
+    return isinstance(model, str) and "/" in model
+
+
+def litellm_available() -> bool:
+    """Whether the custom-LLM (litellm) path can actually run in this venv.
+
+    The lean desktop venv installs praisonaiagents without its `llm` extra, so
+    litellm is usually absent. Checked by import spec rather than importing, so
+    this stays cheap and has no side effects.
+    """
+    try:
+        import importlib.util
+        return importlib.util.find_spec("litellm") is not None
+    except Exception:  # noqa: BLE001 - a broken meta-path finder is "not available"
+        return False
+
+
+def unsupported_model_reason(model: str) -> "str | None":
+    """Why this model id cannot run in this build, or None if it can.
+
+    The message names the constraint the user can act on -- a slashed id needs
+    the LiteLLM path, which this lean build does not ship -- rather than letting
+    the turn fail later with an import error or a bare-OpenAI 404.
+    """
+    if model_needs_litellm(model) and not litellm_available():
+        # Name only a remedy that actually clears the guard. The check keys on
+        # the slash alone, so a Base URL override does NOT help -- a slashed id
+        # still routes through LiteLLM. The fix is a bare id: a plain
+        # OpenAI-compatible name (optionally paired with a Base URL) reaches any
+        # OpenAI-style endpoint without the missing provider path.
+        return (f"The model id \u201c{model}\u201d needs the LiteLLM provider path, "
+                "which this build does not include. Use a plain OpenAI-compatible "
+                "model id without a provider prefix (for example gpt-4o-mini); to "
+                "reach another endpoint, keep the bare id and set a Base URL "
+                "override.")
+    return None
+
+
 def _installed_version() -> str:
     try:
         from importlib.metadata import version
@@ -1711,6 +1759,10 @@ class Handler(BaseHTTPRequestHandler):
                            "shell_version": os.environ.get(
                                "PRAISONAI_DESKTOP_VERSION", "unknown"),
                            "agents_version": _installed_version(),
+                           # Whether the LiteLLM provider path is importable, so
+                           # the picker can mark slashed provider ids this build
+                           # cannot run rather than offering them silently.
+                           "litellm": litellm_available(),
                            "data_dir": str(DATA_DIR)}).encode()
         self.send_response(200)
         self._cors()
@@ -1818,6 +1870,14 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 self.send_error(400)
                 return
+            # Reject a model this build cannot run before it is saved, so the
+            # failure lands here with an explanation rather than on the first
+            # turn as an import error or a bare-OpenAI 404.
+            if "model" in patch:
+                reason = unsupported_model_reason(patch["model"])
+                if reason is not None:
+                    self._json({"ok": False, "error": reason}, 422)
+                    return
             if "launch_at_login" in patch:
                 # Persist what actually happened, not what was asked. Writing
                 # the request first made the toggle report a login item that
