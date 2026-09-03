@@ -116,9 +116,14 @@ export function resolveAutonomy(
 /**
  * Tools an `auto_edit` agent may run without asking: reads and file edits.
  * Anything else (commands, network, deletes, deploys) still prompts.
+ *
+ * Matches only the exact verb (`edit`) or a `<verb>_file` / `<verb>_text`
+ * variant. An open suffix such as `([_-].*)?` would auto-approve unrelated
+ * tools like `write_to_s3`, `update_iam_policy`, or `get_secret`, so the
+ * accepted suffix is a small closed set rather than "anything".
  */
 export const AUTO_EDIT_TOOL_PATTERN =
-  /^(read|list|get|glob|grep|search|find|view|cat|stat|head|tail|edit|write|create|apply_patch|patch|replace|insert|append|multi_edit|str_replace|update)([_-].*)?$/i;
+  /^(read|list|get|glob|grep|search|find|view|cat|stat|head|tail|edit|write|create|apply_patch|patch|replace|insert|append|multi_edit|str_replace|update)(_(file|files|text|line|lines|content))?$/i;
 
 /** Which tools the level lets through without approval. */
 export function isAutoApprovedByLevel(level: AutonomyLevel, toolName: string): boolean {
@@ -141,6 +146,21 @@ export function applyAutonomyToApproval(config: AutonomyConfig, manager: Approva
 }
 
 export type DoomLoopRecovery = 'continue' | 'retry_different' | 'escalate_model' | 'request_help' | 'abort';
+
+/**
+ * Deterministic JSON with keys sorted at every depth. `JSON.stringify(value,
+ * replacerArray)` only sorts the top level and, worse, drops any nested key
+ * not present in the array — so distinct tool calls that differ only in a
+ * nested argument (e.g. `opts.recursive`) would collide. This recurses so the
+ * full argument shape contributes to the key.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.keys(value as Record<string, unknown>).sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`);
+  return `{${entries.join(',')}}`;
+}
 
 interface RecordedAction {
   key: string;
@@ -167,7 +187,7 @@ export class DoomLoopTracker {
   static actionKey(name: string, args: unknown): string {
     let serialised: string;
     try {
-      serialised = JSON.stringify(args, Object.keys((args as Record<string, unknown>) ?? {}).sort());
+      serialised = stableStringify(args);
     } catch {
       serialised = String(args);
     }

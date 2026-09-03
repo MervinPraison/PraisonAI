@@ -132,6 +132,25 @@ describe('EscalationPipeline', () => {
     expect(agent.calls).toEqual(['hi']);
   });
 
+  it('strips tools during the DIRECT stage and restores them afterwards', async () => {
+    const original = [{ name: 'run_shell' }];
+    let toolsSeenByChat: unknown;
+    const agent = {
+      calls: [] as string[],
+      tools: original,
+      async chat(prompt: string) {
+        this.calls.push(prompt);
+        toolsSeenByChat = this.tools;
+        return 'ok';
+      },
+    };
+    const pipeline = new EscalationPipeline({ agent, config: { autoDeescalate: false } });
+    await pipeline.executeAtStage('hi', EscalationStage.DIRECT);
+    expect(toolsSeenByChat).toEqual([]);
+    // Restored after the call.
+    expect(agent.tools).toBe(original);
+  });
+
   it('stops at AUTONOMOUS when every stage fails and reports the failure', async () => {
     const agent = agentFailingAt([0, 1, 2, 3]);
     const pipeline = new EscalationPipeline({ agent, doomLoopConfig: { initialBackoff: 0 } });

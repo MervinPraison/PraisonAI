@@ -82,6 +82,21 @@ export interface DoomLoopConfigOptions {
 }
 
 /**
+ * Coerce a count/chunk-size option to a positive integer, rejecting values
+ * that would break the detectors. `contentChunkSize: 0` would make
+ * `recordResponse()` loop forever (the index never advances) and
+ * `maxIdenticalActions: 0` would dereference an empty slice, so a non-finite
+ * or non-positive value is a configuration error.
+ */
+function positiveInt(value: number | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError(`DoomLoopConfig.${name} must be a positive integer, got ${value}`);
+  }
+  return value;
+}
+
+/**
  * Configuration for doom loop detection.
  *
  * Python parity: escalation/doom_loop.py:35 `DoomLoopConfig`.
@@ -104,21 +119,21 @@ export class DoomLoopConfig {
   contentChunkSize: number;
 
   constructor(options: DoomLoopConfigOptions = {}) {
-    this.maxIdenticalActions = options.maxIdenticalActions ?? 3;
-    this.maxSimilarActions = options.maxSimilarActions ?? 5;
-    this.maxConsecutiveFailures = options.maxConsecutiveFailures ?? 3;
-    this.maxNoProgressSteps = options.maxNoProgressSteps ?? 5;
+    this.maxIdenticalActions = positiveInt(options.maxIdenticalActions, 3, 'maxIdenticalActions');
+    this.maxSimilarActions = positiveInt(options.maxSimilarActions, 5, 'maxSimilarActions');
+    this.maxConsecutiveFailures = positiveInt(options.maxConsecutiveFailures, 3, 'maxConsecutiveFailures');
+    this.maxNoProgressSteps = positiveInt(options.maxNoProgressSteps, 5, 'maxNoProgressSteps');
     this.similarityThreshold = options.similarityThreshold ?? 0.85;
     this.maxTimePerAction = options.maxTimePerAction ?? 60.0;
     this.maxTotalTime = options.maxTotalTime ?? 300.0;
     this.enableAutoRecovery = options.enableAutoRecovery ?? true;
-    this.maxRecoveryAttempts = options.maxRecoveryAttempts ?? 2;
+    this.maxRecoveryAttempts = positiveInt(options.maxRecoveryAttempts, 2, 'maxRecoveryAttempts');
     this.escalateOnLoop = options.escalateOnLoop ?? true;
     this.initialBackoff = options.initialBackoff ?? 1.0;
     this.backoffMultiplier = options.backoffMultiplier ?? 2.0;
     this.maxBackoff = options.maxBackoff ?? 30.0;
-    this.maxRepeatedChunks = options.maxRepeatedChunks ?? 8;
-    this.contentChunkSize = options.contentChunkSize ?? 50;
+    this.maxRepeatedChunks = positiveInt(options.maxRepeatedChunks, 8, 'maxRepeatedChunks');
+    this.contentChunkSize = positiveInt(options.contentChunkSize, 50, 'contentChunkSize');
   }
 }
 

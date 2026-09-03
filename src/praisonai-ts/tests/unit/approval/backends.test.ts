@@ -240,6 +240,17 @@ describe('CallbackBackend', () => {
     expect((await asyncCb.requestApproval(request())).approved).toBe(false);
     expect(() => asyncCb.requestApprovalSync(request())).toThrow('use requestApproval()');
   });
+
+  it('keeps a partial denial ({ approved: false }, no reason) a denial', async () => {
+    // Regression: a non-empty object is truthy, so Boolean(result) once flipped
+    // an explicit denial into an approval.
+    const denyNoReason = new CallbackBackend(() => ({ approved: false }));
+    expect(denyNoReason.requestApprovalSync(request()).approved).toBe(false);
+    expect((await denyNoReason.requestApproval(request())).approved).toBe(false);
+
+    const approveNoReason = new CallbackBackend(() => ({ approved: true }));
+    expect(approveNoReason.requestApprovalSync(request()).approved).toBe(true);
+  });
 });
 
 describe('AgentApproval', () => {

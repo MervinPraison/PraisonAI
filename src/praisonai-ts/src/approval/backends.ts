@@ -481,10 +481,16 @@ export class ConsoleBackend implements ApprovalBackend {
     const readline = await import('readline');
     const rl = readline.createInterface({ input: this.input, output: this.output });
     return new Promise<string>((resolve, reject) => {
-      rl.once('close', () => reject(new Error('EOF')));
+      let settled = false;
+      rl.once('close', () => {
+        // `rl.close()` fires this synchronously; only a genuine EOF (close
+        // before any answer) should reject.
+        if (!settled) reject(new Error('EOF'));
+      });
       rl.question(question, (answer) => {
-        rl.close();
+        settled = true;
         resolve(answer);
+        rl.close();
       });
     });
   }
@@ -735,8 +741,18 @@ function isDecision(value: unknown): value is ApprovalBackendDecision {
     && 'reason' in (value as object);
 }
 
+/** Object carrying an explicit boolean `approved` field (may omit `reason`). */
+function hasApprovedField(value: unknown): value is Partial<ApprovalBackendDecision> & { approved: boolean } {
+  return typeof value === 'object' && value !== null
+    && typeof (value as { approved?: unknown }).approved === 'boolean';
+}
+
 function coerceDecision(result: unknown): ApprovalBackendDecision {
   if (isDecision(result)) return result;
+  // A partial decision such as `{ approved: false }` must stay a denial:
+  // normalise it through approvalDecision rather than falling through to the
+  // truthiness path below (a non-empty object is truthy, which would flip it).
+  if (hasApprovedField(result)) return approvalDecision({ ...result });
   if (typeof result === 'boolean') return approvalDecision({ approved: result });
   return approvalDecision({ approved: Boolean(result) });
 }

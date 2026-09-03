@@ -23,6 +23,18 @@ describe('DoomLoopConfig', () => {
     expect(c.maxRepeatedChunks).toBe(8);
     expect(c.contentChunkSize).toBe(50);
   });
+
+  it('rejects non-positive or non-integer count and chunk-size options', () => {
+    // contentChunkSize: 0 would make recordResponse() loop forever; a zero
+    // count would dereference an empty slice.
+    expect(() => new DoomLoopConfig({ contentChunkSize: 0 })).toThrow(RangeError);
+    expect(() => new DoomLoopConfig({ maxIdenticalActions: 0 })).toThrow(RangeError);
+    expect(() => new DoomLoopConfig({ maxRecoveryAttempts: -1 })).toThrow(RangeError);
+    expect(() => new DoomLoopConfig({ contentChunkSize: 2.5 })).toThrow(RangeError);
+    expect(() => new DoomLoopConfig({ maxSimilarActions: NaN })).toThrow(RangeError);
+    // Valid positive integers are accepted unchanged.
+    expect(new DoomLoopConfig({ contentChunkSize: 10 }).contentChunkSize).toBe(10);
+  });
 });
 
 describe('DoomLoopDetector repeated identical tool calls', () => {

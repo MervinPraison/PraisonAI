@@ -166,6 +166,7 @@ export class EscalationPipeline {
     let currentStage = stage;
 
     let response = '';
+    let stageSucceeded = false;
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -177,6 +178,7 @@ export class EscalationPipeline {
         const stageResult = await this.executeStage(currentStage, prompt);
         response = stageResult.response ?? '';
         const success = stageResult.success ?? false;
+        stageSucceeded = success;
 
         this.observability?.emit(ObservabilityEventType.STAGE_EXIT, { stage: stageName(currentStage), success });
 
@@ -249,8 +251,16 @@ export class EscalationPipeline {
           }
         }
 
-        // Success or can't escalate further
-        if (success || currentStage === EscalationStage.AUTONOMOUS) {
+        // Terminal: succeeded, or failed at the top stage with nowhere to
+        // escalate. Record the failure so a failed AUTONOMOUS stage is not
+        // reported as a success. When autoEscalate is off the loop instead
+        // retries the current stage; the doom-loop detector is the stopping
+        // mechanism there (Python parity), so we do not break here.
+        if (success) {
+          break;
+        }
+        if (currentStage === EscalationStage.AUTONOMOUS) {
+          errors.push(response || 'Escalation stage failed without recovery');
           break;
         }
 
@@ -281,7 +291,7 @@ export class EscalationPipeline {
 
     return new EscalationResult({
       response,
-      success: errors.length === 0,
+      success: stageSucceeded && errors.length === 0,
       initialStage,
       finalStage: currentStage,
       escalations,
@@ -323,12 +333,23 @@ export class EscalationPipeline {
     if (!this.agent) {
       return { response: 'Agent not configured', success: false };
     }
+    // DIRECT is a no-tools stage: strip any configured tools for this call so
+    // a tool-equipped agent cannot invoke them, then restore afterwards.
+    const hasTools = 'tools' in this.agent;
+    const originalTools = this.agent.tools;
+    if (hasTools) {
+      this.agent.tools = [];
+    }
     try {
       const response = await this.chat(this.agent, prompt);
       this.currentContext?.addStep('direct_response', response.slice(0, 100), true);
       return { response, success: true };
     } catch (e) {
       return { response: errorText(e), success: false };
+    } finally {
+      if (hasTools) {
+        this.agent.tools = originalTools;
+      }
     }
   }
 
