@@ -16,6 +16,7 @@
 import type { Op } from "../../ui/src/render/reconcile.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
 import { en, type Strings } from "../../ui/src/i18n/strings.ts";
+import { accessibleName } from "../../ui/src/a11y/names.ts";
 import { UNKNOWN } from "../../ui/src/format.ts";
 
 export interface RowNodes {
@@ -33,8 +34,35 @@ function build(doc: Document, row: Row, strings: Strings): HTMLElement {
   return el;
 }
 
-/** Write a row's content into its element. Called on insert and on update. */
+/**
+ * Write a row's content into its element. Called on insert and on update.
+ *
+ * The `aria-label` comes FIRST, and it is repainted on every update rather
+ * than only on insert: a tool row's name carries its status, and a row that
+ * goes from `running` to `failed` in place would otherwise keep announcing
+ * itself as running for the rest of the conversation.
+ *
+ * `ui/src/a11y/names.ts` existed, was tested eleven ways, and had no caller
+ * anywhere in the application -- so every transcript row was announced by its
+ * text content alone. A tool row read as "search, 1.2s" with no word for
+ * whether it SUCCEEDED (the status reached the DOM only as `data-status`,
+ * which app.css turns into a border colour and a screen reader cannot see at
+ * all); an approval row mid-decision read as its question plus three buttons
+ * that are disabled while the answer is in flight, and a disabled button is
+ * announced as "dimmed" or skipped entirely, so the row went silent at the
+ * exact moment the user was waiting to hear what happened; an error row read
+ * as bare provider prose with no `errorTitle` in front of it.
+ *
+ * `null` is a real answer and not a gap -- a text row's own words ARE its
+ * name, and labelling it would replace the answer with a summary of it -- so
+ * null REMOVES the attribute rather than writing "null" or an empty string. A
+ * row that changes kind in place must not keep a stale label.
+ */
 function paint(el: HTMLElement, row: Row, strings: Strings): void {
+  const name = accessibleName(strings, row);
+  if (name === null) el.removeAttribute("aria-label");
+  else el.setAttribute("aria-label", name);
+
   switch (row.kind) {
     case "text":
       el.textContent = row.text;
@@ -61,6 +89,18 @@ function paint(el: HTMLElement, row: Row, strings: Strings): void {
     case "tool": {
       el.dataset["status"] = row.status;
       el.textContent = "";
+      // The status IN WORDS, not only as `data-status`.
+      //
+      // app.css styles `[data-status="failed"]` and `[data-status="ok"]` with a
+      // border colour and nothing else, so the status was carried by colour
+      // alone -- and it had no rule at all for `unresolved`, which therefore
+      // rendered pixel-for-pixel identically to a tool still running. "A tool
+      // that never came back must not read like one that worked" is the defect
+      // the whole transcript layer is written against (view-model.ts:173), and
+      // `strings.toolStatus` was written for exactly this and had no caller.
+      const status = el.ownerDocument.createElement("span");
+      status.className = "tool-status";
+      status.textContent = strings.toolStatus(row.status);
       const name = el.ownerDocument.createElement("span");
       name.className = "tool-name";
       name.textContent = row.name;
@@ -69,7 +109,7 @@ function paint(el: HTMLElement, row: Row, strings: Strings): void {
       // durationKnown is separate from the label: `seconds: null` means the
       // engine never observed the call begin, which is not zero.
       meta.textContent = row.durationKnown ? row.durationLabel : UNKNOWN;
-      el.append(name, meta);
+      el.append(status, name, meta);
       if (row.preview !== "") {
         const out = el.ownerDocument.createElement("pre");
         out.className = "tool-output";

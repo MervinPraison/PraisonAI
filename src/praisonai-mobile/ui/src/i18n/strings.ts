@@ -97,6 +97,31 @@ export interface Strings {
   /** A chat file that would not parse. It is NOT hidden: see
    *  ui/src/chats/list-view-model.ts. */
   readonly chatUnreadable: (id: string) => string;
+  /**
+   * A chat row's name: its title and when it was last touched.
+   *
+   * ONE string for both, because the visible time and the spoken time have to
+   * be the same characters. `ChatRow.updatedLabel` was computed by
+   * `buildChatList` on every visit to the list and rendered nowhere at all, so
+   * every row was just a title and the list could not be scanned by recency --
+   * the one thing it is sorted by.
+   */
+  readonly chatUpdated: (title: string, when: string) => string;
+  /** The delete control on a chat row. It NAMES the chat: a list of rows each
+   *  offering a button called "Delete" is a list a screen reader user cannot
+   *  delete anything from safely. */
+  readonly deleteChat: (title: string) => string;
+  /** The armed state of that control. Deleting a conversation is the only
+   *  destructive, irreversible thing in the app, so it takes two taps. */
+  readonly actionConfirmDelete: string;
+  readonly deleteChatConfirm: (title: string) => string;
+  /** Said after the row disappears. A row that vanishes silently is
+   *  indistinguishable from a list that failed to draw. */
+  readonly chatDeleted: (title: string) => string;
+  /** The write failed. StoragePort rejects on a real device -- SecurityError
+   *  with site data blocked, QuotaExceededError -- and a delete that quietly
+   *  did nothing leaves the user believing a conversation is gone. */
+  readonly chatDeleteFailed: string;
   /** "You have no chats" -- a new install. */
   readonly chatsEmpty: string;
   /** "None of your chats could be read" -- data loss, and it must not render
@@ -287,6 +312,13 @@ export const en: Strings = {
 
   untitled: "Untitled",
   chatUnreadable: (id) => `Could not be read: ${id}`,
+  chatUpdated: (title, when) => `${title}, ${when}`,
+  deleteChat: (title) => `Delete ${title}`,
+  actionConfirmDelete: "Confirm",
+  // Names the chat and says the consequence. "Are you sure?" says neither.
+  deleteChatConfirm: (title) => `Delete ${title}? Tap Confirm to delete it. This cannot be undone.`,
+  chatDeleted: (title) => `${title} was deleted.`,
+  chatDeleteFailed: "That conversation could not be deleted.",
   chatsEmpty: "No conversations yet.",
   emptyTranscript: "Ask something to begin.",
   chatsAllUnreadable: (count) =>

@@ -19,6 +19,7 @@ import { applyOps, emptyNodes } from "./dom.ts";
 import { reconcile, emptyRender, type RenderState } from "../../ui/src/render/reconcile.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
 import { UNKNOWN } from "../../ui/src/format.ts";
+import { en } from "../../ui/src/i18n/strings.ts";
 
 /** Records how text was set, which is the entire point of these tests. */
 function fakeDoc() {
@@ -72,6 +73,13 @@ function fakeDoc() {
         this.children.splice(at === -1 ? this.children.length : at, 0, c);
         return c;
       },
+      attrs: {} as Record<string, string>,
+      setAttribute(n: string, v: string) { this.attrs[n] = v; },
+      getAttribute(n: string) { return this.attrs[n] ?? null; },
+      // Real removal. `aria-label=""` and an absent aria-label are different
+      // to a screen reader, and `paint` relies on the difference so a text row
+      // is announced by its own words rather than by an empty label.
+      removeAttribute(n: string) { delete this.attrs[n]; },
       remove() {
         const p = this.parent;
         if (!p) return;
@@ -540,4 +548,126 @@ test("a notice shows its text and its tone", () => {
   const el = paintOne({ kind: "notice", id: "n0", text: "Stopped", tone: "warning" } as Row);
   assert.equal(el.textContent, "Stopped");
   assert.equal(el.dataset["tone"], "warning");
+});
+
+// ---- accessible names ------------------------------------------------------
+//
+// `ui/src/a11y/names.ts` had eleven tests and NO caller anywhere in the
+// application: `accessibleName` was exported, exercised, and reached from
+// nothing. So no transcript row carried an `aria-label` at all, and everything
+// the module computes -- the tool's status word, the approval's decision
+// state, the error's title -- was announced to nobody.
+
+test("a tool row is NAMED with its status, not just coloured with it", () => {
+  // `data-status` is what app.css turns into a border colour, and colour is
+  // the only channel it ever reached. A screen reader user heard "rm, —" for a
+  // tool that FAILED. `strings.toolRowName` was written for this exact row and
+  // had no call site.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "failed", name: "rm" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  assert.equal(row?.getAttribute("aria-label"), en.toolRowName("failed", "rm", null));
+  assert.match(row?.getAttribute("aria-label") ?? "", /Failed/);
+});
+
+test("a tool row's status is repainted on UPDATE, not fixed at insert", () => {
+  // A tool is inserted `running` and finishes in place. Naming it only on
+  // insert leaves it announcing "Running" for the rest of the conversation --
+  // and `running` is precisely the state a user is waiting to hear leave.
+  const { host, created } = fakeDoc();
+  const nodes = emptyNodes();
+  applyOps(host, nodes, [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "running", name: "rm" }) },
+  ]);
+  applyOps(host, nodes, [
+    { kind: "update", id: "tool:c1", row: toolRow({ status: "failed", name: "rm" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  assert.match(row?.getAttribute("aria-label") ?? "", /Failed/);
+  assert.doesNotMatch(row?.getAttribute("aria-label") ?? "", /Running/);
+});
+
+test("an approval row is named with the decision state the buttons cannot carry", () => {
+  // While a decision is in flight every button on the row is disabled, and a
+  // disabled button is announced as "dimmed" or skipped outright -- so without
+  // a name the row goes silent at the exact moment the user is waiting to hear
+  // what happened to their answer.
+  const { host, created } = fakeDoc();
+  const row: Row = {
+    kind: "approval", id: "approval:a1", approvalId: "a1", callId: "c1", name: "bash",
+    args: {}, state: { status: "sending" }, actionable: false,
+  } as Row;
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "approval:a1", index: 0, row }]);
+  const el = created.find((n) => n.dataset.rowId === "approval:a1");
+  assert.equal(el?.getAttribute("aria-label"), en.approvalRowName("bash", "sending"));
+});
+
+test("an error row is named with its TITLE, not only the provider's prose", () => {
+  // `errorTitle` is chosen by KIND. The message is whatever the provider said
+  // and may say anything at all, so the kind is the only dependable part of
+  // the announcement -- and it never reached the DOM.
+  const { host, created } = fakeDoc();
+  const row: Row = {
+    kind: "error", id: "error", errorKind: "auth", message: "401 unauthorized",
+    recovery: "settings", tone: "failure",
+  } as Row;
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "error", index: 0, row }]);
+  const el = created.find((n) => n.dataset.rowId === "error");
+  assert.equal(el?.getAttribute("aria-label"), en.errorRowName("auth", "401 unauthorized"));
+});
+
+test("a text row is left UNLABELLED, so its own words are read", () => {
+  // `accessibleName` returns null here and null is a real answer: labelling a
+  // paragraph replaces the answer with a summary of it. Writing "" instead of
+  // removing the attribute is not the same thing.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "t0", index: 0, row: textRow("hello") }]);
+  const row = created.find((el) => el.dataset.rowId === "t0");
+  assert.equal(row?.getAttribute("aria-label"), null);
+});
+
+test("a row that becomes unlabelled loses its stale label", () => {
+  // The same element is reused across kinds by id in principle, and a label
+  // left behind names the row after something it no longer is.
+  const { host, created } = fakeDoc();
+  const nodes = emptyNodes();
+  applyOps(host, nodes, [
+    { kind: "insert", id: "r", index: 0, row: { ...toolRow(), id: "r" } as Row },
+  ]);
+  applyOps(host, nodes, [
+    { kind: "update", id: "r", row: { kind: "text", id: "r", text: "hi", streaming: false } as Row },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "r");
+  assert.equal(row?.getAttribute("aria-label"), null);
+});
+
+test("an unresolved tool says so in words, not only in a colour it has none of", () => {
+  // app.css has rules for `[data-status="failed"]` and `[data-status="ok"]`
+  // and NONE for `unresolved`, so a tool that never came back rendered
+  // pixel-for-pixel identically to one still running. `strings.toolStatus`
+  // exists for this and had no caller in the whole application.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "unresolved" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  const status = row?.children.find((c: any) => c.className === "tool-status");
+  assert.equal(status?._text, en.toolStatus("unresolved"));
+  assert.notEqual(en.toolStatus("unresolved"), en.toolStatus("running"));
+});
+
+test("the visible status is repainted on update too", () => {
+  const { host, created } = fakeDoc();
+  const nodes = emptyNodes();
+  applyOps(host, nodes, [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "running" }) },
+  ]);
+  applyOps(host, nodes, [
+    { kind: "update", id: "tool:c1", row: toolRow({ status: "ok" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  const status = row?.children.find((c: any) => c.className === "tool-status");
+  assert.equal(status?._text, en.toolStatus("ok"));
 });
