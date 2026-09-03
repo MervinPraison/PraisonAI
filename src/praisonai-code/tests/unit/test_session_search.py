@@ -83,6 +83,76 @@ def test_cli_session_search_ranks_with_snippets(project, capsys, monkeypatch):
     assert ids[0] == "zeta"
 
 
+def test_cli_session_search_dedupes_cross_store_shadows(project, capsys, monkeypatch):
+    # A session resumed from the global default store keeps a project-side
+    # shadow, so the same id matches in both canonical stores. Those duplicate
+    # rows must not each consume a slot of ``limit`` and crowd out distinct
+    # sessions (Issue #4701). Stub two stores that both surface ``dup`` plus one
+    # distinct id each; with limit=2 the deduped result must contain both
+    # distinct ids, which only holds when the same id is collapsed.
+    class _Hit:
+        def __init__(self, sid, score):
+            self.session_id = sid
+            self.score = score
+            self.when = ""
+            self.title = sid
+            self.snippet = "migration"
+
+        def as_dict(self):
+            return {
+                "session_id": self.session_id,
+                "title": self.title,
+                "score": self.score,
+                "snippet": self.snippet,
+                "when": self.when,
+            }
+
+    class _Store:
+        def __init__(self, session_dir, hits):
+            self.session_dir = session_dir
+            self._hits = hits
+
+    class _Indexed:
+        registry = {}
+
+        def __init__(self, session_dir):
+            self._hits = _Indexed.registry[session_dir]
+
+        def search(self, query, limit=5, window=5):
+            return list(self._hits)
+
+    project_hits = [_Hit("dup", 5.0), _Hit("proj-only", 3.0)]
+    global_hits = [_Hit("dup", 4.0), _Hit("glob-only", 2.0)]
+    _Indexed.registry = {"proj-dir": project_hits, "glob-dir": global_hits}
+
+    monkeypatch.setattr(
+        "praisonaiagents.session.SqliteSessionStore", _Indexed, raising=False
+    )
+    monkeypatch.setattr(
+        "praisonai_code.cli.state.project_sessions.canonical_cli_stores",
+        lambda *a, **k: [
+            _Store("proj-dir", project_hits),
+            _Store("glob-dir", global_hits),
+        ],
+    )
+
+    from praisonai_code.cli.output.console import get_output_controller
+
+    controller = get_output_controller()
+    monkeypatch.setattr(type(controller), "is_json_mode", property(lambda self: True))
+
+    session_search("migration", limit=2, window=5)
+
+    payload = json.loads(capsys.readouterr().out)
+    ids = [r["session_id"] for r in payload["results"]]
+
+    # "dup" collapses to a single row (its higher score, 5.0, is kept), leaving
+    # room for a distinct id. Without dedup the two "dup" rows fill both slots.
+    assert ids.count("dup") == 1
+    assert "proj-only" in ids
+    assert len(ids) == 2
+
+
 def test_cli_session_search_no_matches(project, capsys, monkeypatch):
     _create_session("alpha", [("user", "hello world")])
 

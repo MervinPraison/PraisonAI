@@ -280,6 +280,22 @@ def session_search(
         except Exception:
             continue
 
+    # A session resumed from the global default store keeps a project-side
+    # shadow, so the *same* id can match in both canonical stores. Without
+    # dedup those duplicate rows each consume a slot of the small ``limit`` and
+    # crowd out distinct sessions (Issue #4701). Collapse by session id, keeping
+    # the higher-scoring copy, mirroring the lineage dedup the store already
+    # applies within a single directory.
+    best_by_id = {}
+    for h in hits:
+        sid = getattr(h, "session_id", None)
+        if sid is None:
+            continue
+        existing = best_by_id.get(sid)
+        if existing is None or getattr(h, "score", 0.0) > getattr(existing, "score", 0.0):
+            best_by_id[sid] = h
+    hits = list(best_by_id.values())
+
     hits.sort(key=lambda h: (getattr(h, "score", 0.0), getattr(h, "when", "") or ""), reverse=True)
     hits = hits[:limit]
 
