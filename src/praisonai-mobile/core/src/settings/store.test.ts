@@ -567,3 +567,49 @@ test("the reader takes the PORT, so a view holding only the facade cannot call i
   // @ts-expect-error the facade is deliberately not a SecretsPort
   void (() => readSecretSetting(facade, KEYED, "openaiApiKey"));
 });
+
+test("a secret never reaches the plain storage port UNDER ANY KEY", async () => {
+  // The pair to the first case in this file, and the hole it left.
+  //
+  // "a secret never reaches the plain storage port" reads ONE document --
+  // settings/app -- by name. So a leak into any other id, or into any other
+  // namespace, was invisible to it. Measured during this change's mutation
+  // sweep: adding
+  //
+  //     await storage.write({ namespace: "settings", id: `secret-${ref.slot}` }, value);
+  //
+  // to `setSecret` SURVIVED the whole core suite. The credential was in a
+  // plain file in the app's data directory, next to the chats, and nothing
+  // said so.
+  //
+  // Rule 1 of core/src/ports/secrets.ts is "a secret never passes through
+  // StoragePort" -- not "not through settings/app" -- so the assertion is over
+  // every value the port was ever handed.
+  const SECRET = "sk-live-must-not-reach-any-file";
+  const { storage, secrets, store } = build();
+
+  await store.setSecret({ slot: "openai", account: "default" }, SECRET);
+  await store.set("model", "gpt-4o");
+  await store.setSecret({ slot: "anthropic", account: "work" }, SECRET);
+  await store.clearSecret({ slot: "openai", account: "default" });
+
+  for (const [n, value] of storage.writtenValues.entries()) {
+    assert.equal(
+      value.includes(SECRET),
+      false,
+      `write #${n} to the plain store contained the credential`,
+    );
+  }
+
+  // THE CONTROL. A fake that recorded nothing, or a store that wrote nothing
+  // at all, would satisfy the loop above while proving nothing whatsoever.
+  assert.ok(
+    storage.writtenValues.length > 0,
+    "nothing was written to the plain store at all; the loop proved nothing",
+  );
+  assert.equal(
+    await secrets.has({ slot: "anthropic", account: "work" }),
+    true,
+    "the secret was not stored anywhere either; the loop proved nothing",
+  );
+});

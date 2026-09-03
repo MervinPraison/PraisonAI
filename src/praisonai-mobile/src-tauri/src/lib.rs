@@ -21,6 +21,7 @@
 //! one; nothing installs the gesture), and the haptics/share plugins the
 //! bridge speaks to — those invokes reject and the bridge degrades.
 
+pub mod secrets;
 pub mod shell;
 pub mod store;
 
@@ -89,10 +90,18 @@ pub fn run() {
 /// `store.rs` but missing from `generate_handler!` is unreachable, the invoke
 /// rejects with "command not found", and only that one operation silently stops
 /// working. `tools/storage-seam.test.mjs` asserts all five are present.
+///
+/// The four `secrets::secret_*` commands are here for the same reason, and so
+/// is `tauri_plugin_secrets::init()` -- which is what puts the `SecretStore`
+/// into managed state. Drop the plugin line and every command still compiles,
+/// still registers, and panics on the first `state::<SecretStore>()`; drop a
+/// command and the settings screen reports "Not set" for a key that is in the
+/// keychain. `tools/secrets-seam.test.mjs` asserts both.
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_back_gesture::init(commands::on_back_pressed))
+        .plugin(tauri_plugin_secrets::init())
         .manage(commands::BackState::default())
         .manage(shell::LifecycleState::default())
         .invoke_handler(tauri::generate_handler![
@@ -101,7 +110,11 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             store::storage_write,
             store::storage_remove,
             store::storage_list_ids,
-            store::storage_clear
+            store::storage_clear,
+            secrets::secret_read,
+            secrets::secret_write,
+            secrets::secret_remove,
+            secrets::secret_has
         ])
         .on_window_event(shell::on_window_event)
 }

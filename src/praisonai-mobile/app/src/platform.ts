@@ -23,6 +23,7 @@ import { createWebStorage } from "../../adapters/src/web/storage.ts";
 import { createTauriStorage } from "../../adapters/src/tauri/storage.ts";
 import { migrateStorage, preparedStorage } from "../../adapters/src/storage/migrate.ts";
 import { createWebSecrets } from "../../adapters/src/web/secrets.ts";
+import { createTauriSecrets } from "../../adapters/src/tauri/secrets.ts";
 import { createWebHttp } from "../../adapters/src/web/http.ts";
 import { createWebTime } from "../../adapters/src/web/time.ts";
 
@@ -77,27 +78,56 @@ export function storageFor(
   return preparedStorage(native, () => migrateStorage(web, native));
 }
 
+/**
+ * The SecretsPort each platform gets.
+ *
+ * The same shape as `storageFor`, and named for the same reason: a `? :` in
+ * the object literal below is a decision no test can name. On a device this is
+ * the platform keychain -- iOS Keychain, Android Keystore -- through
+ * `src-tauri/plugins/secrets`; in a browser it stays a module-scoped Map,
+ * because a browser has no keychain and `localStorage` would be strictly
+ * worse than memory for a credential (readable by any script on the origin,
+ * and copied into the profile backup).
+ *
+ * NOT wrapped in a migration, unlike `storageFor`. There is nothing to move:
+ * the web adapter's Map dies with the process, so no install has a secret
+ * anywhere else to bring across. A migration here would be code that can only
+ * ever read an empty map -- and, worse, a code path that reads secrets at boot.
+ */
+export function secretsFor(kind: Platform["kind"], bridge: TauriBridge): SecretsPort {
+  if (kind !== "tauri") return createWebSecrets();
+  // `invokeStrict`: a rejecting keychain must not arrive as `null`, which is
+  // this port's word for "never configured". See adapters/src/tauri/secrets.ts.
+  return createTauriSecrets({ invoke: bridge.invokeStrict });
+}
+
 export function detectPlatform(deps: PlatformDeps = {}): Platform {
   const bridge = createTauriBridge(deps.scope === undefined ? {} : { scope: deps.scope });
   const native = deps.isNative?.() ?? bridge.isPresent();
   const view = deps.view ?? globalThis.window;
 
-  // Secrets and http are still the web adapters under Tauri. That is a
-  // deliberate, temporary state and not an oversight: a keychain SecretsPort,
-  // and an HttpPort that sends from Rust (so a request is not subject to the
-  // webview's CORS, and a hardware-backed key never crosses into JS) are each
-  // their own piece of work. Naming it here means the next author finds the
-  // seam rather than assuming it was considered and rejected.
+  // HTTP is still the web adapter under Tauri. That is a deliberate,
+  // temporary state and not an oversight: an HttpPort that sends from Rust --
+  // so a request is not subject to the webview's CORS, and a key never crosses
+  // into JS at all -- is its own piece of work. Naming it here means the next
+  // author finds the seam rather than assuming it was considered and rejected.
   //
   // STORAGE is no longer on that list. `localStorage` in WKWebView is
   // EVICTABLE under storage pressure -- the user does nothing wrong and their
   // history is gone -- so on a device it is now the native file store in
   // src-tauri/src/store.rs, which writes to the app's data directory with
   // temp-then-rename.
+  //
+  // SECRETS is no longer on it either, and that one was worse than eviction:
+  // `createWebSecrets()` is a module-scoped Map, so on a phone the API key was
+  // gone on EVERY launch -- not on a crash, not under pressure, every time --
+  // and the settings screen warned that secrets were "stored in app memory on
+  // this platform" while being perfectly correct about it. It is now the
+  // Keychain/Keystore in src-tauri/plugins/secrets.
   return {
     shell: native ? createTauriShell({ bridge }) : createWebShell(view),
     storage: storageFor(native ? "tauri" : "web", bridge, view),
-    secrets: createWebSecrets(),
+    secrets: secretsFor(native ? "tauri" : "web", bridge),
     http: createWebHttp(),
     time: createWebTime(),
     kind: native ? "tauri" : "web",

@@ -292,3 +292,24 @@ test("a secret is refused by the text-field path entirely", () => {
   // engine/server.py:653, the failure the whole split was written against.
   assert.equal(validateInput({ key: "apiKey", default: "", secret: true }, "sk-live"), null);
 });
+
+test("the software-secrets warning says where the key really is", () => {
+  // The message was rewritten when the Tauri build got a real keychain: it used
+  // to say secrets were "stored in app memory on this platform", which was
+  // shown on a PHONE as well, because the phone really was using app memory.
+  // Now the only reader is a browser, and the two facts that reader needs are
+  // that the key goes no further than the tab and that it will not be there
+  // next time. Pinned as behaviour rather than as a string equality, so a
+  // rewording that keeps the meaning passes and one that drops it does not.
+  const text = SOFTWARE_SECRETS_WARNING;
+  assert.match(text, /browser|tab/i, "the message must name where the key is");
+  assert.match(text, /again|not saved|only/i, "the message must say the key does not persist");
+  assert.doesNotMatch(
+    text,
+    /\bin a hardware-backed keychain\b(?!\.)/i,
+    "the message must not imply a keychain the browser does not have",
+  );
+  // The old sentence, refused by name. It is accurate on the web and was ALSO
+  // being shown on a device, which is the state this change ended.
+  assert.doesNotMatch(text, /on this platform/i, "there is only one platform that shows this now");
+});
