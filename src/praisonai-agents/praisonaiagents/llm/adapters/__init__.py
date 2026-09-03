@@ -203,6 +203,30 @@ Now provide your final answer using this result. Summarize the information natur
         }
 
 
+class LocalOpenAIAdapter(DefaultAdapter):
+    """Adapter for local servers that speak real OpenAI over HTTP.
+
+    Covers LM Studio, vLLM and llama.cpp's ``llama-server``. These differ from
+    Ollama in the way that matters most here: they implement the standard tool
+    protocol correctly, so tool results stay ``role: "tool"`` and streaming with
+    tools works. Inheriting ``DefaultAdapter``'s message handling is therefore
+    deliberate -- applying Ollama's natural-language ``role: "user"`` rewrite
+    would corrupt a conversation these servers handle properly.
+
+    What they share with Ollama is the model: locally-served weights are often
+    small and emit a malformed tool call now and then. So the one thing this
+    adapter adds is a repair budget.
+
+    ``force_tool_usage`` is deliberately NOT set. It injects prompts into every
+    conversation, and vLLM commonly serves large, highly capable models where
+    that is unwanted noise. ``max_tool_repairs`` costs nothing unless a tool
+    call actually arrives malformed.
+    """
+
+    def get_default_settings(self) -> Dict[str, Any]:
+        return {'max_tool_repairs': 2}
+
+
 class AnthropicAdapter(DefaultAdapter):
     """Anthropic/Claude provider adapter."""
     
@@ -273,6 +297,7 @@ _provider_adapters: Dict[str, LLMProviderAdapterProtocol] = {}
 _default_adapter = DefaultAdapter()
 _provider_adapters['default'] = _default_adapter
 _provider_adapters['ollama'] = OllamaAdapter()
+_provider_adapters['local'] = LocalOpenAIAdapter()
 _provider_adapters['anthropic'] = AnthropicAdapter()
 _provider_adapters['claude'] = AnthropicAdapter()  # Alias
 _provider_adapters['gemini'] = GeminiAdapter()
@@ -310,6 +335,8 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     # Provider prefixes or substrings
     if "ollama" in name_lower:
         return _provider_adapters["ollama"]
+    if name_lower in {"local", "lm_studio", "lmstudio", "vllm", "hosted_vllm", "llamacpp", "llama_cpp"}:
+        return _provider_adapters["local"]
     if "claude" in name_lower or "anthropic" in name_lower:
         return _provider_adapters["anthropic"]
     if "gemini" in name_lower:
@@ -331,6 +358,7 @@ def has_provider_adapter(name: str) -> bool:
 __all__ = [
     'DefaultAdapter',
     'OllamaAdapter', 
+    'LocalOpenAIAdapter',
     'AnthropicAdapter',
     'GeminiAdapter',
     'get_provider_adapter',

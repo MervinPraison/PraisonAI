@@ -636,9 +636,18 @@ Respond with ONLY a valid JSON tool call in this format:
         # Parse route prefix for explicit provider routing
         provider_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else None
         
-        # Explicit provider prefixes take priority
-        if provider_prefix == "ollama":
+        # Explicit provider prefixes take priority.
+        # "ollama_chat" is litellm's recommended prefix for Ollama tool calling
+        # and must not be treated as a different provider than "ollama".
+        if provider_prefix in {"ollama", "ollama_chat"}:
             return "ollama"
+        # Local servers that speak real OpenAI over HTTP. They keep the standard
+        # tool-message shape (unlike Ollama) but serve locally-hosted weights
+        # that benefit from a tool-call repair budget. "huggingface" is
+        # deliberately absent: that prefix is the hosted Inference API.
+        if provider_prefix in {"lm_studio", "lmstudio", "vllm", "hosted_vllm",
+                               "llamacpp", "llama_cpp"}:
+            return "local"
         if provider_prefix in {"anthropic", "claude"}:
             return "anthropic"
         if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
