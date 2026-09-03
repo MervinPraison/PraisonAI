@@ -36,6 +36,32 @@ _BUILTINS: Dict[str, Callable[[str], bool]] = {
 }
 
 
+# Closed-weights model families that no local runtime can serve. Used to stop a
+# local ``base_url`` (an OpenAI-compatible proxy on :11434, say) from being read
+# as "this is an Ollama model".
+#
+# Open-weights families are deliberately ABSENT -- gemma, llama, mistral, qwen,
+# deepseek and phi are all routinely served by Ollama, so they must stay
+# eligible for URL-based local detection. That is why this is a separate, much
+# narrower predicate than ``resolve_provider``: the latter maps ``gemma-`` to
+# "google" and ``mistral-`` to "mistral", which is correct for provider routing
+# and wrong for deciding whether a model could be running locally.
+HOSTED_ONLY_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-", "claude", "gemini-")
+
+
+def is_hosted_only_model(model_name: str) -> bool:
+    """True if ``model_name`` names a closed-weights model no local server hosts.
+
+    Any litellm-style prefix is stripped first, so ``openai/gpt-4o`` is hosted
+    while ``openai/qwen3:0.6b`` -- a local model reached over the
+    OpenAI-compatible route -- is not.
+    """
+    if not model_name:
+        return False
+    bare = model_name.split("/", 1)[1] if "/" in model_name else model_name
+    return bare.lower().startswith(HOSTED_ONLY_PREFIXES)
+
+
 def _entry_point_matchers():
     """Yield (provider_id, matcher) pairs registered by third-party plugins.
 
