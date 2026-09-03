@@ -24,12 +24,10 @@ const clampNum = (min, max) => (v) =>
 const SETTINGS = [
   // ---- Models -------------------------------------------------------------
   { key: "model", section: "model", label: "Default model",
-    description: "Any OpenAI-compatible model id. New chats use this.",
+    description: "Any OpenAI-compatible model id. New chats use this. For another provider, set a Base URL and use that endpoint’s bare model id.",
     keywords: ["llm", "gpt", "claude", "provider"],
     control: { kind: "combobox", suggestions: [
       "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "o4-mini",
-      "claude-sonnet-4-20250514", "claude-opus-4-20250514",
-      "gemini-2.0-flash", "ollama/llama3.2",
     ]},
     default: "gpt-4o-mini" },
 
