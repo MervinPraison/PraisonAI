@@ -238,6 +238,12 @@ _COMPLETION_PATTERNS = (
     (re.compile(r'\bfinished\b'), True),      # 'finished' needs negation check
 )
 
+# Emitted at most once per process: pointing at a non-OpenAI endpoint without
+# naming a model silently falls back to OpenAI's default, which that endpoint
+# almost certainly does not serve.
+_LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = False
+
+
 class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
@@ -2246,6 +2252,25 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             model_name = llm or Agent._get_default_model()
+            # Pointing at a non-OpenAI endpoint without naming a model leaves the
+            # OpenAI default in place, so the endpoint is asked for a model it
+            # has never heard of -- Ollama answers 404 "model 'gpt-4o-mini' not
+            # found", which reads like an SDK bug rather than a missing line of
+            # config. Warn, don't raise: an OpenAI-compatible proxy may legitimately
+            # serve that exact name.
+            if llm is None and not os.getenv('OPENAI_MODEL_NAME'):
+                _endpoint = os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE')
+                if _endpoint and 'api.openai.com' not in _endpoint:
+                    global _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED
+                    if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
+                        _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = True
+                        logging.warning(
+                            "No model specified, so the OpenAI default %r will be sent to %s. "
+                            "That endpoint probably does not serve it. Set OPENAI_MODEL_NAME "
+                            "to a model it does serve (e.g. OPENAI_MODEL_NAME=ollama/llama3.2), "
+                            "or pass llm= explicitly.",
+                            model_name, _endpoint,
+                        )
             # A provider-prefixed model must be built as an LLM instance, which
             # owns provider routing and the per-provider adapters. The
             # `"/" in llm` branch above only inspects the explicit `llm=`
