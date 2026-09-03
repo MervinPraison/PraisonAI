@@ -37,11 +37,24 @@ def test_local_provider_can_be_created(model):
 
 @pytest.mark.parametrize("model", LOCAL_MODELS)
 def test_local_provider_keeps_the_full_model_string(model):
-    """litellm needs the prefix to route, so it must not be stripped."""
+    """litellm needs the prefix to route, so it must not be stripped.
+
+    The provider stores the prefix (in config["provider"]) and the suffix (in
+    model_id) separately, then reconstructs "provider/model" at request time.
+    Assert BOTH survive -- checking the suffix alone would let a regression that
+    drops the prefix pass here and only fail once litellm is actually called.
+    """
+    provider_id, model_suffix = model.split("/", 1)
+
     provider = create_llm_provider(model)
+
     model_attr = getattr(provider, "model_id", None) or getattr(provider, "model", None)
     assert model_attr is not None
-    assert model.split("/", 1)[1] in str(model_attr)
+    assert model_suffix in str(model_attr)
+
+    # The prefix must survive too, otherwise litellm cannot route the request.
+    prefix = getattr(provider, "config", {}).get("provider")
+    assert prefix == provider_id
 
 
 def test_the_exact_example_from_the_error_message_works():
