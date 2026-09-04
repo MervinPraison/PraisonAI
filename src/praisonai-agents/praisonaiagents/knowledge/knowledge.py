@@ -530,6 +530,12 @@ class Knowledge:
             if os.path.isdir(input_path):
                 self._log(f"Processing directory: {input_path}")
                 all_results = []
+                # Per-file failures were logged at WARNING and dropped, so a
+                # directory whose every file failed to embed still returned a
+                # success-shaped {'results': [], 'relations': []} and the caller
+                # believed the knowledge base was populated. Collect them and
+                # hand them back.
+                all_errors = []
                 
                 # Walk through directory and process all supported files
                 for root, dirs, files in os.walk(input_path):
@@ -544,6 +550,7 @@ class Knowledge:
                                 all_results.extend(result.get('results', []))
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
+                                all_errors.append({'file': file_path, 'error': str(e)})
                             except (KeyboardInterrupt, SystemExit, GeneratorExit):
                                 # Interpreter control-flow signals must propagate
                                 # untouched so a Ctrl+C / interpreter shutdown is
@@ -564,9 +571,18 @@ class Knowledge:
                                 ) from e
                 
                 if not all_results:
-                    logger.warning(f"No supported files found in directory: {input_path}")
+                    if all_errors:
+                        # Nothing was indexed and we know why. Saying "no
+                        # supported files found" here would send the user
+                        # looking for the wrong problem entirely.
+                        logger.error(
+                            "Indexed nothing from %s: all %d file(s) failed; first error: %s",
+                            input_path, len(all_errors), all_errors[0]['error'],
+                        )
+                    else:
+                        logger.warning(f"No supported files found in directory: {input_path}")
                 
-                return {'results': all_results, 'relations': []}
+                return {'results': all_results, 'relations': [], 'errors': all_errors}
 
             # Check if input ends with any supported extension
             is_supported_file = any(input_path.lower().endswith(ext) 
