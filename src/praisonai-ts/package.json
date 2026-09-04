@@ -58,7 +58,7 @@
     "start": "ts-node src/main.ts",
     "dev": "ts-node-dev --respawn src/main.ts",
     "example:arxiv": "ts-node examples/tools/arxiv-tools.ts",
-    "clean": "rimraf dist",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild": "npm run clean",
     "check:webview": "node scripts/webview-gate.mjs"
   },
