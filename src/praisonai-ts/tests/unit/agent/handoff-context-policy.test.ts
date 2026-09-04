@@ -287,4 +287,55 @@ describe('Handoff context policy (Python parity)', () => {
       expect(contents(agent.history)).toEqual(['own']);
     });
   });
+
+  describe('concurrent seeding isolation', () => {
+    /** A target whose chat is slow enough that two handoffs would overlap. */
+    const slowWait = (ms: number) =>
+      new Promise<void>(resolve => {
+        const t = setTimeout(resolve, ms);
+        (t as unknown as { unref?: () => void }).unref?.();
+      });
+
+    it('does not let two handoffs to one shared target read each other context', async () => {
+      // One target, two Handoff instances (separate maxConcurrent semaphores).
+      // Each seeds a different single-message history and records what it saw.
+      const agent: any = {
+        name: 'shared',
+        chatHistory: [{ role: 'user', content: 'own' }] as any[],
+        seen: [] as any[][],
+        chat: jest.fn(async () => {
+          agent.seen.push([...agent.chatHistory]);
+          await slowWait(20);
+          agent.seen.push([...agent.chatHistory]);
+          return { text: 'ok' };
+        }),
+      };
+
+      const a = new Handoff({ agent, contextPolicy: ContextPolicy.FULL });
+      const b = new Handoff({ agent, contextPolicy: ContextPolicy.FULL });
+
+      await Promise.all([
+        a.execute(ctx({ messages: [{ role: 'user', content: 'A' }] })),
+        b.execute(ctx({ messages: [{ role: 'user', content: 'B' }] })),
+      ]);
+
+      // Each chat saw a stable, single seeded context across its own two reads,
+      // never a blend of A and B. Serialisation makes both reads within one
+      // invocation identical.
+      for (const [before, after] of [
+        [agent.seen[0], agent.seen[1]],
+        [agent.seen[2], agent.seen[3]],
+      ]) {
+        expect(contents(before)).toEqual(contents(after));
+        expect(contents(before)).toContain('own');
+      }
+      // Exactly one of the two invocations seeded A, the other B — no cross-talk.
+      const seededTags = [contents(agent.seen[0]), contents(agent.seen[2])].map(c =>
+        c.includes('A') ? 'A' : c.includes('B') ? 'B' : '?'
+      );
+      expect(seededTags.sort()).toEqual(['A', 'B']);
+      // History restored to exactly its original after both finish.
+      expect(contents(agent.chatHistory)).toEqual(['own']);
+    });
+  });
 });

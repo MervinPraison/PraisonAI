@@ -158,6 +158,30 @@ function sameHead(existing: readonly any[], prior: readonly any[]): boolean {
 }
 
 /**
+ * Per-target serialisation gate. Seeding mutates the target agent's shared
+ * conversation, snapshots it, runs, then restores it. Two handoffs to the same
+ * target — even from two different `Handoff` instances, whose per-instance
+ * `maxConcurrent` semaphores do not know about each other — must not interleave
+ * that sequence: one call could read the other's seeded context, and either
+ * restore could put a stale snapshot back over the other's live history. A
+ * timed-out handoff whose abandoned call settles late is the same hazard.
+ *
+ * A `WeakMap` keyed on the target holds a tail promise; each seeding chains onto
+ * it so snapshot/seed/run/restore for one target happens strictly one at a
+ * time. The map is weak so a target that goes out of scope is not retained.
+ * Targets with no restorable history never enter the gate.
+ */
+const seedTails = new WeakMap<object, Promise<unknown>>();
+
+function serialisePerTarget<T>(target: object, task: () => Promise<T>): Promise<T> {
+  const previous = seedTails.get(target) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  // Keep the chain alive but never let a prior rejection reject the next link.
+  seedTails.set(target, run.then(() => undefined, () => undefined));
+  return run;
+}
+
+/**
  * Run `fn` with `prior` prepended to the target agent's conversation, then put
  * the agent's history back exactly as it was — on failure too. Python parity
  * with the `_seed_target_history` context manager.
@@ -165,7 +189,9 @@ function sameHead(existing: readonly any[], prior: readonly any[]): boolean {
  * Without this the target only ever sees the handoff prompt string and the
  * configured context policy has nothing to act on. The seeding is
  * invocation-scoped so handoff context cannot leak into the next handoff or
- * into an ordinary chat that reuses the same agent.
+ * into an ordinary chat that reuses the same agent. Seeding is also serialised
+ * per target (see {@link serialisePerTarget}) so concurrent handoffs to one
+ * agent cannot read each other's context or restore a stale snapshot.
  *
  * Two history shapes are supported: a plain `chatHistory`/`chat_history` array
  * (Python's shape, and what a stub target uses) and the simple `Agent`'s
@@ -190,35 +216,39 @@ export async function withSeededHistory<T>(
       : null;
 
   if (arrayKey) {
-    const original = target[arrayKey] as any[];
-    if (sameHead(original, prior)) return fn();
-    target[arrayKey] = [...prior, ...original];
-    try {
-      return await fn();
-    } finally {
-      target[arrayKey] = original;
-    }
+    return serialisePerTarget(target, async () => {
+      const original = target[arrayKey] as any[];
+      if (sameHead(original, prior)) return fn();
+      target[arrayKey] = [...prior, ...original];
+      try {
+        return await fn();
+      } finally {
+        target[arrayKey] = original;
+      }
+    });
   }
 
   if (typeof target.getHistory === 'function' && typeof target.setHistory === 'function') {
-    let original: any[];
-    try {
-      const current = target.getHistory();
-      original = Array.isArray(current) ? current : [];
-      if (sameHead(original, prior)) return fn();
-      target.setHistory([...prior, ...original]);
-    } catch {
-      return fn(); // a history the agent refuses to hold is not worth failing over
-    }
-    try {
-      return await fn();
-    } finally {
+    return serialisePerTarget(target, async () => {
+      let original: any[];
       try {
-        target.setHistory(original);
+        const current = target.getHistory!();
+        original = Array.isArray(current) ? current : [];
+        if (sameHead(original, prior)) return fn();
+        target.setHistory!([...prior, ...original]);
       } catch {
-        /* restoring a history the agent just held should not mask the result */
+        return fn(); // a history the agent refuses to hold is not worth failing over
       }
-    }
+      try {
+        return await fn();
+      } finally {
+        try {
+          target.setHistory!(original);
+        } catch {
+          /* restoring a history the agent just held should not mask the result */
+        }
+      }
+    });
   }
 
   return fn();
