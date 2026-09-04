@@ -288,7 +288,7 @@ runs:
         fi
         
         # Add allowed tools (include GitHub tools by default)
-        TOOLS="mcp__github__issue_read,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__pull_request_read,Read,Write,Edit,Bash"
+        TOOLS="mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__get_pull_request,mcp__github__get_pull_request_files,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,Read,Write,Edit,Bash"
         if [[ -n "$INPUT_ALLOWED_TOOLS" ]]; then
           TOOLS="$TOOLS,$INPUT_ALLOWED_TOOLS"
         fi
