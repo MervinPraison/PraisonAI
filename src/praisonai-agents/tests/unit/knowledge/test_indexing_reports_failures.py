@@ -20,8 +20,10 @@ import tempfile
 
 import pytest
 
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
-
+# These tests build a bare Knowledge instance via __new__ and mock store(), so
+# no embedding backend is ever reached. Do NOT install a fake OPENAI_API_KEY at
+# import time -- a module-level env mutation persists for the whole test process
+# and can make later provider-backed tests mistake it for a real credential.
 from praisonaiagents.knowledge.chunking import Chunking
 from praisonaiagents.knowledge.knowledge import Knowledge
 
@@ -52,6 +54,12 @@ def _boom(content, **kw):
 
 def _ok(content, **kw):
     return {"results": ["id"]}
+
+
+def _swallowed(content, **kw):
+    # Mirrors the real store(): it catches the embedding exception and returns an
+    # empty list instead of raising. Without surfacing, this reads as success.
+    return []
 
 
 class TestFailuresReachTheCaller:
@@ -93,6 +101,28 @@ class TestFailuresReachTheCaller:
         """Callers already read 'results' and 'relations'."""
         result = _index(docs_dir, _ok)
         assert "results" in result and "relations" in result
+
+    def test_store_that_swallows_the_error_is_still_reported(self, docs_dir):
+        """The production store() returns [] on embedding failure rather than
+        raising. That must still surface as an error, not a false success."""
+        result = _index(docs_dir, _swallowed)
+        assert result["results"] == []
+        assert len(result["errors"]) == 3, (
+            "store() swallowed the failure and the caller was told nothing"
+        )
+
+    def test_list_input_propagates_directory_errors(self, docs_dir):
+        """add([dir]) must not drop the per-file errors the directory collected."""
+        k = Knowledge.__new__(Knowledge)
+        k._verbose = 0
+        k.store = _boom
+        k.normalize_content = lambda c: c.strip().lower()
+        k.__dict__["chunker"] = Chunking(
+            chunker_type="recursive", chunk_size=200, chunk_overlap=20)
+        k._emit_knowledge_event = lambda *a, **kw: None
+        result = k.add([docs_dir])
+        assert len(result["errors"]) == 3
+        assert result["results"] == []
 
 
 if __name__ == "__main__":
