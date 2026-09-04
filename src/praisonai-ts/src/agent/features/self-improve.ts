@@ -149,3 +149,59 @@ export function proposalFromToolArgs(args: Record<string, unknown>): SkillPropos
     instructions: typeof args.instructions === 'string' ? args.instructions : '',
   };
 }
+
+/**
+ * A tool call as either transport reports it: the OpenAI-compatible shape
+ * (`function.name` + a JSON `arguments` string) or the AI SDK's
+ * (`toolName` + parsed `args`).
+ */
+export interface RawSkillToolCall {
+  function?: { name?: string; arguments?: string };
+  toolName?: string;
+  args?: unknown;
+}
+
+/**
+ * Run one review turn and return what it proposed (Python
+ * `agent/skill_review.py` `SkillReviewMixin`).
+ *
+ * `askModel` performs the isolated call: it is given the review prompt and the
+ * single tool the turn may use, and returns the tool calls the model made.
+ * Keeping the transport outside means the Agent decides how to reach the
+ * model and this stays testable without one.
+ *
+ * Nothing here throws: a review is bookkeeping, and it must never break the
+ * task that produced it. Failures are reported through `onError`.
+ */
+export async function runSkillReviewTurn(
+  config: SelfImproveConfig,
+  trajectory: SkillReviewTrajectory,
+  askModel: (prompt: string, tool: typeof SKILL_MANAGE_TOOL) => Promise<RawSkillToolCall[]>,
+  onError: (error: unknown) => void = () => {}
+): Promise<SkillProposal[]> {
+  if (!config.enabled || !config.policy.shouldReview(trajectory)) return [];
+  try {
+    const calls = await askModel(config.policy.reviewPrompt(trajectory), SKILL_MANAGE_TOOL);
+    const proposals: SkillProposal[] = [];
+    for (const call of calls ?? []) {
+      const name = call.function?.name ?? call.toolName;
+      if (name !== 'skill_manage') continue;
+      const raw = call.function?.arguments ?? call.args;
+      let args: Record<string, unknown>;
+      try {
+        args = typeof raw === 'string' ? JSON.parse(raw) : ((raw as Record<string, unknown>) ?? {});
+      } catch {
+        // A malformed argument blob is one bad proposal, not a failed review.
+        continue;
+      }
+      const proposal = proposalFromToolArgs(args);
+      if (!proposal) continue;
+      proposals.push(proposal);
+      await config.policy.onProposal?.(proposal);
+    }
+    return proposals;
+  } catch (error) {
+    onError(error);
+    return [];
+  }
+}

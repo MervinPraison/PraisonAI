@@ -27,8 +27,18 @@
     },
     {
       "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "toolConfig",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
       "option": "web",
       "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "attachments",
+      "surface": "Agent.chat"
     },
     {
       "file": "src/praisonai-ts/src/agent/simple.ts",
@@ -52,31 +62,6 @@
     }
   ],
   "surfaces": {
-    "Agent.__init__": [
-      "auth",
-      "autonomy",
-      "backend",
-      "learn",
-      "messageSteering",
-      "reflection",
-      "runOn",
-      "runtime",
-      "sandbox",
-      "selfImprove",
-      "templates",
-      "toolConfig",
-      "toolSearch",
-      "toolsRunOn",
-      "toolsets"
-    ],
-    "Agent.chat": [
-      "attachments",
-      "config",
-      "reasoningSteps",
-      "taskDescription",
-      "taskId",
-      "taskName"
-    ],
     "AgentTeam.__init__": [
       "autonomy",
       "caching",
@@ -139,5 +124,5 @@
       "when"
     ]
   },
-  "total": 76
+  "total": 55
 }
