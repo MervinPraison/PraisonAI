@@ -68,8 +68,11 @@ class SearchMixin:
         # Apply metadata filtering (defense-in-depth). Auto-derive a user_id
         # filter so per-user isolation holds even for adapters that accept
         # user_id but ignore it in their own query (Chroma/RAG, SQLite, in-memory).
+        # An explicit user_id always wins so a conflicting
+        # metadata_filter["user_id"] can never widen the scope to another
+        # tenant's data (mirrors Memory._build_metadata_filter).
         effective_filter = dict(metadata_filter or {})
-        if user_id and "user_id" not in effective_filter:
+        if user_id:
             effective_filter["user_id"] = user_id
         if effective_filter:
             filtered_results = []
@@ -132,8 +135,11 @@ class SearchMixin:
         # Apply metadata filtering (defense-in-depth). Auto-derive a user_id
         # filter so per-user isolation holds even for adapters that accept
         # user_id but ignore it in their own query (Chroma/RAG, SQLite, in-memory).
+        # An explicit user_id always wins so a conflicting
+        # metadata_filter["user_id"] can never widen the scope to another
+        # tenant's data (mirrors Memory._build_metadata_filter).
         effective_filter = dict(metadata_filter or {})
-        if user_id and "user_id" not in effective_filter:
+        if user_id:
             effective_filter["user_id"] = user_id
         if effective_filter:
             filtered_results = []

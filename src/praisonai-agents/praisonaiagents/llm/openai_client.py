@@ -1045,6 +1045,11 @@ class OpenAIClient:
                     # Fall through to Chat Completions streaming
             
             # ── Chat Completions streaming path ─────────────────────────
+            # Request the trailing usage-only chunk for every streamed call so
+            # process_stream_chunks records real token usage even when stream
+            # events are not being emitted. Respect a caller-supplied
+            # stream_options so we never clobber an explicit choice.
+            stream_options = kwargs.pop("stream_options", {"include_usage": True})
             # Create the response stream
             response_stream = self.sync_client.chat.completions.create(
                 model=model,
@@ -1052,7 +1057,7 @@ class OpenAIClient:
                 temperature=temperature,
                 tools=tools if tools else None,
                 stream=True,
-                stream_options={"include_usage": True} if _emit else None,
+                stream_options=stream_options,
                 **kwargs
             )
             
@@ -1314,6 +1319,11 @@ class OpenAIClient:
                     # Fall through to Chat Completions streaming
             
             # ── Chat Completions streaming path ─────────────────────────
+            # Request the trailing usage-only chunk for every streamed call so
+            # process_stream_chunks records real token usage even when stream
+            # events are not being emitted. Respect a caller-supplied
+            # stream_options so we never clobber an explicit choice.
+            stream_options = kwargs.pop("stream_options", {"include_usage": True})
             # Create the response stream
             response_stream = await self.async_client.chat.completions.create(
                 model=model,
@@ -1321,7 +1331,7 @@ class OpenAIClient:
                 temperature=temperature,
                 tools=tools if tools else None,
                 stream=True,
-                stream_options={"include_usage": True} if _emit else None,
+                stream_options=stream_options,
                 **kwargs
             )
             

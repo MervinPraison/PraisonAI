@@ -1258,9 +1258,20 @@ Provide a JSON with the structure:
             else:
                 logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
-        self.tasks[manager_task.id].status = "completed"
-        if self.verbose >= 1:
-            logging.info("All tasks completed under manager supervision.")
+        # Distinguish genuine completion from a bounded early exit (max_iter,
+        # repeated invalid selections, manager "stop", or manager failure). Only
+        # report success when every delegable task is accounted for; otherwise
+        # mark the manager terminal without falsely logging full completion.
+        if completed_count >= total_tasks:
+            self.tasks[manager_task.id].status = "completed"
+            if self.verbose >= 1:
+                logging.info("All tasks completed under manager supervision.")
+        else:
+            self.tasks[manager_task.id].status = "failed"
+            logging.warning(
+                f"Hierarchical process ended with {completed_count}/{total_tasks} tasks completed; "
+                f"some tasks were not executed."
+            )
         logging.info("Hierarchical task execution finished")
 
     def workflow(self):
@@ -1906,7 +1917,18 @@ Provide a JSON with the structure:
             else:
                 logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
-        self.tasks[manager_task.id].status = "completed"
-        if self.verbose >= 1:
-            logging.info("All tasks completed under manager supervision.")
+        # Distinguish genuine completion from a bounded early exit (max_iter,
+        # repeated invalid selections, manager "stop", or manager failure). Only
+        # report success when every delegable task is accounted for; otherwise
+        # mark the manager terminal without falsely logging full completion.
+        if completed_count >= total_tasks:
+            self.tasks[manager_task.id].status = "completed"
+            if self.verbose >= 1:
+                logging.info("All tasks completed under manager supervision.")
+        else:
+            self.tasks[manager_task.id].status = "failed"
+            logging.warning(
+                f"Hierarchical process ended with {completed_count}/{total_tasks} tasks completed; "
+                f"some tasks were not executed."
+            )
         logging.info("Hierarchical task execution finished")
