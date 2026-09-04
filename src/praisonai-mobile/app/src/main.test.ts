@@ -3251,6 +3251,41 @@ test("a setting's help text reaches the screen", async () => {
   await app?.dispose();
 });
 
+test("a setting's help and inactive note are ASSOCIATED with the control, not just beside it", async () => {
+  // Sitting a help paragraph next to a field tells a sighted user what it is
+  // for; a screen-reader user who focuses the field hears only its aria-label
+  // unless the control POINTS at the note. `aria-describedby` is that pointer.
+  const dom = createFakeDom();
+  // In-process engine: the address is inactive, so its "turn this on" sentence
+  // must be announced with it, alongside the help every field carries.
+  const off = paintSettings(dom, { engineId: ENGINE_PRAISONAI_TS }, new Map());
+  dom.root.append(off as never);
+
+  const address = dom.find((n) => n.getAttribute("aria-label") === "Engine address");
+  const describedBy = (address?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+  const help = dom.find((n) => n.className === "setting-help" && n.id === "setting-help-baseUrl");
+  const inactive = dom.find((n) => n.dataset["settingInactive"] === "baseUrl");
+  assert.ok(help !== undefined && help.id !== "", "the help note needs a stable id to be pointed at");
+  assert.ok(describedBy.includes(help!.id), "the address must describe itself with its help");
+  assert.ok(
+    describedBy.includes(inactive!.id),
+    "and, while it is off, with the sentence that turns it on",
+  );
+
+  // Live engine: the field applies, so the inactive id must NOT linger in the
+  // description -- a screen reader would otherwise read a reason that is gone.
+  const dom2 = createFakeDom();
+  const on = paintSettings(dom2, { engineId: ENGINE_REMOTE_HTTP }, new Map());
+  dom2.root.append(on as never);
+  const live = dom2.find((n) => n.getAttribute("aria-label") === "Engine address");
+  const liveDesc = (live?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+  assert.ok(liveDesc.includes("setting-help-baseUrl"), "help stays whether or not the field applies");
+  assert.ok(
+    !liveDesc.includes("setting-inactive-baseUrl"),
+    "a live field must not point at an inactive reason",
+  );
+});
+
 // The two tests above drive the screen through a CHANGE, which reaches the
 // sync walk. These two assert the FIRST PAINT, which is a different branch:
 // `buildSettingsScreen` decides what a row looks like before any event, and a

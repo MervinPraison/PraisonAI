@@ -371,6 +371,15 @@ export function appliesTo(
  * them apart is three settings that look different and behave identically.
  * Trailing slashes go here rather than at the two call sites that were each
  * doing `.replace(/\/+$/, "")` on their own.
+ *
+ * A query string or fragment is refused, not carried through. The engine
+ * builds `${base}/chat`, `${base}/health`, `${base}/approve/{id}` by plain
+ * concatenation (engines/src/remote-http/engine.ts), so a stored
+ * "http://host:8765/?token=abc" becomes "http://host:8765/?token=abc/chat" --
+ * a request for "/" with a mangled query, not "/chat". The address the user is
+ * told was saved reaches none of the endpoints a turn needs. `?` and `#` have
+ * no place in an engine base, so they are refused at the point the value is
+ * accepted rather than silently kept and mis-joined later.
  */
 export function httpUrl(): (value: SettingValue) => SettingValue | null {
   return (value) => {
@@ -385,7 +394,12 @@ export function httpUrl(): (value: SettingValue) => SettingValue | null {
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     if (url.hostname === "") return null;
-    const normalised = `${url.origin}${url.pathname}${url.search}`.replace(/\/+$/, "");
+    // A base the endpoints append to cannot carry a query or fragment: `?x` and
+    // `#y` would land BEFORE the `/chat` the engine concatenates, addressing "/"
+    // with a broken query instead of the endpoint. Refuse rather than keep-and-
+    // mis-join.
+    if (url.search !== "" || url.hash !== "") return null;
+    const normalised = `${url.origin}${url.pathname}`.replace(/\/+$/, "");
     // `origin` alone for a bare "http://host/", which strips to "http://host".
     return normalised === "" ? url.origin : normalised;
   };

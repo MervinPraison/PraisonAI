@@ -660,6 +660,19 @@ test("a real address is accepted, and normalised so one engine is not three sett
   assert.equal(url("http://proxy.example.com/praisonai/"), "http://proxy.example.com/praisonai");
 });
 
+test("an address carrying a query or fragment is REFUSED, not stored to be mis-joined", () => {
+  // The engine builds `${base}/chat` by concatenation, so a stored
+  // "http://host:8765/?token=abc" becomes "http://host:8765/?token=abc/chat" --
+  // a request for "/" with a mangled query, reaching none of the endpoints a
+  // turn needs. Refuse at the point of acceptance rather than report a save
+  // that cannot work.
+  const url = httpUrl();
+  assert.equal(url("http://192.168.1.10:8765?token=abc"), null, "a query has no place in an engine base");
+  assert.equal(url("http://192.168.1.10:8765/?token=abc"), null);
+  assert.equal(url("http://192.168.1.10:8765/#frag"), null, "nor does a fragment");
+  assert.equal(url("http://proxy.example.com/praisonai?x=1"), null, "not even beside a real path");
+});
+
 test("a non-string never reaches URL parsing", () => {
   const url = httpUrl();
   assert.equal(url(8765), null);

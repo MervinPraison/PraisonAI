@@ -315,6 +315,15 @@ function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings:
   control.value = String(settings.get(def.key) ?? def.default);
   control.className = "setting-value setting-input";
   control.setAttribute("aria-label", row.label);
+  // Point the control at the notes that explain it: its help, and -- only while
+  // it is inactive -- the sentence naming the switch that turns it on. Without
+  // this a screen-reader user who focuses the field hears its label and nothing
+  // of what it is for or why it is greyed out. `syncSettings` keeps the
+  // inactive id in step as the field flips between applies/does-not.
+  const describedBy: string[] = [];
+  if (def.help !== undefined && def.help.trim() !== "") describedBy.push(helpId(def.key));
+  if (!row.applies) describedBy.push(inactiveId(def.key));
+  if (describedBy.length > 0) control.setAttribute("aria-describedby", describedBy.join(" "));
   // `change`, not `input`: a field commits on blur or Enter, so a half-typed
   // address is never stored and `set` is not called once per keystroke.
   // Delegated on root -- `change` bubbles.
@@ -340,12 +349,27 @@ function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings:
  * screen does not -- and it is why the engine address could say "Only used by
  * the remote engine" in the source while the user saw a bare box.
  */
-function settingHelp(doc: Document, help: string | null): HTMLElement | null {
+function settingHelp(doc: Document, key: string, help: string | null): HTMLElement | null {
   if (help === null || help.trim() === "") return null;
   const note = doc.createElement("p");
   note.className = "setting-help";
+  note.id = helpId(key);
   note.textContent = help;
   return note;
+}
+
+/** Stable id for a def's help note, so the control can point `aria-describedby`
+ *  at it. A screen reader that focuses a field otherwise hears its label and
+ *  nothing of what the field is for. */
+function helpId(key: string): string {
+  return `setting-help-${key}`;
+}
+
+/** Stable id for a def's inactive note ("Set Engine to remote-http to use
+ *  this"), so a disabled field announces WHY it is disabled rather than leaving
+ *  a screen-reader user to guess. */
+function inactiveId(key: string): string {
+  return `setting-inactive-${key}`;
 }
 
 /**
@@ -361,6 +385,7 @@ function settingHelp(doc: Document, help: string | null): HTMLElement | null {
 function settingInactiveNote(doc: Document, key: string): HTMLElement {
   const note = doc.createElement("p");
   note.className = "setting-inactive";
+  note.id = inactiveId(key);
   note.dataset["settingInactive"] = key;
   note.hidden = true;
   return note;
@@ -516,7 +541,7 @@ export function buildSettingsScreen(
       el.append(label);
       // Label, then what it is for, then the control. The help was declared on
       // every def and painted by nothing at all until now.
-      const help = settingHelp(doc, row.help);
+      const help = settingHelp(doc, row.key, row.help);
       if (help !== null) el.append(help);
       const def = row.kind === "value" ? defByKey.get(row.key) : undefined;
       if (row.kind === "value" && def !== undefined) {
@@ -1810,9 +1835,17 @@ export async function mount(deps: MountDeps): Promise<App | null> {
           // in-process engine is what makes the engine address stop meaning
           // anything. Recomputed here rather than on a rebuild, so the fields
           // keep what is in them while the dependency flips.
-          (node as HTMLElement & { disabled: boolean }).disabled = !appliesTo(def, (key) =>
-            app.settings.get(key),
-          );
+          const applies = appliesTo(def, (key) => app.settings.get(key));
+          (node as HTMLElement & { disabled: boolean }).disabled = !applies;
+          // Keep the description in step with the disabled state: a field that
+          // has just gone inactive must POINT at the sentence that says why, and
+          // one that has gone live must stop, or a screen reader keeps reading a
+          // reason that no longer applies. Help stays whether or not it applies.
+          const describedBy: string[] = [];
+          if (def.help !== undefined && def.help.trim() !== "") describedBy.push(helpId(def.key));
+          if (!applies) describedBy.push(inactiveId(def.key));
+          if (describedBy.length > 0) node.setAttribute("aria-describedby", describedBy.join(" "));
+          else node.removeAttribute("aria-describedby");
         }
         continue;
       }
