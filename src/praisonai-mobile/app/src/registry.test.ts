@@ -16,6 +16,8 @@ import {
   CONSUMED_SETTING_KEYS,
   ENGINE_PRAISONAI_TS,
   ENGINE_REMOTE_HTTP,
+  SECTION_API_KEY,
+  SECTION_ENGINE,
   SETTING_DEFS,
   apiKeyFor,
   defaultEngineIdFor,
@@ -654,4 +656,90 @@ test("the secret never reaches the plain settings file on the way through", asyn
     false,
     "the key appeared in the plain settings file",
   );
+});
+
+// ---- the screen's information architecture ---------------------------------
+//
+// The one credential the app needs was filed under a heading called "Engine",
+// third of three rows, at the same weight as an engine picker and an address.
+// It is not an engine setting: it is the single field that decides whether the
+// app works at all. Registry order IS screen order (view-model.ts groups by
+// section in insertion order), so these two facts are asserted where they are
+// decided rather than through a DOM.
+
+test("the API key is NOT filed under the engine heading", () => {
+  const key = SETTING_DEFS.find((def) => def.key === "openaiApiKey");
+  assert.ok(key !== undefined, "the app must still declare a credential");
+  assert.notEqual(
+    key.section,
+    SECTION_ENGINE,
+    "a credential is not an engine setting; it was filed under the wrong noun",
+  );
+  assert.equal(key.section, SECTION_API_KEY);
+  // And the heading is not shared with anything else, so "API key" cannot come
+  // to mean "and three other things".
+  const others = SETTING_DEFS.filter((def) => def.section === SECTION_API_KEY && def.key !== key.key);
+  assert.deepEqual(others.map((d) => d.key), []);
+});
+
+test("the API key is the FIRST thing on the settings screen", () => {
+  // Hierarchy, not just grouping. A new user opens Settings to paste a key;
+  // making them read past two rows about runtimes first is the screen deciding
+  // its own taxonomy matters more than the reason they came.
+  assert.equal(
+    SETTING_DEFS[0]?.key,
+    "openaiApiKey",
+    "the thing a new user needs most must be the thing they see first",
+  );
+  // Section order follows from row order, and that is the whole mechanism.
+  const sections: string[] = [];
+  for (const def of SETTING_DEFS) {
+    const section = def.section ?? "";
+    if (!sections.includes(section)) sections.push(section);
+  }
+  assert.deepEqual(sections, [SECTION_API_KEY, SECTION_ENGINE]);
+});
+
+test("the engine address REFUSES an address with no scheme", () => {
+  // `7.0.0.1:8765` was accepted in silence on a device. The def had no
+  // `validate` at all, so the refusal machinery #4694 built had nothing to
+  // refuse. Asserted on the DEF, because that is where the missing half was.
+  const base = SETTING_DEFS.find((def) => def.key === "baseUrl");
+  assert.ok(base?.validate !== undefined, "the engine address must be validated");
+  assert.equal(base.validate("7.0.0.1:8765"), null);
+  assert.equal(base.validate("http://192.168.1.10:8765"), "http://192.168.1.10:8765");
+  // And the def says what a good one looks like, so the refusal can too.
+  assert.ok(base.example !== undefined, "a def that refuses must be able to say what it wants");
+  assert.equal(base.validate(base.example), base.example, "the example itself must be accepted");
+});
+
+test("the engine address applies only while the remote engine is chosen", () => {
+  // The field's own help said "Only used by the remote engine" while the field
+  // rendered and accepted edits identically under the in-process engine, which
+  // runs on the device and never contacts an address.
+  const base = SETTING_DEFS.find((def) => def.key === "baseUrl");
+  assert.deepEqual(base?.appliesWhen, { key: "engineId", equals: ENGINE_REMOTE_HTTP });
+  // The setting it names has to exist, and to offer that value -- a dependency
+  // on a key nobody declares switches the field off forever.
+  const controller = SETTING_DEFS.find((def) => def.key === base?.appliesWhen?.key);
+  assert.ok(controller !== undefined, "appliesWhen must name a declared setting");
+  assert.ok(
+    controller.choices?.includes(ENGINE_REMOTE_HTTP),
+    "the value that switches the address on must be one the picker offers",
+  );
+});
+
+test("the engine's own default is one the address dependency recognises", () => {
+  // On the web the app starts remote, so the address is live from first paint;
+  // on a device it starts in-process, so it is not. Both are only true while
+  // `defaultEngineIdFor` returns ids from the same closed set the dependency
+  // compares against.
+  for (const kind of ["web", "tauri"] as const) {
+    const defs = settingDefsFor(kind);
+    const engineId = defs.find((d) => d.key === "engineId")?.default;
+    assert.ok(
+      engineId === ENGINE_REMOTE_HTTP || engineId === ENGINE_PRAISONAI_TS,
+      `${kind} defaults to an engine outside the picker: ${String(engineId)}`,
+    );
+  }
 });

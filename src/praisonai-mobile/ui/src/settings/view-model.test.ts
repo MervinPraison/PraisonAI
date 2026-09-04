@@ -313,3 +313,94 @@ test("the software-secrets warning says where the key really is", () => {
   // being shown on a device, which is the state this change ended.
   assert.doesNotMatch(text, /on this platform/i, "there is only one platform that shows this now");
 });
+
+// ---- rule 5: a control that cannot do anything says so ----------------------
+//
+// Two of these shipped on the same screen. `Remove` sat under a row reading
+// "Not set", and `Engine address` rendered identically whether or not an engine
+// that reads it was selected -- while its own help text said "Only used by the
+// remote engine". Both answers are computed here rather than in the renderer,
+// so a second renderer cannot get a different one and a test does not need a
+// DOM to ask.
+
+test("Remove is offered only when there is a key to remove", () => {
+  // The defect, exactly: the button was unconditional, so a user with no key
+  // was offered a control that destroys nothing and reports nothing. It is the
+  // defect class this package spent two days eliminating, in the screen that
+  // introduced it.
+  const configured: SecretPresence = new Map([["apiKey", { ref: OPENAI, configured: true }]]);
+  const missing: SecretPresence = new Map([["apiKey", { ref: OPENAI, configured: false }]]);
+
+  const withKey = secretRowsOf(buildSettings(fakeFacade(DEFS), configured))[0];
+  const withoutKey = secretRowsOf(buildSettings(fakeFacade(DEFS), missing))[0];
+
+  assert.equal(withKey?.canClear, true, "a stored key must be removable");
+  assert.equal(withoutKey?.canClear, false, "there is nothing to remove");
+  // And the presence word and the button agree. Two sources for one fact is
+  // how a row comes to say "Not set" with a live Remove under it.
+  assert.equal(withoutKey?.presence, NOT_SET);
+});
+
+test("a key whose lookup has not landed offers no Remove either -- the pair", () => {
+  // `canClear` is `state === "configured"`, not `state !== "not-set"`. UNKNOWN
+  // is a keychain check still in flight (rule 2), and offering to destroy a
+  // credential the app has not confirmed exists is the same false promise
+  // pointed the other way -- and the state EVERY row is in on first paint.
+  const row = secretRowsOf(buildSettings(fakeFacade(DEFS)))[0];
+  assert.equal(row?.presence, UNKNOWN);
+  assert.equal(row?.canClear, false, "an unresolved lookup must not offer Remove");
+});
+
+const DEPENDENT: readonly SettingDef[] = [
+  { key: "engineId", default: "remote-http", label: "Engine", section: "Engine", choices: ["remote-http", "praisonai-ts"] },
+  {
+    key: "baseUrl",
+    default: "http://127.0.0.1:8765",
+    label: "Engine address",
+    section: "Engine",
+    appliesWhen: { key: "engineId", equals: "remote-http" },
+  },
+];
+
+test("a setting whose switch is off does not apply, and names the switch", () => {
+  const rows = rowsOf(buildSettings(fakeFacade(DEPENDENT, { engineId: "praisonai-ts" })));
+  const row = value(rows, "baseUrl");
+  assert.equal(row.kind, "value");
+  assert.equal(row.kind === "value" && row.applies, false, "nothing reads it under this engine");
+  // The LABEL of the controlling setting, not its key: a user sent hunting for
+  // `engineId` on a screen that only ever says "Engine" has been sent nowhere.
+  assert.deepEqual(row.kind === "value" ? row.inactiveBecause : null, {
+    label: "Engine",
+    value: "remote-http",
+  });
+});
+
+test("the same setting applies once its switch is on -- the pair", () => {
+  // Without this, a row hard-wired to `applies: false` would satisfy the test
+  // above and the address would be permanently uneditable -- which is the
+  // recovery path a phone depends on (#4694).
+  const rows = rowsOf(buildSettings(fakeFacade(DEPENDENT, { engineId: "remote-http" })));
+  const row = value(rows, "baseUrl");
+  assert.equal(row.kind === "value" && row.applies, true);
+  assert.equal(row.kind === "value" ? row.inactiveBecause : "x", null);
+});
+
+test("a setting with no dependency always applies", () => {
+  // Nearly every def. A default of `applies: false` would switch the whole
+  // screen off at once.
+  for (const row of rowsOf(buildSettings(fakeFacade(DEFS)))) {
+    if (row.kind !== "value") continue;
+    assert.equal(row.applies, true, `${row.key} has no dependency and must apply`);
+  }
+});
+
+test("a dependency the DEFAULT already satisfies applies before anyone touches it", () => {
+  // Read through `get` and not `isSet`: a def's default is a live value -- the
+  // engine really is remote-http on first launch -- so asking whether the
+  // controlling setting had been CHANGED would report the address inactive on
+  // a screen where it is the only thing that works.
+  const rows = rowsOf(buildSettings(fakeFacade(DEPENDENT)));
+  assert.equal(value(rows, "baseUrl").kind === "value", true);
+  const row = value(rows, "baseUrl");
+  assert.equal(row.kind === "value" && row.applies, true, "the default engine is the remote one");
+});
