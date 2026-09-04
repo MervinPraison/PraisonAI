@@ -179,6 +179,83 @@ def test_lost_run_notice_falls_back_without_outbox(monkeypatch):
     assert called["session_id"] == "run:r1"
 
 
+def test_recover_orphaned_runs_marks_delivered_on_success(monkeypatch):
+    """A successful wake-back marks the ledger delivered (exactly-once).
+
+    Issue #4830: recover_orphans now re-surfaces every *undelivered* LOST run
+    so a failed notice retries on the next boot. The gateway must therefore
+    mark a run delivered once its notice lands, or a delivered run would be
+    re-notified on every subsequent boot.
+    """
+    from praisonaiagents.runs import RunRecord, RunStatus
+
+    lost = [
+        RunRecord(run_id="ok", channel="telegram", thread_id="1",
+                  status=RunStatus.LOST),
+        RunRecord(run_id="fail", channel="telegram", thread_id="2",
+                  status=RunStatus.LOST),
+    ]
+
+    class _FakeLedger:
+        def __init__(self):
+            self.marked = []
+
+        def recover_orphans(self):
+            return lost
+
+        def mark_delivered(self, run_id):
+            self.marked.append(run_id)
+
+        def close(self):
+            pass
+
+    ledger = _FakeLedger()
+    gateway = _make_gateway()
+    monkeypatch.setattr(gateway, "_open_run_ledger", lambda: ledger)
+
+    async def _fake_notice(channel_target, text, run_id):
+        # "ok" delivers; "fail" does not (left undelivered for retry).
+        return run_id == "ok"
+
+    gateway._deliver_lost_run_notice = _fake_notice
+
+    recovered = asyncio.run(gateway._recover_orphaned_runs())
+
+    assert recovered == 1
+    # Only the delivered run is marked; the failed one stays undelivered so a
+    # later boot's recover_orphans returns it again.
+    assert ledger.marked == ["ok"]
+
+
+def test_recover_orphaned_runs_marks_delivered_when_no_route(monkeypatch):
+    """A run with no origin route is marked delivered to stop re-surfacing."""
+    from praisonaiagents.runs import RunRecord, RunStatus
+
+    lost = [RunRecord(run_id="orphan", channel="", status=RunStatus.LOST)]
+
+    class _FakeLedger:
+        def __init__(self):
+            self.marked = []
+
+        def recover_orphans(self):
+            return lost
+
+        def mark_delivered(self, run_id):
+            self.marked.append(run_id)
+
+        def close(self):
+            pass
+
+    ledger = _FakeLedger()
+    gateway = _make_gateway()
+    monkeypatch.setattr(gateway, "_open_run_ledger", lambda: ledger)
+
+    recovered = asyncio.run(gateway._recover_orphaned_runs())
+
+    assert recovered == 0
+    assert ledger.marked == ["orphan"]
+
+
 def test_recover_orphaned_runs_survives_recover_error(monkeypatch):
     """A ledger whose recover_orphans raises degrades to a no-op, not a crash."""
     class _BrokenLedger:

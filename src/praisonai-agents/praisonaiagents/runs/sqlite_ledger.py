@@ -39,10 +39,18 @@ CREATE TABLE IF NOT EXISTS runs (
     terminal_outcome TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    metadata TEXT
+    metadata TEXT,
+    delivered INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 """
+
+#: Added after the initial release; applied on open so a ledger.db created by
+#: an older version gains the exactly-once delivery bookkeeping column without
+#: a destructive migration.
+_MIGRATIONS = (
+    "ALTER TABLE runs ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0",
+)
 
 
 def _dump_metadata(metadata: object) -> str:
@@ -97,6 +105,18 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 except sqlite3.OperationalError:  # pragma: no cover - defensive
                     pass
             self._conn.executescript(_SCHEMA)
+            # Bring an older ledger.db up to the current schema. Each migration
+            # is additive and idempotent: re-adding an existing column raises
+            # OperationalError("duplicate column name") which we swallow. Any
+            # OTHER OperationalError (locked DB, disk full, ...) means the
+            # column may be genuinely absent — re-raise so startup fails loudly
+            # instead of leaving reads/upserts to fail later on a missing column.
+            for stmt in _MIGRATIONS:
+                try:
+                    self._conn.execute(stmt)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     # ── public API (RunLedgerProtocol) ────────────────────────────────
 
@@ -109,8 +129,9 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 """
                 INSERT INTO runs (
                     run_id, agent_id, channel, thread_id, status, progress,
-                    terminal_outcome, created_at, updated_at, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    terminal_outcome, created_at, updated_at, metadata,
+                    delivered
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     agent_id=excluded.agent_id,
                     channel=excluded.channel,
@@ -119,7 +140,8 @@ class SQLiteRunLedger(RunLedgerProtocol):
                     progress=excluded.progress,
                     terminal_outcome=excluded.terminal_outcome,
                     updated_at=excluded.updated_at,
-                    metadata=excluded.metadata
+                    metadata=excluded.metadata,
+                    delivered=excluded.delivered
                 """,
                 (
                     data["run_id"],
@@ -132,6 +154,7 @@ class SQLiteRunLedger(RunLedgerProtocol):
                     data["created_at"],
                     data["updated_at"],
                     _dump_metadata(data["metadata"]),
+                    1 if data["delivered"] else 0,
                 ),
             )
 
@@ -165,11 +188,19 @@ class SQLiteRunLedger(RunLedgerProtocol):
         return [self._row_to_record(r) for r in rows]
 
     def recover_orphans(self) -> List[RunRecord]:
-        """Mark still-active runs as ``LOST`` and return the affected records.
+        """Mark still-active runs as ``LOST`` and return the undelivered ones.
 
         Called on gateway boot: any run left in an active status belonged to a
         process that exited without recording a terminal outcome. They are
         reconciled to ``LOST`` so the gateway can notify their origin channels.
+
+        Returns every ``LOST`` run whose terminal outcome has **not** yet been
+        delivered — both the runs reconciled in *this* call and any left
+        undelivered by a prior boot (a delivery that failed or the process that
+        died again before :meth:`mark_delivered`). This makes a transient
+        transport failure automatically retryable on the next boot instead of a
+        permanent silence, while :meth:`mark_delivered` keeps it exactly-once:
+        an already-delivered run is filtered out and never woken twice.
         """
         placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
         active_values = [s.value for s in ACTIVE_STATUSES]
@@ -190,9 +221,15 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 """,
                 [RunStatus.LOST.value, outcome, now, *active_values],
             )
+            # Return ALL undelivered LOST runs, not just the ones reconciled in
+            # this call: a LOST run whose delivery previously failed (or whose
+            # process died before mark_delivered) is still owed a wake-back, so
+            # it must be retried. ``mark_delivered`` guarantees exactly-once by
+            # flipping ``delivered = 1``; delivered rows are excluded here.
             rows = self._conn.execute(
-                "SELECT * FROM runs WHERE status = ? AND updated_at = ?",
-                (RunStatus.LOST.value, now),
+                "SELECT * FROM runs WHERE status = ? AND delivered = 0 "
+                "ORDER BY created_at ASC",
+                (RunStatus.LOST.value,),
             ).fetchall()
             recovered = [self._row_to_record(r) for r in rows]
         if recovered:
@@ -201,6 +238,21 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 len(recovered),
             )
         return recovered
+
+    def mark_delivered(self, run_id: str) -> None:
+        """Record that ``run_id``'s terminal outcome reached its origin.
+
+        The durable half of the exactly-once wake-back guarantee (see
+        :func:`~praisonaiagents.runs.protocols.notify_recovered`): once set,
+        a subsequent :meth:`recover_orphans` never returns this run again, so a
+        restart cannot re-notify an already-delivered outcome.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE runs SET delivered = 1, updated_at = ? "
+                "WHERE run_id = ?",
+                (time.time(), run_id),
+            )
 
     def close(self) -> None:
         """Close the underlying database connection."""
@@ -230,5 +282,6 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "metadata": metadata,
+                "delivered": bool(row["delivered"]),
             }
         )

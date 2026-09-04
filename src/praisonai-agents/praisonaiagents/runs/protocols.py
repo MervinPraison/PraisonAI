@@ -28,6 +28,8 @@ __all__ = [
     "RunStatus",
     "RunRecord",
     "RunLedgerProtocol",
+    "TerminalOutcomeDelivererProtocol",
+    "notify_recovered",
     "ACTIVE_STATUSES",
     "TERMINAL_STATUSES",
 ]
@@ -97,6 +99,13 @@ class RunRecord:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    #: Whether this run's terminal outcome has been delivered back to its
+    #: origin ``channel``/``thread_id``. Enables exactly-once wake-back: a run
+    #: already ``delivered`` is never re-notified, and a terminal/recovered run
+    #: not yet ``delivered`` is a visible, retryable non-outcome rather than a
+    #: silent one. ``False`` preserves prior behaviour when no deliverer wires
+    #: the seam (see :func:`notify_recovered`).
+    delivered: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise to a plain dict (JSON/SQLite friendly)."""
@@ -111,6 +120,7 @@ class RunRecord:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "metadata": dict(self.metadata or {}),
+            "delivered": bool(self.delivered),
         }
 
     @classmethod
@@ -135,6 +145,7 @@ class RunRecord:
             created_at=float(data.get("created_at", time.time())),
             updated_at=float(data.get("updated_at", time.time())),
             metadata=dict(data.get("metadata") or {}),
+            delivered=bool(data.get("delivered", False)),
         )
 
 
@@ -167,3 +178,70 @@ class RunLedgerProtocol(Protocol):
         gateway can wake their origin channels.
         """
         ...
+
+    def mark_delivered(self, run_id: str) -> None:
+        """Record that ``run_id``'s terminal outcome reached its origin.
+
+        The exactly-once bookkeeping half of the wake-back guarantee: once a
+        terminal/recovered run is delivered, this marks it so a later
+        :func:`notify_recovered` (e.g. on the next restart) never re-notifies.
+        """
+        ...
+
+
+@runtime_checkable
+class TerminalOutcomeDelivererProtocol(Protocol):
+    """Transport that wakes a run's origin channel with its terminal outcome.
+
+    Core owns the *guarantee* (a terminal/recovered run is delivered exactly
+    once); the wrapper supplies only this concrete transport. Implementations
+    send ``record.terminal_outcome`` to ``record.channel``/``record.thread_id``
+    and return whether the send landed, so a failure is recorded and retried
+    rather than silently dropped.
+    """
+
+    async def deliver_terminal(self, record: RunRecord) -> bool:
+        """Deliver ``record``'s terminal outcome to its origin channel.
+
+        Returns ``True`` when the outcome reached the origin, ``False`` when it
+        could not (so the run stays undelivered and is retried next time).
+        """
+        ...
+
+
+async def notify_recovered(
+    ledger: "RunLedgerProtocol",
+    deliverer: "TerminalOutcomeDelivererProtocol",
+) -> int:
+    """Guarantee every recovered ``LOST`` run wakes its origin, exactly once.
+
+    Closes the loop the ledger only *documents*: :meth:`recover_orphans`
+    reconciles orphaned runs to ``LOST`` and returns them so their origin can
+    be told the run did not finish — but nothing in core enforced that the
+    telling actually happened. This binder does: for each recovered record it
+    invokes ``deliverer.deliver_terminal`` and, only on success, marks the run
+    ``delivered`` via :meth:`RunLedgerProtocol.mark_delivered`. A delivery that
+    fails is left undelivered (a visible, retryable non-outcome) rather than
+    silently skipped.
+
+    Mirrors :meth:`BackgroundJobManager.reconcile_on_start`'s ``redeliver``
+    seam. Best-effort per record: a transport that raises is treated as a
+    failed (retryable) delivery, never crashing recovery for the other runs.
+
+    Args:
+        ledger: The durable ledger to reconcile and record delivery against.
+        deliverer: The concrete channel transport (supplied by the wrapper).
+
+    Returns:
+        The number of recovered runs successfully delivered this call.
+    """
+    delivered = 0
+    for record in ledger.recover_orphans():
+        try:
+            ok = await deliverer.deliver_terminal(record)
+        except Exception:  # noqa: BLE001 — a transport error is a retryable miss
+            ok = False
+        if ok:
+            ledger.mark_delivered(record.run_id)
+            delivered += 1
+    return delivered
