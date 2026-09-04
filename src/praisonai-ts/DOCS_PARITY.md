@@ -19,18 +19,18 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 106 | 7 | 2338 |
+| ✅ Agent | 106 | 7 | 2414 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 281 |
 | ✅ Audio | 8 | 1 | 162 |
-| ✅ Auto Generation | 16 | 3 | 620 |
+| ✅ Auto Generation | 16 | 3 | 618 |
 | ✅ Autonomy | 5 | 1 | 164 |
 | ✅ Bots | 14 | 1 | 184 |
 | ✅ Budget | 2 | 1 | 197 |
 | ✅ CLI | 14 | 1 | 159 |
 | ✅ Caching | 2 | 1 | 249 |
 | ✅ Callbacks | 3 | 1 | 211 |
-| ✅ Chunking | 3 | 2 | 299 |
+| ✅ Chunking | 3 | 2 | 298 |
 | ✅ Citations | 3 | 1 | 156 |
 | ✅ Code Execution | 9 | 4 | 464 |
 | ✅ Conditions | 1 | 1 | 372 |
@@ -39,7 +39,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 17 | 2 | 469 |
 | ✅ Display | 22 | 1 | 342 |
-| ✅ Embeddings | 13 | 3 | 813 |
+| ✅ Embeddings | 13 | 3 | 810 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 6 | 1 | 159 |
@@ -48,11 +48,11 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
 | ✅ Guardrails | 15 | 3 | 744 |
-| ✅ Handoffs | 16 | 1 | 218 |
+| ✅ Handoffs | 16 | 1 | 262 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
 | ✅ Jobs | 8 | 1 | 156 |
-| ✅ Knowledge | 37 | 2 | 312 |
+| ✅ Knowledge | 37 | 2 | 352 |
 | ✅ LLM | 29 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 180 |
 | ✅ MCP | 21 | 4 | 870 |
@@ -80,7 +80,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Sessions | 19 | 2 | 433 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
-| ✅ Tasks | 8 | 1 | 165 |
+| ✅ Tasks | 8 | 1 | 169 |
 | ✅ Teams | 1 | 1 | 191 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |

@@ -18,14 +18,14 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 56 | 17845 |
+| ✅ Agent | 22 | 56 | 17846 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 7 | 3531 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3747 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 33 | 13860 |
+| ✅ Bots | 7 | 33 | 13864 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 123 | 38136 |
 | ✅ Chunking | 2 | 2 | 420 |
@@ -43,12 +43,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 86 | 31981 |
+| ✅ Gateway | 7 | 86 | 32013 |
 | ✅ Guardrails | 4 | 4 | 2288 |
 | ✅ Handoffs | 11 | 6 | 2674 |
 | ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 17 | 5226 |
+| ✅ Knowledge | 4 | 17 | 5306 |
 | ✅ LLM | 3 | 15 | 5783 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 62 | 14436 |
@@ -59,9 +59,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1273 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 7 | 1825 |
-| ✅ Plugins | 8 | 5 | 3120 |
+| ✅ Plugins | 8 | 5 | 3124 |
 | ✅ Prompts | 2 | 9 | 2011 |
-| ✅ Providers | 1 | 57 | 8201 |
+| ✅ Providers | 1 | 57 | 8219 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7364 lines)
+- ℹ️ Database (43 docs, 7459 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 
 ---
