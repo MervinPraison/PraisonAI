@@ -15,7 +15,7 @@ import { notYetHonoured } from '../utils/parity-notice';
 
 /** The minimum a team memory store must do. Matches `Agent`'s memory contract. */
 export interface TeamMemoryStore {
-  search(query: string, limit?: number): Promise<Array<{ entry: { content: string; role: string }; score: number }>>;
+  search(query: string, limit?: number): Promise<Array<{ entry: { content: string; role: string; metadata?: Record<string, any> }; score: number }>>;
   add(content: string, role: 'user' | 'assistant' | 'system', metadata?: Record<string, any>): Promise<unknown>;
 }
 
@@ -116,16 +116,28 @@ export class TeamMemory {
     const store = await this.ensureStore();
     if (!store) return '';
     try {
-      const hits = await store.search(prompt, limit);
+      // Search wide, then keep only this team's own entries. A store shared
+      // across teams/users tags each write with its userId (see `remember`);
+      // untagged entries predate scoping and stay visible. Without this filter
+      // a reused store leaks one user's memories into another's prompt.
+      const hits = await store.search(prompt, Math.max(limit, 10));
       const lines = hits
+        .filter((hit) => this.ownedByTeam(hit?.entry?.metadata))
         .map((hit) => (hit?.entry?.content ?? '').trim())
         .filter((content) => content.length > 0)
+        .slice(0, limit)
         .map((content) => `• ${content}`);
       return lines.join('\n');
     } catch (error) {
       await Logger.warn('Team memory recall failed:', error);
       return '';
     }
+  }
+
+  /** An entry belongs to this team when its userId matches, or it carries none. */
+  private ownedByTeam(metadata?: Record<string, any>): boolean {
+    const owner = metadata?.userId ?? metadata?.user_id;
+    return owner === undefined || owner === null || owner === this.userId;
   }
 
   /** Write a finished task back to the shared store. */
