@@ -151,10 +151,20 @@ describe('Handoff execution limits (Python parity)', () => {
       const a = new Handoff({ agent: first, maxConcurrent: 1 });
       const b = new Handoff({ agent: second, maxConcurrent: 1 });
 
-      const started = Date.now();
-      await Promise.all([a.execute(ctx()), b.execute(ctx())]);
-      // Both ran concurrently: nowhere near the 40ms a shared gate would cost.
-      expect(Date.now() - started).toBeLessThan(38);
+      // Prove concurrency by observed overlap rather than a wall-clock ceiling:
+      // a shared gate would serialise them and the two would never be active at
+      // once. Timing budgets flake on a loaded CI worker; overlap does not.
+      let bothActive = false;
+      const watch = setInterval(() => {
+        if (first.active > 0 && second.active > 0) bothActive = true;
+      }, 1);
+      (watch as unknown as { unref?: () => void }).unref?.();
+      try {
+        await Promise.all([a.execute(ctx()), b.execute(ctx())]);
+      } finally {
+        clearInterval(watch);
+      }
+      expect(bothActive).toBe(true);
       expect(first.peak).toBe(1);
       expect(second.peak).toBe(1);
     });
