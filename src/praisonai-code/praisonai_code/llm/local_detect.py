@@ -17,6 +17,7 @@ import time
 import urllib.request
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlsplit
 
 # Total time budget for a probe so the credential/first-run hot path is never
 # stalled when nothing is listening. Kept small deliberately.
@@ -45,8 +46,10 @@ _DEFAULT_LOCAL_ENDPOINTS = (
 )
 
 # Env override for the candidate list: a comma/whitespace separated list of
-# host[:port] or full URLs. Extends nothing — it replaces the defaults so a user
-# can pin a non-standard host or narrow the set. Set to empty to disable probing.
+# host[:port] or full URLs (an explicit URL path prefix such as ``.../openai``
+# is preserved and probed at ``<path>/v1/models``). Extends nothing — it
+# replaces the defaults so a user can pin a non-standard host or narrow the set.
+# Set to empty to disable probing.
 _LOCAL_ENDPOINTS_ENV = "PRAISONAI_LOCAL_ENDPOINTS"
 
 
@@ -70,6 +73,19 @@ def _root_host(host: str) -> str:
     if host.endswith("/v1"):
         host = host[: -len("/v1")]
     return host.rstrip("/")
+
+
+def _has_path_prefix(host: str) -> bool:
+    """Return ``True`` if ``host`` is mounted under a non-``/v1`` URL path.
+
+    Ollama's native ``/api/tags`` lives at the server root, so it is only
+    meaningful for a bare host (optionally suffixed with ``/v1``). An endpoint
+    mounted under an arbitrary path (e.g. ``http://host:8000/openai``) must be
+    treated as OpenAI-compatible only and probed at ``<path>/v1/models`` — never
+    at a rewritten ``<path>/api/tags`` root.
+    """
+    path = urlsplit(_with_scheme(host)).path.rstrip("/")
+    return path not in ("", "/v1")
 
 
 def _normalise_base(host: str) -> str:
@@ -140,16 +156,21 @@ def _probe_ollama_tags(host: str) -> Optional[str]:
     ending in ``/v1`` is not mangled into ``/v1/api/tags``). Falls back to the
     OpenAI-compatible ``/v1/models`` so a generic local server (llama.cpp,
     LM Studio, vLLM) that only speaks the OpenAI API is still detected.
-    """
-    root = _root_host(host)
 
-    data = _get_json(root + "/api/tags")
-    if data is not None:
-        models = data.get("models")
-        if isinstance(models, list) and models:
-            name = models[0].get("name") if isinstance(models[0], dict) else None
-            if isinstance(name, str) and name:
-                return f"ollama/{name}"
+    When ``host`` carries an explicit URL path prefix (e.g. ``.../openai``), the
+    Ollama-native ``/api/tags`` probe is skipped — that path is preserved and
+    only the OpenAI-compatible ``<path>/v1/models`` is consulted, so a runtime
+    mounted beneath an arbitrary path is detected and its base URL kept intact.
+    """
+    if not _has_path_prefix(host):
+        root = _root_host(host)
+        data = _get_json(root + "/api/tags")
+        if data is not None:
+            models = data.get("models")
+            if isinstance(models, list) and models:
+                name = models[0].get("name") if isinstance(models[0], dict) else None
+                if isinstance(name, str) and name:
+                    return f"ollama/{name}"
 
     data = _get_json(_normalise_base(host) + "/models")
     if data is not None:

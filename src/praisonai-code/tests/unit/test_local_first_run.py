@@ -238,6 +238,34 @@ def test_env_override_replaces_candidate_list(clean_env, monkeypatch):
     assert probed == ["http://127.0.0.1:2222", "http://127.0.0.1:4321"]
 
 
+def test_path_prefixed_endpoint_preserves_path_and_skips_api_tags(
+    clean_env, monkeypatch
+):
+    """A runtime mounted under a path is probed at <path>/v1/models only.
+
+    The explicit URL path must be preserved in both the probe URL and the
+    returned base URL, and the Ollama-native /api/tags root probe must be
+    skipped so the path is never rewritten.
+    """
+    clean_env.setenv("PRAISONAI_LOCAL_ENDPOINTS", "http://127.0.0.1:8000/openai")
+    urls = []
+
+    def _fake_get_json(url):
+        urls.append(url)
+        if url.endswith("/openai/v1/models"):
+            return {"data": [{"id": "prefixed-model"}]}
+        return None
+
+    monkeypatch.setattr(local_detect, "_get_json", _fake_get_json)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert result.model == "openai/prefixed-model"
+    assert result.base_url == "http://127.0.0.1:8000/openai/v1"
+    assert "http://127.0.0.1:8000/openai/v1/models" in urls
+    # The Ollama-native /api/tags root probe must not fire for a path prefix.
+    assert not any(u.endswith("/api/tags") for u in urls)
+
+
 def test_env_override_empty_disables_probing(clean_env, monkeypatch):
     """An empty PRAISONAI_LOCAL_ENDPOINTS disables probing entirely."""
     def _boom(host):
