@@ -6354,24 +6354,49 @@ class WebSocketGateway:
                 logger.exception("run ledger recover_orphans failed on boot")
                 return 0
             recovered = 0
+            mark_delivered = getattr(ledger, "mark_delivered", None)
             for record in lost or []:
                 channel_target = self._channel_target_for_run(record)
                 if not channel_target:
+                    # No route to wake: mark delivered so the ledger does not
+                    # re-surface an undeliverable run on every subsequent boot.
+                    if callable(mark_delivered):
+                        try:
+                            mark_delivered(record.run_id)
+                        except Exception:  # pragma: no cover - defensive
+                            logger.exception(
+                                "mark_delivered failed for run %s",
+                                record.run_id,
+                            )
                     continue
                 outcome = record.terminal_outcome or "run interrupted by restart"
                 notice = (
                     "A background run was interrupted by a restart and could "
                     f"not be recovered ({outcome}). Please resend your request."
                 )
+                ok = False
                 try:
-                    await self._deliver_lost_run_notice(
+                    ok = await self._deliver_lost_run_notice(
                         channel_target, notice, record.run_id,
                     )
                 except Exception:
                     logger.exception(
                         "Failed to notify origin for lost run %s", record.run_id,
                     )
-                recovered += 1
+                # Exactly-once: only mark delivered once the notice actually
+                # landed (or was durably enqueued). A failed/raising delivery
+                # leaves ``delivered = 0`` so recover_orphans retries it on the
+                # next boot instead of dropping the user's wake-back forever.
+                if ok:
+                    if callable(mark_delivered):
+                        try:
+                            mark_delivered(record.run_id)
+                        except Exception:  # pragma: no cover - defensive
+                            logger.exception(
+                                "mark_delivered failed for run %s",
+                                record.run_id,
+                            )
+                    recovered += 1
             if recovered:
                 logger.info(
                     "Recovered %d orphaned ledger run(s) on boot", recovered,

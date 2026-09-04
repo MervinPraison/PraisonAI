@@ -106,13 +106,17 @@ class SQLiteRunLedger(RunLedgerProtocol):
                     pass
             self._conn.executescript(_SCHEMA)
             # Bring an older ledger.db up to the current schema. Each migration
-            # is additive and idempotent-by-failure: a column that already
-            # exists raises OperationalError, which we ignore.
+            # is additive and idempotent: re-adding an existing column raises
+            # OperationalError("duplicate column name") which we swallow. Any
+            # OTHER OperationalError (locked DB, disk full, ...) means the
+            # column may be genuinely absent — re-raise so startup fails loudly
+            # instead of leaving reads/upserts to fail later on a missing column.
             for stmt in _MIGRATIONS:
                 try:
                     self._conn.execute(stmt)
-                except sqlite3.OperationalError:
-                    pass
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     # ── public API (RunLedgerProtocol) ────────────────────────────────
 
@@ -184,11 +188,19 @@ class SQLiteRunLedger(RunLedgerProtocol):
         return [self._row_to_record(r) for r in rows]
 
     def recover_orphans(self) -> List[RunRecord]:
-        """Mark still-active runs as ``LOST`` and return the affected records.
+        """Mark still-active runs as ``LOST`` and return the undelivered ones.
 
         Called on gateway boot: any run left in an active status belonged to a
         process that exited without recording a terminal outcome. They are
         reconciled to ``LOST`` so the gateway can notify their origin channels.
+
+        Returns every ``LOST`` run whose terminal outcome has **not** yet been
+        delivered — both the runs reconciled in *this* call and any left
+        undelivered by a prior boot (a delivery that failed or the process that
+        died again before :meth:`mark_delivered`). This makes a transient
+        transport failure automatically retryable on the next boot instead of a
+        permanent silence, while :meth:`mark_delivered` keeps it exactly-once:
+        an already-delivered run is filtered out and never woken twice.
         """
         placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
         active_values = [s.value for s in ACTIVE_STATUSES]
@@ -209,13 +221,15 @@ class SQLiteRunLedger(RunLedgerProtocol):
                 """,
                 [RunStatus.LOST.value, outcome, now, *active_values],
             )
-            # Return only undelivered LOST runs: a run already delivered on a
-            # prior boot must not be woken twice (exactly-once). Newly-lost
-            # rows default ``delivered = 0`` so they are always included.
+            # Return ALL undelivered LOST runs, not just the ones reconciled in
+            # this call: a LOST run whose delivery previously failed (or whose
+            # process died before mark_delivered) is still owed a wake-back, so
+            # it must be retried. ``mark_delivered`` guarantees exactly-once by
+            # flipping ``delivered = 1``; delivered rows are excluded here.
             rows = self._conn.execute(
-                "SELECT * FROM runs WHERE status = ? AND updated_at = ? "
-                "AND delivered = 0",
-                (RunStatus.LOST.value, now),
+                "SELECT * FROM runs WHERE status = ? AND delivered = 0 "
+                "ORDER BY created_at ASC",
+                (RunStatus.LOST.value,),
             ).fetchall()
             recovered = [self._row_to_record(r) for r in rows]
         if recovered:

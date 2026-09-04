@@ -129,7 +129,11 @@ def test_recover_orphans_marks_active_as_lost(ledger):
     assert ledger.get("a").terminal_outcome
     # Terminal runs are untouched.
     assert ledger.get("b").status == RunStatus.SUCCEEDED
-    # Idempotent: nothing active left to recover.
+    # A LOST run stays owed a wake-back until it is delivered: recover_orphans
+    # re-surfaces it (retry) rather than dropping it. Once delivered, it is
+    # never returned again — the exactly-once boundary is mark_delivered.
+    assert {r.run_id for r in ledger.recover_orphans()} == {"a"}
+    ledger.mark_delivered("a")
     assert ledger.recover_orphans() == []
 
 
@@ -275,16 +279,16 @@ async def test_notify_recovered_failed_delivery_is_retryable(ledger):
     assert ledger.get("a").status == RunStatus.LOST
     assert ledger.get("a").delivered is False
 
-    # It is still active in the ledger's eyes for delivery: a later working
-    # transport delivers it (the LOST row stays undelivered until it lands).
+    # Retry is automatic on the next recovery pass: recover_orphans returns
+    # every undelivered LOST run (not only freshly-reconciled ones), so a
+    # later working transport delivers it without any manual re-arming.
     working = _RecordingDeliverer(succeed=True)
-    # recover_orphans only returns freshly-reconciled active runs, so re-arm
-    # the run to active to model the retry path.
-    rec = ledger.get("a")
-    rec.status = RunStatus.RUNNING
-    ledger.upsert(rec)
     assert await notify_recovered(ledger, working) == 1
+    assert {r.run_id for r in working.delivered} == {"a"}
     assert ledger.get("a").delivered is True
+
+    # And now that it is delivered, it is never surfaced again (exactly-once).
+    assert await notify_recovered(ledger, _RecordingDeliverer(succeed=True)) == 0
 
 
 @pytest.mark.asyncio
@@ -313,4 +317,66 @@ def test_mark_delivered_persists_across_reopen():
 
         lg2 = SQLiteRunLedger(db_path=path)
         assert lg2.get("r1").delivered is True
+        lg2.close()
+
+
+def test_migration_adds_delivered_column_to_old_ledger():
+    # An older ledger.db has no ``delivered`` column. Opening it must apply the
+    # additive migration so reads/upserts/recovery keep working.
+    import sqlite3
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "ledger.db")
+        conn = sqlite3.connect(path)
+        conn.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL DEFAULT '',
+                channel TEXT NOT NULL DEFAULT '',
+                thread_id TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                progress TEXT,
+                terminal_outcome TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                metadata TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO runs (run_id, status, created_at, updated_at) "
+            "VALUES ('old', 'running', 1.0, 1.0)",
+        )
+        conn.commit()
+        conn.close()
+
+        lg = SQLiteRunLedger(db_path=path)
+        got = lg.get("old")
+        assert got is not None
+        assert got.delivered is False  # migrated column defaults to 0
+        # Recovery still works on the migrated ledger.
+        recovered = lg.recover_orphans()
+        assert {r.run_id for r in recovered} == {"old"}
+        lg.close()
+
+
+def test_recover_orphans_retries_undelivered_lost_across_reopen():
+    # A LOST run left undelivered by a prior boot is re-surfaced by a later
+    # recover_orphans (retry), while a delivered one is not (exactly-once).
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "ledger.db")
+        lg1 = SQLiteRunLedger(db_path=path)
+        lg1.upsert(RunRecord(run_id="undelivered", status=RunStatus.RUNNING))
+        lg1.upsert(RunRecord(run_id="delivered", status=RunStatus.RUNNING))
+        first = lg1.recover_orphans()
+        assert {r.run_id for r in first} == {"undelivered", "delivered"}
+        lg1.mark_delivered("delivered")
+        lg1.close()
+
+        # Restart: the undelivered LOST run is owed a retry; the delivered one
+        # must never be woken again.
+        lg2 = SQLiteRunLedger(db_path=path)
+        again = lg2.recover_orphans()
+        assert {r.run_id for r in again} == {"undelivered"}
         lg2.close()
