@@ -25,7 +25,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3747 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 33 | 13864 |
+| ✅ Bots | 7 | 33 | 13868 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 123 | 38138 |
 | ✅ Chunking | 2 | 2 | 424 |
@@ -48,7 +48,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2674 |
 | ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 17 | 5320 |
+| ✅ Knowledge | 4 | 18 | 5555 |
 | ✅ LLM | 3 | 15 | 5859 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 62 | 14436 |
