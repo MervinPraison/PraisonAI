@@ -254,6 +254,70 @@ button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .empty { margin: auto; color: var(--soft); text-align: center; padding: 2rem 1rem; }
+
+/*
+ * The empty chat: the welcome, and the "you need a key" guidance.
+ *
+ * A SIBLING of `.transcript`, not a child -- app/src/main.ts says why (three
+ * separate code paths would delete or displace it in there). That makes the
+ * height the one thing this stylesheet has to get right: `.transcript` is
+ * `flex: 1`, so with a second `flex: 1` beside it the two would split the
+ * screen and the panel would sit in the lower half with a tall blank box above
+ * it. While the panel is up, the transcript gives up its stretch and shrinks to
+ * its content -- which is nothing, or the "engine is not answering" notice, and
+ * that notice must stay VISIBLE above the panel rather than being hidden with
+ * the rows it has none of.
+ *
+ * `data-empty` is written by main.ts and carries the KIND, so a future state
+ * can be styled differently without another attribute. The selector below only
+ * needs its presence.
+ *
+ * Colours are tokens, never literals: `--ink`, `--soft` and `--accent` are all
+ * redefined under `prefers-color-scheme: dark` at the top of this file, so the
+ * panel follows the device theme with no rule of its own. A hardcoded #14171c
+ * here would be invisible on the dark ground -- which is the whole reason the
+ * tokens exist.
+ */
+.screen[data-empty] .transcript { flex: 0 0 auto; }
+
+.empty-state {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  text-align: center;
+  /* The inline padding follows the safe area for the same reason every other
+     screen's does: a landscape cutout would otherwise clip the first and last
+     characters of every line. */
+  padding: 1.5rem calc(var(--inset-right) + 1.25rem)
+           1.5rem calc(var(--inset-left) + 1.25rem);
+}
+/* Stated explicitly, exactly as `.screen[hidden]` and `.setting-error[hidden]`
+   are: the author `display: flex` above beats the user agent's
+   `[hidden] { display: none }`, so without this line `emptyPanel.hidden = true`
+   does nothing and the welcome panel stays on screen underneath the
+   conversation. That is the same defect app/src/mount.ts hit, in a new place. */
+.empty-state[hidden] { display: none; }
+
+.empty-state .empty-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Muted, and narrow: a centred sentence running the full width of a phone is
+   read as a paragraph of prose rather than as one line of guidance. */
+.empty-state .empty-body {
+  margin: 0;
+  max-width: 30ch;
+  color: var(--soft);
+  font-size: .95rem;
+}
+.empty-state button { margin-top: .5rem; }
+.empty-state button[hidden] { display: none; }
 /*
  * A row in the chat list. `.row-chat` is the class `buildChatsScreen` emits;
  * this block was written as `.chat-row`, which the app has never painted, so

@@ -83,6 +83,18 @@ test("the table reproduces the literals that are hardcoded at render sites today
   assert.equal(en.routeSettings, "Settings");
   assert.equal(en.chatsEmpty, "No conversations yet.");
   assert.equal(en.emptyTranscript, "Ask something to begin.");
+  // The empty chat screen's own copy. Pinned like the rest: these are the two
+  // sentences a new user reads before anything else in the product, and they
+  // were reviewed as copy rather than typed into a render site.
+  assert.equal(en.emptyNeedsKeyTitle, "Add an API key to start");
+  assert.equal(
+    en.emptyNeedsKeyBody,
+    "PraisonAI answers using your own OpenAI account. Paste a key in Settings and this chat is ready.",
+  );
+  assert.equal(
+    en.emptyAbout,
+    "PraisonAI answers questions, explains things, and works through tasks with you.",
+  );
   assert.equal(en.crashed, "Something went wrong. Your conversations are saved.");
   assert.equal(en.bootFailed("no storage"), "PraisonAI could not start: no storage");
 });
@@ -216,4 +228,23 @@ test("every reason the decoder can produce has a sentence", () => {
   for (const reason of REASONS) {
     assert.notEqual(en.droppedReason(reason), reason, `${reason} has no sentence`);
   }
+});
+
+test("the key guidance says what to do, and names where", () => {
+  // The two facts it has to carry. Without the first it is a diagnosis; without
+  // the second the user is left hunting for the screen that takes a key -- and
+  // "Settings" is the word on the button they will be looking for once they get
+  // there. Asserted on the SENSE rather than the exact sentence so the copy can
+  // be reworded without the guarantee going quiet.
+  assert.match(en.emptyNeedsKeyTitle, /key/i);
+  assert.match(en.emptyNeedsKeyBody, /settings/i);
+  // And it must not be the raw provider sentence it replaces.
+  assert.equal(en.emptyNeedsKeyBody.includes("OPENAI_API_KEY"), false);
+});
+
+test("an empty chat with a key set is not told to get a key", () => {
+  // The pair. A welcome that mentioned a key would put the app's one blocking
+  // requirement in front of a user who has already met it.
+  assert.equal(/api key/i.test(`${en.emptyTranscript} ${en.emptyAbout}`), false);
+  assert.notEqual(en.emptyAbout.trim(), en.emptyNeedsKeyBody.trim());
 });

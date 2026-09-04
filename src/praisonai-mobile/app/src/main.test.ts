@@ -56,7 +56,7 @@ import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
 import { PROTOCOL_VERSION } from "../../protocol/src/version.ts";
-import { appEngines, mount } from "./main.ts";
+import { appEngines, mount, EMPTY_TITLE_ID } from "./main.ts";
 import { ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { createSettingsStore, facadeFor, type SettingsFacade } from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
@@ -2608,5 +2608,426 @@ test("the first render takes the boot indicator away", async () => {
   // emptied -- an indicator removed with nothing put in its place would pass
   // the assertion above while showing the blank page this all exists to fix.
   assert.ok(dom.find((n) => n.tagName === "TEXTAREA") !== null, "the composer replaced it");
+  await app?.dispose();
+});
+
+// ---- the empty chat screen, through the composition root --------------------
+//
+// Defects #3 and #8 were one screen: on a fresh launch the app rendered a
+// header, several hundred pixels of nothing, and a Send button, and the only
+// thing that ever mentioned the API key it cannot work without was the provider
+// SDK, after a message had been sent, in the words "The OPENAI_API_KEY
+// environment variable is missing or empty".
+//
+// `ui/src/transcript/empty-state.test.ts` owns the decision; these own the
+// WIRING, which is where every defect this file has ever found actually lived:
+// a pure function that is right and a composition root that calls it wrongly,
+// or not at all.
+
+/** The empty-state panel, or null when the app never built one. */
+const emptyPanel = (dom: ReturnType<typeof createFakeDom>) =>
+  dom.find((n) => n.className === "empty-state");
+
+/** The panel's words, or "" when it is absent or hidden -- which is what the
+ *  user sees in either case. */
+const emptyWords = (dom: ReturnType<typeof createFakeDom>): string => {
+  const panel = emptyPanel(dom);
+  return panel === null || panel.hidden ? "" : panel.textContent;
+};
+
+test("a fresh install is told it needs a key, on the first screen", async () => {
+  // Defect #3, end to end. `kind: "tauri"` is the device default, so the
+  // in-process engine is what would answer -- the engine that cannot answer
+  // anything without a key. Nothing is stored in the fake keychain.
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  // The keychain lookup is async; the guidance appears when it lands.
+  await settle();
+
+  const panel = emptyPanel(dom);
+  assert.ok(panel, `no empty state was built at all:\n${dom.text()}`);
+  assert.equal(panel.hidden, false, "the empty state must be on screen for a fresh install");
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), emptyWords(dom));
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyBody), emptyWords(dom));
+  await app?.dispose();
+});
+
+test("the key guidance offers a tap through to Settings", async () => {
+  // Saying a key is needed and leaving the user to find the screen that takes
+  // one is the same defect one step softer. The button goes through the SAME
+  // `navigate` intent every other route button does, so this asserts the screen
+  // actually changes rather than that a button exists.
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  const panel = emptyPanel(dom);
+  assert.ok(panel);
+  const button = panel.children.find((c) => c.tagName === "BUTTON");
+  assert.ok(button, `the guidance has no way out of it:\n${panel.textContent}`);
+  assert.equal(button.hidden, false);
+  assert.equal(button.dataset["route"], "settings");
+
+  dom.click(button as never);
+  await settle();
+  assert.ok(keyField(dom), `tapping the guidance did not reach Settings:\n${dom.text()}`);
+  await app?.dispose();
+});
+
+test("a device with a key stored is welcomed, not told to configure the app", async () => {
+  // The mutation this kills: showing the "needs a key" copy when a key IS set.
+  // Same platform, same engine, one difference -- and it is the state a
+  // returning user meets on every new chat for the life of the install.
+  const { dom, platform: web, secrets } = harness();
+  await secrets.set({ slot: "openai", account: "default" }, "sk-already-stored");
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  const words = emptyWords(dom);
+  assert.ok(words.includes(en.emptyTranscript), words);
+  assert.ok(words.includes(en.emptyAbout), words);
+  assert.equal(words.includes(en.emptyNeedsKeyTitle), false, "a configured user must not be told to configure");
+  const button = emptyPanel(dom)?.children.find((c) => c.tagName === "BUTTON");
+  assert.equal(button?.hidden, true, "there is nothing to fix, so there is no button");
+  await app?.dispose();
+});
+
+test("pasting a key in Settings clears the guidance from the chat behind it", async () => {
+  // The transition, which is the whole point of the guidance: the user does the
+  // one thing it asks and the screen it came from stops asking. A panel that
+  // only re-reads the keychain at boot would still be demanding a key on the
+  // chat screen immediately after one was saved.
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), "precondition: the guidance is up");
+
+  await openSettings(dom);
+  const field = keyField(dom);
+  assert.ok(field);
+  field.value = "sk-pasted";
+  dom.change(field as never);
+  await settle();
+
+  const words = emptyWords(dom);
+  assert.equal(words.includes(en.emptyNeedsKeyTitle), false, `still demanding a key:\n${words}`);
+  assert.ok(words.includes(en.emptyTranscript), words);
+  await app?.dispose();
+});
+
+test("the empty state goes the moment the transcript has anything in it", async () => {
+  // Defect #8's other half, and the constraint that matters most: the panel
+  // must not fight the user/assistant rows. `publish` is the one place rows
+  // arrive, so this drives a real turn over the fake transport rather than
+  // poking the DOM.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "Paris." }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+  assert.notEqual(emptyWords(dom), "", "precondition: an empty chat says something");
+
+  submit(dom, "capital of france?");
+  await settle(120);
+
+  assert.equal(emptyPanel(dom)?.hidden, true, `the empty state survived a conversation:\n${dom.text()}`);
+  // And the rows it was standing in for are there instead.
+  assert.ok(dom.find((n) => n.className.includes("row-user")), "the user's message must be on screen");
+  assert.ok(dom.text().includes("Paris."), dom.text());
+
+  // New chat empties the transcript, so the empty state comes back -- the same
+  // three resets that clear the rows must not leave a blank rectangle behind.
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+  assert.equal(emptyPanel(dom)?.hidden, false, `New chat left a blank screen:\n${dom.text()}`);
+  assert.ok(emptyWords(dom).includes(en.emptyTranscript), emptyWords(dom));
+  await app?.dispose();
+});
+
+test("the empty chat is announced, so it is not silent to a screen reader", async () => {
+  // An empty transcript is a `role="log"` with nothing in it. Without this the
+  // one screen a new user lands on has nothing at all to say to them.
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  const polite = dom.find((n) => n.getAttribute("aria-live") === "polite");
+  assert.ok(polite);
+  assert.ok(polite.textContent.includes(en.emptyNeedsKeyTitle), `polite region said "${polite.textContent}"`);
+  // The way out is in the sentence, not three tab stops away.
+  assert.ok(polite.textContent.includes(en.recoveryLabel("settings")), polite.textContent);
+  await app?.dispose();
+});
+
+test("the empty state is a named landmark, not an unlabelled block", async () => {
+  // `aria-labelledby` and NOT `aria-label`: a label on a container replaces its
+  // contents in the accessibility tree (a11y/names.ts rule 3), which would cost
+  // the reader the sentence and the button. A landmark pointing at an id that
+  // does not exist has no name at all, so the pair is asserted together.
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  const panel = emptyPanel(dom);
+  assert.ok(panel);
+  assert.equal(panel.getAttribute("role"), "region");
+  assert.equal(panel.getAttribute("aria-label"), null, "a label here would hide the panel's own words");
+  const labelledBy = panel.getAttribute("aria-labelledby");
+  assert.equal(labelledBy, EMPTY_TITLE_ID);
+  const heading = dom.find((n) => n.getAttribute("id") === labelledBy);
+  assert.ok(heading, "the landmark names an element that does not exist");
+  assert.equal(heading.textContent, en.emptyNeedsKeyTitle);
+  await app?.dispose();
+});
+
+test("presence is read with has(), never by faulting the key into the screen", async () => {
+  // ports/secrets.ts rule 2, applied to the new caller. The chat screen asks
+  // "is one configured?" and must not be able to answer it with `get()` -- and
+  // the value must never reach the rendered text, where a screenshot or a crash
+  // dump would pick it up.
+  const { dom, platform: web, secrets } = harness();
+  await secrets.set({ slot: "openai", account: "default" }, "sk-must-not-be-rendered");
+  const before = secrets.reads;
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  assert.equal(secrets.reads, before, "the empty state must ask presence, not read the value");
+  assert.equal(dom.text().includes("sk-must-not-be-rendered"), false);
+  await app?.dispose();
+});
+
+test("the boot indicator is gone before the empty state arrives -- neither, nor both", async () => {
+  // The one interaction between this change and #4845 worth pinning rather than
+  // assuming. `app/index.html` paints a wordmark and "Starting…" into #root on
+  // the first frame; `mount` clears #root and appends the chat screen in the
+  // same statement pair. The empty state lives INSIDE that screen, so it can
+  // only arrive with the swap -- never beside the indicator, and never leaving a
+  // frame with nothing on it.
+  //
+  // Both halves are asserted together, because either alone passes over the
+  // failure: "the indicator is gone" is satisfied by an app that renders
+  // nothing, and "the panel is up" is satisfied by an app that painted it
+  // underneath a leftover boot screen.
+  const { dom, platform: web } = harness();
+  const boot = dom.make("div");
+  boot.className = "boot";
+  boot.dataset["boot"] = "";
+  dom.root.append(boot);
+
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await settle();
+
+  assert.equal(
+    dom.find((n) => n.dataset["boot"] !== undefined),
+    null,
+    "the boot indicator must not survive alongside the empty state",
+  );
+  assert.equal(emptyPanel(dom)?.hidden, false, `nothing replaced the boot indicator:\n${dom.text()}`);
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), emptyWords(dom));
+  // And the indicator's own words are not still on the page under another name.
+  assert.equal(dom.text().includes("Starting"), false, dom.text());
+  await app?.dispose();
+});
+
+test("an engine that needs no key never asks for one", async () => {
+  // The web default is the remote engine, which authenticates at the server it
+  // talks to. Telling its user to paste an OpenAI key sends them to configure a
+  // credential nothing on this device reads.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+
+  const words = emptyWords(dom);
+  assert.notEqual(words, "", "an empty chat still has to say something");
+  assert.equal(words.includes(en.emptyNeedsKeyTitle), false, words);
+  assert.ok(words.includes(en.emptyAbout), words);
+  await app?.dispose();
+});
+
+test("the guidance follows the engine IN FORCE, not the engineId setting", async () => {
+  // The engine is selected once at boot and the controller holds that instance:
+  // switching `engineId` in Settings changes the setting but not the engine
+  // answering until the next launch. So the panel must read `app.engine.id` --
+  // the engine actually handling prompts -- and not the live setting, or it
+  // describes an engine other than the one the user's next message hits.
+  //
+  // Measured before the fix, the other way round: on a device with no key the
+  // guidance was up, setting `engineId` to the remote engine dropped it, and
+  // `app.engine.id` was still `praisonai-ts` -- so the app said no key was
+  // needed and the next message went to the engine that needs one.
+  const { dom, platform } = harness(); // web default: the remote engine is in force
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+  assert.equal(app?.engine.id, ENGINE_REMOTE_HTTP, "precondition: the remote engine is answering");
+  assert.equal(emptyWords(dom).includes(en.emptyNeedsKeyTitle), false, "precondition: no key demanded");
+
+  // Flip the persisted engine choice under the panel. The running engine does
+  // not change, so the guidance must not either.
+  await app!.settings.set("engineId", ENGINE_PRAISONAI_TS);
+  await settle();
+
+  // Then force a repaint through a path the user actually has. Asserting
+  // straight after the `set` would prove nothing: nothing repaints the panel on
+  // a settings write, so a version reading the SETTING would also still show
+  // the welcome here and the test would pass over the bug. New chat re-runs the
+  // empty state, which is where a wrong source of truth becomes visible.
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+
+  assert.equal(app?.engine.id, ENGINE_REMOTE_HTTP, "the engine in force must not have changed mid-session");
+  const words = emptyWords(dom);
+  assert.equal(
+    words.includes(en.emptyNeedsKeyTitle),
+    false,
+    `the panel demanded a key for an engine that is not the one running:\n${words}`,
+  );
+  await app?.dispose();
+});
+
+test("clearing a key while Settings is open is announced on return to chat", async () => {
+  // The polite region lives inside the chat screen, which is `hidden` while
+  // Settings is on top -- and a hidden element is out of the accessibility tree
+  // entirely, so a key removed there changes the empty state to needs-key
+  // against a region nobody is listening to. Marking it announced in that
+  // window would leave the "you now need a key" transition permanently
+  // unspoken. It must be said the moment chat is visible again -- reached here
+  // through the OS Back gesture, which is how a user returns from Settings.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const secrets = createFakeSecrets();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets,
+    http: createFakeHttp(), time: nodeTime(), kind: "tauri",
+  };
+  await secrets.set({ slot: "openai", account: "default" }, "sk-already-stored");
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+  assert.equal(emptyWords(dom).includes(en.emptyNeedsKeyTitle), false, "precondition: welcomed, not demanding");
+
+  // Open Settings (chat screen hidden) and remove the key there.
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+  const chatScreen = dom.find((n) => n.className === "screen");
+  assert.equal(chatScreen?.hidden, true, "precondition: the chat screen is hidden behind Settings");
+  const remove = dom.find((n) => n.dataset["action"] === "clear-secret");
+  assert.ok(remove, `no way to remove the key:\n${dom.text()}`);
+  dom.click(remove as never);
+  await settle();
+
+  // THE DISCRIMINATING ASSERTION, and the reason this test is not just "the
+  // region ends up with the right words in it". A live region announces on
+  // CHANGE; a change made while the region sits in a hidden subtree is heard by
+  // nobody and is not replayed when the subtree is shown again. So writing the
+  // guidance here would look identical at the end of the test and be silent in
+  // practice -- measured: removing the `screen.hidden` guard left every
+  // assertion below passing. What has to be true is that the region is still
+  // holding its PREVIOUS text at this point.
+  const polite = dom.find((n) => n.getAttribute("aria-live") === "polite");
+  assert.ok(polite);
+  assert.equal(
+    polite.textContent.includes(en.emptyNeedsKeyTitle),
+    false,
+    `announced into a hidden screen, where no reader hears it: "${polite.textContent}"`,
+  );
+
+  // Back to the chat. The empty state is now needs-key, and it must be spoken
+  // -- not silently swallowed while the screen was hidden.
+  shell.pressBack();
+  await settle();
+
+  assert.equal(chatScreen?.hidden, false, "the chat screen must be visible again after Back");
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), `the guidance did not return:\n${dom.text()}`);
+  assert.ok(
+    polite.textContent.includes(en.emptyNeedsKeyTitle),
+    `the needs-key transition was never announced:\n${polite.textContent}`,
+  );
+  await app?.dispose();
+});
+
+test("the chrome is never a blank rectangle, not even while boot is still running", async () => {
+  // The window #4845's boot indicator cannot cover. `mount` appends the chrome
+  // and THEN awaits `bootOrFail`; the indicator was retired by the
+  // `root.textContent = ""` in that same statement pair, so between the two the
+  // screen is a header, an empty middle and a Send button -- defect #8 exactly.
+  // Measured on an Android 35 emulator before this: 117ms of it on a cold
+  // start, 3.928s to 4.045s.
+  //
+  // Asserted with NO await at all. Everything up to `bootOrFail` is
+  // synchronous, so the panel has to be on screen the instant `mount` yields --
+  // which is what makes this a test of the seed and not of the post-boot
+  // refresh. A single `await` here would let boot finish and the test would
+  // pass without the seed existing.
+  const { dom, platform: web } = harness();
+  const pending = mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+
+  const panel = emptyPanel(dom);
+  assert.ok(panel, "no empty state was painted before boot finished");
+  assert.equal(panel.hidden, false, "the chrome was a blank rectangle while booting");
+  // The WELCOME, not the guidance: nothing has asked the keychain yet, and
+  // guessing "no key" here would accuse a configured user on every launch.
+  assert.ok(panel.textContent.includes(en.emptyTranscript), panel.textContent);
+  assert.equal(
+    panel.textContent.includes(en.emptyNeedsKeyTitle),
+    false,
+    "a key was declared missing before anything asked the keychain",
+  );
+
+  const app = await pending;
+  await settle();
+  // And once boot has finished and the keychain has answered, it becomes the
+  // guidance -- so the seed is a starting state, not a state it gets stuck in.
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), emptyWords(dom));
   await app?.dispose();
 });

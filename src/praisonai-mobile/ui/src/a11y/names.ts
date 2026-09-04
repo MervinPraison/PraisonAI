@@ -51,6 +51,7 @@ import type {
   UserRow,
 } from "../transcript/view-model.ts";
 import type { Strings } from "../i18n/strings.ts";
+import type { EmptyStateView } from "../transcript/empty-state.ts";
 
 /**
  * "Failed: search, 1.2s".
@@ -177,6 +178,33 @@ export function chatRowName(strings: Strings, row: ChatListRow): string {
   // row is never nameless. Asserted, because a nameless row is announced as
   // "button" and cannot be told apart from the one above it.
   return row.title === "" ? strings.untitled : row.title;
+}
+
+/**
+ * The empty chat screen, said out loud.
+ *
+ * The block itself carries no `aria-label` -- rule 3 in this file's header
+ * forbids one over prose, and the heading and paragraph inside it are ordinary
+ * content a reader can browse. This is for the OTHER half: an empty transcript
+ * is a `role="log"` with nothing in it, so a screen-reader user who lands on a
+ * fresh chat, or who taps New chat, is told nothing whatsoever about a screen
+ * that has just changed completely. The composition root reads this into the
+ * polite region when the state APPEARS or CHANGES KIND, which is also the
+ * moment a missing key stops being a guess and becomes a fact (see rule 3 of
+ * empty-state.ts) -- the one transition that must not be silent, because it is
+ * the difference between "start typing" and "you cannot yet".
+ *
+ * The action is part of the sentence rather than left to the button, because a
+ * reader hears the region before reaching anything focusable in it: "Open
+ * settings" arriving three tab stops later is not an instruction, it is a
+ * discovery.
+ */
+export function emptyStateName(_strings: Strings, view: EmptyStateView): string {
+  // Already localised by whoever built the view -- re-deriving it from the
+  // table here is how the spoken text and the printed text come to differ, the
+  // same reason `noticeRowName` returns the row's own words.
+  const said = `${view.title} ${view.body}`;
+  return view.action === null ? said : `${said} ${view.action.label}`;
 }
 
 /** The title of a screen. Used for its heading, and for the announcement made
