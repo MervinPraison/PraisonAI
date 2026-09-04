@@ -65,12 +65,20 @@ class SearchMixin:
         if min_quality is not None:
             results = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
         
-        # Apply metadata filtering if specified
-        if metadata_filter:
+        # Apply metadata filtering (defense-in-depth). Auto-derive a user_id
+        # filter so per-user isolation holds even for adapters that accept
+        # user_id but ignore it in their own query (Chroma/RAG, SQLite, in-memory).
+        # An explicit user_id always wins so a conflicting
+        # metadata_filter["user_id"] can never widen the scope to another
+        # tenant's data (mirrors Memory._build_metadata_filter).
+        effective_filter = dict(metadata_filter or {})
+        if user_id:
+            effective_filter["user_id"] = user_id
+        if effective_filter:
             filtered_results = []
             for result in results:
                 metadata = result.get("metadata", {})
-                if all(metadata.get(k) == v for k, v in metadata_filter.items()):
+                if all(metadata.get(k) == v for k, v in effective_filter.items()):
                     filtered_results.append(result)
             results = filtered_results
         
@@ -124,12 +132,20 @@ class SearchMixin:
         if min_quality is not None:
             results = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
         
-        # Apply metadata filtering if specified
-        if metadata_filter:
+        # Apply metadata filtering (defense-in-depth). Auto-derive a user_id
+        # filter so per-user isolation holds even for adapters that accept
+        # user_id but ignore it in their own query (Chroma/RAG, SQLite, in-memory).
+        # An explicit user_id always wins so a conflicting
+        # metadata_filter["user_id"] can never widen the scope to another
+        # tenant's data (mirrors Memory._build_metadata_filter).
+        effective_filter = dict(metadata_filter or {})
+        if user_id:
+            effective_filter["user_id"] = user_id
+        if effective_filter:
             filtered_results = []
             for result in results:
                 metadata = result.get("metadata", {})
-                if all(metadata.get(k) == v for k, v in metadata_filter.items()):
+                if all(metadata.get(k) == v for k, v in effective_filter.items()):
                     filtered_results.append(result)
             results = filtered_results
         

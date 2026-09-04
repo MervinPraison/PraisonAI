@@ -2804,13 +2804,28 @@ Respond with ONLY a valid JSON tool call in this format:
                         )
 
                         if stream:
-                            response_text, tool_calls = self._stream_responses_api(
+                            response_text, tool_calls, stream_response = self._stream_responses_api(
                                 responses_params,
                                 verbose=verbose,
                                 stream_callback=stream_callback,
                                 emit_events=emit_events,
                                 current_time=current_time,
                             )
+                            # Streamed calls still incur real token cost; track
+                            # usage from the final response.completed event so
+                            # the public collector isn't silently zeroed.
+                            if stream_response is not None:
+                                self._track_token_usage(stream_response, self.model)
+                                if self.metrics and getattr(stream_response, 'usage', None):
+                                    usage = stream_response.usage
+                                    tokens_in = getattr(usage, 'input_tokens', 0) or 0
+                                    tokens_out = getattr(usage, 'output_tokens', 0) or 0
+                                    llm_latency_ms = (time.time() - current_time) * 1000
+                                    _get_display_functions()['execute_sync_callback'](
+                                        'llm_end', model=self.model,
+                                        tokens_in=tokens_in, tokens_out=tokens_out,
+                                        cost=None, latency_ms=llm_latency_ms,
+                                    )
                         else:
                             resp = self._call_responses_api(**responses_params)
                             response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
@@ -4933,11 +4948,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     current_time = time.time()
 
                     if stream:
-                        response_text, tool_calls = await self._stream_responses_api_async(
+                        response_text, tool_calls, stream_response = await self._stream_responses_api_async(
                             responses_params,
                             stream_callback=kwargs.get('stream_callback'),
                             emit_events=kwargs.get('emit_events', False),
                         )
+                        # Streamed calls still incur real token cost; track
+                        # usage from the final response.completed event.
+                        if stream_response is not None:
+                            self._track_token_usage(stream_response, self.model)
                     else:
                         resp = await self._call_responses_api_async(**responses_params)
                         response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
@@ -6573,6 +6592,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # tool_calls accumulator: {output_index: {"id":..., "name":..., "arguments":...}}
         _pending_tools: Dict[int, Dict[str, Any]] = {}
         _emit = emit_events and stream_callback is not None
+        _final_response = None
 
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
@@ -6583,6 +6603,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 evt_type = event.get("type", "")
             else:
                 evt_type = getattr(event, "type", "")
+
+            # ── Completed — capture the final response for usage accounting ──
+            if evt_type == "response.completed":
+                _final_response = (event.get("response") if isinstance(event, dict)
+                                   else getattr(event, "response", None))
 
             # ── Text delta ──────────────────────────────────────────
             if evt_type == "response.output_text.delta":
@@ -6675,7 +6700,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 },
             })
 
-        return response_text, tool_calls if tool_calls else None
+        return response_text, tool_calls if tool_calls else None, _final_response
 
     async def _stream_responses_api_async(
         self,
@@ -6693,6 +6718,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         response_text = ""
         _pending_tools: Dict[int, Dict[str, Any]] = {}
         _emit = emit_events and stream_callback is not None
+        _final_response = None
 
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
@@ -6702,6 +6728,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 evt_type = event.get("type", "")
             else:
                 evt_type = getattr(event, "type", "")
+
+            if evt_type == "response.completed":
+                _final_response = (event.get("response") if isinstance(event, dict)
+                                   else getattr(event, "response", None))
 
             if evt_type == "response.output_text.delta":
                 delta_text = (event.get("delta", "") if isinstance(event, dict)
@@ -6777,7 +6807,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             })
 
-        return response_text, tool_calls if tool_calls else None
+        return response_text, tool_calls if tool_calls else None, _final_response
 
     def _process_streaming_chunk(self, chunk) -> Optional[str]:
         """Extract content from a streaming chunk"""
