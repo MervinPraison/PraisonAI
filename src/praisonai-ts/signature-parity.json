@@ -1075,7 +1075,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:603",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:609",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -6418,7 +6418,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/task/task.py:47",
+        "location": "src/praisonai-agents/praisonaiagents/task/task.py:48",
         "resolved_class": "Task"
       },
       "ts_only": [

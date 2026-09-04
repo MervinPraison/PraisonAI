@@ -41,7 +41,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:603`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:609`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:113` (ctor `src/praisonai-ts/src/agent/simple.ts:753`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 6 mismatches; 6 waived; 14 TS-only of 59
 
@@ -129,7 +129,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 
 ### `Task.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
+- Python: `src/praisonai-agents/praisonaiagents/task/task.py:48`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:322`)
 - Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 62
 
