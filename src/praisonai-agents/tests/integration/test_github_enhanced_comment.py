@@ -275,6 +275,33 @@ class TestEnhancedStickyComment:
         assert sticky._branch_name is None
         assert "@{-1}" not in sticky._build_body()
 
+    def test_failed_branch_creation_restores_prior_sticky_branch_and_refreshes(self, monkeypatch):
+        """A failed later creation restores the displayed active branch."""
+        from praisonai.cli.commands.github import StickyComment
+
+        sticky = StickyComment(
+            api_base="https://api.github.com",
+            issue=113,
+            token="fake",
+            task_type="Issue",
+            title="Test",
+            run_url="",
+            repo_name="owner/repo",
+        )
+        sticky.set_branch("feature/active")
+        sticky.on_tool_start("agent", "github_create_branch", {"branch_name": "@{-1}"})
+        sticky.set_branch("@{-1}")
+        refreshes = []
+        monkeypatch.setattr(sticky, "_schedule_push", lambda: refreshes.append(True))
+
+        sticky.on_tool_end("agent", "github_create_branch", "Error: invalid branch name '@{-1}'")
+
+        assert sticky._branch_name == "feature/active"
+        body = sticky._build_body()
+        assert "[🌿 `feature/active`]" in body
+        assert "[🌿 `@{-1}`]" not in body
+        assert refreshes == [True]
+
 
 @pytest.mark.manual
 class TestEnhancedIntegration:
