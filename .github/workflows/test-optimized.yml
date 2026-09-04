@@ -760,6 +760,126 @@ jobs:
       run: echo "✅ Cohere tests skipped (no API key available)"
 
   # ============================================
+  # OLLAMA LIVE TESTS - Real local model, no API key
+  # Nightly / extended only. Installs Ollama on the runner and pulls a small
+  # tools-capable model. Unlike the other live jobs this one needs no secret,
+  # so its required step has no "|| echo" fallback: a failure here is a real
+  # regression in local-model tool calling, not a missing credential.
+  # ============================================
+  extended-ollama:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Bump deliberately: this is the version everything in this job was
+      # verified against. Latest at time of writing is v0.33.3.
+      OLLAMA_VERSION: v0.33.2
+      # 522 MB, capabilities: completion, tools, thinking.
+      OLLAMA_TEST_MODEL: qwen3:0.6b
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-ollama-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Cache Ollama model blobs
+      uses: actions/cache@v4
+      with:
+        path: ~/.ollama/models
+        # No restore-keys on purpose: a partial hit from a different model would
+        # silently test something other than OLLAMA_TEST_MODEL.
+        key: ${{ runner.os }}-ollama-models-${{ env.OLLAMA_TEST_MODEL }}
+
+    - name: Install Ollama
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The official installer, but VERSION-PINNED via OLLAMA_VERSION (which it
+        # honours) so this job cannot silently change what it tests. Fetching the
+        # release asset directly is not a workable alternative: since v0.33 the
+        # linux bundle ships as a 1.4 GB .tar.zst with GPU runtimes bundled in,
+        # and the installer already handles the zst/tgz split across versions.
+        sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+        curl -fsSL https://ollama.com/install.sh | sh
+        ollama --version
+
+    - name: Start Ollama and pull model
+      shell: bash
+      run: |
+        set -euo pipefail
+        ollama serve > /tmp/ollama-serve.log 2>&1 &
+        for i in $(seq 1 30); do
+          if curl -sf http://127.0.0.1:11434/api/tags > /dev/null; then
+            echo "Ollama is up after ${i}s"
+            break
+          fi
+          sleep 1
+        done
+        curl -sf http://127.0.0.1:11434/api/tags > /dev/null
+        ollama pull "$OLLAMA_TEST_MODEL"
+        ollama list
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        agents-extras: ".[all]"
+
+    - name: Run Ollama minimum contract (required)
+      env:
+        PRAISONAI_TEST_TIER: extended
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'ollama'
+        PRAISONAI_TEST_OLLAMA: '1'
+        PRAISONAI_OLLAMA_TEST_MODEL: ${{ env.OLLAMA_TEST_MODEL }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd src/praisonai
+        # No "|| echo" here: no secret is involved, so a failure is a real
+        # regression rather than a missing credential.
+        python -m pytest tests/integration/test_ollama_tool_calling_live.py::TestOllamaCIMinimum \
+          -v --tb=short \
+          --timeout=120
+
+    - name: Run remaining Ollama live tests (informational)
+      if: always()
+      env:
+        PRAISONAI_TEST_TIER: extended
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'ollama'
+        PRAISONAI_TEST_OLLAMA: '1'
+        PRAISONAI_OLLAMA_TEST_MODEL: ${{ env.OLLAMA_TEST_MODEL }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/integration/test_ollama_tool_calling_live.py \
+          --deselect tests/integration/test_ollama_tool_calling_live.py::TestOllamaCIMinimum \
+          -v --tb=short \
+          --timeout=180 \
+          || echo "Ollama exploratory tests completed (small models are non-deterministic)"
+
+    - name: Ollama server log
+      if: failure()
+      run: tail -100 /tmp/ollama-serve.log
+
+  # ============================================
   # LEGACY UNIT TESTS - Post-C6 re-enabled suite
   # Nightly / extended tier only (~401 tests)
   # ============================================
@@ -836,7 +956,7 @@ jobs:
   # TEST SUMMARY
   # ============================================
   test-summary:
-    needs: [smoke, main]
+    needs: [smoke, main, extended-ollama]
     if: always()
     runs-on: ubuntu-latest
     
