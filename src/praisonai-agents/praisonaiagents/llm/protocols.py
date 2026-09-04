@@ -271,15 +271,16 @@ class LLMProviderAdapterProtocol(Protocol):
                 return False
             
             def should_summarize_tools(self, iter_count: int) -> bool:
-                return iter_count >= 3  # Ollama-specific threshold
+                return iter_count >= 1  # Ollama-specific threshold
             
-            def format_tools(self, tools) -> list:
-                return tools  # No special formatting needed
+            def handle_empty_response_with_tools(self, state) -> bool:
+                # Ollama tends to return empty content after tool execution
+                return bool(state.get('accumulated_tool_results')
+                            and not state.get('response_text', '').strip())
             
-            def post_tool_iteration(self, state) -> None:
-                if state.get('empty_response') and state.get('tools'):
-                    # Add Ollama-specific tool summary
-                    state['summary'] = "Tool results processed"
+            def recover_tool_calls_from_text(self, response_text, tools):
+                # Small local models often emit the call as JSON content
+                return _recover_json_tool_calls(response_text, tools)
         ```
     """
     
