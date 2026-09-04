@@ -236,14 +236,28 @@ export function sandboxRunnerNames(): string[] {
   return ['subprocess', ...runners.keys()].filter((v, i, a) => a.indexOf(v) === i).sort();
 }
 
-const INTERPRETERS: Readonly<Record<string, { command: string; args: (file: string) => string[]; extension: string }>> =
+/**
+ * Interpreter table. `command` is a factory rather than a value so the Node
+ * executable (`process.execPath`) is read only when a call actually spawns a
+ * subprocess -- never at module load. A literal `process.execPath` here would
+ * evaluate `process` while the Agent graph initialises, which throws a
+ * ReferenceError in a browser/mobile WebView (issue #4437). `process` is
+ * reached through globalThis for the same reason.
+ */
+const INTERPRETERS: Readonly<Record<string, { command: () => string; args: (file: string) => string[]; extension: string }>> =
   Object.freeze({
-    python: { command: 'python3', args: (f) => [f], extension: '.py' },
-    bash: { command: 'bash', args: (f) => [f], extension: '.sh' },
-    sh: { command: 'sh', args: (f) => [f], extension: '.sh' },
-    javascript: { command: process.execPath, args: (f) => [f], extension: '.js' },
-    node: { command: process.execPath, args: (f) => [f], extension: '.js' },
+    python: { command: () => 'python3', args: (f) => [f], extension: '.py' },
+    bash: { command: () => 'bash', args: (f) => [f], extension: '.sh' },
+    sh: { command: () => 'sh', args: (f) => [f], extension: '.sh' },
+    javascript: { command: () => nodeExecPath(), args: (f) => [f], extension: '.js' },
+    node: { command: () => nodeExecPath(), args: (f) => [f], extension: '.js' },
   });
+
+/** The Node executable, resolved lazily so it never runs on a browser graph. */
+function nodeExecPath(): string {
+  const proc = (globalThis as { process?: { execPath?: string } }).process;
+  return proc?.execPath ?? 'node';
+}
 
 /**
  * The built-in `subprocess` runner: the code goes to a temp file and runs in a
@@ -278,11 +292,38 @@ export function createSubprocessRunner(config: SandboxConfig): SandboxRunner {
       ]);
       const { spawnSync } = childProcess;
 
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'praison-sandbox-'));
+      // Where the code runs and where relative paths resolve. `persistFiles`
+      // reuses a stable workspace so artifacts one call writes are there for
+      // the next; otherwise each call gets a throwaway temp directory. `cwd`
+      // is passed to the child so relative paths resolve against the workspace
+      // rather than the host process directory.
+      //
+      // The default `workingDir` (`/workspace`) is a *container* path from
+      // Python's SandboxConfig; the subprocess runner is host-local, so an
+      // explicit non-default path is honoured verbatim while the container
+      // default maps to a stable per-workspace temp dir instead of the host
+      // filesystem root.
+      const containerDefault = defaultSandboxConfig().workingDir;
+      const explicitDir = config.workingDir && config.workingDir !== containerDefault;
+      let dir: string;
+      let ephemeral: boolean;
+      if (explicitDir) {
+        dir = path.resolve(config.workingDir);
+        fs.mkdirSync(dir, { recursive: true });
+        ephemeral = false;
+      } else if (config.persistFiles) {
+        dir = path.join(os.tmpdir(), 'praison-sandbox-workspace');
+        fs.mkdirSync(dir, { recursive: true });
+        ephemeral = false;
+      } else {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'praison-sandbox-'));
+        ephemeral = true;
+      }
       const file = path.join(dir, `code${interpreter.extension}`);
       try {
         fs.writeFileSync(file, code, 'utf8');
-        const result = spawnSync(interpreter.command, interpreter.args(file), {
+        const result = spawnSync(interpreter.command(), interpreter.args(file), {
+          cwd: dir,
           encoding: 'utf8',
           timeout: options.config.timeout * 1000,
           env: { ...process.env, ...options.config.env },
@@ -295,11 +336,22 @@ export function createSubprocessRunner(config: SandboxConfig): SandboxRunner {
           exitCode,
         };
       } finally {
-        if (config.autoCleanup) {
+        // Only ever remove a temp directory this call created. `autoCleanup`
+        // must never delete a persisted or user-named workspace -- that would
+        // defeat `persistFiles` and could remove host files.
+        if (config.autoCleanup && ephemeral) {
           try {
             fs.rmSync(dir, { recursive: true, force: true });
           } catch {
             // A leftover temp directory is not worth failing the execution for.
+          }
+        } else if (config.autoCleanup && !ephemeral && !config.persistFiles) {
+          // A user-named workingDir without persistFiles: clean up only the
+          // code file we wrote, leaving the workspace itself intact.
+          try {
+            fs.rmSync(file, { force: true });
+          } catch {
+            // Non-fatal.
           }
         }
       }

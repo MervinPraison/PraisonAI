@@ -494,6 +494,35 @@ describe('Agent: sandbox', () => {
     const agent = new Agent({ instructions: 'x', ...quiet, sandbox: { sandboxType: 'docker' } });
     await expect(agent.executeCode('print(1)')).rejects.toThrow(/No sandbox runner is registered for "docker"/);
   });
+
+  it('runs the child in the configured workingDir and persists files between calls', async () => {
+    const os = require('os');
+    const fs = require('fs');
+    const path = require('path');
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'praison-sandbox-test-'));
+    try {
+      const agent = new Agent({
+        instructions: 'x', ...quiet,
+        sandbox: { workingDir: workspace, persistFiles: true },
+      });
+      // Relative paths resolve against the workspace (cwd), not the host dir.
+      const write = await agent.executeCode(
+        'const fs = require("fs"); fs.writeFileSync("artifact.txt", "kept");',
+        { language: 'javascript' }
+      );
+      expect(write.success).toBe(true);
+      expect(fs.existsSync(path.join(workspace, 'artifact.txt'))).toBe(true);
+
+      // A later call sees the earlier call's artifact -- persistFiles honoured.
+      const read = await agent.executeCode(
+        'const fs = require("fs"); process.stdout.write(fs.readFileSync("artifact.txt", "utf8"));',
+        { language: 'javascript' }
+      );
+      expect(read.stdout.trim()).toBe('kept');
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Agent: selfImprove', () => {

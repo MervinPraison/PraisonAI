@@ -328,4 +328,33 @@ describe('Agent: learn', () => {
     const agent = new Agent({ instructions: 'x', ...quiet, learn: 'occasionally' });
     expect(agent.getLearnManager()).toBeUndefined();
   });
+
+  it('nudges on the next turn once a turn did enough tool work', async () => {
+    const agent = new Agent({
+      instructions: 'x', ...quiet,
+      learn: learnConfig({ mode: 'propose', nudgeInterval: 1, nudgeMinToolIters: 1 }),
+      toolFunctions: { lookup: () => 'found' },
+    });
+    // Turn 1 does one tool call, then answers. The nudge cannot appear on this
+    // turn's own prompt (no work done yet at prompt-build time).
+    mockLlm.chatQueue = [toolCallTurn('lookup', {}), { content: 'done', role: 'assistant' }];
+    await agent.chat('find it');
+    expect(lastSystemPrompt()).not.toContain('[System nudge]');
+
+    // Turn 2's prompt reflects the previous turn's tool work and carries the
+    // nudge -- the regression was that the reset counter meant it never did.
+    mockLlm.chatQueue = [{ content: 'ok', role: 'assistant' }];
+    await agent.chat('again');
+    expect(lastSystemPrompt()).toContain('[System nudge]');
+  });
+
+  it('control: a turn with no tool work never nudges', async () => {
+    const agent = new Agent({
+      instructions: 'x', ...quiet,
+      learn: learnConfig({ mode: 'propose', nudgeInterval: 1, nudgeMinToolIters: 1 }),
+    });
+    await agent.chat('hi');
+    await agent.chat('again');
+    expect(lastSystemPrompt()).not.toContain('[System nudge]');
+  });
 });

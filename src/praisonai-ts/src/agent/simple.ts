@@ -2599,6 +2599,12 @@ export class Agent {
     }
 
     const userPrompt = prompt;
+    // The nudge injected into THIS turn's prompt reflects work already done,
+    // so capture the finished turn's tool count before the reset. Python fires
+    // the nudge post-turn (`tool_execution.py` after the loop) for the next
+    // call; here it rides the next prompt, which needs the previous count --
+    // reading the freshly-zeroed counter meant the threshold could never pass.
+    const previousToolCalls = this._recentToolCalls;
     this._recentToolCalls = 0;
     // A new turn is a new task: forget the action history but keep the
     // escalation count, so an agent that loops twice escalates rather than
@@ -2632,7 +2638,7 @@ export class Agent {
     if (this._learnManager) {
       const learned = this._learnManager.toSystemPromptContext();
       if (learned) extraSystem.push(learned);
-      const nudge = this.maybeEmitNudge();
+      const nudge = this.maybeEmitNudge(previousToolCalls);
       if (nudge) extraSystem.push(nudge);
     }
     prompt = await this.applyPlanning(prompt);
@@ -2695,13 +2701,13 @@ export class Agent {
    * agent has actually done some work (`nudgeMinToolIters` tool calls), remind
    * it to persist anything reusable it discovered.
    */
-  private maybeEmitNudge(): string | null {
+  private maybeEmitNudge(recentToolCalls: number): string | null {
     const config = this._learnConfig;
     if (!config || config.nudgeInterval <= 0) return null;
     this._turnsSinceNudge += 1;
     if (this._turnsSinceNudge < config.nudgeInterval) return null;
     this._turnsSinceNudge = 0;
-    if (this._recentToolCalls < config.nudgeMinToolIters) return null;
+    if (recentToolCalls < config.nudgeMinToolIters) return null;
     return (
       '[System nudge] Review the recent conversation. If you discovered a ' +
       'non-trivial procedure or pattern, consider using available tools to ' +
@@ -3564,11 +3570,15 @@ export class Agent {
         const { resolveBackend } = await import('../llm/backend-resolver');
         // Forward the per-agent apiKey/baseURL so a bare claude-*/gemini-*
         // that now routes here can authenticate on the same key the caller
-        // gave the constructor -- not only via a provider env var.
-        const config = (this._apiKey || this._baseURL)
+        // gave the constructor -- not only via a provider env var. `this._fetch`
+        // is the wrapped fetch that carries `auth` provider headers (user
+        // agent, beta flags); without forwarding it, a subscription route on
+        // the AI SDK path would omit the headers the provider requires.
+        const config = (this._apiKey || this._baseURL || this._fetch)
           ? {
               ...(this._apiKey ? { apiKey: this._apiKey } : {}),
               ...(this._baseURL ? { baseUrl: this._baseURL } : {}),
+              ...(this._fetch ? { fetch: this._fetch } : {}),
             }
           : undefined;
         const result = await resolveBackend(this.llm, {
