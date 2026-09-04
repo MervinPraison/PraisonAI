@@ -56,8 +56,8 @@ export interface AnyapiApiSummary {
   name: string;
   category: string;
   description: string;
-  /** USD billed for one request on the cheapest route. */
-  priceUsd: number;
+  /** Most USD one request can cost on the cheapest route: the price of a flat offer, the ceiling of a linear one. */
+  maxCostUsd: number;
   /** USD ceiling for one request if AnyAPI has to fail over to another route. */
   failoverMaxUsd: number;
   /** Search relevance score, higher is a closer match. */
@@ -78,8 +78,8 @@ export interface AnyapiGetApiResult {
   name: string;
   category: string;
   description: string;
-  /** USD billed for one request on the cheapest route. */
-  priceUsd: number;
+  /** Most USD one request can cost on the cheapest route: the price of a flat offer, the ceiling of a linear one. */
+  maxCostUsd: number;
   /** USD ceiling for one request if AnyAPI has to fail over to another route. */
   failoverMaxUsd: number;
   /** JSON Schema for the normalized input this API accepts. */
@@ -206,7 +206,7 @@ function readOutput(output: unknown): { found: boolean; data: unknown } {
 export function anyapiSearchApis(config?: AnyapiSearchApisConfig): PraisonTool<AnyapiSearchApisInput, AnyapiSearchApisResult> {
   return {
     name: 'anyapiSearchApis',
-    description: 'Search the AnyAPI catalog for an API that can answer a data request, ranked by relevance. Returns each API slug, description and USD price per request. Start here, then call anyapiGetApi for its input schema.',
+    description: 'Search the AnyAPI catalog for an API that can answer a data request, ranked by relevance. Returns each API slug, description and the most USD one request can cost. Start here, then call anyapiGetApi for its input schema.',
     parameters: {
       type: 'object',
       properties: {
@@ -231,7 +231,7 @@ export function anyapiSearchApis(config?: AnyapiSearchApisConfig): PraisonTool<A
           name: hit.name,
           category: hit.category,
           description: hit.description,
-          priceUsd: hit.pricing.from.maxUsd,
+          maxCostUsd: hit.pricing.from.maxUsd,
           failoverMaxUsd: hit.pricing.failoverMaxUsd,
           relevance: hit.relevance,
         })),
@@ -247,7 +247,7 @@ export function anyapiSearchApis(config?: AnyapiSearchApisConfig): PraisonTool<A
 export function anyapiGetApi(): PraisonTool<AnyapiGetApiInput, AnyapiGetApiResult> {
   return {
     name: 'anyapiGetApi',
-    description: 'Get the full definition of one AnyAPI API by slug: its normalized input and output JSON Schema, and its USD price per request. Call this before anyapiRunApi to learn what input the API accepts.',
+    description: 'Get the full definition of one AnyAPI API by slug: its normalized input and output JSON Schema, and the most USD one request can cost. Call this before anyapiRunApi to learn what input the API accepts.',
     parameters: {
       type: 'object',
       properties: {
@@ -267,7 +267,7 @@ export function anyapiGetApi(): PraisonTool<AnyapiGetApiInput, AnyapiGetApiResul
         name: entry.name,
         category: entry.category,
         description: entry.description,
-        priceUsd: entry.pricing.from.maxUsd,
+        maxCostUsd: entry.pricing.from.maxUsd,
         failoverMaxUsd: entry.pricing.failoverMaxUsd,
         inputSchema: entry.inputSchema,
         outputSchema: entry.outputSchema,
