@@ -195,3 +195,59 @@ class TestSendResult:
         d = SendResult(ok=True, queued=True).to_dict()
         assert d["status"] == "queued"
         assert d["queued"] is True and d["duplicate"] is False
+
+
+class QueuingBot(BasePlatformAdapter):
+    """Adapter whose ``send`` reports a non-``sent`` outcome per chunk."""
+
+    capabilities = PlatformCapabilities(max_message_length=20)
+
+    def __init__(self, *, queued=False, duplicate=False):
+        self._queued = queued
+        self._duplicate = duplicate
+        self._counter = 0
+
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
+        return True
+
+    async def disconnect(self) -> None:
+        return None
+
+    async def send(self, chat_id, content, *, reply_to=None, metadata=None):
+        self._counter += 1
+        return SendResult(
+            ok=True,
+            message_id=f"m{self._counter}",
+            chat_id=chat_id,
+            queued=self._queued,
+            duplicate=self._duplicate,
+        )
+
+    async def get_chat_info(self, chat_id):
+        return {"id": chat_id}
+
+
+class TestDeliverAggregatesOutcome:
+    def test_deliver_preserves_queued_single_chunk(self):
+        bot = QueuingBot(queued=True)
+        result = asyncio.run(bot.deliver("c1", "hello"))
+        assert result.status == "queued"
+        assert result.queued is True
+
+    def test_deliver_preserves_duplicate_single_chunk(self):
+        bot = QueuingBot(duplicate=True)
+        result = asyncio.run(bot.deliver("c1", "hello"))
+        assert result.status == "duplicate"
+        assert result.duplicate is True
+
+    def test_deliver_preserves_queued_multi_chunk(self):
+        bot = QueuingBot(queued=True)
+        long_text = "a" * 25  # exceeds max_message_length=20 → chunked
+        result = asyncio.run(bot.deliver("c1", long_text))
+        assert result.status == "queued"
+        assert len(result.message_ids) >= 2
+
+    def test_deliver_plain_send_still_sent(self):
+        bot = QueuingBot()
+        result = asyncio.run(bot.deliver("c1", "hello"))
+        assert result.status == "sent"

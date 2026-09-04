@@ -54,16 +54,22 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from .protocols import PlatformCapabilities
 
 __all__ = [
     "SendErrorKind",
+    "SendStatus",
     "SendResult",
     "classify_send_error",
     "BasePlatformAdapter",
 ]
+
+#: Closed set of delivery outcomes for :attr:`SendResult.status`. Exposed as a
+#: type alias so static callers can verify exhaustive handling of the contract
+#: instead of treating the outcome as an arbitrary ``str``.
+SendStatus = Literal["sent", "failed", "queued", "duplicate"]
 
 
 class SendErrorKind(str, Enum):
@@ -287,7 +293,7 @@ class SendResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
-    def status(self) -> str:
+    def status(self) -> SendStatus:
         """Closed, branchable delivery outcome for the send contract.
 
         One of ``"sent"`` / ``"failed"`` / ``"queued"`` / ``"duplicate"``,
@@ -653,6 +659,15 @@ class BasePlatformAdapter(ABC):
             if not result.ok:
                 result.message_ids = aggregate.message_ids + result.message_ids
                 return result
+            # Preserve non-``sent`` outcomes: a chunk persisted to a durable
+            # outbox (``queued``) or crash-recovered as a possible re-send
+            # (``duplicate``) must propagate to the aggregate, otherwise a
+            # deferred/at-least-once delivery would be silently reported as
+            # ``sent`` and the outcome the receipt exists to carry is erased.
+            if result.queued:
+                aggregate.queued = True
+            if result.duplicate:
+                aggregate.duplicate = True
             if result.message_id:
                 aggregate.message_ids.append(result.message_id)
                 aggregate.message_id = result.message_id
