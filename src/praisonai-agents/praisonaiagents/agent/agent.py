@@ -2246,14 +2246,25 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             model_name = llm or Agent._get_default_model()
-            if auth:
+            # A provider-prefixed model must be built as an LLM instance, which
+            # owns provider routing and the per-provider adapters. The
+            # `"/" in llm` branch above only inspects the explicit `llm=`
+            # argument, so a prefixed model that arrived from a credential env
+            # var (_PROVIDER_DEFAULT_MODELS) or from OPENAI_MODEL_NAME lands
+            # here instead and would otherwise fall through to the plain OpenAI
+            # client holding a model name OpenAI has never heard of. Re-check
+            # the *resolved* name so `llm="ollama/x"` and OLLAMA_HOST agree.
+            _has_provider_prefix = isinstance(model_name, str) and "/" in model_name
+            if auth or _has_provider_prefix:
                 # A subscription auth provider only takes effect inside LLM
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
                 # than falling through to the plain OpenAI client.
-                llm_params = {'model': model_name, 'auth': auth}
+                llm_params = {'model': model_name}
                 if api_key:
                     llm_params['api_key'] = api_key
+                if auth:
+                    llm_params['auth'] = auth
                 llm_params['metrics'] = metrics
                 llm_params['web_search'] = web_search
                 llm_params['web_fetch'] = web_fetch
