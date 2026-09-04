@@ -31,6 +31,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from ..agent import Agent
+    from .base import SendResult
 
 
 class ChannelCapabilities(TypedDict, total=False):
@@ -929,17 +930,29 @@ class BotProtocol(Protocol):
         content: Union[str, Dict[str, Any]],
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
-    ) -> BotMessage:
+    ) -> Union[BotMessage, "SendResult"]:
         """Send a message to a channel.
-        
+
         Args:
             channel_id: Target channel ID
             content: Message content
             reply_to: Optional message ID to reply to
             thread_id: Optional thread ID for threaded replies
-            
+
         Returns:
-            The sent message
+            A **typed delivery outcome**. Adapters SHOULD return a
+            :class:`~praisonaiagents.bots.SendResult` — the transport-neutral
+            receipt that carries a closed, branchable ``status``
+            (``"sent"`` / ``"failed"`` / ``"queued"`` / ``"duplicate"``), the
+            platform ``message_id``/``message_ids`` (for edit-in-place, delete
+            and threading), and a classified ``error``/``error_kind`` on
+            failure. This makes a silent drop *unrepresentable*: a caller can
+            branch on ``result.status`` instead of relying on an exception that
+            may be swallowed.
+
+            A legacy :class:`BotMessage` remains an accepted return for
+            backward compatibility — treat a returned ``BotMessage`` as a
+            successful send (``status == "sent"``).
         """
         ...
     

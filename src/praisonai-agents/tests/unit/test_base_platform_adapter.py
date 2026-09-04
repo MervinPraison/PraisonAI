@@ -184,3 +184,14 @@ class TestSendResult:
         r = SendResult(ok=True, message_id="m1", chat_id="c1")
         d = r.to_dict()
         assert d["ok"] and d["message_id"] == "m1" and d["chat_id"] == "c1"
+
+    def test_status_closed_union(self):
+        assert SendResult(ok=True, message_id="m1").status == "sent"
+        assert SendResult(ok=False, error="boom").status == "failed"
+        assert SendResult(ok=True, queued=True).status == "queued"
+        assert SendResult(ok=True, duplicate=True).status == "duplicate"
+
+    def test_status_in_to_dict(self):
+        d = SendResult(ok=True, queued=True).to_dict()
+        assert d["status"] == "queued"
+        assert d["queued"] is True and d["duplicate"] is False

@@ -267,6 +267,10 @@ class SendResult:
             behaviour rather than being silently dropped.
         retry_after: Suggested seconds to wait before retrying (from the
             platform's rate-limit response, if provided).
+        queued: True when the send was persisted to a durable outbox for later
+            delivery rather than delivered inline (``status == "queued"``).
+        duplicate: True when a crash-recovered re-send may be a duplicate —
+            an honest at-least-once outcome (``status == "duplicate"``).
         metadata: Additional platform-specific result details.
     """
 
@@ -278,12 +282,32 @@ class SendResult:
     error_kind: Optional[SendErrorKind] = None
     retryable: bool = True
     retry_after: Optional[float] = None
+    queued: bool = False
+    duplicate: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def status(self) -> str:
+        """Closed, branchable delivery outcome for the send contract.
+
+        One of ``"sent"`` / ``"failed"`` / ``"queued"`` / ``"duplicate"``,
+        derived from the existing flags so a caller of ``BotProtocol``'s
+        ``send_message`` can branch on the outcome without exception-handling
+        (a swallowed exception would otherwise be a silent drop). ``queued``
+        (persisted to a durable outbox) and ``duplicate`` (crash-recovered
+        possible re-send) take precedence over the bare ``ok`` flag.
+        """
+        if self.queued:
+            return "queued"
+        if self.duplicate:
+            return "duplicate"
+        return "sent" if self.ok else "failed"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a plain dictionary."""
         return {
             "ok": self.ok,
+            "status": self.status,
             "message_id": self.message_id,
             "chat_id": self.chat_id,
             "message_ids": list(self.message_ids),
@@ -291,6 +315,8 @@ class SendResult:
             "error_kind": self.error_kind.value if self.error_kind else None,
             "retryable": self.retryable,
             "retry_after": self.retry_after,
+            "queued": self.queued,
+            "duplicate": self.duplicate,
             "metadata": self.metadata,
         }
 
