@@ -23,8 +23,6 @@ import tempfile
 
 import pytest
 
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
-
 from praisonaiagents.knowledge.chunking import Chunking
 from praisonaiagents.knowledge.knowledge import Knowledge
 
