@@ -17,26 +17,49 @@ The check is a ratchet: the total may fall, never rise.
 
 | Surface | Options not yet acted on |
 |---|---|
-| `AgentTeam.__init__` | 15 |
+| `Agent.__init__` | 15 |
+| `Agent.chat` | 6 |
+| `AgentTeam.__init__` | 8 |
 | `Handoff` | 8 |
 | `Task.__init__` | 32 |
-| **Total** | **55** |
+| **Total** | **69** |
 
-Plus 12 options that work for some inputs and announce themselves for the rest.
+Plus 17 options that work for some inputs and announce themselves for the rest.
 
 ## The queue
 
 Each row is one unit of work: implement it, delete its entry from the ledger,
 add a test proving the option changes what the code does, and regenerate.
 
-### `AgentTeam.__init__` (15)
+### `Agent.__init__` (15)
 
-- `managerLlm`
-- `memory`
-- `planning`
-- `context`
-- `execution`
-- `hooks`
+- `auth`
+- `toolsets`
+- `reflection`
+- `autonomy`
+- `templates`
+- `selfImprove`
+- `toolConfig`
+- `learn`
+- `backend`
+- `runOn`
+- `toolsRunOn`
+- `runtime`
+- `toolSearch`
+- `messageSteering`
+- `sandbox`
+
+### `Agent.chat` (6)
+
+- `reasoningSteps`
+- `taskName`
+- `taskDescription`
+- `taskId`
+- `config`
+- `attachments`
+
+### `AgentTeam.__init__` (8)
+
 - `autonomy`
 - `knowledge`
 - `guardrails`
@@ -45,7 +68,6 @@ add a test proving the option changes what the code does, and regenerate.
 - `caching`
 - `learn`
 - `toolsRunOn`
-- `runOn`
 
 ### `Handoff` (8)
 
@@ -107,5 +129,10 @@ add a test proving the option changes what the code does, and regenerate.
 | `Agent.chat` | `attachments` | `src/praisonai-ts/src/agent/simple.ts` |
 | `Agent.chat` | `outputPydantic` | `src/praisonai-ts/src/agent/simple.ts` |
 | `Agent.chat` | `seed` | `src/praisonai-ts/src/agent/simple.ts` |
+| `AgentTeam` | `context` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `execution` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `hooks` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `memory` | `src/praisonai-ts/src/agent/team-memory.ts` |
+| `AgentTeam` | `planning` | `src/praisonai-ts/src/agent/team-planning.ts` |
 | `ChromaMemory` | `ragDbPath` | `src/praisonai-ts/src/memory/adapters.ts` |
 | `Task` | `guardrails` | `src/praisonai-ts/src/agent/types.ts` |

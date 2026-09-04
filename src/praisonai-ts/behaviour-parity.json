@@ -51,6 +51,31 @@
       "surface": "Agent.chat"
     },
     {
+      "file": "src/praisonai-ts/src/agent/team-options.ts",
+      "option": "context",
+      "surface": "AgentTeam"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/team-options.ts",
+      "option": "execution",
+      "surface": "AgentTeam"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/team-options.ts",
+      "option": "hooks",
+      "surface": "AgentTeam"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/team-memory.ts",
+      "option": "memory",
+      "surface": "AgentTeam"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/team-planning.ts",
+      "option": "planning",
+      "surface": "AgentTeam"
+    },
+    {
       "file": "src/praisonai-ts/src/memory/adapters.ts",
       "option": "ragDbPath",
       "surface": "ChromaMemory"
@@ -65,17 +90,10 @@
     "AgentTeam.__init__": [
       "autonomy",
       "caching",
-      "context",
-      "execution",
       "guardrails",
-      "hooks",
       "knowledge",
       "learn",
-      "managerLlm",
-      "memory",
-      "planning",
       "reflection",
-      "runOn",
       "toolsRunOn",
       "web"
     ],
@@ -124,5 +142,5 @@
       "when"
     ]
   },
-  "total": 55
+  "total": 69
 }

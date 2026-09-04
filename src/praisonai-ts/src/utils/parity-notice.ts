@@ -34,8 +34,7 @@
  */
 export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   'AgentTeam.__init__': [
-    'managerLlm', 'memory', 'planning', 'context', 'execution', 'hooks', 'autonomy', 'knowledge',
-    'guardrails', 'web', 'reflection', 'caching', 'learn', 'toolsRunOn', 'runOn',
+    'autonomy', 'knowledge', 'guardrails', 'web', 'reflection', 'caching', 'learn', 'toolsRunOn',
   ],
   'Task.__init__': [
     'asyncExecution', 'config', 'outputPydantic', 'images', 'nextTasks', 'condition', 'isStart',

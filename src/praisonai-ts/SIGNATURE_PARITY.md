@@ -95,7 +95,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:17` (ctor `src/praisonai-ts/src/agent/team.ts:210`)
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:74` (ctor `src/praisonai-ts/src/agent/team.ts:332`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
 
@@ -109,12 +109,12 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 | `variables` | positional | null | `Optional[Dict[str, Any]]` | exact | `variables` | undefined | `Record<string, unknown>` | ok |
 | `llm` | positional | null | `Optional[str]` | exact | `llm` | undefined | `string` | ok |
 | `model` | positional | null | `Optional[str]` | exact | `model` | undefined | `string` | ok |
-| `memory` | positional | false | `Optional[Any]` | exact | `memory` | undefined | `unknown` | ok |
-| `planning` | positional | false | `Optional[Any]` | exact | `planning` | undefined | `unknown` | ok |
-| `context` | positional | false | `Optional[Any]` | exact | `context` | undefined | `unknown` | ok |
+| `memory` | positional | false | `Optional[Any]` | exact | `memory` | undefined | `TeamMemoryInput` | ok |
+| `planning` | positional | false | `Optional[Any]` | exact | `planning` | undefined | `TeamPlanningInput` | ok |
+| `context` | positional | false | `Optional[Any]` | exact | `context` | undefined | `TeamContextInput` | ok |
 | `output` | positional | null | `Optional[Any]` | exact | `output` | undefined | `unknown` | ok |
-| `execution` | positional | null | `Optional[Any]` | exact | `execution` | undefined | `unknown` | ok |
-| `hooks` | positional | null | `Optional[Any]` | exact | `hooks` | undefined | `unknown` | ok |
+| `execution` | positional | null | `Optional[Any]` | exact | `execution` | undefined | `TeamExecutionInput` | ok |
+| `hooks` | positional | null | `Optional[Any]` | exact | `hooks` | undefined | `TeamHooksInput` | ok |
 | `autonomy` | positional | null | `Optional[Any]` | exact | `autonomy` | undefined | `unknown` | ok |
 | `knowledge` | positional | null | `Optional[Any]` | exact | `knowledge` | undefined | `unknown` | ok |
 | `guardrails` | positional | null | `Optional[Any]` | exact | `guardrails` | undefined | `unknown` | ok |
@@ -241,7 +241,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:383`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:744`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
