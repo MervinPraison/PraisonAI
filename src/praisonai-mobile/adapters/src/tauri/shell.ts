@@ -251,6 +251,11 @@ const EVENTS = {
  *  back gesture. Answering `false` is what lets Android exit the app. */
 const BACK_RESULT_COMMAND = "back_gesture_result";
 
+/** The command that carries the app's STANDING answer -- can it go back at all
+ *  -- sent whenever that changes rather than in reply to a press. Rust reads it
+ *  when the reply above is too slow to arrive; see ShellPort.setCanGoBack. */
+const BACK_CAN_GO_BACK_COMMAND = "back_gesture_can_go_back";
+
 export interface TauriShellDeps {
   /** Defaults to the real bridge. Injected in tests so the event paths run
    *  without a device -- an adapter whose events only work on a phone has no
@@ -460,6 +465,10 @@ export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
     for (const cb of lifecycleSubs) cb(phase);
   });
 
+  // The last value handed to `setCanGoBack`, or null before the app has said
+  // anything. See the method below for why null and not false.
+  let declaredCanGoBack: boolean | null = null;
+
   attach(EVENTS.back, () => {
     let handled = false;
     // Last registered gets first refusal; the first to consume it wins and
@@ -502,6 +511,23 @@ export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
         const at = backSubs.lastIndexOf(cb);
         if (at !== -1) backSubs.splice(at, 1);
       };
+    },
+
+    setCanGoBack(canGoBack) {
+      // Sent on CHANGE only. The router declares on every stack change, and a
+      // chat-to-chat move does not alter the answer; forwarding those anyway
+      // would put an IPC call on a navigation that needs none.
+      //
+      // `declaredCanGoBack` starts as null rather than false so the first
+      // declaration always crosses, even when it is `false`: Rust's default
+      // agrees, but a shell that stayed silent because it AGREED with a default
+      // is one that says nothing at all after a reload.
+      if (declaredCanGoBack === canGoBack) return;
+      declaredCanGoBack = canGoBack;
+      // void, like the answer above: this is fire-and-forget state. A rejected
+      // invoke leaves Rust on its previous value, which is the same failure as
+      // a lost event and is covered by the watchdog either way.
+      void bridge.invoke(BACK_CAN_GO_BACK_COMMAND, { canGoBack });
     },
 
     haptic(kind: HapticKind) {

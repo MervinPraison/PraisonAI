@@ -134,10 +134,39 @@ export function createRouter(root: Route): Router {
 /**
  * Wire the router to the OS gesture.
  *
+ * Two directions, and the second one is what makes Back work on a device.
+ *
+ * The handler answers a press that has already happened. On Android that answer
+ * has to reach Rust before the OS decides what the press meant, and it does not
+ * always get there in time: measured on an Android 15 emulator, one press was
+ * answered in 0.7 s and the next in 5.4 s, against a 400 ms watchdog. The app
+ * had consumed both -- the stack popped Settings and the chat was back on
+ * screen -- and the watchdog handed the press to Android anyway, which took the
+ * app away from the user. That is the "Back on Settings quits the app" report.
+ *
+ * So the stack is also DECLARED, out of band: on attach, on every change, and
+ * `false` on detach. A declaration is state the native side already has when a
+ * press arrives, so nothing has to be waited for. False on detach because a
+ * torn-down view's router speaks for nothing, and a native side still holding
+ * `true` would swallow every press afterwards.
+ *
  * Returns the unsubscribe, and returning it is not a formality: a leaked
  * handler keeps popping a router belonging to a torn-down view on every back
  * press, which reads to the user as the button doing nothing.
  */
 export function attachBackGesture(shell: ShellPort, router: Router): Unsubscribe {
-  return shell.onBackGesture(() => router.handleBack());
+  const declare = (stack: readonly Route[]): void =>
+    // The same pure decision the handler will make, so the declaration and the
+    // answer can never disagree about what the stack means.
+    shell.setCanGoBack(backDecision(stack).consumed);
+
+  declare(router.stack);
+  const stopDeclaring = router.subscribe(declare);
+  const stopHandling = shell.onBackGesture(() => router.handleBack());
+
+  return () => {
+    stopDeclaring();
+    stopHandling();
+    declare([]);
+  };
 }

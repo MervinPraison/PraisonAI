@@ -1,4 +1,4 @@
-//! The four things the native shell tells the webview, and the one thing it asks.
+//! The four things the native shell tells the webview, and the two it is told.
 //!
 //! These names are a CONTRACT with `adapters/src/tauri/shell.ts`, which
 //! subscribes to them by string. A rename on either side is silent: the
@@ -46,6 +46,15 @@ pub const EVT_BACK: &str = "back-gesture";
 
 /// What the webview calls to answer a back gesture.
 pub const CMD_BACK_RESULT: &str = "back_gesture_result";
+
+/// What the webview calls whenever its route stack changes, to say whether it
+/// could take the NEXT back press.
+///
+/// Out of band on purpose. The answer to a press cannot be waited for -- the
+/// round trip was measured at 0.7 s and then 5.4 s on the same device -- so the
+/// watchdog decides from this standing declaration instead of from silence.
+/// See `shell::back` for what each value means when the answer never comes.
+pub const CMD_BACK_CAN_GO_BACK: &str = "back_gesture_can_go_back";
 
 /// The lifecycle tracker, managed as Tauri state so `on_window_event` — a
 /// plain `Fn` with no captures — can reach it through the window.

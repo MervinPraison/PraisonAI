@@ -121,6 +121,30 @@ export interface ShellPort {
    */
   onBackGesture(cb: () => boolean): Unsubscribe;
 
+  /**
+   * Say, IN ADVANCE, whether the app would consume the next back gesture.
+   *
+   * `onBackGesture` answers a press that has already happened, and on Android
+   * that answer has to cross the native bridge before the OS decides what the
+   * press meant. That crossing is not bounded by anything the app controls: the
+   * event reaches the webview on the platform's UI thread and the handler runs
+   * on the thread that is painting. Measured on an Android 15 emulator, the
+   * same press was answered in 0.7 s once and 5.4 s the next time -- both past
+   * the native watchdog, which then handed the press to the OS and took the app
+   * away from a user who was mid-navigation.
+   *
+   * So the app also declares its state whenever the route stack changes, and
+   * the native side reads THAT when an answer is late rather than reading
+   * silence as "the app does not want this press". `attachBackGesture` in
+   * ui/src/router.ts is the one caller; it declares on attach, on every stack
+   * change, and `false` on detach.
+   *
+   * FALSE IS THE SAFE DEFAULT and shells must behave as though it had been
+   * declared until told otherwise: an app that never declares anything is one
+   * that never loaded, and back must still be able to leave it.
+   */
+  setCanGoBack(canGoBack: boolean): void;
+
   haptic(kind: HapticKind): void;
 
   share(payload: SharePayload): Promise<void>;

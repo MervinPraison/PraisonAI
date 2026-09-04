@@ -62,6 +62,7 @@ test("the shell port is implementable", () => {
     onKeyboardHeightChanged: noop,
     onLifecycleChanged: noop,
     onBackGesture: noop,
+    setCanGoBack() {},
     haptic() {},
     async share() {},
     async openExternal() {},

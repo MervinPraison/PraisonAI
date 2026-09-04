@@ -57,6 +57,34 @@ test("the back-result command name agrees", () => {
   assert.equal(rustConst("CMD_BACK_RESULT"), m[1]);
 });
 
+test("the can-go-back command name agrees", () => {
+  // The webview invokes this by string whenever its route stack changes, and a
+  // rename on either side is silent in the worst way: Tauri rejects the unknown
+  // command, the TypeScript's `invoke` swallows the rejection into null, and
+  // the Rust gate keeps its default of "cannot go back" -- so a slow answer on
+  // the Settings screen sends the app to the background again, with both test
+  // suites still green.
+  const m = /BACK_CAN_GO_BACK_COMMAND = "([^"]+)"/.exec(ts);
+  assert.ok(m, "BACK_CAN_GO_BACK_COMMAND not found in the TypeScript adapter");
+  assert.equal(rustConst("CMD_BACK_CAN_GO_BACK"), m[1]);
+});
+
+test("the command the webview invokes is one the app actually registers", () => {
+  // The other half of the same silence: a command named identically on both
+  // sides but missing from `generate_handler!` is unreachable, and rejects
+  // exactly like a misspelt one.
+  const lib = readFileSync(join(pkg, "src-tauri/src/lib.rs"), "utf8");
+  const handler = /invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\)/.exec(lib);
+  assert.ok(handler, "the invoke_handler list was not found in lib.rs");
+  for (const command of ["back_gesture_result", "back_gesture_can_go_back"]) {
+    assert.match(
+      handler[1],
+      new RegExp(`commands::${command}\\b`),
+      `lib.rs does not register ${command}, so the webview's invoke would reject`,
+    );
+  }
+});
+
 test("the comparison is real, not two lookups of the same file", () => {
   // The way this test could quietly stop working: if both helpers read the
   // same source, every assertion above passes forever. Assert the two files

@@ -19,6 +19,7 @@ import { enginesFor, apiKeyFor, defaultEngineIdFor, settingDefsFor } from "./reg
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
+import type { ShellPort } from "../../core/src/ports/shell.ts";
 import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/reconcile.ts";
 import { buildTranscript, type Row } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
@@ -648,12 +649,27 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // completely empty: a blank white page, no crash screen, on a device nobody
   // can attach a debugger to.
   const owner = doc.defaultView;
+  // Known only after `detectPlatform()` below, which is AFTER the handler is
+  // installed -- deliberately, since detecting can itself throw. A crash before
+  // then has no shell to tell, and nothing to correct: nothing has declared a
+  // route stack yet either.
+  let crashedShell: ShellPort | null = null;
   installCrashHandler({
     ...(owner === null ? {} : { view: owner }),
-    onCrash: () => renderFatal(root, strings.crashed),
+    onCrash: () => {
+      // The fatal screen has no routes, so the last thing the router declared
+      // is now a lie. Left standing, the native side keeps handing every back
+      // press to a webview that is not going to answer -- and back on a dead
+      // app would do nothing at all, which is the one outcome ShellPort's
+      // `setCanGoBack` doc forbids. Said BEFORE the repaint, because the
+      // repaint is the part that can throw.
+      crashedShell?.setCanGoBack(false);
+      renderFatal(root, strings.crashed);
+    },
   });
 
   const platform = deps.platform ?? detectPlatform();
+  crashedShell = platform.shell;
 
   /**
    * The WALL clock, and it comes from the port.
