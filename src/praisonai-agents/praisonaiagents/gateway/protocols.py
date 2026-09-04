@@ -1971,13 +1971,16 @@ class RouteBinding:
     role: Optional[str] = None
     channel_id: Optional[str] = None
     account: Optional[str] = None
-    thread_id: Optional[str] = None
-    guild_id: Optional[str] = None
     priority: int = 0
     trust: Optional[str] = None
     allow_tools: Optional[List[str]] = None
     deny_tools: Optional[List[str]] = None
     profile: Optional[str] = None
+    # New optional conditions are appended here (never inserted mid-list) so
+    # existing positional constructors — RouteBinding("a", "dm", ..., priority)
+    # — keep their meaning and stay backward-compatible (Issue #4839 review).
+    thread_id: Optional[str] = None
+    guild_id: Optional[str] = None
 
     # Specificity weights — exact thread beats peer beats role/channel beats
     # guild/account beats chat-type. Higher means more specific, so a single
