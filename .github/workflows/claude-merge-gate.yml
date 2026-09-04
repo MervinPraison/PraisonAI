@@ -319,8 +319,11 @@ jobs:
             Replace
           allowed_tools: |
             mcp__github__add_issue_comment
-            mcp__github__pull_request_read
-            mcp__github__issue_read
+            mcp__github__get_pull_request
+            mcp__github__get_pull_request_files
+            mcp__github__get_pull_request_reviews
+            mcp__github__get_pull_request_status
+            mcp__github__get_issue
             mcp__github__get_issue_comments
             Glob
             Grep
