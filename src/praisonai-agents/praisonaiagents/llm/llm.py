@@ -664,11 +664,12 @@ Respond with ONLY a valid JSON tool call in this format:
         if model_lower.startswith("gemini") or model_lower.startswith("google/gemini"):
             return "gemini"
         
-        # Check base_url for provider hints
-        base_urls = [self.base_url, os.getenv("OPENAI_BASE_URL", ""), os.getenv("OPENAI_API_BASE", "")]
-        if any(url and ("ollama" in url.lower() or ":11434" in url) for url in base_urls):
-            return "ollama"
-        
+        # NOTE: the base_url hint that used to live here checked exactly the
+        # same three URLs for exactly the same two patterns as
+        # _is_ollama_provider() above, so it was an unguarded duplicate -- and
+        # it re-captured hosted models that _is_ollama_provider() had just
+        # correctly declined. Detection now happens once, in one place.
+
         # Substring fallback for routed models whose provider is not the first
         # path segment (e.g. bedrock/anthropic.claude-*, vertex_ai/claude-*,
         # openrouter/anthropic/*, vertex_ai/gemini-*). Mirrors the substring
@@ -712,10 +713,22 @@ Respond with ONLY a valid JSON tool call in this format:
         if not self.model:
             return False
         
-        # Direct ollama/ prefix
+        # Direct ollama/ prefix -- the user speaking explicitly, always wins.
         if self.model.startswith("ollama/"):
             return True
-        
+
+        # A base_url says WHERE the server is, not WHAT it serves. Only let it
+        # imply Ollama for a model that could plausibly be running locally.
+        # Without this, the README's own local-model recipe
+        # (OPENAI_BASE_URL=http://localhost:11434/v1) gave gpt-4o and
+        # claude-* the Ollama adapter: tool results downgraded to
+        # natural-language user turns, streaming-with-tools disabled, and
+        # forced-tool prompts injected into a conversation that never needed
+        # them.
+        from .model_providers import is_hosted_only_model
+        if is_hosted_only_model(self.model):
+            return False
+
         # Check base_url if provided
         if self.base_url and "ollama" in self.base_url.lower():
             return True

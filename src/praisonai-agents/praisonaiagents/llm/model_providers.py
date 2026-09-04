@@ -36,6 +36,44 @@ _BUILTINS: Dict[str, Callable[[str], bool]] = {
 }
 
 
+# Closed-weights model families that no local runtime can serve. Used to stop a
+# local ``base_url`` (an OpenAI-compatible proxy on :11434, say) from being read
+# as "this is an Ollama model".
+#
+# Open-weights families are deliberately ABSENT -- gemma, llama, mistral, qwen,
+# deepseek and phi are all routinely served by Ollama, so they must stay
+# eligible for URL-based local detection. That is why this is a separate, much
+# narrower predicate than ``resolve_provider``: the latter maps ``gemma-`` to
+# "google" and ``mistral-`` to "mistral", which is correct for provider routing
+# and wrong for deciding whether a model could be running locally.
+HOSTED_ONLY_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-", "claude", "gemini-")
+
+
+def is_hosted_only_model(model_name: str) -> bool:
+    """True if ``model_name`` names a closed-weights model no local server hosts.
+
+    Every route segment is tested, so single-prefix (``openai/gpt-4o``), nested
+    (``openrouter/openai/gpt-4o``, ``openrouter/anthropic/claude-*``) and
+    vendor-qualified (``bedrock/anthropic.claude-*``, ``us.anthropic.claude-*``)
+    forms all resolve to the hosted family they name -- mirroring the substring
+    fallback that ``_detect_provider`` uses for the same routed models. An
+    open-weights model reached over the OpenAI-compatible route
+    (``openai/qwen3:0.6b``) is not hosted-only and keeps its local treatment,
+    because the prefixes tested are themselves closed-weights families no local
+    runtime serves.
+    """
+    if not model_name:
+        return False
+    lower = model_name.lower()
+    # Split on both route ("/") and vendor-qualifier (".") boundaries so a
+    # family name anywhere in the path is seen: bedrock/anthropic.claude-3 ->
+    # ["bedrock", "anthropic", "claude-3"].
+    for segment in lower.replace(".", "/").split("/"):
+        if segment.startswith(HOSTED_ONLY_PREFIXES):
+            return True
+    return False
+
+
 def _entry_point_matchers():
     """Yield (provider_id, matcher) pairs registered by third-party plugins.
 
