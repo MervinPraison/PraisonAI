@@ -1092,7 +1092,21 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         MAX_INVALID_SELECTIONS = 3
         error_context = ""
 
+        # Bound the manager-directed delegation loop. Without this a task that
+        # ends in status "failed" (a valid id that is never "completed") is
+        # re-selectable forever, so the loop can run indefinitely. Mirror the
+        # max_iter ceiling workflow() already enforces, plus a per-task cap so a
+        # repeatedly-failing task becomes terminal instead of being retried
+        # without bound.
+        current_iter = 0
+        failed_reselect_counts: Dict[Any, int] = {}
+        MAX_TASK_RESELECTIONS = 3
+
         while completed_count < total_tasks:
+            current_iter += 1
+            if current_iter > self.max_iter:
+                logging.info(f"Max iteration limit {self.max_iter} reached, ending hierarchical process.")
+                break
             tasks_summary = []
             for tid, tk in self.tasks.items():
                 if tid in excluded_task_ids:
@@ -1206,6 +1220,23 @@ Provide a JSON with the structure:
                     selected_task.agent = a
                     logging.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
                     break
+
+            # A task whose internal retries are exhausted lands in "failed" — a
+            # valid id that never becomes "completed". Cap how many times the
+            # manager may re-delegate it, then treat it as terminal so the loop
+            # can make progress instead of retrying it forever.
+            if self.tasks[selected_task_id].status == "failed":
+                failed_reselect_counts[selected_task_id] = failed_reselect_counts.get(selected_task_id, 0) + 1
+                if failed_reselect_counts[selected_task_id] > MAX_TASK_RESELECTIONS:
+                    logging.error(
+                        f"Task {selected_task_id} failed {failed_reselect_counts[selected_task_id]} times; "
+                        f"excluding from further delegation."
+                    )
+                    excluded_task_ids.add(selected_task_id)
+                    if selected_task_id not in counted_task_ids:
+                        counted_task_ids.add(selected_task_id)
+                        completed_count += 1
+                    continue
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")
@@ -1736,7 +1767,21 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         MAX_INVALID_SELECTIONS = 3
         error_context = ""
 
+        # Bound the manager-directed delegation loop. Without this a task that
+        # ends in status "failed" (a valid id that is never "completed") is
+        # re-selectable forever, so the loop can run indefinitely. Mirror the
+        # max_iter ceiling workflow() already enforces, plus a per-task cap so a
+        # repeatedly-failing task becomes terminal instead of being retried
+        # without bound.
+        current_iter = 0
+        failed_reselect_counts: Dict[Any, int] = {}
+        MAX_TASK_RESELECTIONS = 3
+
         while completed_count < total_tasks:
+            current_iter += 1
+            if current_iter > self.max_iter:
+                logging.info(f"Max iteration limit {self.max_iter} reached, ending hierarchical process.")
+                break
             tasks_summary = []
             for tid, tk in self.tasks.items():
                 if tid in excluded_task_ids:
@@ -1823,6 +1868,23 @@ Provide a JSON with the structure:
                     selected_task.agent = a
                     logging.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
                     break
+
+            # A task whose internal retries are exhausted lands in "failed" — a
+            # valid id that never becomes "completed". Cap how many times the
+            # manager may re-delegate it, then treat it as terminal so the loop
+            # can make progress instead of retrying it forever.
+            if self.tasks[selected_task_id].status == "failed":
+                failed_reselect_counts[selected_task_id] = failed_reselect_counts.get(selected_task_id, 0) + 1
+                if failed_reselect_counts[selected_task_id] > MAX_TASK_RESELECTIONS:
+                    logging.error(
+                        f"Task {selected_task_id} failed {failed_reselect_counts[selected_task_id]} times; "
+                        f"excluding from further delegation."
+                    )
+                    excluded_task_ids.add(selected_task_id)
+                    if selected_task_id not in counted_task_ids:
+                        counted_task_ids.add(selected_task_id)
+                        completed_count += 1
+                    continue
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")

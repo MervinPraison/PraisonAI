@@ -246,6 +246,15 @@ def process_stream_chunks(chunks):
 
         # First pass: Get initial tool call data
         for chunk in chunks:
+            # Capture token usage from the final usage-only chunk. With
+            # stream_options={"include_usage": True} the provider sends a
+            # trailing chunk carrying `usage` and an empty `choices` list, so
+            # this must run before the `choices` guard below skips it.
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage:
+                completion_tokens = getattr(chunk_usage, "completion_tokens", 0) or completion_tokens
+                prompt_tokens = getattr(chunk_usage, "prompt_tokens", 0) or prompt_tokens
+
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
             
