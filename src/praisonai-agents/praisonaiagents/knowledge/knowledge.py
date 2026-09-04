@@ -587,7 +587,17 @@ class Knowledge:
                         content = file.read().strip()
                     if not content:
                         raise ValueError("Empty text file")
-                    memories = [self.normalize_content(content)]
+                    # Chunk like every other branch. This one used to store the
+                    # whole file as a single memory and lowercase it, so
+                    # chunk_size/chunk_overlap were inert on .md/.txt/.csv/.json
+                    # /.xml/.html -- the commonest sources -- while .pdf and an
+                    # unlisted extension both chunked correctly. A 20 KB guide
+                    # became one 20 KB memory that no retrieval could rank, and
+                    # the case of every identifier and proper noun was lost on
+                    # the way to the model.
+                    chunks = self.chunker.chunk(content)
+                    memories = [chunk.text.strip() if hasattr(chunk, 'text') else str(chunk).strip()
+                                for chunk in chunks if chunk] or [content]
                 else:
                     # Use MarkItDown for documents and media
                     result = self.markdown.convert(input_path)
