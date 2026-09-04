@@ -1938,7 +1938,16 @@ class RouteBinding:
         chat_type: Chat type ("dm" | "group" | "channel").
         peer: Sender/user id (most specific).
         role: Role / guild-role membership of the sender.
-        channel_id: Specific chat/channel id.
+        channel_id: Specific chat/channel id. Also matches a message whose
+            parent channel is this id (a thread/forum-post under it), so a
+            channel-level route naturally covers the threads beneath it
+            without listing each thread by hand (Issue #4839).
+        thread_id: Specific thread / forum-post id (most specific unit — one
+            triage-spun support thread can route to a specialist agent,
+            Issue #4839).
+        guild_id: Server / workspace id. One rule covers every current and
+            future channel in the guild, so an operator can multiplex by the
+            tenant boundary they actually think in (Issue #4839).
         account: Receiving bot account (for multi-account channels).
         priority: Higher wins; ties are broken by specificity then order.
         trust: Optional trust tier ("untrusted" | "standard" | "trusted").
@@ -1967,13 +1976,21 @@ class RouteBinding:
     allow_tools: Optional[List[str]] = None
     deny_tools: Optional[List[str]] = None
     profile: Optional[str] = None
+    # New optional conditions are appended here (never inserted mid-list) so
+    # existing positional constructors — RouteBinding("a", "dm", ..., priority)
+    # — keep their meaning and stay backward-compatible (Issue #4839 review).
+    thread_id: Optional[str] = None
+    guild_id: Optional[str] = None
 
-    # Specificity weights — exact peer beats role/channel beats account
-    # beats chat-type. Higher means more specific.
+    # Specificity weights — exact thread beats peer beats role/channel beats
+    # guild/account beats chat-type. Higher means more specific, so a single
+    # thread rule wins over a whole-guild rule (Issue #4839).
     _SPECIFICITY = {
+        "thread_id": 32,
         "peer": 16,
         "role": 8,
         "channel_id": 8,
+        "guild_id": 4,
         "account": 4,
         "chat_type": 2,
     }
@@ -2017,7 +2034,20 @@ class RouteBinding:
         """Return True if every constrained condition equals the facts."""
         if self.peer is not None and str(self.peer) != str(facts.peer):
             return False
-        if self.channel_id is not None and str(self.channel_id) != str(facts.channel_id):
+        if self.channel_id is not None:
+            # Parent-chain match (Issue #4839): a channel_id condition matches
+            # the channel itself OR a thread/forum-post whose parent is that
+            # channel, so channel-level routes cover the threads beneath them
+            # without enumerating each thread.
+            expected_channel = str(self.channel_id)
+            candidates = {str(facts.channel_id)}
+            if facts.parent_channel_id is not None:
+                candidates.add(str(facts.parent_channel_id))
+            if expected_channel not in candidates:
+                return False
+        if self.thread_id is not None and str(self.thread_id) != str(facts.thread_id):
+            return False
+        if self.guild_id is not None and str(self.guild_id) != str(facts.guild_id):
             return False
         if self.account is not None and str(self.account) != str(facts.account):
             return False
@@ -2066,6 +2096,8 @@ class RouteBinding:
             role=data.get("role"),
             channel_id=_as_opt_str(data.get("channel_id")),
             account=_as_opt_str(data.get("account")),
+            thread_id=_as_opt_str(data.get("thread_id")),
+            guild_id=_as_opt_str(data.get("guild_id")),
             priority=int(data.get("priority", 0) or 0),
             trust=_as_opt_str(data.get("trust")),
             allow_tools=_as_opt_str_list(data.get("allow_tools")),
@@ -2084,6 +2116,13 @@ class RouteFacts:
         roles: Roles/guild-role memberships of the sender.
         channel_id: The chat/channel id the message arrived in.
         account: The receiving bot account (multi-account channels).
+        thread_id: The thread / forum-post id the message arrived in, when the
+            platform threads conversations (Issue #4839).
+        guild_id: The server / workspace id the message belongs to (Discord
+            guild, Slack workspace), used for whole-server routing (Issue #4839).
+        parent_channel_id: The parent channel of a thread/forum-post, so a
+            channel-level binding can cover the threads beneath it via
+            parent-chain matching (Issue #4839).
     """
 
     chat_type: str = "default"
@@ -2091,6 +2130,9 @@ class RouteFacts:
     roles: List[str] = field(default_factory=list)
     channel_id: Optional[str] = None
     account: Optional[str] = None
+    thread_id: Optional[str] = None
+    guild_id: Optional[str] = None
+    parent_channel_id: Optional[str] = None
 
 
 @dataclass
@@ -2148,8 +2190,9 @@ def resolve_route(
     """Resolve the handling agent from priority-ordered bindings.
 
     Bindings are evaluated most-specific-first: the matching binding with the
-    highest ``priority`` wins; ties are broken by specificity (exact peer →
-    role/channel → account → chat-type), then by declaration order.
+    highest ``priority`` wins; ties are broken by specificity (exact thread →
+    peer → role/channel → guild/account → chat-type), then by declaration
+    order.
 
     Args:
         bindings: Candidate route bindings (any order).
