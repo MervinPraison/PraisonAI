@@ -14,24 +14,15 @@ import pathlib
 
 import pytest
 
-# Methods known to have zero call sites, with the disposition for each.
-# This set may only ever SHRINK. Removing a name is the last step of the change
-# that wires or deletes it. Adding a name needs a documented reason -- a new
-# adapter method with no consumer is the exact defect this file prevents
-# (root AGENTS.md: no exports without a live consumer).
-KNOWN_DEAD = frozenset({
-    "extract_reasoning_tokens",          # no override anywhere, no divergence to abstract
-    "format_tools",                      # inline behaviour in llm.py is the inverse
-    "get_max_iteration_threshold",       # duplicates should_summarize_tools
-    "get_streaming_adapter",             # speculative: no inline equivalent
-    "handle_empty_response_with_tools",  # has an exact inline equivalent; wire it
-    "inject_cache_control",              # stub, no implementation anywhere
-    "parse_tool_calls",                  # signature cannot express litellm's ModelResponse
-    "post_tool_iteration",               # sets a flag nothing reads
-    "recover_tool_calls_from_text",      # duplicated inline at llm.py:3468-3500; wire it
-    "should_skip_streaming_with_tools",  # subsumed by supports_streaming_with_tools
-    "supports_structured_output",        # model_capabilities already does this per-model
-})
+# Empty: every DefaultAdapter method now has a live call site. Eleven were dead
+# when this file was written; nine were deleted as speculative API and two were
+# wired into llm.py.
+#
+# The allowlist mechanism is deliberately kept rather than removed, so a future
+# addition has an obvious, reviewable place to be justified. It may only ever
+# SHRINK: an adapter method with no consumer is the exact defect this file
+# exists to prevent (root AGENTS.md: no exports without a live consumer).
+KNOWN_DEAD = frozenset()
 
 # Attribute-call receivers that denote a provider adapter. Restricting to these
 # is what stops OpenAIClient.format_tools -- an unrelated method with the same

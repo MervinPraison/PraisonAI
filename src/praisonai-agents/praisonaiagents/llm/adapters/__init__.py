@@ -9,9 +9,46 @@ and integrates with Gap 2 (parallel tool execution).
 """
 
 from ..protocols import LLMProviderAdapterProtocol
-from ..model_capabilities import GEMINI_INTERNAL_TOOLS
-from ..streaming_protocol import StreamingCapableAdapter, get_streaming_adapter
+import json
 from typing import Dict, Any, List, Optional
+
+
+def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """Recover a tool call a local model emitted as JSON text.
+
+    Shared by every locally-served engine: small models routinely answer with
+    the call as content instead of using the tool_calls field. Deliberately NOT
+    on DefaultAdapter -- a hosted model returning JSON prose must never have it
+    parsed as a tool call.
+    """
+    if not response_text or not tools:
+        return None
+    
+    try:
+        import json
+        response_json = json.loads(response_text.strip())
+        
+        # Normalize to list so both single and multi-tool payloads are supported
+        if isinstance(response_json, dict):
+            response_json = [response_json]
+
+        if isinstance(response_json, list):
+            tool_calls: List[Dict[str, Any]] = []
+            for idx, tool_json in enumerate(response_json):
+                if isinstance(tool_json, dict) and "name" in tool_json:
+                    tool_calls.append({
+                        "id": f"call_{tool_json['name']}_{idx}_{hash(response_text) % 10000}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_json["name"],
+                            "arguments": json.dumps(tool_json.get("arguments", {}))
+                        }
+                    })
+            return tool_calls if tool_calls else None
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
+    
+    return None
 
 
 class DefaultAdapter:
@@ -23,14 +60,8 @@ class DefaultAdapter:
     def should_summarize_tools(self, iter_count: int) -> bool:
         return iter_count >= 5  # Conservative default
     
-    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return tools  # No special formatting by default
     
-    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
-        pass  # No post-processing by default
     
-    def supports_structured_output(self) -> bool:
-        return False  # Conservative default
     
     def supports_streaming(self) -> bool:
         return True  # Most providers support streaming
@@ -38,26 +69,35 @@ class DefaultAdapter:
     def supports_streaming_with_tools(self) -> bool:
         return True  # Most providers support streaming with tools
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get the streaming adapter for this provider."""
-        # Default providers use the default streaming adapter
-        return get_streaming_adapter("default")
     
-    def get_max_iteration_threshold(self) -> int:
-        return 10  # Conservative default
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
-        # Standard OpenAI-style tool result message
-        message = {
-            "role": "tool",
-            "content": str(tool_result),
-        }
-        if tool_call_id is not None:
-            message["tool_call_id"] = tool_call_id
+        """Standard OpenAI-shaped tool result message.
+
+        This is the union of five inline copies that had drifted apart in llm.py:
+        it uses the fuller error sentence, reports a list-of-errors result as an
+        error rather than dumping it as data, and guards json.dumps so a tool
+        returning a set or a datetime does not crash the turn.
+        """
+        if tool_result is None:
+            content = "Function returned an empty output"
+        elif isinstance(tool_result, dict) and 'error' in tool_result:
+            content = (f"Error: {tool_result.get('error', 'Unknown error')}. "
+                       "Please inform the user that the operation could not be completed.")
+        elif (isinstance(tool_result, list) and tool_result
+                and isinstance(tool_result[0], dict) and 'error' in tool_result[0]):
+            content = (f"Error: {tool_result[0].get('error', 'Unknown error')}. "
+                       "Please inform the user that the operation could not be completed.")
         else:
-            # Fallback for backward compatibility
-            message["tool_call_id"] = f"call_{function_name}"
-        return message
+            try:
+                content = json.dumps(tool_result)
+            except (TypeError, ValueError):
+                content = str(tool_result)
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id if tool_call_id is not None else f"call_{function_name}",
+            "content": content,
+        }
     
     def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
         return False  # No special handling by default
@@ -65,24 +105,12 @@ class DefaultAdapter:
     def get_default_settings(self) -> Dict[str, Any]:
         return {}  # No provider-specific defaults
     
-    def parse_tool_calls(self, raw_response: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-        """Default tool call parsing - use OpenAI-style format."""
-        if "choices" in raw_response and len(raw_response["choices"]) > 0:
-            message = raw_response["choices"][0].get("message", {})
-            return message.get("tool_calls")
-        return None
     
-    def should_skip_streaming_with_tools(self) -> bool:
-        return False  # Most providers support streaming with tools
     
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         return None  # No text recovery by default
     
-    def inject_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return messages  # No cache control by default
     
-    def extract_reasoning_tokens(self, response: Dict[str, Any]) -> int:
-        return 0  # No reasoning tokens by default
 
 
 class OllamaAdapter(DefaultAdapter):
@@ -105,12 +133,7 @@ class OllamaAdapter(DefaultAdapter):
         # Ollama doesn't reliably support streaming with tools
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Ollama-specific streaming adapter."""
-        return get_streaming_adapter("ollama")
     
-    def get_max_iteration_threshold(self) -> int:
-        return 1  # Ollama-specific threshold
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         # Ollama uses natural language format for tool results.
@@ -159,42 +182,8 @@ Now provide your final answer using this result. Summarize the information natur
     
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Ollama-specific tool call recovery from response text."""
-        if not response_text or not tools:
-            return None
-        
-        try:
-            import json
-            response_json = json.loads(response_text.strip())
-            
-            # Normalize to list so both single and multi-tool payloads are supported
-            if isinstance(response_json, dict):
-                response_json = [response_json]
-
-            if isinstance(response_json, list):
-                tool_calls: List[Dict[str, Any]] = []
-                for idx, tool_json in enumerate(response_json):
-                    if isinstance(tool_json, dict) and "name" in tool_json:
-                        tool_calls.append({
-                            "id": f"call_{tool_json['name']}_{idx}_{hash(response_text) % 10000}",
-                            "type": "function",
-                            "function": {
-                                "name": tool_json["name"],
-                                "arguments": json.dumps(tool_json.get("arguments", {}))
-                            }
-                        })
-                return tool_calls if tool_calls else None
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
-        
-        return None
+        return _recover_json_tool_calls(response_text, tools)
     
-    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
-        # Replaces: Ollama-specific post-tool summary branches
-        if (not state.get('response_text', '').strip() and 
-            state.get('formatted_tools') and 
-            state.get('iteration_count') == 0):
-            # Add Ollama-specific summary logic here
-            state['needs_summary'] = True
     
     def get_default_settings(self) -> Dict[str, Any]:
         return {
@@ -226,6 +215,11 @@ class LocalOpenAIAdapter(DefaultAdapter):
     def get_default_settings(self) -> Dict[str, Any]:
         return {'max_tool_repairs': 2}
 
+    def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        # Same reason as Ollama: these servers front small local models that
+        # answer with the tool call as text, especially after a repair prompt.
+        return _recover_json_tool_calls(response_text, tools)
+
 
 class AnthropicAdapter(DefaultAdapter):
     """Anthropic/Claude provider adapter."""
@@ -233,8 +227,6 @@ class AnthropicAdapter(DefaultAdapter):
     def supports_prompt_caching(self) -> bool:
         return True  # Claude supports prompt caching
     
-    def supports_structured_output(self) -> bool:
-        return True
 
     def supports_streaming(self) -> bool:
         # litellm.acompletion with stream=True returns a ModelResponse (not async generator)
@@ -244,9 +236,6 @@ class AnthropicAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Anthropic-specific streaming adapter."""
-        return get_streaming_adapter("anthropic")
 
 
 class GeminiAdapter(DefaultAdapter):
@@ -259,35 +248,13 @@ class GeminiAdapter(DefaultAdapter):
     - Supports structured output
     """
     
-    def should_skip_streaming_with_tools(self) -> bool:
-        """Gemini should skip streaming when tools are present."""
-        return True
     
-    def supports_structured_output(self) -> bool:
-        return True
     
-    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        # Replaces: gemini_internal_tools handling in llm.py
-        # Internal tool names match GEMINI_INTERNAL_TOOLS: {'googleSearch', 'urlContext', 'codeExecution'}
-        formatted = []
-        for tool in tools:
-            if tool.get('name') in GEMINI_INTERNAL_TOOLS:
-                # Convert to Gemini internal tool format
-                formatted.append({
-                    'type': 'function',
-                    'function': tool
-                })
-            else:
-                formatted.append(tool)
-        return formatted
     
     def supports_streaming_with_tools(self) -> bool:
         # Gemini has issues with streaming + tools
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Gemini-specific streaming adapter."""
-        return get_streaming_adapter("gemini")
 
 
 # Provider adapter registry - public for extension
@@ -345,16 +312,6 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     return _provider_adapters["default"]
 
 
-def list_provider_adapters() -> List[str]:
-    """List all registered provider adapter names."""
-    return sorted(_provider_adapters.keys())
-
-
-def has_provider_adapter(name: str) -> bool:
-    """Check if a provider adapter is registered."""
-    return name in _provider_adapters
-
-
 __all__ = [
     'DefaultAdapter',
     'OllamaAdapter', 
@@ -363,6 +320,4 @@ __all__ = [
     'GeminiAdapter',
     'get_provider_adapter',
     'add_provider_adapter',
-    'list_provider_adapters',
-    'has_provider_adapter',
 ]

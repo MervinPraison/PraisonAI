@@ -271,15 +271,16 @@ class LLMProviderAdapterProtocol(Protocol):
                 return False
             
             def should_summarize_tools(self, iter_count: int) -> bool:
-                return iter_count >= 3  # Ollama-specific threshold
+                return iter_count >= 1  # Ollama-specific threshold
             
-            def format_tools(self, tools) -> list:
-                return tools  # No special formatting needed
+            def handle_empty_response_with_tools(self, state) -> bool:
+                # Ollama tends to return empty content after tool execution
+                return bool(state.get('accumulated_tool_results')
+                            and not state.get('response_text', '').strip())
             
-            def post_tool_iteration(self, state) -> None:
-                if state.get('empty_response') and state.get('tools'):
-                    # Add Ollama-specific tool summary
-                    state['summary'] = "Tool results processed"
+            def recover_tool_calls_from_text(self, response_text, tools):
+                # Small local models often emit the call as JSON content
+                return _recover_json_tool_calls(response_text, tools)
         ```
     """
     
@@ -291,17 +292,8 @@ class LLMProviderAdapterProtocol(Protocol):
         """Check if tools should be summarized at this iteration count."""
         ...
     
-    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format tools for this provider's requirements."""
-        ...
     
-    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
-        """Handle provider-specific post-tool processing."""
-        ...
     
-    def supports_structured_output(self) -> bool:
-        """Check if provider supports structured JSON output."""
-        ...
     
     def supports_streaming(self) -> bool:
         """Check if provider supports streaming responses."""
@@ -311,9 +303,6 @@ class LLMProviderAdapterProtocol(Protocol):
         """Check if provider supports streaming with tools enabled."""
         ...
     
-    def get_max_iteration_threshold(self) -> int:
-        """Get provider-specific maximum iteration count."""
-        ...
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         """Format tool result message for this provider's requirements."""
@@ -327,25 +316,13 @@ class LLMProviderAdapterProtocol(Protocol):
         """Get provider-specific default settings."""
         ...
     
-    def parse_tool_calls(self, raw_response: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-        """Parse tool calls from provider-specific response format."""
-        ...
     
-    def should_skip_streaming_with_tools(self) -> bool:
-        """Check if provider should skip streaming when tools are present."""
-        ...
     
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Attempt to recover tool calls from response text for providers that don't format them properly."""
         ...
     
-    def inject_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Inject provider-specific cache control headers."""
-        ...
     
-    def extract_reasoning_tokens(self, response: Dict[str, Any]) -> int:
-        """Extract reasoning token count from provider-specific response."""
-        ...
 
 
 @runtime_checkable  
