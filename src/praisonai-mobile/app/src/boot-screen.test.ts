@@ -168,6 +168,7 @@ function runGuard(showing: boolean): {
   note: FakeNode;
   failed: FakeNode;
   fire: (target: unknown) => void;
+  fireThrow: () => void;
   capture: boolean;
 } {
   const note: FakeNode = { hidden: false, querySelector: () => null };
@@ -188,7 +189,15 @@ function runGuard(showing: boolean): {
   const document = { querySelector: (s: string) => (s === "[data-boot]" && showing ? boot : null) };
   runInNewContext(guardSource, { window, document });
   assert.ok(handler !== null, "boot-guard.js must listen for error events");
-  return { note, failed, fire: (target) => handler?.({ target }), capture };
+  return {
+    note,
+    failed,
+    // A resource error carries the failed element as its target.
+    fire: (target) => handler?.({ target }),
+    // A thrown exception's error event has the window as its target.
+    fireThrow: () => handler?.({ target: window }),
+    capture,
+  };
 }
 
 test("the guard is loaded before the bundle, and not deferred", () => {
@@ -219,9 +228,38 @@ test("a boot script that fails to load turns the indicator into a failure notice
   // this, a static "Starting…" would sit there claiming progress forever --
   // which is worse than the blank page, because it is a blank page that lies.
   const { note, failed, fire } = runGuard(true);
-  fire({ tagName: "SCRIPT" });
+  fire({ tagName: "SCRIPT", src: "https://example.test/PraisonAI/app.js" });
   assert.equal(failed.hidden, false, "the failure notice must be revealed");
   assert.equal(note.hidden, true, '"Starting…" must go: it is no longer true');
+});
+
+test("a throw before the app has rendered is reported: app code failing is a failed boot", () => {
+  // A runtime error whose event.target is the window -- app.js parsed and ran
+  // but threw on its way in, before mount() could install crash.ts. Nobody
+  // else is left to report it, so the guard must.
+  const { note, failed, fireThrow } = runGuard(true);
+  fireThrow();
+  assert.equal(failed.hidden, false, "a throw (target === window) is the app failing");
+  assert.equal(note.hidden, true);
+});
+
+test("register-sw.js failing to load does not claim the app could not start", () => {
+  // register-sw.js is a CLASSIC script that runs during parse, BEFORE the
+  // deferred app.js module executes. If its download fails while app.js is
+  // still in flight, the app can still load and mount -- so treating every
+  // <script> error as an app-bundle failure would flash "could not start" on a
+  // page that is about to boot fine. The worker declining to register is a
+  // degraded page (see register-sw.js), not a broken one, so it must be
+  // ignored exactly as a failed stylesheet or icon is.
+  for (const src of [
+    "https://example.test/PraisonAI/register-sw.js",
+    "https://example.test/PraisonAI/boot-guard.js",
+  ]) {
+    const { note, failed, fire } = runGuard(true);
+    fire({ tagName: "SCRIPT", src });
+    assert.equal(failed.hidden, true, `a failed ${src} must not be reported as a boot failure`);
+    assert.equal(note.hidden, false);
+  }
 });
 
 test("the guard listens in the CAPTURE phase, because a resource error does not bubble", () => {
@@ -250,7 +288,7 @@ test("once the app has rendered, the guard says nothing at all", () => {
   // there is no boot indicator to find and every later error belongs to the
   // crash handler alone.
   const { note, failed, fire } = runGuard(false);
-  fire({ tagName: "SCRIPT" });
+  fire({ tagName: "SCRIPT", src: "https://example.test/PraisonAI/app.js" });
   assert.equal(failed.hidden, true, "a post-render error is the crash handler's, not this file's");
   assert.equal(note.hidden, false);
 });

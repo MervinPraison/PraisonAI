@@ -24,7 +24,7 @@
 import test from "node:test";
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -112,6 +112,33 @@ test("the shipped bundle -- every chunk, engine included -- has no syntax the fl
       print(code, target("chrome")),
       print(code, "esnext"),
       `${name}: lowering it to ${target("chrome")} changed it, so it carries syntax the floor cannot parse`,
+    );
+  }
+});
+
+test("the hand-written verbatim scripts parse on the floor too", () => {
+  // boot-guard.js and register-sw.js are copied byte-for-byte into dist/ by
+  // build-webview.mjs -- esbuild never sees them, so the whole-bundle syntax
+  // gate above cannot. Both are load-bearing on old WebViews: boot-guard.js is
+  // the ONLY thing that reports app.js failing to load, and if it is itself a
+  // parse error on a chrome58 device then the one failure it exists to cover
+  // goes unreported. Their VM tests run on modern Node, where an arrow
+  // function or a `?.` passes clean and then fails to parse on the floor. So
+  // they are held to the same floor here, by the same parser-based no-op test
+  // the bundle uses: lowering a floor-clean file to the floor changes nothing.
+  const floor = target("chrome");
+  const lower = (code) => esbuild.transformSync(code, {
+    target: [floor], format: "esm", supported: { "dynamic-import": true, "template-literal": false },
+  }).code;
+  for (const name of ["boot-guard.js", "register-sw.js"]) {
+    const file = join(import.meta.dirname, "../app", name);
+    assert.ok(existsSync(file), `${name} must exist to be checked`);
+    const code = readFileSync(file, "utf8");
+    assert.equal(
+      lower(code, floor),
+      lower(code, "esnext"),
+      `app/${name}: lowering it to ${floor} changed it, so it carries syntax the floor cannot parse -- ` +
+        `and being copied verbatim, no other gate would catch it`,
     );
   }
 });
