@@ -38,6 +38,7 @@ import { routeTitle, chatRowName, emptyStateName } from "../../ui/src/a11y/names
 import {
   emptyState,
   type EmptyStateKind,
+  type EmptyStateView,
   type KeyPresence,
 } from "../../ui/src/transcript/empty-state.ts";
 import {
@@ -794,6 +795,67 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   emptyAction.hidden = true;
   emptyPanel.append(emptyTitle, emptyBody, emptyAction);
 
+  /** The kind last read into the polite region, so a repaint that changes
+   *  nothing does not re-announce. Reset to null when the panel goes away, so
+   *  the next empty chat is announced again. */
+  let announcedEmptyKind: EmptyStateKind | null = null;
+
+  /**
+   * The panel's DOM, written from a view. Takes no `app`, deliberately.
+   *
+   * Split from `refreshEmptyState`, which DECIDES, so that the first paint can
+   * happen before boot -- see the seed below. Everything in here is a write.
+   */
+  const paintEmptyState = (view: EmptyStateView | null): void => {
+    if (view === null) {
+      emptyPanel.hidden = true;
+      // The stylesheet gives the transcript back its full height. Written as a
+      // data attribute rather than an inline style so the rule stays in
+      // app.css, where css.test.ts can see it.
+      delete screen.dataset["empty"];
+      announcedEmptyKind = null;
+      return;
+    }
+
+    emptyPanel.hidden = false;
+    screen.dataset["empty"] = view.kind;
+    emptyTitle.textContent = view.title;
+    emptyBody.textContent = view.body;
+    if (view.action === null) {
+      emptyAction.hidden = true;
+      // The route goes with the button. A hidden control still carrying
+      // `data-route` is one stylesheet mistake away from being tappable and
+      // sending a user who has a key configured to Settings for no reason.
+      delete emptyAction.dataset["route"];
+      emptyAction.textContent = "";
+    } else {
+      emptyAction.hidden = false;
+      emptyAction.textContent = view.action.label;
+      emptyAction.dataset["route"] = view.action.route;
+    }
+
+    // Said once per appearance, and again only when the state changes KIND --
+    // which is exactly the transition from "start typing" to "you cannot yet",
+    // the one a screen-reader user must not miss. An empty `role="log"` says
+    // nothing on its own, so without this a fresh chat is silent.
+    //
+    // But only while the chat screen is actually on screen. Removing a key in
+    // Settings changes the kind, and the polite region lives INSIDE the chat
+    // screen, which `mount.ts` has set `hidden` -- a hidden element is out of
+    // the accessibility tree entirely, so the announcement is made to nobody.
+    // Recording it as announced there would be worse than not announcing: the
+    // "you now need a key" transition would then never be spoken at all,
+    // because on return the kind matches what was already marked said. So the
+    // panel is repainted and `announcedEmptyKind` is left alone; `showRoute`
+    // re-runs this the moment chat is visible again.
+    if (screen.hidden) return;
+    if (view.kind !== announcedEmptyKind) {
+      polite.textContent = emptyStateName(strings, view);
+      announcedEmptyKind = view.kind;
+    }
+  };
+
+
   const polite = doc.createElement("div");
   polite.className = "sr-only";
   polite.setAttribute("aria-live", "polite");
@@ -846,6 +908,25 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // has no key.
   root.textContent = "";
   root.append(screen);
+
+  /**
+   * The panel's FIRST paint, before boot and before anything is known.
+   *
+   * The chrome is appended above and `bootOrFail` is awaited a long way below;
+   * measured on an Android 35 emulator, that gap put the header, an empty
+   * middle and the Send button on screen for 117ms -- 3.928s to 4.045s on a
+   * cold start -- which is defect #8 exactly, in the one window #4845's boot
+   * indicator cannot cover because `root.textContent = ""` has already retired
+   * it.
+   *
+   * `key: "unknown"` is what makes this paintable with nothing known: rule 3 of
+   * empty-state.ts says an unresolved key reads as the welcome, and the welcome
+   * does not depend on which engine is in force -- so `keyRequired` cannot
+   * change the answer and its value here is not a guess about the engine.
+   * "Ask something to begin." is true while the app is starting; the guidance
+   * replaces it if the keychain comes back empty.
+   */
+  paintEmptyState(emptyState({ hasRows: false, keyRequired: false, key: "unknown" }, strings));
 
   // ---- boot ---------------------------------------------------------------
   let render: RenderState = emptyRender;
@@ -1324,85 +1405,58 @@ export async function mount(deps: MountDeps): Promise<App | null> {
    */
   let keyPresence: KeyPresence = "unknown";
 
-  /** The kind last read into the polite region, so a repaint that changes
-   *  nothing does not re-announce. Reset to null when the panel goes away, so
-   *  the next empty chat is announced again. */
-  let announcedEmptyKind: EmptyStateKind | null = null;
-
   /**
    * Whether the engine that would answer the next message authenticates with a
    * key held on this device.
    *
-   * Read at paint time, not captured: `engineId` is a setting, and a user who
-   * switches from the remote engine to the in-process one has just made a
-   * missing key start mattering. Read through the facade so it follows the same
-   * value Settings shows.
+   * `app.engine.id` -- the engine ACTUALLY in force -- and deliberately NOT the
+   * live `engineId` setting. The first version of this read the setting, and the
+   * two diverge: `createApp` selects the engine once at boot and the controller
+   * holds that instance for the session (`enginesFor` in registry.ts spells out
+   * why rebuilding it on a change is a much larger job). Measured on this
+   * branch before the fix -- mount on a device with no key, then set `engineId`
+   * to the remote engine in Settings: the panel dropped the guidance while
+   * `app.engine.id` was still `praisonai-ts`, so the app told a user no key was
+   * needed and the very next message went to the engine that needs one.
+   *
+   * The engine in force cannot change mid-session, so this is stable rather
+   * than merely "read at paint time" -- but it is still read here, not
+   * captured, because that is the fact being asked about and a copy of it is
+   * one more thing that can go stale.
    */
-  const engineNeedsKey = (): boolean =>
-    app.settings.get("engineId") === ENGINE_PRAISONAI_TS;
+  const engineNeedsKey = (): boolean => app.engine.id === ENGINE_PRAISONAI_TS;
 
   refreshEmptyState = (): void => {
-    const view = emptyState(
-      {
-        // Both lists, because either one alone is a transcript: a reopened
-        // conversation has only `priorRows` and a first turn has only
-        // `liveRows`.
-        hasRows: priorRows.length + liveRows.length > 0,
-        keyRequired: engineNeedsKey(),
-        key: keyPresence,
-      },
-      strings,
+    paintEmptyState(
+      emptyState(
+        {
+          // Both lists, because either one alone is a transcript: a reopened
+          // conversation has only `priorRows` and a first turn has only
+          // `liveRows`.
+          hasRows: priorRows.length + liveRows.length > 0,
+          keyRequired: engineNeedsKey(),
+          key: keyPresence,
+        },
+        strings,
+      ),
     );
-
-    if (view === null) {
-      emptyPanel.hidden = true;
-      // The stylesheet gives the transcript back its full height. Written as a
-      // data attribute rather than an inline style so the rule stays in
-      // app.css, where css.test.ts can see it.
-      delete screen.dataset["empty"];
-      announcedEmptyKind = null;
-      return;
-    }
-
-    emptyPanel.hidden = false;
-    screen.dataset["empty"] = view.kind;
-    emptyTitle.textContent = view.title;
-    emptyBody.textContent = view.body;
-    if (view.action === null) {
-      emptyAction.hidden = true;
-      // The route goes with the button. A hidden control still carrying
-      // `data-route` is one stylesheet mistake away from being tappable and
-      // sending a user who has a key configured to Settings for no reason.
-      delete emptyAction.dataset["route"];
-      emptyAction.textContent = "";
-    } else {
-      emptyAction.hidden = false;
-      emptyAction.textContent = view.action.label;
-      emptyAction.dataset["route"] = view.action.route;
-    }
-
-    // Said once per appearance, and again only when the state changes KIND --
-    // which is exactly the transition from "start typing" to "you cannot yet",
-    // the one a screen-reader user must not miss. An empty `role="log"` says
-    // nothing on its own, so without this a fresh chat is silent.
-    if (view.kind !== announcedEmptyKind) {
-      polite.textContent = emptyStateName(strings, view);
-      announcedEmptyKind = view.kind;
-    }
   };
 
-  // The engine can change under the panel: switching to the in-process engine
-  // is what makes a missing key start mattering, and switching away is what
-  // makes it stop. `subscribe` fires only on ACCEPTED writes, so a refused
-  // value does not repaint.
-  app.settings.subscribe(() => {
-    refreshEmptyState();
-  });
 
   // The first paint, and the first keychain lookup. `root` holds no secret rows
   // yet -- Settings has not been built -- so this call is here for its OTHER
   // half: it is what resolves `keyPresence` from `unknown`, which is what turns
   // the welcome into the key guidance on a fresh install.
+  //
+  // Every LATER repaint comes from the same function: the `set-secret` and
+  // `clear-secret` handlers already call `refreshSecretPresence` to update the
+  // settings rows, and resolving presence is exactly what the panel keys off,
+  // so pasting a key clears the guidance and removing one brings it back with
+  // no second mechanism. A `settings.subscribe` was tried here and deleted: it
+  // repainted on every accepted write and a mutation that emptied it killed no
+  // test, because the handlers had already done the work. An inert subscription
+  // that also has to be unsubscribed on teardown is the #4636 defect -- shipped
+  // machinery with no reader -- plus a lifetime to leak.
   refreshEmptyState();
   refreshSecretPresence(root);
 
@@ -1561,6 +1615,12 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // silently spending itself while the user was elsewhere.
     armedDelete = null;
     currentRoute = route;
+    // Back on the chat screen, re-run the empty state so its kind is announced.
+    // Anything that changed it while Settings was on top -- removing a key is
+    // the reachable one -- repainted the panel behind a hidden screen without
+    // speaking, deliberately (see `refreshEmptyState`). This is where that
+    // deferred announcement is made.
+    if (route.name === "chat") refreshEmptyState();
   };
   // The router's root is `chats`, but the app opens on the chat screen; align
   // the two so the first back gesture behaves and `screenFor` agrees.

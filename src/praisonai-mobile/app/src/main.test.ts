@@ -2890,3 +2890,144 @@ test("an engine that needs no key never asks for one", async () => {
   assert.ok(words.includes(en.emptyAbout), words);
   await app?.dispose();
 });
+
+test("the guidance follows the engine IN FORCE, not the engineId setting", async () => {
+  // The engine is selected once at boot and the controller holds that instance:
+  // switching `engineId` in Settings changes the setting but not the engine
+  // answering until the next launch. So the panel must read `app.engine.id` --
+  // the engine actually handling prompts -- and not the live setting, or it
+  // describes an engine other than the one the user's next message hits.
+  //
+  // Measured before the fix, the other way round: on a device with no key the
+  // guidance was up, setting `engineId` to the remote engine dropped it, and
+  // `app.engine.id` was still `praisonai-ts` -- so the app said no key was
+  // needed and the next message went to the engine that needs one.
+  const { dom, platform } = harness(); // web default: the remote engine is in force
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+  assert.equal(app?.engine.id, ENGINE_REMOTE_HTTP, "precondition: the remote engine is answering");
+  assert.equal(emptyWords(dom).includes(en.emptyNeedsKeyTitle), false, "precondition: no key demanded");
+
+  // Flip the persisted engine choice under the panel. The running engine does
+  // not change, so the guidance must not either.
+  await app!.settings.set("engineId", ENGINE_PRAISONAI_TS);
+  await settle();
+
+  // Then force a repaint through a path the user actually has. Asserting
+  // straight after the `set` would prove nothing: nothing repaints the panel on
+  // a settings write, so a version reading the SETTING would also still show
+  // the welcome here and the test would pass over the bug. New chat re-runs the
+  // empty state, which is where a wrong source of truth becomes visible.
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+
+  assert.equal(app?.engine.id, ENGINE_REMOTE_HTTP, "the engine in force must not have changed mid-session");
+  const words = emptyWords(dom);
+  assert.equal(
+    words.includes(en.emptyNeedsKeyTitle),
+    false,
+    `the panel demanded a key for an engine that is not the one running:\n${words}`,
+  );
+  await app?.dispose();
+});
+
+test("clearing a key while Settings is open is announced on return to chat", async () => {
+  // The polite region lives inside the chat screen, which is `hidden` while
+  // Settings is on top -- and a hidden element is out of the accessibility tree
+  // entirely, so a key removed there changes the empty state to needs-key
+  // against a region nobody is listening to. Marking it announced in that
+  // window would leave the "you now need a key" transition permanently
+  // unspoken. It must be said the moment chat is visible again -- reached here
+  // through the OS Back gesture, which is how a user returns from Settings.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const secrets = createFakeSecrets();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets,
+    http: createFakeHttp(), time: nodeTime(), kind: "tauri",
+  };
+  await secrets.set({ slot: "openai", account: "default" }, "sk-already-stored");
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await settle();
+  assert.equal(emptyWords(dom).includes(en.emptyNeedsKeyTitle), false, "precondition: welcomed, not demanding");
+
+  // Open Settings (chat screen hidden) and remove the key there.
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+  const chatScreen = dom.find((n) => n.className === "screen");
+  assert.equal(chatScreen?.hidden, true, "precondition: the chat screen is hidden behind Settings");
+  const remove = dom.find((n) => n.dataset["action"] === "clear-secret");
+  assert.ok(remove, `no way to remove the key:\n${dom.text()}`);
+  dom.click(remove as never);
+  await settle();
+
+  // THE DISCRIMINATING ASSERTION, and the reason this test is not just "the
+  // region ends up with the right words in it". A live region announces on
+  // CHANGE; a change made while the region sits in a hidden subtree is heard by
+  // nobody and is not replayed when the subtree is shown again. So writing the
+  // guidance here would look identical at the end of the test and be silent in
+  // practice -- measured: removing the `screen.hidden` guard left every
+  // assertion below passing. What has to be true is that the region is still
+  // holding its PREVIOUS text at this point.
+  const polite = dom.find((n) => n.getAttribute("aria-live") === "polite");
+  assert.ok(polite);
+  assert.equal(
+    polite.textContent.includes(en.emptyNeedsKeyTitle),
+    false,
+    `announced into a hidden screen, where no reader hears it: "${polite.textContent}"`,
+  );
+
+  // Back to the chat. The empty state is now needs-key, and it must be spoken
+  // -- not silently swallowed while the screen was hidden.
+  shell.pressBack();
+  await settle();
+
+  assert.equal(chatScreen?.hidden, false, "the chat screen must be visible again after Back");
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), `the guidance did not return:\n${dom.text()}`);
+  assert.ok(
+    polite.textContent.includes(en.emptyNeedsKeyTitle),
+    `the needs-key transition was never announced:\n${polite.textContent}`,
+  );
+  await app?.dispose();
+});
+
+test("the chrome is never a blank rectangle, not even while boot is still running", async () => {
+  // The window #4845's boot indicator cannot cover. `mount` appends the chrome
+  // and THEN awaits `bootOrFail`; the indicator was retired by the
+  // `root.textContent = ""` in that same statement pair, so between the two the
+  // screen is a header, an empty middle and a Send button -- defect #8 exactly.
+  // Measured on an Android 35 emulator before this: 117ms of it on a cold
+  // start, 3.928s to 4.045s.
+  //
+  // Asserted with NO await at all. Everything up to `bootOrFail` is
+  // synchronous, so the panel has to be on screen the instant `mount` yields --
+  // which is what makes this a test of the seed and not of the post-boot
+  // refresh. A single `await` here would let boot finish and the test would
+  // pass without the seed existing.
+  const { dom, platform: web } = harness();
+  const pending = mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+
+  const panel = emptyPanel(dom);
+  assert.ok(panel, "no empty state was painted before boot finished");
+  assert.equal(panel.hidden, false, "the chrome was a blank rectangle while booting");
+  // The WELCOME, not the guidance: nothing has asked the keychain yet, and
+  // guessing "no key" here would accuse a configured user on every launch.
+  assert.ok(panel.textContent.includes(en.emptyTranscript), panel.textContent);
+  assert.equal(
+    panel.textContent.includes(en.emptyNeedsKeyTitle),
+    false,
+    "a key was declared missing before anything asked the keychain",
+  );
+
+  const app = await pending;
+  await settle();
+  // And once boot has finished and the keychain has answered, it becomes the
+  // guidance -- so the seed is a starting state, not a state it gets stuck in.
+  assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), emptyWords(dom));
+  await app?.dispose();
+});
