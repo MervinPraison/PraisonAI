@@ -839,9 +839,15 @@ class PraisonAIDB:
             async_fn = getattr(store, async_name, None)
         return async_fn or getattr(store, sync_name, None)
 
+    #: Store ops whose result the caller *reads back* (session/message loads).
+    #: These MUST return their real value — fire-and-forget would silently drop
+    #: the read and make a resumed session look empty. Everything else is a
+    #: write, which is uuid-keyed and idempotent and safe to defer.
+    _READ_OPS = frozenset({"get_session", "get_messages", "list_sessions"})
+
     @staticmethod
     def _call_store(store, sync_name, async_name, *args, **kwargs):
-        """Call a store from a sync hook without ever blocking or losing a write.
+        """Call a store from a sync hook without ever blocking or losing data.
 
         A sync hook can be reached from a plain sync caller *or* from inside a
         running event loop (several async chat paths still route through the
@@ -849,13 +855,19 @@ class PraisonAIDB:
         coroutine we must handle both:
 
         - No running loop: block on the shared bridge via ``run_sync``.
-        - Running loop: submitting-then-blocking would park the loop (the
-          pathology ``run_sync_or_offload`` forbids), and the old behaviour
-          discarded the coroutine entirely — silently dropping every message,
-          reply and tool result. Instead we submit the write to the shared
-          bridge as tracked fire-and-forget. Store writes are uuid-keyed and
-          idempotent per message, so completing them slightly later is safe by
-          construction and strictly better than losing them.
+        - Running loop:
+
+          * **Writes** (default): submitting-then-blocking would park the loop
+            (the pathology ``run_sync_or_offload`` forbids), so we submit to the
+            shared bridge as tracked fire-and-forget. Store writes are uuid-keyed
+            and idempotent per message, so completing them slightly later is safe
+            by construction and strictly better than losing them.
+          * **Reads** (``get_session``/``get_messages``/…): the caller consumes
+            the return value, so fire-and-forget would silently drop the read and
+            make a resumed session look empty. We route these through
+            ``run_sync_or_offload``, which returns the value on a sync path and,
+            inside a running loop, fails loudly (steering callers to the ``aon_*``
+            hooks) instead of corrupting history with a silent ``None``.
         """
         fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:
@@ -870,6 +882,14 @@ class PraisonAIDB:
             asyncio.get_running_loop()
         except RuntimeError:
             return run_sync(result)
+
+        if sync_name in PraisonAIDB._READ_OPS:
+            # Reads must return a real value; never fire-and-forget them.
+            from .._async_bridge import run_sync_or_offload
+
+            return run_sync_or_offload(
+                result, thread_name=f"praisonai-db-read-{sync_name}"
+            )
 
         bridge = current_bridge()
         fut = bridge.submit(result)
