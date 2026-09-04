@@ -28,7 +28,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Bots | 7 | 33 | 13864 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 123 | 38138 |
-| ✅ Chunking | 2 | 2 | 420 |
+| ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1347 |
@@ -48,8 +48,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2674 |
 | ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 17 | 5306 |
-| ✅ LLM | 3 | 15 | 5853 |
+| ✅ Knowledge | 4 | 17 | 5320 |
+| ✅ LLM | 3 | 15 | 5859 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 62 | 14436 |
 | ✅ Memory | 6 | 19 | 7548 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 7 | 1825 |
 | ✅ Plugins | 8 | 5 | 3124 |
 | ✅ Prompts | 2 | 9 | 2011 |
-| ✅ Providers | 1 | 57 | 8581 |
+| ✅ Providers | 1 | 57 | 8621 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44182 |
+| ✅ Tools | 12 | 145 | 44258 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
