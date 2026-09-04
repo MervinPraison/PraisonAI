@@ -839,11 +839,15 @@ class PraisonAIDB:
             async_fn = getattr(store, async_name, None)
         return async_fn or getattr(store, sync_name, None)
 
-    #: Store ops whose result the caller *reads back* (session/message loads).
+    #: Store ops whose result the caller *reads back* before writing again.
     #: These MUST return their real value — fire-and-forget would silently drop
-    #: the read and make a resumed session look empty. Everything else is a
-    #: write, which is uuid-keyed and idempotent and safe to defer.
-    _READ_OPS = frozenset({"get_session", "get_messages", "list_sessions"})
+    #: the read: a resumed session would look empty (``get_session`` /
+    #: ``get_messages`` / ``list_sessions``), and the run/trace/span completion
+    #: hooks — which read-modify-write state via ``get`` then ``set`` — would
+    #: merge into an empty ``{}`` and overwrite the persisted record, losing
+    #: identifiers, start timestamps, input, spans, and events. Everything else
+    #: is a write, which is uuid-keyed and idempotent and safe to defer.
+    _READ_OPS = frozenset({"get", "get_session", "get_messages", "list_sessions"})
 
     @staticmethod
     def _call_store(store, sync_name, async_name, *args, **kwargs):
@@ -862,12 +866,16 @@ class PraisonAIDB:
             shared bridge as tracked fire-and-forget. Store writes are uuid-keyed
             and idempotent per message, so completing them slightly later is safe
             by construction and strictly better than losing them.
-          * **Reads** (``get_session``/``get_messages``/…): the caller consumes
-            the return value, so fire-and-forget would silently drop the read and
-            make a resumed session look empty. We route these through
-            ``run_sync_or_offload``, which returns the value on a sync path and,
-            inside a running loop, fails loudly (steering callers to the ``aon_*``
-            hooks) instead of corrupting history with a silent ``None``.
+          * **Reads** (``get``/``get_session``/``get_messages``/…): the caller
+            consumes the return value — either directly (session/message loads)
+            or as the base of a read-modify-write (the run/trace/span completion
+            hooks ``get`` then ``set``). Fire-and-forget would silently drop the
+            read: a resumed session would look empty, and a completion hook would
+            merge into ``{}`` and overwrite the persisted record. We route these
+            through ``run_sync_or_offload``, which returns the value on a sync
+            path and, inside a running loop, fails loudly (steering callers to
+            the ``aon_*`` hooks) instead of corrupting state with a silent
+            ``None``.
         """
         fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:

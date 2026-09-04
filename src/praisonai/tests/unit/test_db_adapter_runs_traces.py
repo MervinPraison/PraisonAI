@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 
 
@@ -10,6 +11,23 @@ class _FakeStateStore:
 
     def get(self, key):
         return self._data.get(key)
+
+
+class _AsyncStateStore:
+    """State store whose ``get``/``set`` are coroutines.
+
+    Mirrors an async backend so a sync completion hook reaching ``get`` from
+    inside a running event loop exercises the ``_call_store`` read path.
+    """
+
+    def __init__(self, data=None):
+        self._data = dict(data or {})
+
+    async def get(self, key):
+        return self._data.get(key)
+
+    async def set(self, key, value):
+        self._data[key] = value
 
 
 class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
@@ -52,3 +70,35 @@ class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
     def test_get_traces_limit_zero_returns_empty_list(self):
         db = self._make_db({"trace:t1": {"trace_id": "t1", "started_at": 10}})
         self.assertEqual(db.get_traces(limit=0), [])
+
+    def test_state_get_is_a_read_op(self):
+        """State ``get`` must be classified as a read so the run/trace/span
+        completion hooks (get-then-set) never fire-and-forget the read-back and
+        overwrite the persisted record with a partial dict."""
+        from praisonai.db.adapter import PraisonAIDB
+
+        self.assertIn("get", PraisonAIDB._READ_OPS)
+
+    def test_on_run_end_state_get_fails_loudly_in_running_loop(self):
+        """Regression (Greptile P1): a sync completion hook whose ``get`` returns
+        a coroutine must not silently return ``None`` inside a running loop.
+        With ``get`` now a read op it fails loudly (steering to ``aon_*``) rather
+        than merging into ``{}`` and clobbering run_id/started_at/input_content."""
+        from praisonai.db.adapter import PraisonAIDB
+
+        db = PraisonAIDB()
+        db._state_store = _AsyncStateStore(
+            {"run:s1:r1": {"run_id": "r1", "started_at": 10, "input_content": "hi"}}
+        )
+        db._initialized = True
+
+        async def _main():
+            with self.assertRaises(RuntimeError):
+                db.on_run_end("s1", "r1", output_content="done")
+
+        asyncio.run(_main())
+        # The persisted record was left intact — not overwritten with a partial dict.
+        self.assertEqual(
+            db._state_store._data["run:s1:r1"],
+            {"run_id": "r1", "started_at": 10, "input_content": "hi"},
+        )
