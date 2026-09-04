@@ -158,9 +158,22 @@ describe('HandoffConfig parity', () => {
       expect(h.config.timeoutSeconds).toBe(10);
     });
 
-    it('reports non-default settings that execute() does not consult yet', () => {
-      new Handoff({ agent: fakeAgent(), maxDepth: 3, config: { detectCycles: false } });
-      expect(unhonouredOptions()).toEqual(['Handoff.detectCycles', 'Handoff.maxDepth']);
+    // Every HandoffConfig setting is now acted on by execute() (see
+    // handoff-context-policy / handoff-safety / handoff-execution-limits), so
+    // nothing on this surface is accepted-and-ignored any more.
+    it('reports no unhonoured settings, whatever is configured', () => {
+      new Handoff({
+        agent: fakeAgent(),
+        maxDepth: 3,
+        maxContextTokens: 50,
+        maxContextMessages: 2,
+        preserveSystem: false,
+        contextPolicy: ContextPolicy.LAST_N,
+        timeoutSeconds: 1,
+        maxConcurrent: 1,
+        config: { detectCycles: false },
+      });
+      expect(unhonouredOptions()).toEqual([]);
     });
   });
 
