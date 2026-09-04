@@ -245,7 +245,7 @@ Wrapper-only surfaces remain in `src/praisonai/`:
 - **Python Wrapper** — `src/praisonai/` (`praisonai`)
 - **TypeScript SDK** — JS/TS runtime (`src/praisonai-ts/`)
 - **Rust SDK** — High-performance Rust runtime (`src/praisonai-rust/`)
-- **UI** — Web UI (`src/praisonai/praisonai/ui/`)
+- **UI** — Web UI apps (`src/praisonai/praisonai/ui_chat/`, `ui_agents/`, `ui_bot/`, `ui_realtime/`, `ui_dashboard/`; shared support in `ui/`)
 
 ---
 
