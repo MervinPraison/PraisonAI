@@ -20,9 +20,8 @@ The check is a ratchet: the total may fall, never rise.
 | `Agent.__init__` | 15 |
 | `Agent.chat` | 6 |
 | `AgentTeam.__init__` | 15 |
-| `Handoff` | 8 |
 | `Task.__init__` | 32 |
-| **Total** | **76** |
+| **Total** | **68** |
 
 Plus 10 options that work for some inputs and announce themselves for the rest.
 
@@ -75,17 +74,6 @@ add a test proving the option changes what the code does, and regenerate.
 - `learn`
 - `toolsRunOn`
 - `runOn`
-
-### `Handoff` (8)
-
-- `contextPolicy`
-- `maxContextTokens`
-- `maxContextMessages`
-- `preserveSystem`
-- `timeoutSeconds`
-- `maxConcurrent`
-- `detectCycles`
-- `maxDepth`
 
 ### `Task.__init__` (32)
 
