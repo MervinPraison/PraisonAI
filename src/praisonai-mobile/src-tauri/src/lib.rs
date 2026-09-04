@@ -12,7 +12,9 @@
 //!  - `shell::on_window_event` — `lifecycle` on suspend/resume/focus, and
 //!    `safe-area-changed` on resize and scale change.
 //!  - `tauri_plugin_back_gesture` + `commands::on_back_pressed` — `back-gesture`
-//!    on Android's system back, answered through `back_gesture_result`.
+//!    on Android's system back, answered through `back_gesture_result` and
+//!    pre-empted by `back_gesture_can_go_back`, the standing declaration the
+//!    watchdog reads when that answer is too slow to arrive.
 //!  - `keyboard-height` — NOT emitted by anything here. The TypeScript reads
 //!    `visualViewport`, which WKWebView and Android WebView both implement,
 //!    and treats a native event as an override if one ever arrives.
@@ -106,6 +108,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
         .manage(shell::LifecycleState::default())
         .invoke_handler(tauri::generate_handler![
             commands::back_gesture_result,
+            commands::back_gesture_can_go_back,
             store::storage_read,
             store::storage_write,
             store::storage_remove,

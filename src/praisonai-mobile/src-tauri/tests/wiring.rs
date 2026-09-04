@@ -159,6 +159,7 @@ fn run_registers_the_window_event_handler() {
         ".manage(shell::LifecycleState::default())",
         ".manage(commands::BackState::default())",
         "tauri_plugin_back_gesture::init(commands::on_back_pressed)",
+        "commands::back_gesture_can_go_back",
     ] {
         assert!(
             LIB_RS.contains(required),

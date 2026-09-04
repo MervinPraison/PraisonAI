@@ -64,6 +64,23 @@ fn watchdog<R: Runtime>(app: AppHandle<R>) {
     });
 }
 
+/// The webview's standing declaration: has it a route to pop?
+///
+/// Pushed on every route change, not in response to a press, because the answer
+/// to a press cannot be waited for -- the round trip was measured at 0.7 s and
+/// then 5.4 s on one Android 15 emulator, against a 400 ms watchdog. This is
+/// what the watchdog consults instead of reading silence as "the app does not
+/// want it" and taking a live app away from the user mid-navigation.
+#[tauri::command]
+pub fn back_gesture_can_go_back<R: Runtime>(app: AppHandle<R>, can_go_back: bool) {
+    transition(&app, |gate| {
+        gate.declare_can_go_back(can_go_back);
+        // Nothing to do now: a declaration is state, not an event. It is read
+        // by `Gate::timed_out` the next time a press goes unanswered.
+        Action::Ignore
+    });
+}
+
 /// The webview's answer to a back gesture.
 ///
 /// Answering at all is mandatory on the TypeScript side, and it is fire and

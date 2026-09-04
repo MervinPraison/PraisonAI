@@ -111,6 +111,68 @@ test("detaching the back gesture leaves no listener behind", () => {
   assert.equal(shell.pressBack(), false, "a detached router must not consume the gesture");
 });
 
+test("attaching declares whether there is anywhere to go back to", () => {
+  // The device bug this exists for: on Settings the app HAD consumed the press
+  // and popped, but its answer took seconds to cross the native bridge, the
+  // watchdog read the silence as "the app does not want it", and Android took
+  // the app away. The native side can only be right about a late answer if it
+  // was told the stack IN ADVANCE, so the declaration goes out on attach and on
+  // every change -- not in reply to a press.
+  const shell = createFakeShell();
+  const router = createRouter(CHATS);
+  const detach = attachBackGesture(shell, router);
+
+  assert.equal(shell.canGoBack(), false, "the root has nothing to pop");
+
+  router.push(SETTINGS);
+  assert.equal(shell.canGoBack(), true, "Settings is a route back must keep");
+
+  router.pop();
+  assert.equal(shell.canGoBack(), false, "back at the root again");
+
+  // Every change, not just the first: a declaration sent once at startup would
+  // be right exactly until the user navigated.
+  assert.deepEqual(shell.declared, [false, true, false]);
+  detach();
+});
+
+test("detaching declares that there is nothing to go back to", () => {
+  // A torn-down view's router speaks for nothing. A native side left holding
+  // `true` would treat every unanswered press as "the app is just slow" and
+  // swallow it -- a back button that does nothing, forever.
+  const shell = createFakeShell();
+  const router = createRouter(CHATS);
+  const detach = attachBackGesture(shell, router);
+  router.push(SETTINGS);
+  assert.equal(shell.canGoBack(), true);
+
+  detach();
+  assert.equal(shell.canGoBack(), false, "a detached router must declare nothing to pop");
+
+  router.push(chat("c1"));
+  assert.equal(shell.canGoBack(), false, "a detached router must stop declaring at all");
+});
+
+test("the declaration says the same thing the handler will answer", () => {
+  // Two sources of truth for one question is the failure this is written
+  // against: a declaration that says "I can go back" while the handler answers
+  // false gets the press swallowed, and the opposite exits the app mid-screen.
+  const shell = createFakeShell();
+  const router = createRouter(CHATS);
+  attachBackGesture(shell, router);
+
+  for (const route of [SETTINGS, chat("c1"), SETTINGS]) {
+    router.push(route);
+    assert.equal(shell.canGoBack(), true);
+  }
+  while (router.stack.length > 1) {
+    const declared = shell.canGoBack();
+    assert.equal(shell.pressBack(), declared, "the answer contradicted the declaration");
+  }
+  assert.equal(shell.canGoBack(), false);
+  assert.equal(shell.pressBack(), false, "the root must let the OS act");
+});
+
 test("the most recently attached handler gets the gesture first", () => {
   // A modal must consume back ahead of the route beneath it, or dismissing it
   // also navigates.

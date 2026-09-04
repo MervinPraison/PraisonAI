@@ -30,6 +30,13 @@ export interface FakeShell extends ShellPort {
   setLifecycle(phase: LifecyclePhase): void;
   /** Returns what the app answered, so a test can assert the OS would act. */
   pressBack(): boolean;
+  /** The app's standing declaration, as the native side would hold it. False
+   *  until the app says otherwise, which is what a shell must assume of an app
+   *  that never loaded. */
+  readonly canGoBack: () => boolean;
+  /** Every value the app declared, in order: a test can prove the declaration
+   *  tracks the stack rather than being sent once at startup. */
+  readonly declared: readonly boolean[];
 
   // ---- observe what the app asked for ----
   readonly haptics: readonly HapticKind[];
@@ -51,6 +58,11 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
   // registered gets first refusal. A Set has no defined order, so a modal
   // would not reliably consume the gesture ahead of the route beneath it.
   const backSubs: Array<() => boolean> = [];
+
+  // False, exactly as the Rust gate defaults: an app that has declared nothing
+  // is one that never loaded, and back must still be able to leave it.
+  let canGoBack = false;
+  const declared: boolean[] = [];
 
   const haptics: HapticKind[] = [];
   const shared: SharePayload[] = [];
@@ -85,6 +97,11 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
       };
     },
 
+    setCanGoBack(next) {
+      canGoBack = next;
+      declared.push(next);
+    },
+
     haptic: (kind) => void haptics.push(kind),
 
     async share(payload) {
@@ -110,6 +127,9 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
     },
 
     // ---- test controls ----
+    canGoBack: () => canGoBack,
+    declared,
+
     setInsets(next) {
       insets = next;
       for (const cb of insetSubs) cb(next);

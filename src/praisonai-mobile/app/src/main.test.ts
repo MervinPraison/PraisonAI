@@ -1029,6 +1029,58 @@ test("a route change MOVES focus to the new heading, and Back restores it", asyn
   app?.dispose();
 });
 
+test("opening Settings tells the shell there is a route to come back to", async () => {
+  // The whole point, end to end, on the path the user walks. On a device the
+  // app's ANSWER to the back press was measured arriving 5.4 s after it -- long
+  // past the 400 ms the native side waits -- so Android acted on the press
+  // itself and the app left the screen the user was on. What stops that is the
+  // declaration made when the route is PUSHED, before any press exists.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets: createFakeSecrets(),
+    http: createFakeHttp(), time: nodeTime(), kind: "web",
+  };
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+  assert.equal(shell.canGoBack(), false, "the chat the app opens on is the root");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+  assert.equal(shell.canGoBack(), true, "Settings must be declared as a route back");
+
+  shell.pressBack();
+  await settle();
+  assert.equal(shell.canGoBack(), false, "and popped back to the root");
+  assert.equal(shell.pressBack(), false, "the root still lets the OS act");
+  app?.dispose();
+});
+
+test("the crash screen stops claiming there is a route to go back to", async () => {
+  // The fatal screen has no routes. If the last thing declared was `true`, the
+  // native side keeps waiting on a webview that will never answer again, and
+  // back on a dead app does nothing at all -- the one outcome that is worse
+  // than exiting.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets: createFakeSecrets(),
+    http: createFakeHttp(), time: nodeTime(), kind: "web",
+  };
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+  assert.equal(shell.canGoBack(), true);
+
+  // A real crash, through the real handler: an uncaught error at the window.
+  dom.view.dispatch("error", { error: new Error("the webview fell over") });
+  await settle();
+  assert.match(dom.text(), /Something went wrong/, "the crash screen did not paint");
+  assert.equal(shell.canGoBack(), false, "a crashed app must not swallow the back gesture");
+  app?.dispose();
+});
+
 test("the chat list is painted from the session, and a chat reopens", async () => {
   // `session.list()` had no app caller and the chat list no way to be reached,
   // so a conversation, once left, could never be reopened. The chats route must

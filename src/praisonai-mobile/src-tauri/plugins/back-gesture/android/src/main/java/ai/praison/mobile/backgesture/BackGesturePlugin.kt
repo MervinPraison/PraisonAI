@@ -19,6 +19,10 @@ import app.tauri.plugin.Plugin
  * listener -- Rust setup failed, or the channel is gone -- the press falls
  * through immediately, so a broken bridge degrades to a normal back button
  * rather than a dead one.
+ *
+ * What "falling through" means depends on where the app is: see `defer` -- at
+ * the task root the app is BACKGROUNDED, and anywhere else the press is
+ * re-dispatched to whatever is beneath this callback.
  */
 @TauriPlugin
 class BackGesturePlugin(private val activity: Activity) : Plugin(activity) {
@@ -56,16 +60,41 @@ class BackGesturePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   /**
-   * Re-dispatch with this callback disabled, so the next one runs: Tauri's
-   * AppPlugin (webview history, if any), then the system default. On Android
-   * 12+ the default moves the task to the back rather than destroying the
-   * activity, which preserves warm start. `finish()` would destroy it and
-   * `exitProcess` would kill the process; both are worse.
+   * Let something else have the press.
+   *
+   * Two paths, because the "system default" is not one thing.
+   *
+   * Above the task root -- a second activity, or webview history -- the press
+   * is RE-DISPATCHED with this callback disabled, so whatever sits beneath it
+   * runs: Tauri's AppPlugin, then the platform.
+   *
+   * At the task root it is not re-dispatched, and that difference is the whole
+   * point of this function. Android 12+ backgrounds a root activity instead of
+   * finishing it, but only on the press the SYSTEM dispatches; calling
+   * `onBackPressedDispatcher.onBackPressed()` ourselves walks the app-level
+   * path, which ends in `Activity.onBackPressed` -> `finishAfterTransition()`.
+   * Measured on an Android 15 emulator: back on the root chat produced
+   * `WIN DEATH` for MainActivity and `pidof` came back empty -- the process was
+   * gone, so returning to the app was a cold start with the transcript and the
+   * live run lost. `moveTaskToBack(true)` is the behaviour the comment above
+   * used to claim: the task goes behind the launcher, the process stays warm,
+   * and the app is one tap away in Recents.
+   *
+   * `finish()` would destroy the activity and `exitProcess` would kill the
+   * process; both are worse than either path here.
    */
   private fun defer() {
+    val host = activity as AppCompatActivity
+    if (host.isTaskRoot) {
+      // Ignore the return: `false` means the task was not moved (it is not the
+      // one in front any more), and there is nothing better to do about that
+      // than leave the app where it is.
+      host.moveTaskToBack(true)
+      return
+    }
     callback.isEnabled = false
     try {
-      (activity as AppCompatActivity).onBackPressedDispatcher.onBackPressed()
+      host.onBackPressedDispatcher.onBackPressed()
     } finally {
       callback.isEnabled = true
     }

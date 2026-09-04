@@ -5,7 +5,9 @@
 //! as though the phone had no notch, no keyboard and no lifecycle. Nothing
 //! throws, so nothing is reported.
 
-use praisonai_mobile_lib::shell::{CMD_BACK_RESULT, EVT_BACK, EVT_KEYBOARD, EVT_LIFECYCLE, EVT_SAFE_AREA};
+use praisonai_mobile_lib::shell::{
+    CMD_BACK_CAN_GO_BACK, CMD_BACK_RESULT, EVT_BACK, EVT_KEYBOARD, EVT_LIFECYCLE, EVT_SAFE_AREA,
+};
 
 #[test]
 fn event_names_match_the_typescript_adapter() {
@@ -20,6 +22,15 @@ fn event_names_match_the_typescript_adapter() {
 #[test]
 fn the_command_name_matches() {
     assert_eq!(CMD_BACK_RESULT, "back_gesture_result");
+}
+
+#[test]
+fn the_can_go_back_command_name_matches() {
+    // The webview invokes this by string on every route change. A rename here
+    // alone is silent: Tauri rejects the unknown command, the TypeScript's
+    // `invoke` swallows the rejection, and the gate keeps its default -- so the
+    // app exits on a slow back press again, with every test still green.
+    assert_eq!(CMD_BACK_CAN_GO_BACK, "back_gesture_can_go_back");
 }
 
 #[test]

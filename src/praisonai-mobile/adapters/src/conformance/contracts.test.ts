@@ -1183,6 +1183,56 @@ test("the back gesture is always answered, because silence reads as consumed", a
   });
 });
 
+test("the shell tells Rust in advance whether the app can go back", async () => {
+  // The answer to a press is not fast enough to be the only signal: measured on
+  // an Android 15 emulator, the same press was answered in 0.7 s and then in
+  // 5.4 s, both past the 400 ms watchdog -- which then handed the press to
+  // Android and took a live app away from the user mid-navigation. The standing
+  // declaration is what the watchdog reads instead of that silence, so it has
+  // to actually cross the bridge.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+
+  shell.setCanGoBack(true);
+  assert.deepEqual(probe.invocations.at(-1), {
+    command: "back_gesture_can_go_back",
+    args: { canGoBack: true },
+  });
+
+  shell.setCanGoBack(false);
+  assert.deepEqual(probe.invocations.at(-1), {
+    command: "back_gesture_can_go_back",
+    args: { canGoBack: false },
+  });
+});
+
+test("the first declaration is sent even when it agrees with the default", async () => {
+  // Rust starts at false, so `false` looks like a value worth skipping. It is
+  // not: after a reload the native side is holding whatever the PREVIOUS page
+  // declared, and a shell that stays quiet because it agrees with a default is
+  // a shell that says nothing at all.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+  const before = probe.invocations.length;
+  shell.setCanGoBack(false);
+  assert.deepEqual(probe.invocations.slice(before), [
+    { command: "back_gesture_can_go_back", args: { canGoBack: false } },
+  ]);
+});
+
+test("re-declaring the same answer costs nothing", async () => {
+  // The router declares on EVERY stack change, and moving between two chats
+  // does not change the answer. Forwarding those would put an IPC round trip on
+  // a navigation that needs none.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+  shell.setCanGoBack(true);
+  const after = probe.invocations.length;
+  shell.setCanGoBack(true);
+  shell.setCanGoBack(true);
+  assert.equal(probe.invocations.length, after, "a repeated declaration was re-sent");
+});
+
 test("the shell refuses to hand a javascript: URL to the OS", async () => {
   // openExternal inside a webview is script execution in the app's own origin
   // with the user's session, from whatever produced the link -- a model, a tool

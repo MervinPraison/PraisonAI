@@ -174,6 +174,15 @@ export function createWebShell(view: Window = window): WebShell {
       };
     },
 
+    setCanGoBack(_canGoBack: boolean) {
+      // Nothing to tell. A browser answers `popstate` SYNCHRONOUSLY -- the
+      // handler runs in the page, its return value is acted on in the same
+      // task, and there is no bridge to be slow and no watchdog to lose a race
+      // with. The declaration exists for the native shells, where the answer to
+      // a press has to cross a thread boundary before the OS decides what the
+      // press meant; recording it here would be state nothing reads.
+    },
+
     haptic(_kind: HapticKind) {
       // No haptic engine. Silence is the honest behaviour.
     },
