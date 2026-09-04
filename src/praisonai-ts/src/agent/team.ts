@@ -3,13 +3,70 @@ import { getEnv } from '../llm/openaiClientOptions';
 import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 import { Agent, type AgentChatOptions } from './simple';
 import type { Task, TaskOutput } from './types';
+import type { ContextManager } from '../context/manager';
+import type { Plan, TodoList } from '../planning';
+import {
+  assertTeamPlacement,
+  resolveTeamContext,
+  resolveTeamExecution,
+  resolveTeamHooks,
+  type TeamCompletionChecker,
+  type TeamContextInput,
+  type TeamExecutionInput,
+  type TeamHooksInput,
+  type TeamTaskCompleteHook,
+  type TeamTaskRef,
+  type TeamTaskStartHook,
+  type TeamTaskStatus,
+} from './team-options';
+import { createTeamMemory, type TeamMemory, type TeamMemoryInput, type TeamMemoryStore } from './team-memory';
+import { runHierarchical, type ManagerTaskView } from './team-manager';
+import {
+  approveTeamPlan,
+  createTeamPlan,
+  resolveTeamPlanning,
+  todoListFromPlan,
+  type TeamPlanningInput,
+  type TeamPlanningSettings,
+} from './team-planning';
 
 /**
  * How an AgentTeam runs its tasks. `workflow` runs like `sequential`;
- * `hierarchical` also runs sequentially until a manager agent exists in
- * TypeScript (see `managerLlm`).
+ * `hierarchical` puts a manager agent on `managerLlm` in charge of choosing
+ * which task runs next and on which member (see {@link AgentTeamConfig.managerLlm}).
  */
 export type AgentTeamProcess = 'sequential' | 'parallel' | 'workflow' | 'hierarchical';
+
+/**
+ * Options this surface accepts for Python parity but does not yet act on are
+ * listed in `utils/parity-notice.ts`. These are the ones this file DOES act on,
+ * and are filtered out of the notice loop below. The ledger is shared with the
+ * other surfaces, so it is the coordinator that deletes these entries; until
+ * then this set keeps the constructor from warning about behaviour that exists.
+ */
+const HONOURED_HERE: ReadonlySet<string> = new Set([
+  'memory', 'context', 'hooks', 'planning', 'execution', 'runOn', 'managerLlm',
+]);
+
+/**
+ * Why each still-unhonoured team option is unhonoured, so the warning says what
+ * to do instead of only that something was ignored.
+ *
+ * The first six are unwired at the team level in Python too -- its constructor
+ * logs "AgentTeam received [...] but does not yet apply them at the team level;
+ * pass these to individual Agent(...) instances instead" -- so honouring them
+ * here would diverge from the reference implementation rather than match it.
+ */
+const TEAM_OPTION_NOTES: Readonly<Record<string, string>> = {
+  knowledge: 'Python does not apply it at the team level either; pass knowledge to individual Agent(...) instances.',
+  guardrails: 'Python does not apply it at the team level either; pass guardrails to individual Agent(...) instances.',
+  web: 'Python does not apply it at the team level either; pass web to individual Agent(...) instances.',
+  reflection: 'Python does not apply it at the team level either; pass reflection to individual Agent(...) instances.',
+  caching: 'Python does not apply it at the team level either; pass caching to individual Agent(...) instances.',
+  learn: 'Python does not apply it at the team level either; pass learn to individual Agent(...) instances.',
+  autonomy: 'Python propagates it to members that have none of their own; TypeScript Agents have no autonomy to propagate to yet.',
+  toolsRunOn: 'It needs one shared sandbox for the whole team; TypeScript has no compute providers yet, so every tool would still run on the host.',
+};
 
 /**
  * Configuration for multi-agent orchestration
@@ -26,7 +83,12 @@ export interface AgentTeamConfig {
   pretty?: boolean;
   /** Python parity: process (default "sequential"). */
   process?: AgentTeamProcess;
-  /** Python parity: manager_llm. Model for the hierarchical manager. */
+  /**
+   * Python parity: manager_llm. Model for the hierarchical manager: with
+   * `process: 'hierarchical'` a Manager agent on this model decides which task
+   * runs next and which member runs it. Defaults to `OPENAI_MODEL_NAME`, then
+   * `gpt-4o-mini`.
+   */
   managerLlm?: string;
   /** Python parity: name (Optional[str]). */
   name?: string;
@@ -39,21 +101,44 @@ export interface AgentTeamConfig {
   llm?: string;
   /** Python parity: model (Optional[str]). Alias of `llm`; wins when both are given. */
   model?: string;
-  /** Python parity: memory (Optional[Any]). */
-  memory?: unknown;
-  /** Python parity: planning (Optional[Any]). */
-  planning?: unknown;
-  /** Python parity: context (Optional[Any]). */
-  context?: unknown;
+  /**
+   * Python parity: memory (Optional[Any], default false). One shared memory for
+   * the whole team: what it recalls is appended to each task's prompt, and each
+   * task's result is written back. `true` uses an in-process store; pass a
+   * MemoryConfig, a `.json`/`.jsonl` path, or your own store.
+   */
+  memory?: TeamMemoryInput;
+  /**
+   * Python parity: planning (Optional[Any], default false). Plan first: the
+   * task descriptions become one request, a planner turns it into steps, and
+   * the steps are what run. `true` uses gpt-4o-mini; a string names the
+   * planner's model.
+   */
+  planning?: TeamPlanningInput;
+  /**
+   * Python parity: context (Optional[Any], default false). One shared
+   * ContextManager for the run: every task's prompt and result is recorded on
+   * it, and each task is handed the accumulated context of all the tasks before
+   * it rather than only the previous result.
+   */
+  context?: TeamContextInput;
   /**
    * Python parity: output (Optional[Any]). Output preset: "silent" hides the
    * per-task result printing, "verbose" forces it.
    */
   output?: unknown;
-  /** Python parity: execution (Optional[Any]). */
-  execution?: unknown;
-  /** Python parity: hooks (Optional[Any]). */
-  hooks?: unknown;
+  /**
+   * Python parity: execution (Optional[Any]). Iteration and retry limits, as a
+   * preset ("fast" | "balanced" | "thorough" | "unlimited"), an object
+   * (`{ maxIter, maxRetries }`) or `[preset, overrides]`.
+   */
+  execution?: TeamExecutionInput;
+  /**
+   * Python parity: hooks (Optional[Any]). Team lifecycle callbacks:
+   * `onTaskStart`, `onTaskComplete` and `completionChecker` (returning false
+   * from the checker retries the task).
+   */
+  hooks?: TeamHooksInput;
   /** Python parity: autonomy (Optional[Any]). */
   autonomy?: unknown;
   /** Python parity: knowledge (Optional[Any]). */
@@ -70,7 +155,11 @@ export interface AgentTeamConfig {
   learn?: unknown;
   /** Python parity: tools_run_on (Optional[Any]). */
   toolsRunOn?: unknown;
-  /** Python parity: run_on (Optional[Any]). */
+  /**
+   * Python parity: run_on (Optional[Any]). Refused on a team: `runOn` hands one
+   * agent's whole loop to a managed runtime, and a team orchestrates several
+   * agents locally. Passing it throws, as it does in Python.
+   */
   runOn?: unknown;
 }
 
@@ -119,6 +208,12 @@ interface TeamTask {
   options?: AgentChatOptions;
   /** The originating Task, when one was given: its status and callbacks are honoured. */
   task?: Task;
+  /** Where this task is in its lifecycle. Tracked here so a plain-string task has one too. */
+  status: TeamTaskStatus;
+  /** The last answer this task produced. */
+  result?: string;
+  /** The agent a hierarchical manager delegated this task to, overriding the default. */
+  assignedAgent?: Agent;
 }
 
 function looksLikeJsonSchema(value: unknown): value is Record<string, any> {
@@ -168,7 +263,7 @@ export class AgentTeam {
   readonly name?: string;
   /** Python parity: variables (Optional[Dict[str, Any]]). */
   readonly variables?: Record<string, unknown>;
-  /** Python parity: manager_llm. */
+  /** Python parity: manager_llm, as supplied. */
   readonly managerLlm?: string;
   /** Python parity: llm / model. The default model applied to member agents. */
   readonly llm?: string;
@@ -200,8 +295,35 @@ export class AgentTeam {
   readonly learn?: unknown;
   /** Python parity: tools_run_on. */
   readonly toolsRunOn?: unknown;
-  /** Python parity: run_on. */
+  /** Python parity: run_on. Always undefined: a team refuses the option (see the config docs). */
   readonly runOn?: unknown;
+
+  /** Python parity: max_iter. The hierarchical manager's iteration ceiling. */
+  readonly maxIter: number;
+  /** Python parity: max_retries. Attempts per task before it is left failed (never below 3). */
+  readonly maxRetries: number;
+  /** Python parity: on_task_start. Fired before each task runs. */
+  onTaskStart?: TeamTaskStartHook;
+  /** Python parity: on_task_complete. Fired after each task completes. */
+  onTaskComplete?: TeamTaskCompleteHook;
+  /** Python parity: completion_checker. Returning false retries the task. */
+  completionChecker: TeamCompletionChecker;
+  /** Python parity: user_id (default "praison"). */
+  readonly userId: string;
+  /** Python parity: shared_memory. The team's shared memory, when `memory` is on. */
+  readonly sharedMemory?: TeamMemory;
+  /** Python parity: context_manager. The shared context, when `context` is on. */
+  readonly contextManager?: ContextManager;
+  /** Python parity: planning_llm. */
+  readonly planningLlm: string;
+  /** Python parity: auto_approve_plan. */
+  readonly autoApprovePlan: boolean;
+
+  private readonly planningSettings: TeamPlanningSettings;
+  /** Python parity: _current_plan. Set once a planning run has produced a plan. */
+  private currentPlan?: Plan;
+  /** Python parity: _todo_list. */
+  private todoList?: TodoList;
 
   /**
    * Create a multi-agent orchestration
@@ -212,6 +334,11 @@ export class AgentTeam {
     const config: AgentTeamConfig = Array.isArray(configOrAgents)
       ? { agents: configOrAgents }
       : configOrAgents;
+
+    // run_on names a place that cannot do the job asked of it. Refuse it here,
+    // at the call site, rather than accepting it and orchestrating locally
+    // anyway (Python: resolve_placement(..., supports_run_on=False)).
+    assertTeamPlacement(config.runOn, config.toolsRunOn);
 
     this.agents = config.agents;
     this.name = config.name;
@@ -234,7 +361,33 @@ export class AgentTeam {
     this.caching = config.caching;
     this.learn = config.learn;
     this.toolsRunOn = config.toolsRunOn;
-    this.runOn = config.runOn;
+    // Kept readable rather than removed: `team.runOn` is always undefined
+    // because a team never hands its whole loop to a managed runtime.
+    this.runOn = undefined;
+
+    // execution -> iteration and retry limits.
+    const execution = resolveTeamExecution(config.execution);
+    this.maxIter = execution.maxIter;
+    this.maxRetries = execution.maxRetries;
+
+    // hooks -> the three team lifecycle callbacks.
+    const hooks = resolveTeamHooks(config.hooks);
+    this.onTaskStart = hooks.onTaskStart;
+    this.onTaskComplete = hooks.onTaskComplete;
+    this.completionChecker = hooks.completionChecker ?? this.defaultCompletionChecker;
+
+    // memory -> one shared store for the whole team.
+    const memory = createTeamMemory(config.memory);
+    this.sharedMemory = memory.memory;
+    this.userId = memory.userId;
+
+    // context -> one shared ContextManager for the whole run.
+    this.contextManager = resolveTeamContext(config.context);
+
+    // planning -> plan first, then run the plan's steps.
+    this.planningSettings = resolveTeamPlanning(config.planning);
+    this.planningLlm = this.planningSettings.llm;
+    this.autoApprovePlan = this.planningSettings.autoApprove;
 
     // Default model for member agents constructed without one (Python parity:
     // AgentTeam(llm=...) / AgentTeam(model=...); `model` wins).
@@ -250,10 +403,11 @@ export class AgentTeam {
     // Accepted for signature parity but not yet honoured on the team surface.
     // The ledger in utils/parity-notice.ts is the single list; see it for why.
     const accepted: Array<[string, unknown]> = unhonouredFor('AgentTeam.__init__')
+      .filter((name) => !HONOURED_HERE.has(name))
       .map((name) => [name, (config as unknown as Record<string, unknown>)[name]] as [string, unknown]);
     for (const [name, value] of accepted) {
       if (value !== undefined && value !== false && value !== null) {
-        notYetHonoured('AgentTeam', name, name === 'managerLlm' ? 'A hierarchical process runs sequentially until a manager agent exists.' : undefined);
+        notYetHonoured('AgentTeam', name, TEAM_OPTION_NOTES[name]);
       }
     }
 
@@ -262,15 +416,55 @@ export class AgentTeam {
       ? config.tasks.map((task, i) => this.normaliseTask(task, i))
       : this.generateTasks();
 
+    // The shared context starts from what the members are for, so a task that
+    // reads it sees who is on the team as well as what they have produced.
+    if (this.contextManager) {
+      for (const agent of this.agents) {
+        const instructions = agent.getInstructions();
+        if (instructions) this.contextManager.addSystem(`${agent.name}: ${instructions}`);
+      }
+    }
+
     // Configure logging
     Logger.setVerbose(this.verbose);
     Logger.setPretty(this.pretty);
   }
 
+  /** The team's shared memory store, when `memory` is on. Python parity: shared_memory. */
+  getSharedMemory(): TeamMemoryStore | undefined {
+    return this.sharedMemory?.getStore();
+  }
+
+  /** The shared ContextManager, when `context` is on. Python parity: context_manager. */
+  getContextManager(): ContextManager | undefined {
+    return this.contextManager;
+  }
+
+  /** The plan a planning run produced, if any. Python parity: _current_plan. */
+  getPlan(): Plan | undefined {
+    return this.currentPlan;
+  }
+
+  /** The todo list tracking that plan. Python parity: _todo_list. */
+  getTodoList(): TodoList | undefined {
+    return this.todoList;
+  }
+
+  /**
+   * Python parity: `default_completion_checker`'s freeform branch -- an answer
+   * with content in it finishes the task. Python additionally fails a task
+   * closed when structured output was requested and not produced; that rule
+   * belongs to Task.outputJson rather than to any team option, so it is left
+   * to `hooks: { completionChecker }` here rather than changed underneath
+   * existing callers.
+   */
+  private defaultCompletionChecker = (_task: TeamTaskRef, agentOutput: string): boolean =>
+    agentOutput.trim().length > 0;
+
   /** Turn a prompt string or Task object into a TeamTask, applying `variables`. */
   private normaliseTask(task: string | Task, index: number): TeamTask {
     if (typeof task === 'string') {
-      return { name: `task_${index + 1}`, prompt: this.substituteVariables(task) };
+      return { name: `task_${index + 1}`, prompt: this.substituteVariables(task), status: 'not started' };
     }
     let prompt = this.substituteVariables(task.description ?? '');
     if (task.expected_output) {
@@ -293,33 +487,110 @@ export class AgentTeam {
       agent,
       options: Object.keys(options).length > 0 ? options : undefined,
       task,
+      status: 'not started',
     };
   }
 
-  /** Run one task on `agent`, keeping the originating Task's status and callbacks in step. */
+  /** The hook's view of one task. */
+  private refFor(entry: TeamTask, agent?: Agent): TeamTaskRef {
+    return {
+      name: entry.name,
+      description: entry.task?.description ?? entry.prompt,
+      status: entry.status,
+      agent: agent?.name ?? entry.assignedAgent?.name ?? entry.agent?.name,
+      task: entry.task,
+    };
+  }
+
+  /**
+   * Run one task on `agent`, keeping the originating Task's status and
+   * callbacks in step.
+   *
+   * Python parity: `run_task` -- the on_task_start hook, the retry loop bounded
+   * by `max_retries` and driven by `completion_checker`, the shared-memory
+   * context and write-back, and the on_task_complete hook.
+   */
   private async runTask(entry: TeamTask, agent: Agent, prompt: string, previousResult?: string): Promise<string> {
+    const index = this.tasks.indexOf(entry);
     entry.task?.markStarted();
-    let result: string;
-    try {
-      result = await agent.start(prompt, previousResult, undefined, undefined, undefined, entry.options);
-    } catch (error) {
-      entry.task?.markFailed();
-      throw error;
-    }
-    if (entry.task) {
-      const output: TaskOutput = { description: entry.task.description, raw: result, agent: agent.name, outputFormat: 'RAW' };
-      if (entry.options?.outputJson || entry.options?.outputPydantic) {
-        try {
-          const parsed = JSON.parse(result);
-          if (entry.options.outputJson) { output.outputJson = parsed; output.outputFormat = 'JSON'; }
-          else { output.outputPydantic = parsed; output.outputFormat = 'Pydantic'; }
-        } catch {
-          // Not JSON: the raw text stands.
-        }
+    entry.status = 'in progress';
+
+    if (this.onTaskStart) {
+      try {
+        await this.onTaskStart(this.refFor(entry, agent), index);
+      } catch (error) {
+        await Logger.error(`Error in onTaskStart callback: ${(error as Error)?.message ?? String(error)}`);
       }
-      entry.task.markCompleted(output);
-      await entry.task.notifyComplete(output);
     }
+
+    // Shared memory is context, not history: what it recalls is appended to the
+    // prompt exactly as Python appends it, as bare bullet lines.
+    let finalPrompt = prompt;
+    if (this.sharedMemory) {
+      const recalled = await this.sharedMemory.recall(prompt);
+      if (recalled) finalPrompt = `${prompt}\n\n${recalled}`;
+    }
+
+    let result = '';
+    let completed = false;
+    const attempts = Math.max(1, this.maxRetries);
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        result = await agent.start(finalPrompt, previousResult, undefined, undefined, undefined, entry.options);
+      } catch (error) {
+        entry.status = 'failed';
+        entry.task?.markFailed();
+        throw error;
+      }
+      if (this.completionChecker(this.refFor(entry, agent), result)) {
+        completed = true;
+        break;
+      }
+      await Logger.debug(`Task ${entry.name}: completion check failed (attempt ${attempt + 1}/${attempts})`);
+    }
+
+    entry.result = result;
+    entry.status = completed ? 'completed' : 'failed';
+
+    const output: TaskOutput = {
+      description: entry.task?.description ?? entry.prompt,
+      raw: result,
+      agent: agent.name,
+      outputFormat: 'RAW',
+    };
+    if (entry.options?.outputJson || entry.options?.outputPydantic) {
+      try {
+        const parsed = JSON.parse(result);
+        if (entry.options.outputJson) { output.outputJson = parsed; output.outputFormat = 'JSON'; }
+        else { output.outputPydantic = parsed; output.outputFormat = 'Pydantic'; }
+      } catch {
+        // Not JSON: the raw text stands.
+      }
+    }
+
+    if (entry.task) {
+      if (completed) {
+        entry.task.markCompleted(output);
+        await entry.task.notifyComplete(output);
+      } else {
+        entry.task.markFailed();
+      }
+    }
+
+    if (this.sharedMemory && completed) await this.sharedMemory.remember(prompt, result, entry.name);
+    if (this.contextManager) {
+      this.contextManager.add(prompt, 'user', { metadata: { task: entry.name } });
+      if (result) this.contextManager.add(result, 'assistant', { metadata: { task: entry.name, agent: agent.name } });
+    }
+
+    if (this.onTaskComplete) {
+      try {
+        await this.onTaskComplete(this.refFor(entry, agent), output);
+      } catch (error) {
+        await Logger.error(`Error in onTaskComplete callback: ${(error as Error)?.message ?? String(error)}`);
+      }
+    }
+
     return result;
   }
 
@@ -336,18 +607,29 @@ export class AgentTeam {
       const instructions = agent.getInstructions();
       // Extract task from instructions - get first sentence or whole instruction if no period
       const task = instructions.split('.')[0].trim();
-      return { name: `task_${i + 1}`, prompt: task };
+      return { name: `task_${i + 1}`, prompt: task, status: 'not started' as TeamTaskStatus };
     });
   }
 
-  /** The agent that runs task `i`: the Task's own agent, else the i-th (or last) team member. */
+  /** The agent that runs task `i`: a manager's pick, the Task's own agent, else the i-th (or last) member. */
   private agentFor(task: TeamTask, index: number): Agent {
-    return task.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
+    return task.assignedAgent ?? task.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
   }
 
   /** `content` (Python parity) is added to every task's context. */
   private withContent(prompt: string, content?: string): string {
     return content ? `${prompt}\n\nContext: ${content}` : prompt;
+  }
+
+  /**
+   * What a task is handed as "the input so far". With a shared ContextManager
+   * that is everything the team has produced; without one it is the previous
+   * task's result, as before.
+   */
+  private inputSoFar(previousResult?: string): string | undefined {
+    if (!this.contextManager) return previousResult;
+    const produced = this.contextManager.getByRole('assistant').map((item) => item.content).filter(Boolean);
+    return produced.length > 0 ? produced.join('\n\n') : undefined;
   }
 
   private async executeSequential(content?: string): Promise<string[]> {
@@ -362,15 +644,94 @@ export class AgentTeam {
       await Logger.debug(`Task: ${task.prompt}`);
 
       // For first agent, use task directly
-      // For subsequent agents, append previous result to their instructions
+      // For subsequent agents, append the input so far to their instructions
       const base = this.withContent(task.prompt, content);
-      const prompt = i === 0 ? base : `${base}\n\nHere is the input: ${previousResult}`;
+      const input = this.inputSoFar(previousResult);
+      const prompt = i === 0 || !input ? base : `${base}\n\nHere is the input: ${input}`;
       const result = await this.runTask(task, agent, prompt, previousResult);
       results.push(result);
       previousResult = result;
     }
 
     return results;
+  }
+
+  /**
+   * Run the tasks under a manager on `managerLlm` (Python parity:
+   * `Process.hierarchical`). The manager chooses the order and the member;
+   * a task it never reaches keeps an empty result.
+   */
+  private async executeHierarchical(content?: string): Promise<string[]> {
+    const managerLlm = this.managerLlm ?? getEnv('OPENAI_MODEL_NAME') ?? 'gpt-4o-mini';
+    const agentNames = this.agents.map((agent) => agent.name);
+
+    const outcome = await runHierarchical({
+      managerLlm,
+      maxIter: this.maxIter,
+      verbose: this.verbose,
+      agentNames,
+      snapshot: (): ManagerTaskView[] => this.tasks.map((task, index) => ({
+        task_id: index,
+        name: task.name,
+        description: task.task?.description ?? task.prompt,
+        status: task.status,
+        agent: this.agentFor(task, index)?.name ?? 'No agent',
+      })),
+      assignAgent: (taskId, agentName) => {
+        const picked = this.agents.find((agent) => agent.name === agentName);
+        if (picked) this.tasks[taskId].assignedAgent = picked;
+      },
+      runTask: async (taskId) => {
+        const entry = this.tasks[taskId];
+        const agent = this.agentFor(entry, taskId);
+        const base = this.withContent(entry.prompt, content);
+        const input = this.inputSoFar(taskId > 0 ? this.tasks[taskId - 1].result : undefined);
+        const prompt = input ? `${base}\n\nHere is the input: ${input}` : base;
+        await this.runTask(entry, agent, prompt);
+      },
+    });
+
+    await Logger.debug(`Hierarchical process ended: ${outcome}`);
+    return this.tasks.map((task) => task.result ?? '');
+  }
+
+  /**
+   * Planning mode (Python parity: `_run_with_planning`). The task descriptions
+   * become one request, the planner turns it into steps, and -- once approved
+   * -- the steps replace the tasks for this run. Returns false when the plan
+   * was rejected, which abandons the run; null-ish planning falls through to
+   * normal execution.
+   */
+  private async applyPlanning(): Promise<boolean> {
+    const request = this.tasks.map((task) => task.task?.description ?? task.prompt).join(' AND ');
+    const plan = await createTeamPlan(this.planningSettings, request, this.verbose);
+    if (!plan) {
+      await Logger.warn('Planning produced no steps; falling back to normal execution.');
+      return true;
+    }
+    this.currentPlan = plan;
+
+    if (!(await approveTeamPlan(this.planningSettings, plan))) {
+      await Logger.warn('Plan rejected. Aborting execution.');
+      return false;
+    }
+    plan.start();
+    this.todoList = todoListFromPlan(plan);
+
+    const byName = new Map(this.agents.map((agent) => [agent.name, agent]));
+    const original = this.tasks;
+    this.tasks = plan.steps.map((step, index) => {
+      const named = typeof step.metadata?.agent === 'string' ? byName.get(step.metadata.agent) : undefined;
+      const inherited = original[Math.min(index, original.length - 1)];
+      return {
+        name: `Plan Step ${index + 1}`,
+        prompt: step.description,
+        agent: named ?? this.agents[0],
+        options: inherited?.options,
+        status: 'not started' as TeamTaskStatus,
+      };
+    });
+    return true;
   }
 
   /**
@@ -391,15 +752,25 @@ export class AgentTeam {
     await Logger.debug('Process mode:', this.process);
     await Logger.debug('Tasks:', this.tasks.map((t) => t.prompt));
 
+    if (this.planningSettings.enabled && !(await this.applyPlanning())) {
+      return returnDict ? {} : [];
+    }
+
     let results: string[];
 
     if (this.process === 'parallel') {
       // Run all tasks in parallel
       const promises = this.tasks.map((task, i) => this.runTask(task, this.agentFor(task, i), this.withContent(task.prompt, content)));
       results = await Promise.all(promises);
+    } else if (this.process === 'hierarchical') {
+      results = await this.executeHierarchical(content);
     } else {
-      // sequential (default), workflow, and hierarchical (no manager yet) run in order
+      // sequential (default) and workflow run in order
       results = await this.executeSequential(content);
+    }
+
+    if (this.todoList) {
+      for (const item of this.todoList.items) item.complete();
     }
 
     if (printResults) {

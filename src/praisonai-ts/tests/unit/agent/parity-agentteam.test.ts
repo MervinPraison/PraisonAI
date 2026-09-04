@@ -66,7 +66,6 @@ describe('AgentTeam.__init__ parity', () => {
       caching: true,
       learn: true,
       toolsRunOn: 'docker',
-      runOn: 'anthropic',
     });
     expect(team.name).toBe('research-team');
     expect(team.variables).toEqual({ topic: 'whales' });
@@ -75,10 +74,12 @@ describe('AgentTeam.__init__ parity', () => {
     expect(team.planning).toBe(true);
     expect(team.context).toBe(true);
     expect(team.output).toBe('normal');
+    // memory, planning, context, execution, hooks, managerLlm and runOn are
+    // acted on now (see parity-agentteam-features.test.ts); the rest are still
+    // accepted-with-notice.
     expect(unhonouredOptions()).toEqual([
-      'AgentTeam.autonomy', 'AgentTeam.caching', 'AgentTeam.context', 'AgentTeam.execution', 'AgentTeam.guardrails',
-      'AgentTeam.hooks', 'AgentTeam.knowledge', 'AgentTeam.learn', 'AgentTeam.managerLlm', 'AgentTeam.memory',
-      'AgentTeam.planning', 'AgentTeam.reflection', 'AgentTeam.runOn', 'AgentTeam.toolsRunOn', 'AgentTeam.web',
+      'AgentTeam.autonomy', 'AgentTeam.caching', 'AgentTeam.guardrails', 'AgentTeam.knowledge',
+      'AgentTeam.learn', 'AgentTeam.reflection', 'AgentTeam.toolsRunOn', 'AgentTeam.web',
     ]);
   });
 
@@ -191,11 +192,14 @@ describe('AgentTeam.start parity', () => {
     expect(Object.keys(await named.start(undefined, { returnDict: true }))).toEqual(['summarise']);
   });
 
-  it('workflow and hierarchical run sequentially; hierarchical reports the missing manager', async () => {
+  it('workflow runs sequentially', async () => {
     await makeTeam('workflow').start();
     expect(promptOf(mockLlm.calls[1])).toContain('Here is the input: reply(task one');
+  });
 
-    mockLlm.calls = [];
+  it('hierarchical asks the manager first and delegates nothing when the reply is not the requested JSON', async () => {
+    // Python parity: Process.hierarchical breaks on a manager parse error, so
+    // no member task runs. The mocked model answers prose, not JSON.
     const team = new AgentTeam({
       agents: [new Agent({ instructions: 'a', ...quiet }), new Agent({ instructions: 'b', ...quiet })],
       tasks: ['task one', 'task two'],
@@ -203,10 +207,11 @@ describe('AgentTeam.start parity', () => {
       managerLlm: 'gpt-4o',
       ...quiet,
     });
-    await team.start();
-    expect(mockLlm.calls).toHaveLength(2);
-    expect(promptOf(mockLlm.calls[1])).toContain('Here is the input: reply(task one');
-    expect(unhonouredOptions()).toEqual(['AgentTeam.managerLlm']);
+    const results = await team.start();
+    expect(mockLlm.calls.map((c) => c.model)).toEqual(['gpt-4o']);
+    expect(promptOf(mockLlm.calls[0])).toContain('Provide a JSON with the structure');
+    expect(results).toEqual(['', '']);
+    expect(unhonouredOptions()).toEqual([]);
   });
 
   it('output preset per run: an unknown preset is reported, "silent" is honoured', async () => {

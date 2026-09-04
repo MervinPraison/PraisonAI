@@ -19,12 +19,12 @@ The check is a ratchet: the total may fall, never rise.
 |---|---|
 | `Agent.__init__` | 15 |
 | `Agent.chat` | 6 |
-| `AgentTeam.__init__` | 15 |
+| `AgentTeam.__init__` | 8 |
 | `Handoff` | 8 |
 | `Task.__init__` | 32 |
-| **Total** | **76** |
+| **Total** | **69** |
 
-Plus 10 options that work for some inputs and announce themselves for the rest.
+Plus 15 options that work for some inputs and announce themselves for the rest.
 
 ## The queue
 
@@ -58,14 +58,8 @@ add a test proving the option changes what the code does, and regenerate.
 - `config`
 - `attachments`
 
-### `AgentTeam.__init__` (15)
+### `AgentTeam.__init__` (8)
 
-- `managerLlm`
-- `memory`
-- `planning`
-- `context`
-- `execution`
-- `hooks`
 - `autonomy`
 - `knowledge`
 - `guardrails`
@@ -74,7 +68,6 @@ add a test proving the option changes what the code does, and regenerate.
 - `caching`
 - `learn`
 - `toolsRunOn`
-- `runOn`
 
 ### `Handoff` (8)
 
@@ -134,5 +127,10 @@ add a test proving the option changes what the code does, and regenerate.
 | `Agent` | `web` | `src/praisonai-ts/src/agent/simple.ts` |
 | `Agent.chat` | `outputPydantic` | `src/praisonai-ts/src/agent/simple.ts` |
 | `Agent.chat` | `seed` | `src/praisonai-ts/src/agent/simple.ts` |
+| `AgentTeam` | `context` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `execution` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `hooks` | `src/praisonai-ts/src/agent/team-options.ts` |
+| `AgentTeam` | `memory` | `src/praisonai-ts/src/agent/team-memory.ts` |
+| `AgentTeam` | `planning` | `src/praisonai-ts/src/agent/team-planning.ts` |
 | `ChromaMemory` | `ragDbPath` | `src/praisonai-ts/src/memory/adapters.ts` |
 | `Task` | `guardrails` | `src/praisonai-ts/src/agent/types.ts` |
