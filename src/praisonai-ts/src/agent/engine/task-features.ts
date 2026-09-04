@@ -66,13 +66,41 @@ export function cacheKey(agentName: string, prompt: string): string {
 
 // ---------------------------------------------------------------- knowledge
 
-/** Anything that can answer a knowledge query (a `KnowledgeBase` satisfies it). */
+/** Anything that can answer a knowledge query (`KnowledgeBase` or `Knowledge`). */
 export interface KnowledgeSearcher {
-    search(query: string, limit?: number): Promise<Array<{ document: { content: string }; score: number }>>;
+    search(query: string, ...args: unknown[]): unknown;
 }
 
 function isSearcher(value: unknown): value is KnowledgeSearcher {
     return typeof value === 'object' && value !== null && typeof (value as KnowledgeSearcher).search === 'function';
+}
+
+/**
+ * Pull the text out of a search hit regardless of its shape. `KnowledgeBase`
+ * returns `{ document: { content } }` items; the canonical `Knowledge` returns
+ * `SearchResultItem` objects carrying `text`. Both spellings, plus a plain
+ * string, are read here.
+ */
+function hitText(hit: unknown): string {
+    if (typeof hit === 'string') return hit;
+    if (!isRecord(hit)) return '';
+    const doc = hit.document;
+    if (isRecord(doc) && typeof doc.content === 'string') return doc.content;
+    if (typeof hit.text === 'string') return hit.text;
+    if (typeof hit.content === 'string') return hit.content;
+    return '';
+}
+
+/**
+ * Normalise a searcher's return value to a list of hits. `KnowledgeBase`
+ * returns the array directly; `Knowledge` returns `{ results: [...] }`.
+ */
+function hitsOf(result: unknown): unknown[] {
+    if (Array.isArray(result)) return result;
+    if (isRecord(result) && Array.isArray((result as { results?: unknown }).results)) {
+        return (result as { results: unknown[] }).results;
+    }
+    return [];
 }
 
 /**
@@ -97,9 +125,9 @@ export async function buildKnowledgeContext(
     }
     if (isSearcher(knowledge)) {
         try {
-            const hits = await knowledge.search(query, limit);
-            if (!hits || hits.length === 0) return '';
-            return hits.map((h) => h.document.content).join('\n');
+            const hits = hitsOf(await knowledge.search(query, limit));
+            if (hits.length === 0) return '';
+            return hits.map(hitText).filter((t) => t.length > 0).join('\n');
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             task.nonFatalErrors.push(`knowledge search: ${message}`);

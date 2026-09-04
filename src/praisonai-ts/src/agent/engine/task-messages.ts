@@ -22,6 +22,21 @@ export type MessageContentPart =
 
 const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
 
+/**
+ * Map an image extension to its registered media type. `.jpg` is `image/jpeg`
+ * and `.svg` is `image/svg+xml`; a bare `image/<ext>` is not a registered type
+ * and some providers reject the resulting data URI.
+ */
+const IMAGE_MIME_TYPES: Readonly<Record<string, string>> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+};
+
 /** The filesystem calls this module needs; injectable so tests need no disk. */
 export interface ImageFileSystem {
     existsSync(p: string): boolean;
@@ -64,7 +79,7 @@ export function buildMultimodalContent(
         const encoded = fileSystem.readFileSync(image).toString('base64');
         content.push({
             type: 'image_url',
-            image_url: { url: `data:image/${ext.replace(/^\./, '') || 'png'};base64,${encoded}` },
+            image_url: { url: `data:${IMAGE_MIME_TYPES[ext] ?? 'image/png'};base64,${encoded}` },
         });
     }
     return content;

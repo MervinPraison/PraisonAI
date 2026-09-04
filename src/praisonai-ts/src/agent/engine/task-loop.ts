@@ -19,6 +19,44 @@ import type { Task, TaskConfig } from '../types';
 /** Python's `_loop_index` key. */
 export const LOOP_INDEX_VAR = '_loop_index';
 
+/**
+ * The execution-affecting settings a fan-out child inherits from its parent, so
+ * a task that combines `loopOver` / `inputFile` with a handler, output shaping,
+ * retries, hooks, memory, knowledge or caching keeps those behaviours on every
+ * iteration. Per-item fields (`description`, `name`, `nextTasks`, `isStart`,
+ * `variables`, `loopState`, and — for the input-file path — `taskType` /
+ * `condition`) are set by the caller and deliberately not copied here.
+ */
+export function inheritedExecutionConfig(task: Task): Partial<TaskConfig> {
+    const inherited: Partial<TaskConfig> = {};
+    if (task.tools.length > 0) inherited.tools = [...task.tools];
+    if (task.images.length > 0) inherited.images = [...task.images];
+    if (task.handler !== undefined) inherited.handler = task.handler;
+    if (task.shouldRun !== undefined) inherited.shouldRun = task.shouldRun;
+    if (task.agentConfig !== undefined) inherited.agentConfig = task.agentConfig;
+    if (task.outputJson !== undefined) inherited.outputJson = task.outputJson;
+    if (task.outputPydantic !== undefined) inherited.outputPydantic = task.outputPydantic;
+    if (task.outputConfig !== undefined) inherited.outputConfig = task.outputConfig;
+    if (task.output !== undefined) inherited.output = task.output;
+    if (task.outputFile !== undefined) inherited.outputFile = task.outputFile;
+    if (task.guardrails !== undefined) inherited.guardrails = task.guardrails;
+    else if (task.guardrail !== undefined) inherited.guardrail = task.guardrail;
+    if (task.memory !== undefined) inherited.memory = task.memory;
+    if (task.knowledge !== undefined) inherited.knowledge = task.knowledge;
+    if (task.hooks !== undefined) inherited.hooks = task.hooks;
+    if (task.caching !== undefined) inherited.caching = task.caching;
+    if (task.execution !== undefined) inherited.execution = task.execution;
+    inherited.maxRetries = task.maxRetries;
+    inherited.retryDelay = task.retryDelay;
+    inherited.onError = task.onError;
+    inherited.skipOnFailure = task.skipOnFailure;
+    inherited.retainFullContext = task.retainFullContext;
+    inherited.qualityCheck = task.qualityCheck;
+    inherited.failOnCallbackError = task.failOnCallbackError;
+    inherited.failOnMemoryError = task.failOnMemoryError;
+    return inherited;
+}
+
 function isIterable(value: unknown): value is unknown[] {
     return Array.isArray(value);
 }
@@ -44,12 +82,13 @@ export function loopTaskConfigs(task: Task, variables: Record<string, unknown> =
     if (!isIterable(items)) return [];
 
     const loopVar = task.loopVar || 'item';
+    const inherited = inheritedExecutionConfig(task);
     return items.map((item, index): TaskConfig => ({
+        ...inherited,
         description: task.description,
         name: task.name ? `${task.name}_${index + 1}` : undefined,
         agent: task.agent,
         expected_output: task.expected_output,
-        tools: task.tools.length > 0 ? [...task.tools] : undefined,
         onTaskComplete: task.onTaskComplete ?? task.callback,
         variables: { ...task.variables, [loopVar]: item, [LOOP_INDEX_VAR]: index },
         loopState: {

@@ -815,9 +815,11 @@ export class Task {
         for (const cb of [this.callback, this.onTaskComplete]) {
             if (!cb) continue;
             try {
-                // Python inspects the signature: a callback declaring a second
-                // parameter is handed the metadata dict, a one-parameter one is not.
-                await (cb.length >= 2 ? cb(output, metadata) : (cb as (o: TaskOutput) => unknown)(output));
+                // Metadata is always passed as a second argument; JavaScript
+                // callbacks declaring fewer parameters (including a defaulted
+                // `metadata = {}`) safely ignore the extra argument, so a
+                // one-parameter callback still works.
+                await cb(output, metadata);
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 this.nonFatalErrors.push(`callback: ${message}`);

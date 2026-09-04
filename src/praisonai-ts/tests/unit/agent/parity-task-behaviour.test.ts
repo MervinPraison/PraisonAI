@@ -330,14 +330,17 @@ describe('Task behaviour: callback metadata', () => {
         });
     });
 
-    it('control: a one-parameter callback is called with the output only', async () => {
+    it('control: metadata is always passed; a one-parameter callback ignores it', async () => {
         const args: unknown[][] = [];
         const t = new Task({
             description: 'd',
             onTaskComplete: (...received: unknown[]) => { args.push(received); },
         });
-        // A rest-parameter function reports length 0, so it takes the 1-arg path.
+        // Metadata is handed to every callback as a second argument; a callback
+        // that declares fewer parameters simply ignores it, as in JavaScript.
         await t.notifyComplete(makeOutput('only'));
-        expect(args).toEqual([[{ description: 'd', raw: 'only', agent: 'a' }]]);
+        expect(args).toHaveLength(1);
+        expect(args[0][0]).toEqual({ description: 'd', raw: 'only', agent: 'a' });
+        expect(args[0][1]).toMatchObject({ taskDescription: 'd', retryCount: 0 });
     });
 });

@@ -14,24 +14,55 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Task, TaskConfig } from '../types';
+import { inheritedExecutionConfig } from './task-loop';
 
 /**
- * Split one CSV line, honouring `"` quoting and `\` escaping the way Python's
- * `csv.reader(quotechar='"', escapechar='\\')` does.
+ * Parse a whole CSV document into logical records. `"` quotes a field, a
+ * doubled `""` inside a quoted field is a literal quote (RFC 4180), a `\` escapes
+ * the next character outside quotes (Python's `escapechar='\\'`), and a newline
+ * inside quotes stays part of the field rather than starting a new record.
+ * Returns one string[] per logical record.
  */
-export function parseCsvLine(line: string): string[] {
-    const fields: string[] = [];
+export function parseCsv(contents: string): string[][] {
+    const records: string[][] = [];
+    let record: string[] = [];
     let field = '';
     let quoted = false;
-    for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '\\' && i + 1 < line.length) { field += line[++i]; continue; }
-        if (ch === '"') { quoted = !quoted; continue; }
-        if (ch === ',' && !quoted) { fields.push(field); field = ''; continue; }
+    let started = false;
+    const pushField = () => { record.push(field); field = ''; };
+    const pushRecord = () => { pushField(); records.push(record); record = []; started = false; };
+
+    for (let i = 0; i < contents.length; i++) {
+        const ch = contents[i];
+        if (quoted) {
+            if (ch === '"') {
+                if (contents[i + 1] === '"') { field += '"'; i++; }
+                else quoted = false;
+            } else {
+                field += ch;
+            }
+            continue;
+        }
+        if (ch === '\\' && i + 1 < contents.length) { field += contents[++i]; started = true; continue; }
+        if (ch === '"') { quoted = true; started = true; continue; }
+        if (ch === ',') { pushField(); started = true; continue; }
+        if (ch === '\r') { continue; }
+        if (ch === '\n') { if (started || field.length > 0) pushRecord(); continue; }
         field += ch;
+        started = true;
     }
-    fields.push(field);
-    return fields;
+    if (started || field.length > 0) pushRecord();
+    return records;
+}
+
+/**
+ * Split one CSV line, honouring `"` quoting and `""` doubled-quote escaping.
+ * Kept for callers that already hold a single physical record; prefer
+ * `parseCsv` for whole files so quoted newlines survive.
+ */
+export function parseCsvLine(line: string): string[] {
+    const [record] = parseCsv(line);
+    return record ?? [''];
 }
 
 /**
@@ -40,14 +71,12 @@ export function parseCsvLine(line: string): string[] {
  * line of a text file, is used verbatim. Empty rows are dropped.
  */
 export function inputFileRows(contents: string, extension: string): string[] {
-    const lines = contents.split(/\r?\n/);
     if (extension.toLowerCase() !== '.csv') {
-        return lines.map((l) => l.trim()).filter((l) => l.length > 0);
+        return contents.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
     }
     const rows: string[] = [];
-    for (const line of lines) {
-        if (line.trim().length === 0) continue;
-        const fields = parseCsvLine(line);
+    for (const fields of parseCsv(contents)) {
+        if (fields.length === 0) continue;
         let text = (fields[0] ?? '').trim();
         if (fields.length > 1) {
             const question = (fields[0] ?? '').trim();
@@ -83,7 +112,8 @@ export function inputFileTaskConfigs(
     const rows = inputFileRows(readFile(task.inputFile), path.extname(task.inputFile));
     if (rows.length === 0) return [];
 
-    const inherited = task.nextTasks.length > 0 ? [...task.nextTasks] : [];
+    const inheritedNext = task.nextTasks.length > 0 ? [...task.nextTasks] : [];
+    const inheritedExecution = inheritedExecutionConfig(task);
     const nameFor = (index: number, text: string): string =>
         task.name ? `${task.name}_${index + 1}` : text;
 
@@ -92,8 +122,9 @@ export function inputFileTaskConfigs(
     return rows.map((text, i): TaskConfig => {
         const description = task.description ? `${task.description}\n${text}` : text;
         const isLast = i === rows.length - 1;
-        const nextTasks = isLast ? inherited : [names[i + 1]];
+        const nextTasks = isLast ? inheritedNext : [names[i + 1]];
         const base: TaskConfig = {
+            ...inheritedExecution,
             description,
             name: names[i],
             agent: task.agent,

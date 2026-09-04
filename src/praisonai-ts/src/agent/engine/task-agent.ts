@@ -60,7 +60,9 @@ export function resolveTaskAgent(task: Task, options: ResolveAgentOptions = {}):
         const agent = factory(built);
         task.agent = agent;
         return agent;
-    } catch {
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        task.nonFatalErrors.push(`resolve_agent: ${message}`);
         return options.defaultAgent;
     }
 }

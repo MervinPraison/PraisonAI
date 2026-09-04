@@ -270,6 +270,20 @@ describe('engine/task-input-file: inputFile', () => {
         ]);
     });
 
+    it('keeps a quoted newline inside one CSV record instead of splitting it', () => {
+        // A newline inside quotes is part of the field, so this is one record.
+        expect(inputFileRows('q1,"line one\nline two"\nq2,a2\n', '.csv')).toEqual([
+            'Question: q1\nAnswer: line one\nline two',
+            'Question: q2\nAnswer: a2',
+        ]);
+    });
+
+    it('decodes a doubled quote inside a quoted CSV field', () => {
+        expect(inputFileRows('q1,"say ""hi"""\n', '.csv')).toEqual([
+            'Question: q1\nAnswer: say "hi"',
+        ]);
+    });
+
     it('uses non-empty lines for a text file', () => {
         expect(inputFileRows('one\n\n  two  \n', '.txt')).toEqual(['one', 'two']);
     });
@@ -295,6 +309,25 @@ describe('engine/task-input-file: inputFile', () => {
     it('control: without inputFile nothing is expanded', () => {
         const t = new Task({ name: 'row', description: 'Answer' });
         expect(inputFileTaskConfigs(t, { readFile: () => 'alpha\n' })).toEqual([]);
+    });
+
+    it('each input-file child inherits the parent execution settings', () => {
+        const handler = () => 'done';
+        const tool = () => 42;
+        const t = new Task({
+            name: 'row',
+            description: 'Answer',
+            inputFile: 'q.txt',
+            handler,
+            tools: [tool],
+            maxRetries: 5,
+        });
+        const configs = inputFileTaskConfigs(t, { readFile: () => 'alpha\nbeta\n' });
+        for (const config of configs) {
+            expect(config.handler).toBe(handler);
+            expect(config.tools).toEqual([tool]);
+            expect(config.maxRetries).toBe(5);
+        }
     });
 
     it('decisionMode adds the done/retry/exit table Python builds', () => {
@@ -336,6 +369,25 @@ describe('engine/task-loop: loopOver, loopVar, loopState', () => {
         expect(loopTaskConfigs(new Task({ description: 'd', loopOver: 'rows' }), {})).toEqual([]);
         expect(loopTaskConfigs(new Task({ description: 'd', loopOver: 'rows' }), { rows: 'nope' })).toEqual([]);
     });
+
+    it('each loop child inherits the parent execution settings, not just per-item fields', () => {
+        const handler = () => 'done';
+        const t = new Task({
+            description: 'd',
+            loopOver: 'rows',
+            handler,
+            outputJson: { type: 'object' },
+            maxRetries: 7,
+            caching: true,
+        });
+        const configs = loopTaskConfigs(t, { rows: [1, 2] });
+        for (const config of configs) {
+            expect(config.handler).toBe(handler);
+            expect(config.outputJson).toEqual({ type: 'object' });
+            expect(config.maxRetries).toBe(7);
+            expect(config.caching).toBe(true);
+        }
+    });
 });
 
 // -------------------------------------------------------------- messages
@@ -364,6 +416,14 @@ describe('engine/task-messages: images', () => {
         const content = buildMultimodalContent('describe', ['/local/clip.mp4'], fakeFs);
         expect(content[1]).toEqual({ type: 'text', text: videoNote('/local/clip.mp4') });
     });
+
+    it('maps a local .jpg to the registered image/jpeg media type', () => {
+        const content = buildMultimodalContent('describe', ['/local/a.jpg'], fakeFs);
+        expect(content[1]).toEqual({
+            type: 'image_url',
+            image_url: { url: `data:image/jpeg;base64,${Buffer.from('PNGDATA').toString('base64')}` },
+        });
+    });
 });
 
 // ---------------------------------------------------------------- output
@@ -390,6 +450,16 @@ describe('engine/task-output: outputPydantic, outputConfig', () => {
         const out = buildTaskOutput(t, 'not json');
         expect(out.outputFormat).toBe('RAW');
         expect(t.nonFatalErrors.join()).toContain('output parse');
+    });
+
+    it('rejects a non-object JSON payload rather than assigning it to outputJson', () => {
+        const t = new Task({ description: 'd', outputJson: { type: 'object' } });
+        const out = buildTaskOutput(t, '[1, 2, 3]');
+        // A top-level array is valid JSON but not a Record; it must not be
+        // labelled JSON output, and it must not be assigned.
+        expect(out.outputFormat).toBe('RAW');
+        expect(out.outputJson).toBeUndefined();
+        expect(t.nonFatalErrors.join()).toContain('expected a JSON object');
     });
 
     it('cleanJsonOutput strips a markdown fence', () => {
@@ -578,6 +648,20 @@ describe('engine/task-features: hooks, caching, knowledge', () => {
             knowledge: { search: async () => [{ document: { content: 'found it' }, score: 1 }] },
         });
         expect(await buildKnowledgeContext(searched, 'x')).toBe('found it');
+
+        // The canonical `Knowledge.search` returns `{ results: SearchResultItem[] }`
+        // where each item carries `text`, not `{ document: { content } }`.
+        const canonical = new Task({
+            description: 'd',
+            knowledge: {
+                search: async () => ({
+                    results: [{ id: '1', text: 'canonical hit', score: 0.9, metadata: {} }],
+                    metadata: {},
+                    query: 'x',
+                }),
+            },
+        });
+        expect(await buildKnowledgeContext(canonical, 'x')).toBe('canonical hit');
     });
 
     it('control: no knowledge, no block; a failing search is non-fatal', async () => {

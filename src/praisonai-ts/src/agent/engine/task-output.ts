@@ -83,12 +83,20 @@ export function buildTaskOutput(task: Task, raw: string, agentName = 'Agent'): T
     }
 
     if (task.outputJson !== undefined) {
-        output.outputJson = parsed as Record<string, unknown>;
-        output.outputFormat = 'JSON';
+        if (isRecord(parsed)) {
+            output.outputJson = parsed;
+            output.outputFormat = 'JSON';
+        } else {
+            task.nonFatalErrors.push('output parse: expected a JSON object');
+        }
     }
     if (task.outputPydantic !== undefined) {
-        output.outputPydantic = parsed;
-        output.outputFormat = 'Pydantic';
+        if (isRecord(parsed)) {
+            output.outputPydantic = parsed;
+            output.outputFormat = 'Pydantic';
+        } else {
+            task.nonFatalErrors.push('output parse: expected a JSON object for pydantic');
+        }
     }
     return output;
 }
