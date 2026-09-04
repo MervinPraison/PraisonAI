@@ -200,3 +200,110 @@ class TestProfileIsolation:
         assert RouteBinding(agent="a", profile="   ").profile is None
         assert RouteBinding.from_dict({"agent": "a", "profile": ""}).profile is None
         assert RouteBinding.from_dict({"agent": "a", "profile": "  "}).profile is None
+
+
+class TestThreadGuildParentMatching:
+    """Thread-, guild-, and parent-chain route matching (Issue #4839)."""
+
+    def test_new_facts_default_to_none(self):
+        f = RouteFacts()
+        assert f.thread_id is None
+        assert f.guild_id is None
+        assert f.parent_channel_id is None
+
+    def test_new_bindings_default_to_none(self):
+        b = RouteBinding(agent="a")
+        assert b.thread_id is None
+        assert b.guild_id is None
+
+    def test_thread_id_match(self):
+        b = RouteBinding(agent="escalations", thread_id="77")
+        assert b.matches(RouteFacts(thread_id="77"))
+        assert not b.matches(RouteFacts(thread_id="88"))
+
+    def test_thread_id_is_string_coerced(self):
+        b = RouteBinding(agent="a", thread_id="77")
+        assert b.matches(RouteFacts(thread_id=77))
+
+    def test_guild_id_match(self):
+        b = RouteBinding(agent="support", guild_id="9001")
+        assert b.matches(RouteFacts(guild_id="9001"))
+        assert not b.matches(RouteFacts(guild_id="9002"))
+
+    def test_guild_matches_any_channel_in_it(self):
+        # One rule covers every channel in the guild, current and future.
+        b = RouteBinding(agent="support", guild_id="9001")
+        assert b.matches(RouteFacts(guild_id="9001", channel_id="111"))
+        assert b.matches(RouteFacts(guild_id="9001", channel_id="999-new"))
+
+    def test_channel_id_parent_chain_match(self):
+        # A channel_id condition also matches a thread whose parent is that
+        # channel, without listing each thread.
+        b = RouteBinding(agent="sales", channel_id="333")
+        assert b.matches(RouteFacts(channel_id="333"))
+        assert b.matches(
+            RouteFacts(channel_id="thread-abc", parent_channel_id="333")
+        )
+        assert not b.matches(
+            RouteFacts(channel_id="thread-abc", parent_channel_id="444")
+        )
+
+    def test_thread_is_most_specific(self):
+        assert RouteBinding(agent="a", thread_id="1").specificity > \
+            RouteBinding(agent="a", peer="1").specificity
+
+    def test_guild_specificity_below_channel(self):
+        assert RouteBinding(agent="a", channel_id="1").specificity > \
+            RouteBinding(agent="a", guild_id="1").specificity
+
+    def test_thread_beats_guild_in_resolution(self):
+        bindings = [
+            RouteBinding(agent="support", guild_id="9001", profile="acme"),
+            RouteBinding(agent="escalations", thread_id="77", profile="acme"),
+        ]
+        facts = RouteFacts(
+            chat_type="channel", channel_id="333", thread_id="77",
+            guild_id="9001", parent_channel_id="333",
+        )
+        m = resolve_route(bindings, facts)
+        assert m.agent == "escalations"
+
+    def test_channel_route_covers_its_threads(self):
+        bindings = [
+            RouteBinding(agent="support", guild_id="9001"),
+            RouteBinding(agent="sales", channel_id="333"),
+        ]
+        # A message in a thread under channel 333 hits the channel rule (more
+        # specific than the guild rule).
+        facts = RouteFacts(
+            channel_id="thread-abc", parent_channel_id="333", guild_id="9001",
+        )
+        m = resolve_route(bindings, facts)
+        assert m.agent == "sales"
+
+    def test_whole_server_routing(self):
+        bindings = [RouteBinding(agent="support", guild_id="9001", profile="acme")]
+        m = resolve_route(
+            bindings,
+            RouteFacts(guild_id="9001", channel_id="brand-new-channel"),
+            default_agent="general",
+        )
+        assert m.agent == "support"
+        assert m.profile == "acme"
+
+    def test_from_dict_parses_thread_and_guild(self):
+        b = RouteBinding.from_dict(
+            {"agent": "a", "thread_id": 77, "guild_id": 9001}
+        )
+        assert b.thread_id == "77"
+        assert b.guild_id == "9001"
+
+    def test_backward_compatible_ignores_new_facts(self):
+        # A legacy channel-only binding resolves exactly as before even when
+        # the richer facts are present.
+        bindings = [RouteBinding(agent="ops", channel_id="333")]
+        m = resolve_route(
+            bindings,
+            RouteFacts(channel_id="333", thread_id="77", guild_id="9001"),
+        )
+        assert m.agent == "ops"
