@@ -1,16 +1,9 @@
 from setuptools import setup
-from setuptools.command.install import install
-import subprocess
-import sys
 
-class PostInstallCommand(install):
-    def run(self):
-        install.run(self)
-        # Install Playwright browsers
-        subprocess.check_call([sys.executable, '-m', 'playwright', 'install'])
-
-setup(
-    cmdclass={
-        'install': PostInstallCommand,
-    }
-) 
+# NOTE: No PostInstallCommand / cmdclass override.
+# `pip install praisonai` must have NO network side-effects: browsers are
+# provisioned on demand (e.g. `praisonai browser` prints an actionable
+# `playwright install chromium` hint the first time a browser tool is used),
+# not force-downloaded at install time. This keeps the default install lean
+# and offline/CI-friendly.
+setup()
