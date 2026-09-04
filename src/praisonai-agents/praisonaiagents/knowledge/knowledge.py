@@ -494,10 +494,15 @@ class Knowledge:
         """
         if isinstance(file_path, (list, tuple)):
             results = []
+            errors = []
             for path in file_path:
                 result = self._process_single_input(path, user_id, agent_id, run_id, metadata)
                 results.extend(result.get('results', []))
-            return {'results': results, 'relations': []}
+                # Per-path failures (e.g. a directory whose files all failed to
+                # embed) must survive aggregation; otherwise a list input hides
+                # them behind the old success-shaped response.
+                errors.extend(result.get('errors', []))
+            return {'results': results, 'relations': [], 'errors': errors}
         
         return self._process_single_input(file_path, user_id, agent_id, run_id, metadata)
 
@@ -530,6 +535,12 @@ class Knowledge:
             if os.path.isdir(input_path):
                 self._log(f"Processing directory: {input_path}")
                 all_results = []
+                # Per-file failures were logged at WARNING and dropped, so a
+                # directory whose every file failed to embed still returned a
+                # success-shaped {'results': [], 'relations': []} and the caller
+                # believed the knowledge base was populated. Collect them and
+                # hand them back.
+                all_errors = []
                 
                 # Walk through directory and process all supported files
                 for root, dirs, files in os.walk(input_path):
@@ -544,6 +555,7 @@ class Knowledge:
                                 all_results.extend(result.get('results', []))
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
+                                all_errors.append({'file': file_path, 'error': str(e)})
                             except (KeyboardInterrupt, SystemExit, GeneratorExit):
                                 # Interpreter control-flow signals must propagate
                                 # untouched so a Ctrl+C / interpreter shutdown is
@@ -564,9 +576,18 @@ class Knowledge:
                                 ) from e
                 
                 if not all_results:
-                    logger.warning(f"No supported files found in directory: {input_path}")
+                    if all_errors:
+                        # Nothing was indexed and we know why. Saying "no
+                        # supported files found" here would send the user
+                        # looking for the wrong problem entirely.
+                        logger.error(
+                            "Indexed nothing from %s: all %d file(s) failed; first error: %s",
+                            input_path, len(all_errors), all_errors[0]['error'],
+                        )
+                    else:
+                        logger.warning(f"No supported files found in directory: {input_path}")
                 
-                return {'results': all_results, 'relations': []}
+                return {'results': all_results, 'relations': [], 'errors': all_errors}
 
             # Check if input ends with any supported extension
             is_supported_file = any(input_path.lower().endswith(ext) 
@@ -656,10 +677,13 @@ class Knowledge:
 
             # Store memories with progress bar
             all_results = []
+            attempted = 0
+            failed_chunks = 0
             with progress:
                 store_task = progress.add_task(f"Adding to Knowledge from {os.path.basename(input_path)}", total=len(memories))
                 for memory in memories:
                     if memory:
+                        attempted += 1
                         # memories here are already-read file contents or literal
                         # text the caller handed in -- never a path to re-open, so
                         # bypass store()'s file-path heuristic (a chunk ending in
@@ -688,6 +712,25 @@ class Knowledge:
                                     import logging
                                     logging.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
                             progress.advance(store_task)
+                        else:
+                            # store() catches embedding/persistence exceptions and
+                            # returns a falsy empty list rather than raising, so a
+                            # falsy result is the one reliable signal that this
+                            # chunk did not land -- distinct from a truthy result
+                            # that simply carries no 'results' ids (e.g. mem0's
+                            # {'ok': True} or a backend that echoes a bare id).
+                            failed_chunks += 1
+
+            # If we tried to store real content and every chunk was swallowed,
+            # the file failed; raise so the directory walk records it in
+            # ``errors`` and a single-file caller sees the failure instead of a
+            # false success. This is the exact silent drop this change exists to
+            # prevent (a wrong model, revoked key, or exhausted quota).
+            if attempted and failed_chunks == attempted:
+                raise RuntimeError(
+                    f"Stored nothing from {input_path}: all {attempted} chunk(s) "
+                    f"failed (embedding/vector-store backend). See earlier logs."
+                )
 
             # Emit trace event for knowledge add
             self._emit_knowledge_event("add", source=input_path, chunk_count=len(memories), 
