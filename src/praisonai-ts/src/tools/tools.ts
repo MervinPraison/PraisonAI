@@ -116,7 +116,8 @@ export function registerBuiltinTools(): void {
   // Code Mode
   registry.register(CODE_MODE_METADATA, createCodeModeTool as ToolFactory);
 
-  // AnyAPI
+  // AnyAPI - register with both base ID and specific IDs
+  registry.register(ANYAPI_METADATA, createAnyapiSearchApisTool as ToolFactory);
   registry.register({ ...ANYAPI_METADATA, id: 'anyapi-search-apis' }, createAnyapiSearchApisTool as ToolFactory);
   registry.register({ ...ANYAPI_METADATA, id: 'anyapi-get-api' }, createAnyapiGetApiTool as ToolFactory);
   registry.register({ ...ANYAPI_METADATA, id: 'anyapi-run-api' }, createAnyapiRunApiTool as ToolFactory);
