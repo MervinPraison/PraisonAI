@@ -324,6 +324,12 @@ export class AgentTeam {
   private currentPlan?: Plan;
   /** Python parity: _todo_list. */
   private todoList?: TodoList;
+  /**
+   * How many assistant entries the shared context held when this run began, so
+   * `inputSoFar` hands a task only what THIS run produced (Python resets
+   * per-task state each run: `_reset_task_state_for_item`).
+   */
+  private contextRunOffset = 0;
 
   /**
    * Create a multi-agent orchestration
@@ -628,7 +634,10 @@ export class AgentTeam {
    */
   private inputSoFar(previousResult?: string): string | undefined {
     if (!this.contextManager) return previousResult;
-    const produced = this.contextManager.getByRole('assistant').map((item) => item.content).filter(Boolean);
+    const produced = this.contextManager.getByRole('assistant')
+      .slice(this.contextRunOffset)
+      .map((item) => item.content)
+      .filter(Boolean);
     return produced.length > 0 ? produced.join('\n\n') : undefined;
   }
 
@@ -702,18 +711,18 @@ export class AgentTeam {
    * was rejected, which abandons the run; null-ish planning falls through to
    * normal execution.
    */
-  private async applyPlanning(): Promise<boolean> {
+  private async applyPlanning(): Promise<'aborted' | 'skipped' | 'planned'> {
     const request = this.tasks.map((task) => task.task?.description ?? task.prompt).join(' AND ');
     const plan = await createTeamPlan(this.planningSettings, request, this.verbose);
     if (!plan) {
       await Logger.warn('Planning produced no steps; falling back to normal execution.');
-      return true;
+      return 'skipped';
     }
     this.currentPlan = plan;
 
     if (!(await approveTeamPlan(this.planningSettings, plan))) {
       await Logger.warn('Plan rejected. Aborting execution.');
-      return false;
+      return 'aborted';
     }
     plan.start();
     this.todoList = todoListFromPlan(plan);
@@ -731,7 +740,20 @@ export class AgentTeam {
         status: 'not started' as TeamTaskStatus,
       };
     });
-    return true;
+    return 'planned';
+  }
+
+  /**
+   * Clear per-run task state so a reused team starts fresh (Python parity:
+   * `_reset_task_state_for_item` -- without it a task seen `completed` from the
+   * previous run is skipped and its stale result is returned).
+   */
+  private resetTaskState(): void {
+    for (const task of this.tasks) {
+      task.status = 'not started';
+      task.result = undefined;
+      task.assignedAgent = undefined;
+    }
   }
 
   /**
@@ -752,40 +774,60 @@ export class AgentTeam {
     await Logger.debug('Process mode:', this.process);
     await Logger.debug('Tasks:', this.tasks.map((t) => t.prompt));
 
-    if (this.planningSettings.enabled && !(await this.applyPlanning())) {
-      return returnDict ? {} : [];
-    }
+    // Fresh run: clear stale status/results so a reused team does not skip
+    // already-"completed" tasks, and scope the shared context to this run so a
+    // task is handed only what this run has produced.
+    const savedTasks = this.tasks;
+    this.resetTaskState();
+    this.contextRunOffset = this.contextManager?.getByRole('assistant').length ?? 0;
 
-    let results: string[];
-
-    if (this.process === 'parallel') {
-      // Run all tasks in parallel
-      const promises = this.tasks.map((task, i) => this.runTask(task, this.agentFor(task, i), this.withContent(task.prompt, content)));
-      results = await Promise.all(promises);
-    } else if (this.process === 'hierarchical') {
-      results = await this.executeHierarchical(content);
-    } else {
-      // sequential (default) and workflow run in order
-      results = await this.executeSequential(content);
-    }
-
-    if (this.todoList) {
-      for (const item of this.todoList.items) item.complete();
-    }
-
-    if (printResults) {
-      await Logger.info('AgentTeam execution completed.');
-      for (let i = 0; i < results.length; i++) {
-        await Logger.section(`Result from Agent ${i + 1}`, results[i]);
+    try {
+      if (this.planningSettings.enabled) {
+        const outcome = await this.applyPlanning();
+        if (outcome === 'aborted') return returnDict ? {} : [];
       }
-    }
 
-    if (returnDict) {
-      const byTask: Record<string, string> = {};
-      this.tasks.forEach((task, i) => { byTask[task.name] = results[i]; });
-      return byTask;
+      let results: string[];
+
+      if (this.process === 'parallel') {
+        // Run all tasks in parallel
+        const promises = this.tasks.map((task, i) => this.runTask(task, this.agentFor(task, i), this.withContent(task.prompt, content)));
+        results = await Promise.all(promises);
+      } else if (this.process === 'hierarchical') {
+        results = await this.executeHierarchical(content);
+      } else {
+        // sequential (default) and workflow run in order
+        results = await this.executeSequential(content);
+      }
+
+      // Only tasks that actually completed mark their plan todo done: a
+      // completion checker can leave one failed, and a hierarchical run can
+      // stop or exhaust its bound before every step ran.
+      if (this.todoList) {
+        this.tasks.forEach((task, i) => {
+          if (task.status === 'completed') this.todoList!.items[i]?.complete();
+        });
+      }
+
+      if (printResults) {
+        await Logger.info('AgentTeam execution completed.');
+        for (let i = 0; i < results.length; i++) {
+          await Logger.section(`Result from Agent ${i + 1}`, results[i]);
+        }
+      }
+
+      if (returnDict) {
+        const byTask: Record<string, string> = {};
+        this.tasks.forEach((task, i) => { byTask[task.name] = results[i]; });
+        return byTask;
+      }
+      return results;
+    } finally {
+      // Planning replaces the tasks for one run only; restore the configured
+      // tasks so the next run re-plans from the originals (Python parity:
+      // `_run_with_planning` -> `self.tasks = original_tasks`).
+      this.tasks = savedTasks;
     }
-    return results;
   }
 
   async chat(content?: string, options?: AgentTeamStartOptions): Promise<string[]>;

@@ -370,3 +370,120 @@ describe('AgentTeam managerLlm', () => {
     expect(promptsFor('alpha-model')).toHaveLength(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// repeated runs (Python parity: per-run state reset)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AgentTeam repeated runs', () => {
+  it('a reused sequential team runs its tasks again, not stale completed state', async () => {
+    const team = new AgentTeam({
+      agents: [new Agent({ name: 'one', instructions: 'a', llm: 'member-model', ...quiet })],
+      tasks: ['task one', 'task two'],
+      ...quiet,
+    });
+    await team.start();
+    expect(promptsFor('member-model')).toHaveLength(2);
+
+    mockLlm.calls = [];
+    await team.start();
+    // The second run executes both tasks afresh rather than skipping them.
+    expect(promptsFor('member-model')).toHaveLength(2);
+  });
+
+  it('a reused hierarchical team delegates again instead of returning last run', async () => {
+    // One task: the manager executes it on alpha; once completed the loop exits,
+    // so a single execute instruction is enough for each run.
+    mockLlm.responder = (model) =>
+      model === 'manager-model' ? '{"task_id": 0, "agent_name": "alpha", "action": "execute"}' : undefined;
+    const team = new AgentTeam({
+      agents: [new Agent({ name: 'alpha', instructions: 'a', llm: 'alpha-model', ...quiet })],
+      tasks: ['only task'],
+      process: 'hierarchical',
+      managerLlm: 'manager-model',
+      ...quiet,
+    });
+
+    await team.start();
+    expect(promptsFor('alpha-model')).toHaveLength(1);
+
+    mockLlm.calls = [];
+    await team.start();
+    // Without the reset the manager loop would count the task completed and exit
+    // immediately; the reset makes the second run delegate it once more.
+    expect(promptsFor('alpha-model')).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// planning: one-run replacement, partial completion
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AgentTeam planning lifecycle', () => {
+  const planningResponder = (_model: string, prompt: string) =>
+    prompt.includes('Create a step-by-step plan for') ? '1. Gather sources\n2. Draft the answer' : undefined;
+
+  it('re-plans from the original tasks on the next run, not from the last plan steps', async () => {
+    mockLlm.responder = planningResponder;
+    const team = new AgentTeam({
+      agents: [new Agent({ name: 'one', instructions: 'a', llm: 'member-model', ...quiet })],
+      tasks: ['research whales'],
+      planning: true,
+      ...quiet,
+    });
+
+    await team.start();
+    mockLlm.calls = [];
+    await team.start();
+
+    // The second planning request is still the configured task, proving the
+    // plan steps did not permanently replace it.
+    expect(promptsFor('gpt-4o-mini')[0]).toContain('Create a step-by-step plan for: research whales');
+  });
+
+  it('marks only the plan steps whose task completed, not every todo', async () => {
+    // The planner produces two steps; the completion checker refuses the second.
+    mockLlm.responder = planningResponder;
+    const team = new AgentTeam({
+      agents: [new Agent({ name: 'one', instructions: 'a', llm: 'member-model', ...quiet })],
+      tasks: ['research whales'],
+      planning: true,
+      execution: { maxRetries: 1 },
+      hooks: { completionChecker: (_task, output) => !output.includes('Draft the answer') },
+      ...quiet,
+    });
+    await team.start();
+
+    // Step one completed; step two was left failed, so the todo is not complete.
+    expect(team.getTodoList()?.getCompleted()).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memory scope (security: recall must not cross userId)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AgentTeam memory scope', () => {
+  it('recall keeps only this team\'s own entries when a store is shared across users', async () => {
+    const store = {
+      search: jest.fn(async () => [
+        { entry: { content: 'other user secret', role: 'assistant', metadata: { userId: 'someone-else' } }, score: 1 },
+        { entry: { content: 'my own note', role: 'assistant', metadata: { userId: 'me' } }, score: 0.9 },
+        { entry: { content: 'untagged shared note', role: 'assistant' }, score: 0.8 },
+      ]),
+      add: jest.fn(async () => undefined),
+    };
+    const team = new AgentTeam({
+      agents: [new Agent({ name: 'solo', instructions: 'a', llm: 'member-model', ...quiet })],
+      tasks: ['summarise'],
+      memory: { userId: 'me', config: store } as any,
+      ...quiet,
+    });
+    await team.start();
+
+    const prompt = promptsFor('member-model')[0];
+    expect(prompt).toContain('• my own note');
+    expect(prompt).toContain('• untagged shared note');
+    expect(prompt).not.toContain('other user secret');
+  });
+});
