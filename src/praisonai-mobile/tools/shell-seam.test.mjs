@@ -85,6 +85,27 @@ test("the command the webview invokes is one the app actually registers", () => 
   }
 });
 
+test("a declined press at the task root backgrounds the app instead of finishing it", () => {
+  // Kotlin has no test harness in this package, and this is the one line no
+  // other gate can reach: `onBackPressedDispatcher.onBackPressed()` called by
+  // the APP walks the app-level path, which ends in `finishAfterTransition()`
+  // even on Android 12+. Measured on an Android 15 emulator, back on the root
+  // chat logged `WIN DEATH` and left `pidof` empty -- the process was gone and
+  // returning was a cold start. `moveTaskToBack` is what keeps it warm.
+  const plugin = readFileSync(
+    join(pkg, "src-tauri/plugins/back-gesture/android/src/main/java/ai/praison/mobile/backgesture/BackGesturePlugin.kt"),
+    "utf8",
+  );
+  const defer = /private fun defer\(\) \{([\s\S]*?)\n  \}/.exec(plugin);
+  assert.ok(defer, "defer() was not found in BackGesturePlugin.kt");
+  assert.match(defer[1], /isTaskRoot/, "defer() must tell the task root from anything above it");
+  assert.match(defer[1], /moveTaskToBack\(true\)/, "the root must be backgrounded, not finished");
+  assert.doesNotMatch(defer[1], /\bfinish\(\)|exitProcess/, "the root must not be destroyed");
+  // And the other path is still there: above the root, the press belongs to
+  // whatever sits beneath this callback.
+  assert.match(defer[1], /onBackPressedDispatcher\.onBackPressed\(\)/);
+});
+
 test("the comparison is real, not two lookups of the same file", () => {
   // The way this test could quietly stop working: if both helpers read the
   // same source, every assertion above passes forever. Assert the two files
