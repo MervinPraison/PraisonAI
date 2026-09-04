@@ -15,7 +15,13 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, apiKeyFor, defaultEngineIdFor, settingDefsFor } from "./registry.ts";
+import {
+  enginesFor,
+  apiKeyFor,
+  defaultEngineIdFor,
+  settingDefsFor,
+  ENGINE_PRAISONAI_TS,
+} from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -28,7 +34,12 @@ import { en, type Strings } from "../../ui/src/i18n/strings.ts";
 import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a11y/announce.ts";
 import { createScreens } from "./mount.ts";
 import { transition, screenFor, type ScreenId } from "../../ui/src/screens.ts";
-import { routeTitle, chatRowName } from "../../ui/src/a11y/names.ts";
+import { routeTitle, chatRowName, emptyStateName } from "../../ui/src/a11y/names.ts";
+import {
+  emptyState,
+  type EmptyStateKind,
+  type KeyPresence,
+} from "../../ui/src/transcript/empty-state.ts";
 import {
   focusForRoute,
   headingId,
@@ -563,6 +574,16 @@ function renderFatal(root: HTMLElement, message: string): void {
 }
 
 /**
+ * The id the empty-state region is named by.
+ *
+ * A constant rather than a literal in two places: the `aria-labelledby` and the
+ * heading's `id` have to be the same string, and a landmark pointing at an id
+ * that does not exist has NO accessible name at all -- it is announced as a
+ * bare "region", which is worse than not being a landmark.
+ */
+export const EMPTY_TITLE_ID = "empty-state-title";
+
+/**
  * What to announce after a Stop, or null when there is nothing to say.
  *
  * Extracted so a test calls it: `mount` needs a whole fake SSE transport to
@@ -738,6 +759,41 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   transcript.setAttribute("role", "log");
   transcript.setAttribute("aria-label", strings.appName);
 
+  /**
+   * What an empty chat says. A SIBLING of the transcript, never a child of it.
+   *
+   * Three separate things in this file would destroy or displace it if it lived
+   * inside `.transcript`: `applyOps` places rows by `children[index]`, so an
+   * extra node shifts every insert; New chat, Open chat and deleting the open
+   * chat each do `transcript.textContent = ""`, which would silently delete it;
+   * and the reconciler's `remove` ops only know the nodes it created. Outside,
+   * it is owned by exactly one function and nothing else can touch it.
+   *
+   * `role="region"` with `aria-labelledby`, not `aria-label`: a label on a
+   * generic container REPLACES its contents in the accessibility tree
+   * (a11y/names.ts rule 3), which would cost the reader the paragraph and the
+   * button. A landmark named by its own heading keeps both browsable and still
+   * gives the block a name to arrive at.
+   */
+  const emptyPanel = doc.createElement("section");
+  emptyPanel.className = "empty-state";
+  emptyPanel.setAttribute("role", "region");
+  emptyPanel.setAttribute("aria-labelledby", EMPTY_TITLE_ID);
+  emptyPanel.hidden = true;
+  const emptyTitle = doc.createElement("h2");
+  emptyTitle.className = "empty-title";
+  emptyTitle.setAttribute("id", EMPTY_TITLE_ID);
+  const emptyBody = doc.createElement("p");
+  emptyBody.className = "empty-body";
+  const emptyAction = doc.createElement("button");
+  emptyAction.type = "button";
+  emptyAction.dataset["action"] = "navigate";
+  emptyAction.dataset["variant"] = "primary";
+  // Hidden until a view supplies one. A button with no label is announced as
+  // "button" and is a hit target that does nothing.
+  emptyAction.hidden = true;
+  emptyPanel.append(emptyTitle, emptyBody, emptyAction);
+
   const polite = doc.createElement("div");
   polite.className = "sr-only";
   polite.setAttribute("aria-live", "polite");
@@ -771,7 +827,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   jumpLatest.textContent = strings.streaming;
   jumpLatest.hidden = true;
 
-  screen.append(bar, transcript, jumpLatest, composer, polite, assertive);
+  screen.append(bar, transcript, emptyPanel, jumpLatest, composer, polite, assertive);
   // This is also what RETIRES the boot indicator, and the ordering is the whole
   // guarantee. `app/index.html` paints a wordmark and "Starting…" into #root on
   // the first frame so a cold start does not look like a broken install; the
@@ -781,6 +837,13 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // a `removeChild` of a known id: anything the page painted before the app did
   // is the app's to replace, and a targeted removal would leave a second
   // element behind the day someone adds one.
+  //
+  // The empty state is inside `screen` and therefore inside that same swap: it
+  // arrives with the rest of the UI, never beside the indicator. Its own
+  // visibility is decided one step later by `refreshEmptyState`, which is why
+  // the panel is built `hidden` -- a panel that defaulted to visible would show
+  // the welcome for a frame before the keychain answered, on an install that
+  // has no key.
   root.textContent = "";
   root.append(screen);
 
@@ -855,6 +918,18 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   let liveRows: readonly Row[] = [];
   let turnSeq = 0;
   let turnEnded = false;
+
+  /**
+   * Repaint the empty state. A no-op until boot has finished.
+   *
+   * Forward-declared because `publish` is handed to `bootOrFail` and can be
+   * called from inside it, before anything that needs `app` exists. A `const`
+   * declared further down would be in its temporal dead zone at that moment,
+   * and the first publish of the session would throw a ReferenceError into the
+   * crash handler -- replacing the whole app with the fatal screen on the very
+   * first token.
+   */
+  let refreshEmptyState: () => void = () => {};
 
   /** A turn's rows, namespaced so no two turns can claim the same id. Both
    *  turns of a two-turn chat produce `text:0`; see `liveRows`. */
@@ -990,6 +1065,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     follow = outcome.state;
     if (outcome.action.kind === "scrollTo") transcript.scrollTop = outcome.action.top;
     applyFollow();
+
+    // The transcript now has rows, so the empty state must go -- and it has to
+    // go on the SAME frame the first row appears, or the welcome panel and the
+    // user's own message are on screen together.
+    refreshEmptyState();
   };
 
   // `createApp` returns a typed BootResult for the failures it anticipated --
@@ -1195,14 +1275,24 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     const seq = ++latestPresenceSeq;
     void (async (): Promise<void> => {
       const answers = new Map<string, string>();
+      // Whether ANY credential is on file, which is the question the empty chat
+      // screen asks. Resolved from the same walk rather than from a second one:
+      // two independent lookups over the same keychain can land out of order
+      // and disagree, so the settings row saying "Configured" and the chat
+      // screen saying "Add an API key" would both be showing at once.
+      let anyPresent = false;
       for (const def of app.settings.defs()) {
         const ref = secretRefOf(def);
         if (ref === null) continue;
-        answers.set(def.key, presenceLabel((await app.settings.hasSecret(ref)) ? "configured" : "not-set"));
+        const present = await app.settings.hasSecret(ref);
+        anyPresent = anyPresent || present;
+        answers.set(def.key, presenceLabel(present ? "configured" : "not-set"));
       }
       // A newer refresh started while this one awaited: its answer is the
       // current truth, so this one must not overwrite it.
       if (seq !== latestPresenceSeq) return;
+      keyPresence = anyPresent ? "present" : "absent";
+      refreshEmptyState();
       for (const node of everyElement(scope)) {
         const key = node.dataset["secretPresence"];
         if (key === undefined) continue;
@@ -1215,8 +1305,106 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       // their key is gone because a lookup failed -- view-model.ts rule 2, and
       // the reason UNKNOWN is a state at all. A floating rejection here would
       // also reach the global crash handler and replace the whole app.
+      //
+      // `keyPresence` is left where it was for the same reason, which is why it
+      // has an `unknown` value at all: a keychain that will not answer must not
+      // be reported to the user as "you have not set a key". See rule 3 of
+      // ui/src/transcript/empty-state.ts.
     });
   };
+
+  // ---- the empty chat -----------------------------------------------------
+  /**
+   * Whether a credential is on file, as far as anyone has actually been told.
+   *
+   * Starts `unknown`, not `absent`. The first paint happens before any keychain
+   * lookup can return, and rendering "Add an API key to start" during that
+   * window accuses every configured user of not having set one, on every
+   * launch, for as long as the lookup takes.
+   */
+  let keyPresence: KeyPresence = "unknown";
+
+  /** The kind last read into the polite region, so a repaint that changes
+   *  nothing does not re-announce. Reset to null when the panel goes away, so
+   *  the next empty chat is announced again. */
+  let announcedEmptyKind: EmptyStateKind | null = null;
+
+  /**
+   * Whether the engine that would answer the next message authenticates with a
+   * key held on this device.
+   *
+   * Read at paint time, not captured: `engineId` is a setting, and a user who
+   * switches from the remote engine to the in-process one has just made a
+   * missing key start mattering. Read through the facade so it follows the same
+   * value Settings shows.
+   */
+  const engineNeedsKey = (): boolean =>
+    app.settings.get("engineId") === ENGINE_PRAISONAI_TS;
+
+  refreshEmptyState = (): void => {
+    const view = emptyState(
+      {
+        // Both lists, because either one alone is a transcript: a reopened
+        // conversation has only `priorRows` and a first turn has only
+        // `liveRows`.
+        hasRows: priorRows.length + liveRows.length > 0,
+        keyRequired: engineNeedsKey(),
+        key: keyPresence,
+      },
+      strings,
+    );
+
+    if (view === null) {
+      emptyPanel.hidden = true;
+      // The stylesheet gives the transcript back its full height. Written as a
+      // data attribute rather than an inline style so the rule stays in
+      // app.css, where css.test.ts can see it.
+      delete screen.dataset["empty"];
+      announcedEmptyKind = null;
+      return;
+    }
+
+    emptyPanel.hidden = false;
+    screen.dataset["empty"] = view.kind;
+    emptyTitle.textContent = view.title;
+    emptyBody.textContent = view.body;
+    if (view.action === null) {
+      emptyAction.hidden = true;
+      // The route goes with the button. A hidden control still carrying
+      // `data-route` is one stylesheet mistake away from being tappable and
+      // sending a user who has a key configured to Settings for no reason.
+      delete emptyAction.dataset["route"];
+      emptyAction.textContent = "";
+    } else {
+      emptyAction.hidden = false;
+      emptyAction.textContent = view.action.label;
+      emptyAction.dataset["route"] = view.action.route;
+    }
+
+    // Said once per appearance, and again only when the state changes KIND --
+    // which is exactly the transition from "start typing" to "you cannot yet",
+    // the one a screen-reader user must not miss. An empty `role="log"` says
+    // nothing on its own, so without this a fresh chat is silent.
+    if (view.kind !== announcedEmptyKind) {
+      polite.textContent = emptyStateName(strings, view);
+      announcedEmptyKind = view.kind;
+    }
+  };
+
+  // The engine can change under the panel: switching to the in-process engine
+  // is what makes a missing key start mattering, and switching away is what
+  // makes it stop. `subscribe` fires only on ACCEPTED writes, so a refused
+  // value does not repaint.
+  app.settings.subscribe(() => {
+    refreshEmptyState();
+  });
+
+  // The first paint, and the first keychain lookup. `root` holds no secret rows
+  // yet -- Settings has not been built -- so this call is here for its OTHER
+  // half: it is what resolves `keyPresence` from `unknown`, which is what turns
+  // the welcome into the key guidance on a fresh install.
+  refreshEmptyState();
+  refreshSecretPresence(root);
 
   // ---- screens the router drives -----------------------------------------
   // The chat screen is retained (it holds scroll position and a live stream);
@@ -1528,6 +1716,10 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // again -- but still there for anyone navigating the page.
         polite.textContent = "";
         assertive.textContent = "";
+        // The transcript is empty again, so the empty state comes back -- and
+        // it is the welcome or the key guidance depending on what is on file
+        // NOW, not on what was true when the app launched.
+        refreshEmptyState();
         return;
       }
       case "navigate":
@@ -1626,6 +1818,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
           announcer = initialAnnouncer;
           transcript.textContent = "";
           polite.textContent = "";
+          refreshEmptyState();
         }
         assertive.textContent = strings.chatDeleted(title);
         const list = screens.nodes.get("chats");
@@ -1729,6 +1922,9 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         const seeded = reconcile(render, priorRows);
         applyOps(transcript, nodes, seeded.ops, strings);
         render = seeded.next;
+        // A stored chat that turned out to have no messages is as empty as a
+        // new one and gets the same panel; one with history hides it.
+        refreshEmptyState();
         app.router.push({ name: "chat", chatId: intent.chatId });
         return;
       }

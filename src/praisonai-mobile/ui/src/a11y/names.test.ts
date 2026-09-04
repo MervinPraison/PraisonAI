@@ -17,10 +17,12 @@ import {
   accessibleName,
   approvalRowName,
   chatRowName,
+  emptyStateName,
   routeTitle,
   toolRowName,
   userRowNames,
 } from "./names.ts";
+import { emptyState } from "../transcript/empty-state.ts";
 import { en } from "../i18n/strings.ts";
 import { UNKNOWN } from "../format.ts";
 import { buildChatList } from "../chats/list-view-model.ts";
@@ -248,4 +250,35 @@ test("only a message that is NOT stored is annotated as such", () => {
     { type: "end", msgId: M, userIndex: null, assistantIndex: null, versions: 1, active: 0 }));
   assert.notEqual(lost.note, null, "a message the engine did not write must say so");
   assert.match(String(lost.note), /not saved/i);
+});
+
+test("the empty chat has something to say to a screen reader", () => {
+  // An empty transcript is a `role="log"` with nothing in it, so a fresh chat
+  // is announced as nothing at all. The panel's own heading and paragraph are
+  // browsable content -- rule 3 forbids an aria-label over prose -- and this is
+  // the sentence the composition root reads into the polite region instead.
+  const view = emptyState({ hasRows: false, keyRequired: true, key: "present" }, en);
+  assert.ok(view !== null);
+  const said = emptyStateName(en, view);
+  assert.ok(said.includes(view.title), said);
+  assert.ok(said.includes(view.body), said);
+});
+
+test("the spoken key guidance includes the way out of it", () => {
+  // A reader hears the region before reaching anything focusable inside it, so
+  // "Open settings" arriving three tab stops later is a discovery rather than
+  // an instruction. It belongs in the sentence.
+  const view = emptyState({ hasRows: false, keyRequired: true, key: "absent" }, en);
+  assert.ok(view !== null && view.action !== null);
+  const said = emptyStateName(en, view);
+  assert.ok(said.includes(view.action.label), said);
+  assert.match(said, /key/i);
+});
+
+test("the welcome is not spoken as an instruction to fix something", () => {
+  // The pair: a name that appended a settings prompt unconditionally would tell
+  // a configured user to go and configure the app, out loud, on every new chat.
+  const view = emptyState({ hasRows: false, keyRequired: true, key: "present" }, en);
+  assert.ok(view !== null);
+  assert.equal(emptyStateName(en, view).toLowerCase().includes("settings"), false);
 });

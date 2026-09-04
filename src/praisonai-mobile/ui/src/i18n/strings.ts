@@ -150,6 +150,34 @@ export interface Strings {
   readonly chatsAllUnreadable: (count: number) => string;
   /** An open chat with no messages in it yet. */
   readonly emptyTranscript: string;
+  /**
+   * What the app is, under `emptyTranscript`, in an empty chat.
+   *
+   * Second line rather than first: the invitation is what a returning user
+   * needs and the description is what a new one does, and only one of them can
+   * be read first. It says what the app DOES -- not what it is built on, and
+   * not a claim about where the words go, because with the in-process engine
+   * they go to a model provider and a privacy line here would be false.
+   */
+  readonly emptyAbout: string;
+  /**
+   * The empty chat, when no key is stored and the engine in force needs one.
+   *
+   * The whole of defect #3 is that this sentence did not exist anywhere: the
+   * app could not answer, and the only thing that said so was the provider SDK,
+   * after a message had been sent, in the words "The OPENAI_API_KEY environment
+   * variable is missing or empty". These two strings and the button beside them
+   * are the replacement, and they run BEFORE the failure rather than after it.
+   *
+   * The title says what to do, not what is wrong: "No API key" describes the
+   * app's state, "Add an API key to start" describes the user's next move, and
+   * only one of those is useful to someone holding a phone.
+   */
+  readonly emptyNeedsKeyTitle: string;
+  /** The sentence under it: why, and where. It NAMES Settings, because the
+   *  button says "Open settings" and a user who taps Back has to know what they
+   *  were looking for. */
+  readonly emptyNeedsKeyBody: string;
 
   // ---- relative time (fallback path; see format-intl.ts) -----------------
   readonly justNow: string;
@@ -370,6 +398,12 @@ export const en: Strings = {
   chatDeleteFailed: "That conversation could not be deleted.",
   chatsEmpty: "No conversations yet.",
   emptyTranscript: "Ask something to begin.",
+  emptyAbout: "PraisonAI answers questions, explains things, and works through tasks with you.",
+  emptyNeedsKeyTitle: "Add an API key to start",
+  // "Paste", to match `secretPlaceholder` and because nobody types a key on a
+  // phone. Active, addressed to the reader, and it does not apologise for a
+  // state the app is simply in on its first launch.
+  emptyNeedsKeyBody: "PraisonAI answers using your own OpenAI account. Paste a key in Settings and this chat is ready.",
   chatsAllUnreadable: (count) =>
     countedPhrase(EN, count, String(count), {
       one: "{n} chat could not be read",
