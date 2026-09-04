@@ -136,7 +136,7 @@ def github_create_branch(branch_name: str) -> str:
         # Validate branch name to prevent misinterpretation as git options or invalid refs
         try:
             subprocess.run(
-                ["git", "check-ref-format", "--branch", branch_name],
+                ["git", "check-ref-format", f"refs/heads/{branch_name}"],
                 check=True, capture_output=True, text=True
             )
         except subprocess.CalledProcessError as e:
