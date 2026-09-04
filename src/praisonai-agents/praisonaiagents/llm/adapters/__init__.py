@@ -9,6 +9,7 @@ and integrates with Gap 2 (parallel tool execution).
 """
 
 from ..protocols import LLMProviderAdapterProtocol
+import json
 from typing import Dict, Any, List, Optional
 
 
@@ -33,17 +34,32 @@ class DefaultAdapter:
     
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
-        # Standard OpenAI-style tool result message
-        message = {
-            "role": "tool",
-            "content": str(tool_result),
-        }
-        if tool_call_id is not None:
-            message["tool_call_id"] = tool_call_id
+        """Standard OpenAI-shaped tool result message.
+
+        This is the union of five inline copies that had drifted apart in llm.py:
+        it uses the fuller error sentence, reports a list-of-errors result as an
+        error rather than dumping it as data, and guards json.dumps so a tool
+        returning a set or a datetime does not crash the turn.
+        """
+        if tool_result is None:
+            content = "Function returned an empty output"
+        elif isinstance(tool_result, dict) and 'error' in tool_result:
+            content = (f"Error: {tool_result.get('error', 'Unknown error')}. "
+                       "Please inform the user that the operation could not be completed.")
+        elif (isinstance(tool_result, list) and tool_result
+                and isinstance(tool_result[0], dict) and 'error' in tool_result[0]):
+            content = (f"Error: {tool_result[0].get('error', 'Unknown error')}. "
+                       "Please inform the user that the operation could not be completed.")
         else:
-            # Fallback for backward compatibility
-            message["tool_call_id"] = f"call_{function_name}"
-        return message
+            try:
+                content = json.dumps(tool_result)
+            except (TypeError, ValueError):
+                content = str(tool_result)
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id if tool_call_id is not None else f"call_{function_name}",
+            "content": content,
+        }
     
     def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
         return False  # No special handling by default

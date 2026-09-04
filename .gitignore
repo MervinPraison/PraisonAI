@@ -102,6 +102,9 @@ issue_details.json
 .internal
 .praisonai
 
+# Agent tool-output scratch directory (generated at runtime by tools)
+.praisonai_tool_output/
+
 # Backup files
 *.bak
 
