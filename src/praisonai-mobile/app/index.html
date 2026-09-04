@@ -52,11 +52,82 @@
     <link rel="stylesheet" href="./app.css" />
   </head>
   <body>
-    <!-- Populated by app/src/main.ts. Deliberately empty: a skeleton rendered
-         here would be a second source of truth for a layout the view models
-         already own. -->
-    <div id="root"></div>
+    <!--
+      The boot indicator.
+
+      What used to be here said, correctly: "Deliberately empty: a skeleton
+      rendered here would be a second source of truth for a layout the view
+      models already own." That argument still stands and nothing below
+      weakens it. THIS IS NOT A SKELETON, and the difference is the whole
+      point:
+
+        - A skeleton imitates the LAYOUT -- a fake topbar, grey message
+          bubbles, a stand-in composer. It duplicates what
+          ui/src/transcript/view-model.ts and app/src/main.ts own, so it
+          drifts from them the moment either changes, and nothing fails when
+          it does.
+        - This is a WORDMARK and one line of text. It owns no view-model
+          state, mirrors no layout, and names nothing the app renders. There
+          is no second source of truth because there is no first one: "the app
+          is starting" is not something the view models model.
+
+      It earns its place because the alternative was measured: on an Android
+      15 emulator the page was blank -- no logo, no text, nothing -- for the
+      whole of a cold start while the WebView started, fetched app.js and ran
+      it. A user cannot tell a slow launch from a broken install by looking at
+      white.
+
+      It is STATIC on purpose, and that is a decision rather than laziness.
+      Nothing running before app.js executes can observe how far the boot has
+      got: a script element has no download-progress event, and there is no way
+      to ask how much of a module has been parsed. A spinner or a progress bar
+      here would be animation the compositor keeps running even when the main
+      thread is dead -- an assertion of liveness nobody is in a position to
+      make, in a repository that has spent days removing things that claim
+      state they cannot see. The honest claim is the one made here (the app has
+      been asked to start), plus the failure notice below, which is driven by a
+      real event and nothing else.
+
+      Removal is the app's first paint and needs no code of its own:
+      app/src/main.ts does `root.textContent = ""` before appending the chat
+      screen, and app/src/crash.ts's fatal route does the same. It therefore
+      cannot outlive the first render. Nor can it flash: a browser presents its
+      first frame after layout, and on a boot fast enough for that frame to
+      already contain the app, this element is gone before it is ever painted.
+      Measured on the emulator above, that is exactly what happens -- the
+      indicator costs a fast start nothing and only appears on the slow starts
+      it was written for.
+
+      The words are English literals rather than ui/src/i18n/strings.ts,
+      because every one of those arrives with the bundle this element exists
+      to cover for. That is the same trade <noscript> below already makes.
+
+      Written without the literal script tag name anywhere in this comment, on
+      purpose: tools/web-csp.test.mjs scans this file for an inline script and
+      cannot tell one inside a comment from a real one -- which is the right
+      way round for a gate about the CSP, so the prose gives way, not the gate.
+    -->
+    <div id="root">
+      <div class="boot" data-boot>
+        <p class="boot-mark">PraisonAI</p>
+        <p class="boot-note" data-boot-note role="status">Starting…</p>
+        <!--
+          Revealed by boot-guard.js when app.js itself fails to load or throws
+          on its way in -- the one boot failure that happens with no
+          application code left running to report it. Everything after that
+          point is app/src/crash.ts's renderFatal, which this deliberately
+          does not duplicate: text only, no controls, the same `.empty` register.
+        -->
+        <p class="boot-failed" data-boot-failed role="alert" hidden>
+          PraisonAI could not start: its code could not be loaded. Close the app and open it again.
+        </p>
+      </div>
+    </div>
     <noscript>PraisonAI needs JavaScript to run.</noscript>
+    <!-- Before app.js, and not deferred: see app/boot-guard.js for why the
+         ordering is load-bearing. It is the only thing left to report a failure
+         when app.js itself is what failed. -->
+    <script src="./boot-guard.js"></script>
     <script type="module" src="./app.js"></script>
     <script src="./register-sw.js"></script>
   </body>

@@ -15,6 +15,7 @@ const SHIPPED = [
   "app.js",
   "manifest.webmanifest",
   "register-sw.js",
+  "boot-guard.js",
   "sw.js",
   "icons/a.png",
   "icons/b.png",
@@ -30,6 +31,7 @@ function fixture(main) {
   writeFileSync(join(dir, "app/index.html"), "<!doctype html><div id=root></div>\n");
   writeFileSync(join(dir, "app/app.css"), ":root { color: red }\n");
   writeFileSync(join(dir, "app/register-sw.js"), "// register\n");
+  writeFileSync(join(dir, "app/boot-guard.js"), "// boot guard\n");
   writeFileSync(join(dir, "app/sw.js"), REAL_SW);
   writeFileSync(
     join(dir, "app/manifest.webmanifest"),

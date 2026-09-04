@@ -66,6 +66,14 @@ function serveDist(overrides = new Map()) {
     let rel = url.pathname.slice(BASE.length);
     if (rel === "" || rel.endsWith("/")) rel += "index.html";
     if (overrides.has(rel)) {
+      // `null` means REFUSE this file, not serve nothing. A zero-byte 200 is a
+      // script that loaded and did nothing; the boot-guard proof below needs
+      // the other thing entirely -- a <script> the browser could not fetch,
+      // which is what fires the `error` event that file listens for.
+      if (overrides.get(rel) === null) {
+        res.writeHead(500).end("refused");
+        return;
+      }
       res.writeHead(200, { "content-type": MIME[extname(rel)] ?? "application/octet-stream", "cache-control": "no-store" });
       res.end(overrides.get(rel));
       return;
@@ -178,7 +186,7 @@ test("the built web app boots, installs, and survives going offline", async (t) 
   const cached = await page.evaluate(async () => {
     const keys = await caches.keys();
     const hits = {};
-    for (const rel of ["index.html", "app.js", "app.css", "manifest.webmanifest", "register-sw.js"]) {
+    for (const rel of ["index.html", "app.js", "app.css", "manifest.webmanifest", "register-sw.js", "boot-guard.js"]) {
       hits[rel] = (await caches.match(new URL(rel, location.href).href)) !== undefined;
     }
     return { keys, hits };
@@ -339,4 +347,98 @@ test("a redeployed site replaces the cached one instead of being pinned behind i
   await page.reload({ waitUntil: "load" });
   await page.locator('textarea[aria-label="Message"]').waitFor({ timeout: 15_000 });
   assert.ok(await page.evaluate(() => navigator.serviceWorker.controller !== null), "v2 controls the page");
+});
+
+test("the boot screen paints before the app, goes when the app arrives, and reports an app that cannot load", async (t) => {
+  // The blank-cold-start defect, proved in a browser rather than argued from
+  // the markup. Three claims, and only a real engine can settle any of them:
+  //
+  //   1. the indicator is on screen while app.js is still in flight -- i.e. it
+  //      covers the gap it was written for, rather than appearing alongside
+  //      the app it is meant to precede;
+  //   2. the app's first render removes it, so it can never sit on top of the
+  //      UI;
+  //   3. when app.js cannot be fetched at all, the page says so. That is the
+  //      one failure app/src/crash.ts cannot cover, because the crash handler
+  //      is installed by `mount()` inside the module that just failed -- and a
+  //      static "Starting…" left alone in that state is a page that lies.
+  const built = spawnSync(process.execPath, [join(pkg, "tools/build-webview.mjs")], { encoding: "utf8" });
+  assert.equal(built.status, 0, `the build must succeed before it can be booted:\n${built.stdout}${built.stderr}`);
+
+  const overrides = new Map();
+  const server = await serveDist(overrides);
+  const site = `http://127.0.0.1:${server.address().port}` + BASE;
+  const browser = await launch();
+  t.after(async () => {
+    await browser.close();
+    server.closeAllConnections?.();
+    await new Promise((ok) => server.close(ok));
+  });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.route((u) => u.href.startsWith(ENGINE), (route) => route.abort("connectionrefused"));
+
+  // ---- 1. on screen while the bundle is still coming ----------------------
+  // app.js is held for two seconds. Everything the indicator depends on --
+  // the markup and the render-blocking stylesheet -- has arrived by then, so
+  // whatever is visible in this window is what a user on a slow start sees.
+  let release = null;
+  await page.route(
+    (u) => u.pathname.endsWith("/app.js"),
+    async (route) => {
+      await new Promise((ok) => { release = ok; setTimeout(ok, 2000); });
+      await route.continue();
+    },
+  );
+  await page.goto(site, { waitUntil: "commit" });
+  const mark = page.locator("[data-boot] .boot-mark");
+  await mark.waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal((await mark.textContent()).trim(), "PraisonAI", "the wordmark is what is on screen");
+  await page.locator("[data-boot] .boot-note").waitFor({ state: "visible" });
+  assert.equal(
+    await page.locator("[data-boot] .boot-failed").isVisible(),
+    false,
+    "a boot that is merely slow must not be reported as a boot that failed",
+  );
+  // It is inside #root and it is the only thing there: the app has not painted.
+  assert.equal(await page.locator("textarea").count(), 0, "the app has not rendered yet, or this proves nothing");
+
+  // ---- 2. gone the moment the app renders ---------------------------------
+  release?.();
+  await page.locator('textarea[aria-label="Message"]').waitFor({ timeout: 20_000 });
+  assert.equal(
+    await page.locator("[data-boot]").count(),
+    0,
+    "the boot indicator survived the first render and is sitting on top of the app",
+  );
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // ---- 3. an app.js that cannot be fetched --------------------------------
+  // Refused by the server rather than by a route, so the failure is a real
+  // network one on a real <script> element.
+  //
+  // A FRESH CONTEXT, and that detail is not incidental. The context above has
+  // a service worker registered for this scope with app.js precached, so it
+  // answers the refusal out of the cache and boots normally -- correct
+  // behaviour, and the whole point of the offline proof further up, but it
+  // means this failure cannot be staged there. This is a first visit: nothing
+  // is cached yet, and the refusal reaches the page.
+  overrides.set("app.js", null);
+  const firstVisit = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  t.after(() => firstVisit.close());
+  const failed = await firstVisit.newPage();
+  await failed.route((u) => u.href.startsWith(ENGINE), (route) => route.abort("connectionrefused"));
+  await failed.goto(site, { waitUntil: "commit" });
+  const notice = failed.locator("[data-boot] .boot-failed");
+  await notice.waitFor({ state: "visible", timeout: 15_000 });
+  assert.match(
+    (await notice.textContent()).trim(),
+    /could not start/i,
+    "the notice must say the app could not start",
+  );
+  assert.equal(
+    await failed.locator("[data-boot] .boot-note").isVisible(),
+    false,
+    '"Starting…" must be withdrawn: leaving it beside "could not start" is the page contradicting itself',
+  );
 });
