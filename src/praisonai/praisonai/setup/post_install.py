@@ -1,23 +1,21 @@
-import os
-import sys
-import subprocess
-import logging
+"""Post-installation hook.
 
-def install_playwright():
-    """Install playwright browsers."""
-    try:
-        subprocess.run([sys.executable, "-m", "playwright", "install"], check=True)
-        logging.info("Playwright browsers installed successfully")
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to install playwright browsers: {e}")
-    except Exception as e:
-        logging.error(f"Unexpected error installing playwright browsers: {e}")
+Intentionally a no-op: `pip install praisonai` must NOT download browser
+binaries (or perform any other network step) at install time. Fetching all
+Playwright browser engines on install breaks offline/air-gapped/CI/sandboxed
+environments and bloats the default footprint.
+
+Browser provisioning is on-demand instead: the browser tool path prints an
+actionable one-line hint (`playwright install chromium`) the first time a
+browser tool is actually used. Install the full stack with
+`pip install "praisonai[browser]"` (or `praisonai[all]`).
+"""
+
 
 def main():
-    """Post-installation script."""
-    # Check if this is a chat or code installation
-    if any(extra in sys.argv for extra in ['chat', 'code']):
-        install_playwright()
+    """No-op post-install: no network side-effects."""
+    return
+
 
 if __name__ == "__main__":
     main()

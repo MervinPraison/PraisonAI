@@ -72,7 +72,19 @@ class PlaywrightBrowserAgent:
         else:
             browser_launcher = self.playwright.chromium
         
-        self.browser = await browser_launcher.launch(headless=self.headless)
+        try:
+            self.browser = await browser_launcher.launch(headless=self.headless)
+        except Exception as e:
+            # The Playwright package is installed but its browser binary is not.
+            # This is the common `praisonai[browser]`/`praisonai[all]` case since
+            # install no longer force-downloads engines. Surface the documented
+            # on-demand hint instead of an opaque launch traceback.
+            if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
+                raise RuntimeError(
+                    f"Playwright {self.browser_type} binary not found. "
+                    f"Install it on demand: playwright install {self.browser_type}"
+                ) from e
+            raise
         self.page = await self.browser.new_page()
         
         logger.info(f"Launched {self.browser_type} browser (headless={self.headless})")
