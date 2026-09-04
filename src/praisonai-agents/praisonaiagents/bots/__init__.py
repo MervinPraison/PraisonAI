@@ -41,6 +41,7 @@ from .protocols import (
 from .base import (
     BasePlatformAdapter,
     SendResult,
+    SendStatus,
     SendErrorKind,
     classify_send_error,
 )
@@ -169,6 +170,7 @@ __all__ = [
     "GatewayAdapterContractError",
     "BasePlatformAdapter",
     "SendResult",
+    "SendStatus",
     "SendErrorKind",
     "classify_send_error",
     "InteractiveContext",

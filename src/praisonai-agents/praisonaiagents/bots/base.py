@@ -54,16 +54,22 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from .protocols import PlatformCapabilities
 
 __all__ = [
     "SendErrorKind",
+    "SendStatus",
     "SendResult",
     "classify_send_error",
     "BasePlatformAdapter",
 ]
+
+#: Closed set of delivery outcomes for :attr:`SendResult.status`. Exposed as a
+#: type alias so static callers can verify exhaustive handling of the contract
+#: instead of treating the outcome as an arbitrary ``str``.
+SendStatus = Literal["sent", "failed", "queued", "duplicate"]
 
 
 class SendErrorKind(str, Enum):
@@ -267,6 +273,10 @@ class SendResult:
             behaviour rather than being silently dropped.
         retry_after: Suggested seconds to wait before retrying (from the
             platform's rate-limit response, if provided).
+        queued: True when the send was persisted to a durable outbox for later
+            delivery rather than delivered inline (``status == "queued"``).
+        duplicate: True when a crash-recovered re-send may be a duplicate —
+            an honest at-least-once outcome (``status == "duplicate"``).
         metadata: Additional platform-specific result details.
     """
 
@@ -278,12 +288,32 @@ class SendResult:
     error_kind: Optional[SendErrorKind] = None
     retryable: bool = True
     retry_after: Optional[float] = None
+    queued: bool = False
+    duplicate: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def status(self) -> SendStatus:
+        """Closed, branchable delivery outcome for the send contract.
+
+        One of ``"sent"`` / ``"failed"`` / ``"queued"`` / ``"duplicate"``,
+        derived from the existing flags so a caller of ``BotProtocol``'s
+        ``send_message`` can branch on the outcome without exception-handling
+        (a swallowed exception would otherwise be a silent drop). ``queued``
+        (persisted to a durable outbox) and ``duplicate`` (crash-recovered
+        possible re-send) take precedence over the bare ``ok`` flag.
+        """
+        if self.queued:
+            return "queued"
+        if self.duplicate:
+            return "duplicate"
+        return "sent" if self.ok else "failed"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a plain dictionary."""
         return {
             "ok": self.ok,
+            "status": self.status,
             "message_id": self.message_id,
             "chat_id": self.chat_id,
             "message_ids": list(self.message_ids),
@@ -291,6 +321,8 @@ class SendResult:
             "error_kind": self.error_kind.value if self.error_kind else None,
             "retryable": self.retryable,
             "retry_after": self.retry_after,
+            "queued": self.queued,
+            "duplicate": self.duplicate,
             "metadata": self.metadata,
         }
 
@@ -627,6 +659,15 @@ class BasePlatformAdapter(ABC):
             if not result.ok:
                 result.message_ids = aggregate.message_ids + result.message_ids
                 return result
+            # Preserve non-``sent`` outcomes: a chunk persisted to a durable
+            # outbox (``queued``) or crash-recovered as a possible re-send
+            # (``duplicate``) must propagate to the aggregate, otherwise a
+            # deferred/at-least-once delivery would be silently reported as
+            # ``sent`` and the outcome the receipt exists to carry is erased.
+            if result.queued:
+                aggregate.queued = True
+            if result.duplicate:
+                aggregate.duplicate = True
             if result.message_id:
                 aggregate.message_ids.append(result.message_id)
                 aggregate.message_id = result.message_id
