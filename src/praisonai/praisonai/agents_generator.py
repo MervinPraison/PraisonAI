@@ -12,13 +12,18 @@ import difflib
 import importlib
 import importlib.util
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
 from .version import __version__
 
-# Import new architecture components
-from .framework_adapters.base import FrameworkAdapter
-from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_registry
+# New architecture components are imported lazily to preserve the wrapper's
+# lazy-import contract: eagerly importing them here would pull the heavy
+# ``praisonaiagents.frameworks.*`` tree on every CLI command and ``praisonai.run``
+# call. Runtime access goes through ``_get_default_adapter_registry()`` below;
+# these type-only imports carry no runtime cost.
+if TYPE_CHECKING:
+    from .framework_adapters.base import FrameworkAdapter
+    from .framework_adapters.registry import FrameworkAdapterRegistry
 
 logger = logging.getLogger("praisonai.agents_generator")
 
@@ -662,7 +667,7 @@ class AgentsGenerator:
         self.close()
         return False
 
-    def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
+    def _get_framework_adapter(self, framework: str) -> "FrameworkAdapter":
         """
         Get the appropriate framework adapter for the given framework.
         
