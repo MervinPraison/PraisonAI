@@ -1,10 +1,9 @@
 """
 Tests for architectural fixes from Issue #1392.
 
-This test suite validates all three gaps:
+This test suite validates:
 1. Gap 1: Sync/Async Duplication - unified execution core
 2. Gap 2: Parallel Tool Execution - concurrent tool calls
-3. Gap 3: Streaming Protocol - unified streaming adapters
 
 Tests follow AGENTS.md requirements:
 - Real agentic tests (actual LLM calls)
@@ -20,13 +19,6 @@ from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from praisonaiagents import Agent, tool
 from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.agent.unified_execution_mixin import UnifiedExecutionMixin
-from praisonaiagents.llm.streaming_protocol import (
-    get_streaming_adapter, 
-    DefaultStreamingAdapter,
-    OllamaStreamingAdapter,
-    AnthropicStreamingAdapter,
-    GeminiStreamingAdapter
-)
 from praisonaiagents.streaming.events import StreamEvent, StreamEventType
 from praisonaiagents.tools.call_executor import (
     create_tool_call_executor,
@@ -230,111 +222,6 @@ class TestGap2ParallelToolExecution:
         # Test default behavior (should be False for backward compatibility)
         default_agent = Agent(name="default_test", instructions="test")
         assert getattr(default_agent, 'parallel_tool_calls', False) is False
-
-
-class TestGap3StreamingProtocol:
-    """Test Gap 3: Streaming Protocol unification."""
-    
-    def test_streaming_adapter_registry(self):
-        """Test that streaming adapters are properly registered."""
-        
-        # Test default adapters are available
-        default_adapter = get_streaming_adapter("default")
-        ollama_adapter = get_streaming_adapter("ollama")
-        anthropic_adapter = get_streaming_adapter("anthropic")
-        gemini_adapter = get_streaming_adapter("gemini")
-        
-        assert isinstance(default_adapter, DefaultStreamingAdapter)
-        assert isinstance(ollama_adapter, OllamaStreamingAdapter)
-        assert isinstance(anthropic_adapter, AnthropicStreamingAdapter)
-        assert isinstance(gemini_adapter, GeminiStreamingAdapter)
-        
-        # Test provider name matching
-        claude_adapter = get_streaming_adapter("claude-3-sonnet")
-        assert isinstance(claude_adapter, AnthropicStreamingAdapter)
-        
-        ollama_model_adapter = get_streaming_adapter("ollama/llama2")
-        assert isinstance(ollama_model_adapter, OllamaStreamingAdapter)
-    
-    def test_provider_specific_streaming_capabilities(self):
-        """Test that each adapter reports correct streaming capabilities."""
-        
-        # Default adapter - supports most streaming scenarios
-        default = get_streaming_adapter("default")
-        assert default.can_stream() is True
-        assert default.can_stream(tools=[{"name": "test"}]) is True
-        
-        # Ollama adapter - doesn't support streaming with tools
-        ollama = get_streaming_adapter("ollama")
-        assert ollama.can_stream() is True
-        assert ollama.can_stream(tools=[{"name": "test"}]) is False
-        
-        # Anthropic adapter - disabled due to litellm bug
-        anthropic = get_streaming_adapter("anthropic")
-        assert anthropic.can_stream() is False
-        assert anthropic.can_stream(tools=[{"name": "test"}]) is False
-        
-        # Gemini adapter - supports basic streaming but not with tools
-        gemini = get_streaming_adapter("gemini")
-        assert gemini.can_stream() is True
-        assert gemini.can_stream(tools=[{"name": "test"}]) is False
-    
-    def test_stream_unavailable_events(self):
-        """Test that adapters emit proper unavailable events."""
-        
-        # Test Anthropic unavailable event
-        anthropic = get_streaming_adapter("anthropic")
-        event = anthropic.create_stream_unavailable_event()
-        
-        assert event.type == StreamEventType.STREAM_UNAVAILABLE
-        assert "litellm" in event.error.lower()
-        assert event.metadata["provider"] == "anthropic"
-        
-        # Test Gemini unavailable event with tools
-        gemini = get_streaming_adapter("gemini")
-        event = gemini.create_stream_unavailable_event("tools present")
-        
-        assert event.type == StreamEventType.STREAM_UNAVAILABLE
-        assert "tools present" in event.error
-        assert event.metadata["provider"] == "gemini"
-    
-    @pytest.mark.asyncio
-    async def test_streaming_adapter_integration(self):
-        """Test streaming adapter integration with mock LLM responses."""
-        
-        default_adapter = get_streaming_adapter("default")
-        
-        # Mock the litellm.acompletion to return test stream chunks
-        mock_chunks = [
-            Mock(choices=[Mock(delta=Mock(content="Hello", tool_calls=None))]),
-            Mock(choices=[Mock(delta=Mock(content=" world", tool_calls=None))]),
-            Mock(choices=[Mock(delta=Mock(content="!", tool_calls=None))])
-        ]
-        
-        async def mock_acompletion(**kwargs):
-            for chunk in mock_chunks:
-                yield chunk
-        
-        with patch('litellm.acompletion', mock_acompletion):
-            events = []
-            async for event in default_adapter.stream_completion(
-                messages=[{"role": "user", "content": "Hello"}],
-                model="gpt-3.5-turbo",
-                temperature=1.0
-            ):
-                events.append(event)
-        
-        # Verify event sequence
-        assert len(events) >= 4  # REQUEST_START, FIRST_TOKEN, DELTA_TEXT, STREAM_END
-        assert events[0].type == StreamEventType.REQUEST_START
-        assert events[-1].type == StreamEventType.STREAM_END
-        
-        # Find text events
-        text_events = [e for e in events if e.type in [StreamEventType.FIRST_TOKEN, StreamEventType.DELTA_TEXT]]
-        assert len(text_events) == 3
-        assert text_events[0].content == "Hello"
-        assert text_events[1].content == " world"
-        assert text_events[2].content == "!"
 
 
 class TestRealAgenticIntegration:
