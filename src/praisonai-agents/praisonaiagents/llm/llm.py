@@ -4384,6 +4384,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._tool_parse_error_message(function_name, tool_call_id)
                                 )
                                 continue
+                            # Validate and filter arguments for Ollama provider.
+                            # Pre-dispatch, so this is streaming-safe: nothing has
+                            # been yielded that would need retracting. Weak local
+                            # models routinely emit arguments belonging to a
+                            # different function, and dispatching those calls the
+                            # user's tool with parameters it never declared.
+                            if is_ollama and tools:
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools)
                             tool_calls_batch.append(ToolCall(
                                 function_name=function_name,
                                 arguments=arguments, 
@@ -4590,6 +4599,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages.append(
                                     self._tool_parse_error_message(function_name, tool_call_id))
                                 continue
+                            # Validate and filter arguments for Ollama provider.
+                            # Pre-dispatch, so this is streaming-safe: nothing has
+                            # been yielded that would need retracting. Weak local
+                            # models routinely emit arguments belonging to a
+                            # different function, and dispatching those calls the
+                            # user's tool with parameters it never declared.
+                            if is_ollama and tools:
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools)
                             try:
                                 tool_result = execute_tool_fn(function_name, arguments)
                             except Exception as tool_error:  # noqa: BLE001
