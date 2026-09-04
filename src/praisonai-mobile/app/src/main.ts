@@ -772,6 +772,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   jumpLatest.hidden = true;
 
   screen.append(bar, transcript, jumpLatest, composer, polite, assertive);
+  // This is also what RETIRES the boot indicator, and the ordering is the whole
+  // guarantee. `app/index.html` paints a wordmark and "Starting…" into #root on
+  // the first frame so a cold start does not look like a broken install; the
+  // clear below is the single point at which it can no longer be on screen, and
+  // it happens in the same statement pair that puts the real UI there -- so
+  // there is no frame with both, and none with neither. It is deliberately not
+  // a `removeChild` of a known id: anything the page painted before the app did
+  // is the app's to replace, and a targeted removal would leave a second
+  // element behind the day someone adds one.
   root.textContent = "";
   root.append(screen);
 

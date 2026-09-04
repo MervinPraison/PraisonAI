@@ -2574,3 +2574,39 @@ test("a turn the model was NEVER told about is the one row that says it was not 
   );
   await app?.dispose();
 });
+
+test("the first render takes the boot indicator away", async () => {
+  // The other half of the boot screen (app/src/boot-screen.test.ts asserts the
+  // markup and the styling). `app/index.html` paints a wordmark and "Starting…"
+  // into #root before any module runs, so a cold start is not a blank page --
+  // and the ONE thing that must never happen is that it survives the first
+  // render and sits on top of the app.
+  //
+  // Nothing removes it by name. `mount` clears #root before appending the chat
+  // screen, which is what makes the guarantee total: whatever the page painted
+  // ahead of the app is gone in the same statement pair that puts the real UI
+  // there. This test is what stops that clear from being "simplified" away --
+  // the app would still look correct on every screen a test drives, because
+  // every other test starts from an empty root.
+  const { dom, platform } = harness();
+  const boot = dom.make("div");
+  boot.className = "boot";
+  boot.dataset["boot"] = "";
+  const mark = dom.make("p");
+  mark.textContent = "PraisonAI";
+  boot.append(mark);
+  dom.root.append(boot);
+  assert.ok(dom.find((n) => n.dataset["boot"] !== undefined) !== null, "the fixture must start with one");
+
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.equal(
+    dom.find((n) => n.dataset["boot"] !== undefined),
+    null,
+    "the boot indicator must not survive the first render",
+  );
+  // And the real UI is what replaced it, rather than the root simply being
+  // emptied -- an indicator removed with nothing put in its place would pass
+  // the assertion above while showing the blank page this all exists to fix.
+  assert.ok(dom.find((n) => n.tagName === "TEXTAREA") !== null, "the composer replaced it");
+  await app?.dispose();
+});

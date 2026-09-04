@@ -29,7 +29,12 @@ await mkdir(join(dist, "icons"), { recursive: true });
 // The page, the stylesheet, the manifest and the registration script are
 // copied verbatim: none is compiled, and a transform step would be one more
 // thing between what is written and what ships.
-const verbatim = ["index.html", "app.css", "manifest.webmanifest", "register-sw.js"];
+// `boot-guard.js` is here for the same reason `register-sw.js` is: it is a
+// hand-written script the page loads directly, not something the bundle
+// produces. Being in this list is also what puts it in the PRECACHE below,
+// which matters -- it is the file that reports app.js failing to load, so it
+// must not itself be a thing that has to be fetched to work.
+const verbatim = ["index.html", "app.css", "manifest.webmanifest", "register-sw.js", "boot-guard.js"];
 for (const name of verbatim) {
   await copyFile(join(pkg, "app", name), join(dist, name));
 }

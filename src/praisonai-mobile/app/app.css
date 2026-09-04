@@ -358,3 +358,45 @@ button:disabled { opacity: .45; cursor: default; }
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/*
+ * The boot indicator, painted from index.html on the first frame.
+ *
+ * These rules are the reason it is worth painting at all: this stylesheet is a
+ * render-blocking <link> in <head>, so it is parsed BEFORE the first frame,
+ * while app.js is a deferred module that is not. Style the indicator from
+ * script and it would appear only once the thing it exists to cover for has
+ * already arrived.
+ *
+ * Every colour is a token from :root, never a literal, and that is what makes
+ * the indicator theme-correct without knowing the theme exists: the dark block
+ * above redefines --ground/--ink/--soft/--bad, so a dark device gets a dark
+ * boot screen and then a dark app. A hardcoded #fff here would have produced
+ * the one outcome worse than the blank page -- a white flash handing over to a
+ * dark UI on every launch.
+ *
+ * `margin: auto` inside `#root`'s flex column centres it, the same idiom
+ * `.empty` uses. The insets are still added as padding: centred content
+ * clears a status bar on a phone-shaped viewport by construction, but a short
+ * landscape viewport or a large font scale can push these lines into a cutout,
+ * and `--inset-*` falls back to `env()` here because nothing has run yet to
+ * write the shell's real numbers over it.
+ */
+.boot {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .4rem;
+  text-align: center;
+  padding: calc(var(--inset-top) + 1rem) calc(var(--inset-right) + 1.25rem)
+           calc(var(--inset-bottom) + 1rem) calc(var(--inset-left) + 1.25rem);
+}
+.boot-mark { margin: 0; font-size: 1.4rem; font-weight: 600; color: var(--ink); }
+.boot-note { margin: 0; font-size: .9rem; color: var(--soft); }
+/* The failure notice boot-guard.js reveals. `[hidden]` is spelled out for the
+   same reason `.screen[hidden]` and `.setting-error[hidden]` are: an author
+   `display` declaration beats the user agent's, and this repository has twice
+   shipped an element that ignored `hidden` because of one. */
+.boot-failed { margin: .4rem 0 0; max-width: 22rem; font-size: .9rem; color: var(--bad); }
+.boot-note[hidden], .boot-failed[hidden] { display: none; }
