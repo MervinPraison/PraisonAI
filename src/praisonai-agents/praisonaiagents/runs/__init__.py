@@ -31,12 +31,16 @@ from .protocols import (
     RunLedgerProtocol,
     RunRecord,
     RunStatus,
+    TerminalOutcomeDelivererProtocol,
+    notify_recovered,
 )
 
 __all__ = [
     "RunStatus",
     "RunRecord",
     "RunLedgerProtocol",
+    "TerminalOutcomeDelivererProtocol",
+    "notify_recovered",
     "ACTIVE_STATUSES",
     "TERMINAL_STATUSES",
     "SQLiteRunLedger",
