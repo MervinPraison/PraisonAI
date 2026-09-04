@@ -323,11 +323,24 @@ def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
     # Build loader dict for the canonical PluginRegistry
     loaders: Dict[str, Callable[[], ProviderType]] = {}
     
-    # Cover the providers parse_model_string() already special-cases.
+    # Cover the providers parse_model_string() already special-cases, plus the
+    # local-server routes. All of these are resolved by litellm, which is what
+    # _make_litellm_factory wraps, so registering them costs nothing beyond the
+    # entry -- and without them `create_llm_provider("ollama/llama3")` raised
+    # "Unknown praisonai.llm_providers plugin: 'ollama'", which is the exact
+    # string parse_model_string() tells users to write a few lines below.
     for name, aliases in [
-        ("openai",    ("oai",)),
-        ("anthropic", ("claude",)),
-        ("google",    ("gemini", "google_genai")),
+        ("openai",      ("oai",)),
+        ("anthropic",   ("claude",)),
+        ("google",      ("gemini", "google_genai")),
+        # Local runtimes. "ollama_chat" is litellm's recommended prefix for
+        # Ollama tool calling; "hosted_vllm" is its name for an OpenAI-compatible
+        # vLLM server.
+        ("ollama",      ()),
+        ("ollama_chat", ()),
+        ("lm_studio",   ()),
+        ("vllm",        ()),
+        ("hosted_vllm", ()),
     ]:
         # Use local function to capture name correctly in closure
         def make_loader(provider_name):
