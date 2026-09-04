@@ -636,9 +636,18 @@ Respond with ONLY a valid JSON tool call in this format:
         # Parse route prefix for explicit provider routing
         provider_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else None
         
-        # Explicit provider prefixes take priority
-        if provider_prefix == "ollama":
+        # Explicit provider prefixes take priority.
+        # "ollama_chat" is litellm's recommended prefix for Ollama tool calling
+        # and must not be treated as a different provider than "ollama".
+        if provider_prefix in {"ollama", "ollama_chat"}:
             return "ollama"
+        # Local servers that speak real OpenAI over HTTP. They keep the standard
+        # tool-message shape (unlike Ollama) but serve locally-hosted weights
+        # that benefit from a tool-call repair budget. "huggingface" is
+        # deliberately absent: that prefix is the hosted Inference API.
+        if provider_prefix in {"lm_studio", "lmstudio", "vllm", "hosted_vllm",
+                               "llamacpp", "llama_cpp"}:
+            return "local"
         if provider_prefix in {"anthropic", "claude"}:
             return "anthropic"
         if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
@@ -721,6 +730,17 @@ Respond with ONLY a valid JSON tool call in this format:
             return True
         
         return False
+
+    def _is_local_openai_provider(self) -> bool:
+        """Detect local OpenAI-compatible servers (LM Studio, vLLM, llama.cpp).
+
+        These speak the standard OpenAI protocol, so well-formed tool calls
+        arrive as ``message.tool_calls``. But after a tool-call *repair* prompt
+        the model is asked to reply with a bare JSON tool call as text content;
+        like Ollama, that text must be reconstructed into a dispatchable tool
+        call rather than returned as the final answer.
+        """
+        return self._detect_provider() == "local"
 
     def _is_qwen_provider(self) -> bool:
         """Detect if this is a Qwen provider"""
@@ -3465,8 +3485,11 @@ Respond with ONLY a valid JSON tool call in this format:
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
                     
-                    # For Ollama, parse tool calls from response text if not in tool_calls field
-                    if self._is_ollama_provider() and not tool_calls and response_text and formatted_tools:
+                    # For Ollama and local OpenAI-compatible servers, parse tool
+                    # calls from response text if not in the tool_calls field.
+                    # This is essential after a repair prompt, which asks the
+                    # model to reply with a bare JSON tool call as text content.
+                    if (self._is_ollama_provider() or self._is_local_openai_provider()) and not tool_calls and response_text and formatted_tools:
                         # Try to parse JSON tool call from response text
                         try:
                             response_json = json.loads(response_text.strip())
