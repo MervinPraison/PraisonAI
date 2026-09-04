@@ -530,12 +530,6 @@ Respond with ONLY a valid JSON tool call in this format:
         # for zero regression.
         self.tool_timeout_ms = extra_settings.get('tool_timeout_ms', None)
         
-        # Initialize provider adapter for dispatch logic
-        self._provider_adapter = self._initialize_provider_adapter()
-        
-        # Apply provider-specific defaults after adapter is initialized
-        self._apply_provider_defaults()
-        
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
@@ -568,6 +562,17 @@ Respond with ONLY a valid JSON tool call in this format:
                 if profile.model and profile.model != self.model:
                     logging.info(f"Failover: using profile model {profile.model}")
                     self.model = profile.model
+
+        # Initialize provider adapter for dispatch logic. This must run *after*
+        # the initial failover profile is applied above: the profile can change
+        # the provider (e.g. gpt-4o -> ollama/llama3 or the reverse), and the
+        # adapter is selected from self.model/self.base_url. Selecting it earlier
+        # would capture the pre-profile provider and leave dispatch (e.g. the
+        # empty-turn compensation gate) pointing at the wrong adapter.
+        self._provider_adapter = self._initialize_provider_adapter()
+
+        # Apply provider-specific defaults after adapter is initialized
+        self._apply_provider_defaults()
 
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
@@ -3814,8 +3819,11 @@ Respond with ONLY a valid JSON tool call in this format:
                         
                         # Special early stopping logic for Ollama when tool results are available
                         # Ollama often provides empty responses after successful tool execution
-                        if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
-                            (not response_text or response_text.strip() == "")):
+                        if self._provider_adapter.handle_empty_response_with_tools({
+                            'iteration_count': iteration_count,
+                            'accumulated_tool_results': accumulated_tool_results,
+                            'response_text': response_text or '',
+                        }):
                             # Generate coherent response from tool results
                             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
@@ -5416,8 +5424,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special early stopping logic for Ollama when tool results are available
                     # Ollama often provides empty responses after successful tool execution
-                    if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
-                        (not response_text or response_text.strip() == "")):
+                    if self._provider_adapter.handle_empty_response_with_tools({
+                        'iteration_count': iteration_count,
+                        'accumulated_tool_results': accumulated_tool_results,
+                        'response_text': response_text or '',
+                    }):
                         # Generate coherent response from tool results
                         tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
