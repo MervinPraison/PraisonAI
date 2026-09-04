@@ -30,6 +30,7 @@ _PROVIDER_KEY_VARS = (
 def clean_env(monkeypatch):
     for var in _PROVIDER_KEY_VARS + (
         "MODEL_NAME", "OPENAI_MODEL_NAME", "OPENAI_BASE_URL",
+        "PRAISONAI_LOCAL_ENDPOINTS",
     ):
         monkeypatch.delenv(var, raising=False)
     local_detect.reset_cache()
@@ -155,8 +156,10 @@ def test_negative_probe_is_cached(clean_env, monkeypatch):
 
     monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
     assert local_detect.detect_local_model() is None
+    first_pass = calls["n"]  # one probe per default candidate
+    assert first_pass >= 1
     assert local_detect.detect_local_model() is None
-    assert calls["n"] == 1  # second call served from cache
+    assert calls["n"] == first_pass  # second call served from cache, no re-probe
 
 
 def test_resolver_falls_back_to_local_when_no_cloud_key(clean_env, monkeypatch):
@@ -176,6 +179,73 @@ def test_resolver_falls_back_to_local_when_no_cloud_key(clean_env, monkeypatch):
         None, persist=False, notify=False
     )
     assert resolved == "ollama/llama3.2"
+
+
+def test_default_candidates_include_common_local_runtimes(clean_env):
+    """Default probe list must cover Ollama, LM Studio, vLLM, Jan, llama.cpp."""
+    hosts = local_detect._candidate_hosts()
+    assert hosts[0] == "http://127.0.0.1:11434"  # Ollama stays first
+    for port in ("1234", "8000", "1337", "8080"):
+        assert any(port in h for h in hosts)
+
+
+def test_detect_probes_candidates_until_first_reachable(clean_env, monkeypatch):
+    """First reachable candidate wins and probing short-circuits."""
+    probed = []
+
+    def _probe(host):
+        probed.append(host)
+        return "openai/lmstudio-model" if "1234" in host else None
+
+    monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert result.model == "openai/lmstudio-model"
+    assert result.base_url == "http://127.0.0.1:1234/v1"
+    # Ollama probed first, LM Studio second, then short-circuit (no vLLM etc.).
+    assert probed == ["http://127.0.0.1:11434", "http://127.0.0.1:1234"]
+
+
+def test_openai_base_url_skips_candidate_list(clean_env, monkeypatch):
+    """An explicit override is probed alone; the default list is not consulted."""
+    probed = []
+
+    def _probe(host):
+        probed.append(host)
+        return "ollama/m"
+
+    clean_env.setenv("OPENAI_BASE_URL", "http://localhost:9999")
+    monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert probed == ["http://localhost:9999"]
+
+
+def test_env_override_replaces_candidate_list(clean_env, monkeypatch):
+    """PRAISONAI_LOCAL_ENDPOINTS replaces the built-in list."""
+    probed = []
+
+    def _probe(host):
+        probed.append(host)
+        return "openai/m" if "4321" in host else None
+
+    clean_env.setenv(
+        "PRAISONAI_LOCAL_ENDPOINTS", "127.0.0.1:2222, http://127.0.0.1:4321"
+    )
+    monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert probed == ["http://127.0.0.1:2222", "http://127.0.0.1:4321"]
+
+
+def test_env_override_empty_disables_probing(clean_env, monkeypatch):
+    """An empty PRAISONAI_LOCAL_ENDPOINTS disables probing entirely."""
+    def _boom(host):
+        raise AssertionError("probing must not happen when disabled")
+
+    clean_env.setenv("PRAISONAI_LOCAL_ENDPOINTS", "")
+    monkeypatch.setattr(local_detect, "_probe_ollama_tags", _boom)
+    assert local_detect.detect_local_model(use_cache=False) is None
 
 
 def test_resolver_prefers_cloud_key_over_local(clean_env, monkeypatch):

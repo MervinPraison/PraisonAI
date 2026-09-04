@@ -32,6 +32,23 @@ _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
 _DEFAULT_LOCAL_MODEL = "ollama/llama3.2"
 
+# Ordered default candidates probed on the keyless first-run path when no env
+# override is set. Ollama stays first so its behaviour is byte-for-byte
+# unchanged; the rest are well-known local OpenAI-compatible runtimes on their
+# default ports. First reachable wins, then probing short-circuits.
+_DEFAULT_LOCAL_ENDPOINTS = (
+    "http://127.0.0.1:11434",  # Ollama
+    "http://127.0.0.1:1234",   # LM Studio
+    "http://127.0.0.1:8000",   # vLLM
+    "http://127.0.0.1:1337",   # Jan
+    "http://127.0.0.1:8080",   # llama.cpp server
+)
+
+# Env override for the candidate list: a comma/whitespace separated list of
+# host[:port] or full URLs. Extends nothing — it replaces the defaults so a user
+# can pin a non-standard host or narrow the set. Set to empty to disable probing.
+_LOCAL_ENDPOINTS_ENV = "PRAISONAI_LOCAL_ENDPOINTS"
+
 
 @dataclass(frozen=True)
 class LocalModel:
@@ -63,15 +80,45 @@ def _normalise_base(host: str) -> str:
     return host + "/v1"
 
 
+def _with_scheme(host: str) -> str:
+    """Return ``host`` with an ``http://`` scheme if it has none."""
+    host = host.strip()
+    if host and not host.startswith(("http://", "https://")):
+        host = "http://" + host
+    return host
+
+
 def _candidate_host() -> str:
-    """Resolve the host to probe, honouring env overrides."""
+    """Resolve an explicit override host to probe, or ``""`` if none is set."""
     base = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OLLAMA_HOST")
     if base:
         # OLLAMA_HOST may be a bare host:port; give it a scheme.
-        if not base.startswith(("http://", "https://")):
-            base = "http://" + base
-        return base
-    return _DEFAULT_OLLAMA_HOST
+        return _with_scheme(base)
+    return ""
+
+
+def _candidate_hosts() -> tuple[str, ...]:
+    """Ordered list of hosts to probe on the keyless first-run path.
+
+    ``OPENAI_BASE_URL`` / ``OLLAMA_HOST`` take precedence and are probed alone.
+    Otherwise the ``PRAISONAI_LOCAL_ENDPOINTS`` env override (if set) replaces
+    the built-in default list. An override set to an empty value disables
+    probing entirely.
+    """
+    override_host = _candidate_host()
+    if override_host:
+        return (override_host,)
+
+    raw = os.environ.get(_LOCAL_ENDPOINTS_ENV)
+    if raw is not None:
+        hosts = [
+            _with_scheme(part)
+            for part in raw.replace(",", " ").split()
+            if part.strip()
+        ]
+        return tuple(hosts)
+
+    return _DEFAULT_LOCAL_ENDPOINTS
 
 
 def _get_json(url: str) -> Optional[dict]:
@@ -122,35 +169,39 @@ def _probe_ollama_tags(host: str) -> Optional[str]:
 def detect_local_model(*, use_cache: bool = True) -> Optional[LocalModel]:
     """Detect a reachable local OpenAI-compatible endpoint.
 
-    Checks ``OPENAI_BASE_URL`` / ``OLLAMA_HOST`` then ``127.0.0.1:11434``.
-    Returns a :class:`LocalModel` (provider-prefixed model id + base URL) when a
-    local server answers, otherwise ``None``. Negative results are cached for a
-    short TTL so the hot path stays fast; pass ``use_cache=False`` to force a
-    fresh probe.
+    Honours ``OPENAI_BASE_URL`` / ``OLLAMA_HOST`` first, then the
+    ``PRAISONAI_LOCAL_ENDPOINTS`` override, then a built-in ordered list of
+    well-known local runtimes (Ollama, LM Studio, vLLM, Jan, llama.cpp). The
+    first reachable endpoint wins. Returns a :class:`LocalModel`
+    (provider-prefixed model id + base URL) when a local server answers,
+    otherwise ``None``. Results are cached for a short TTL so the hot path stays
+    fast; pass ``use_cache=False`` to force a fresh probe.
     """
     global _cache
 
-    host = _candidate_host()
+    hosts = _candidate_hosts()
 
-    # Pin the cache to the resolved endpoint so a mid-process env change is never
-    # served a stale positive/negative for a different server.
+    # Pin the cache to the resolved candidate set so a mid-process env change is
+    # never served a stale positive/negative for a different server.
+    cache_key = "|".join(hosts)
     if use_cache and _cache is not None:
         deadline, cached_key, cached = _cache
-        if cached_key == host and time.monotonic() < deadline:
+        if cached_key == cache_key and time.monotonic() < deadline:
             return cached
 
-    model_id = _probe_ollama_tags(host)
-
     result: Optional[LocalModel] = None
-    if model_id:
-        result = LocalModel(
-            model=model_id,
-            base_url=_normalise_base(host),
-        )
+    for host in hosts:
+        model_id = _probe_ollama_tags(host)
+        if model_id:
+            result = LocalModel(
+                model=model_id,
+                base_url=_normalise_base(host),
+            )
+            break
 
     # Cache negatives briefly; a positive is stable enough to cache for the same
     # TTL (a server going away mid-session is rare and self-heals on expiry).
-    _cache = (time.monotonic() + _NEGATIVE_CACHE_TTL_S, host, result)
+    _cache = (time.monotonic() + _NEGATIVE_CACHE_TTL_S, cache_key, result)
     return result
 
 
