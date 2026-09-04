@@ -13,6 +13,7 @@ Environment Variables:
 - PRAISONAI_LOCAL_SERVICES: 0|1 (default: 0)
 """
 
+import ast
 import os
 import re
 import socket
@@ -44,6 +45,9 @@ PROVIDER_ENV_KEYS: Dict[str, str] = {
 
 # Cache for file content scans (avoid re-reading files)
 _file_content_cache: Dict[str, str] = {}
+
+# Cache for per-file AST provider maps: filepath -> {(class, func): providers} or None
+_file_provider_cache: Dict[str, Optional[Dict[tuple, Set[str]]]] = {}
 
 
 def _get_test_tier() -> str:
@@ -150,20 +154,135 @@ def _is_excluded_path(filepath_str: str, nodeid: str = '') -> bool:
     return False
 
 
+def _detect_providers_in_text(text: str) -> Set[str]:
+    """Return every provider marker whose pattern appears in ``text``."""
+    detected = set()
+    for marker, pattern in PROVIDER_PATTERNS.items():
+        if pattern.search(text):
+            detected.add(marker)
+    return detected
+
+
 def _detect_providers_in_file(filepath: Path) -> Set[str]:
-    """Detect which providers are referenced in a test file."""
+    """Detect which providers are referenced anywhere in a test file.
+
+    This is the coarse, whole-file answer. It is deliberately retained: it still
+    decides the ``network`` marker (see pytest_collection_modifyitems), so
+    narrowing per-test provider markers can never silently un-gate a test that
+    lives in a file which really does talk to a provider.
+    """
     filepath_str = str(filepath)
-    
+
     # Skip detection for excluded paths (plugin tests, meta, fixtures)
     if _is_excluded_path(filepath_str):
         return set()
-    
-    content = _get_file_content(filepath)
-    detected = set()
-    for marker, pattern in PROVIDER_PATTERNS.items():
-        if pattern.search(content):
-            detected.add(marker)
-    return detected
+
+    return _detect_providers_in_text(_get_file_content(filepath))
+
+
+def _build_per_test_provider_map(filepath: Path) -> Optional[Dict[tuple, Set[str]]]:
+    """Map ``(class_name, func_name)`` -> provider markers for one test file.
+
+    The text considered for a test is that test's own source segment plus its
+    decorators, **plus the file's module-level scope** (docstring, imports,
+    module constants, ``pytestmark``, and fixture/helper bodies). A mocked OpenAI
+    test that sits next to an Ollama test therefore no longer inherits
+    ``provider_ollama`` from that *sibling's* body -- but a live test whose
+    provider identity comes from a shared fixture or module-level config is still
+    marked, so positive selectors like ``-m "provider_openai or real"`` keep it.
+
+    Only test functions leak nothing to each other; everything at module scope is
+    shared by design, mirroring how a fixture is shared at runtime.
+
+    Returns ``None`` if the file cannot be parsed, so callers fall back to the
+    whole-file behaviour rather than under-marking.
+    """
+    key = str(filepath)
+    if key in _file_provider_cache:
+        return _file_provider_cache[key]
+
+    result: Optional[Dict[tuple, Set[str]]] = None
+    try:
+        source = _get_file_content(filepath)
+        tree = ast.parse(source)
+
+        # Provider keywords visible at module scope are shared by every test in
+        # the file: blank out each test's own body so only genuinely shared
+        # context (fixtures, module constants, pytestmark) contributes here.
+        module_segments = []
+
+        def _is_test_callable(node) -> bool:
+            return (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name.startswith('test')
+            )
+
+        for child in tree.body:
+            if _is_test_callable(child):
+                continue
+            if isinstance(child, ast.ClassDef):
+                # Keep decorators/class-level code, drop only the test bodies.
+                for grandchild in child.body:
+                    if _is_test_callable(grandchild):
+                        continue
+                    seg = ast.get_source_segment(source, grandchild)
+                    if seg:
+                        module_segments.append(seg)
+                for decorator in child.decorator_list:
+                    seg = ast.get_source_segment(source, decorator)
+                    if seg:
+                        module_segments.append(seg)
+                continue
+            seg = ast.get_source_segment(source, child)
+            if seg:
+                module_segments.append(seg)
+
+        module_providers = _detect_providers_in_text("\n".join(module_segments))
+
+        result = {}
+
+        def _visit(node, class_name=None):
+            for child in getattr(node, 'body', ()):
+                if isinstance(child, ast.ClassDef):
+                    _visit(child, child.name)
+                elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    segment = ast.get_source_segment(source, child) or ""
+                    for decorator in child.decorator_list:
+                        segment += "\n" + (ast.get_source_segment(source, decorator) or "")
+                    result[(class_name, child.name)] = (
+                        _detect_providers_in_text(segment) | module_providers
+                    )
+
+        _visit(tree)
+    except (SyntaxError, ValueError, RecursionError):
+        result = None
+
+    _file_provider_cache[key] = result
+    return result
+
+
+def _detect_providers_for_item(item) -> Set[str]:
+    """Provider markers for a single collected item (per test, not per file)."""
+    filepath = Path(item.fspath)
+    if _is_excluded_path(str(filepath)):
+        return set()
+
+    per_test = _build_per_test_provider_map(filepath)
+    if per_test is None:
+        return _detect_providers_in_file(filepath)
+
+    parts = item.nodeid.split("::")[1:]
+    if not parts:
+        return _detect_providers_in_file(filepath)
+    func = parts[-1].split("[")[0]
+    cls = parts[-2] if len(parts) >= 2 else None
+
+    if (cls, func) in per_test:
+        return set(per_test[(cls, func)])
+    if (None, func) in per_test:
+        return set(per_test[(None, func)])
+    # Dynamically generated item we cannot locate in the AST: stay conservative.
+    return _detect_providers_in_file(filepath)
 
 
 def _get_test_type_from_path(nodeid: str) -> Optional[str]:
@@ -184,6 +303,7 @@ def pytest_configure(config):
     """Register custom markers and initialize plugin state."""
     # Clear file content cache at start of session
     _file_content_cache.clear()
+    _file_provider_cache.clear()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -218,23 +338,39 @@ def pytest_collection_modifyitems(config, items):
             
             # Check if this path should be excluded from provider detection
             if not _is_excluded_path(filepath_str, item.nodeid):
-                detected_providers = _detect_providers_in_file(filepath)
-                
-                # Also check nodeid for provider keywords (but not for excluded paths)
-                for marker, pattern in PROVIDER_PATTERNS.items():
-                    if pattern.search(item.nodeid):
-                        detected_providers.add(marker)
-                
-                for provider in detected_providers:
-                    if provider not in existing_markers:
-                        item.add_marker(getattr(pytest.mark, provider))
+                # An explicit @pytest.mark.offline (or module-level pytestmark)
+                # is the author asserting "this test is fully mocked". It turns
+                # off provider and network auto-marking for that test.
+                if 'offline' not in existing_markers:
+                    # Providers are detected per test function, not per file, so
+                    # one Ollama test can no longer gate its mocked neighbours.
+                    detected_providers = _detect_providers_for_item(item)
+
+                    # Also check nodeid for provider keywords (but not for excluded paths)
+                    for marker, pattern in PROVIDER_PATTERNS.items():
+                        if pattern.search(item.nodeid):
+                            detected_providers.add(marker)
+
+                    for provider in detected_providers:
+                        if provider not in existing_markers:
+                            item.add_marker(getattr(pytest.mark, provider))
+
+                    # The `network` marker stays WHOLE-FILE derived. Narrowing the
+                    # per-test provider markers must not, by itself, un-deselect a
+                    # test that really is live -- only `offline` does that. Without
+                    # this, 48 currently-deselected integration tests would newly
+                    # select, 25 of them with no skipif.
+                    if (_detect_providers_in_file(filepath)
+                            and 'network' not in existing_markers):
+                        item.add_marker(pytest.mark.network)
         
         # Refresh existing markers after additions
         existing_markers = {m.name for m in item.iter_markers()}
         
         # 3. Add network marker if any provider marker is present
         provider_markers = {m for m in existing_markers if m.startswith('provider_')}
-        if provider_markers and 'network' not in existing_markers:
+        if (provider_markers and 'network' not in existing_markers
+                and 'offline' not in existing_markers):
             item.add_marker(pytest.mark.network)
         
         # Handle 'real' marker as alias for network
@@ -292,3 +428,4 @@ def pytest_collection_modifyitems(config, items):
 def pytest_sessionfinish(session, exitstatus):
     """Clean up at end of session."""
     _file_content_cache.clear()
+    _file_provider_cache.clear()

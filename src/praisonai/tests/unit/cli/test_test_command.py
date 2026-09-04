@@ -293,3 +293,155 @@ class TestExcludedPaths:
         # Even if filepath doesn't match, nodeid should be checked
         assert _is_excluded_path("/some/path.py", "tests/_pytest_plugins/test_gating.py::test_foo")
         assert not _is_excluded_path("/some/path.py", "tests/unit/test_agent.py::test_bar")
+
+
+class TestProviderMarkerGranularity:
+    """The gating plugin must mark per test function, not per file.
+
+    Regression guard for D7: one Ollama test used to tag its whole file
+    provider_ollama, and the plugin implies `network` from any provider marker,
+    so six unrelated fully-mocked tests were deselected in every CI job.
+    """
+
+    MIXED_SOURCE = '''
+import pytest
+
+class TestMixed:
+    def test_mocked_openai_only(self):
+        model = "openai/gpt-4o"
+        assert model
+
+    def test_mentions_ollama(self):
+        assert "ollama/llama2"
+
+def test_module_level_plain():
+    assert True
+'''
+
+    def _map(self, tmp_path):
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_mixed_providers.py"
+        f.write_text(self.MIXED_SOURCE)
+        return _build_per_test_provider_map(f)
+
+    def test_ollama_does_not_leak_to_sibling_tests(self, tmp_path):
+        """THE meta-test. If this fails, D7 has regressed."""
+        m = self._map(tmp_path)
+        assert 'provider_ollama' not in m[('TestMixed', 'test_mocked_openai_only')]
+        assert 'provider_ollama' in m[('TestMixed', 'test_mentions_ollama')]
+
+    def test_openai_does_not_leak_to_sibling_tests(self, tmp_path):
+        m = self._map(tmp_path)
+        assert 'provider_openai' in m[('TestMixed', 'test_mocked_openai_only')]
+        assert 'provider_openai' not in m[('TestMixed', 'test_mentions_ollama')]
+
+    def test_plain_test_gets_no_provider_markers(self, tmp_path):
+        m = self._map(tmp_path)
+        assert m[(None, 'test_module_level_plain')] == set()
+
+    def test_decorators_are_scanned(self, tmp_path):
+        """A provider named only in a parametrize decorator still counts."""
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_decorated.py"
+        f.write_text(
+            'import pytest\n'
+            '@pytest.mark.parametrize("m", ["ollama/llama2"])\n'
+            'def test_decorated(m):\n'
+            '    assert m\n'
+        )
+        got = _build_per_test_provider_map(f)[(None, 'test_decorated')]
+        assert 'provider_ollama' in got
+
+    def test_unparseable_file_falls_back_to_whole_file(self, tmp_path):
+        """A file we cannot parse must stay conservatively over-marked."""
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _detect_providers_in_file,
+            _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_broken.py"
+        f.write_text("def test_x(:\n    ollama\n")
+        assert _build_per_test_provider_map(f) is None
+        assert 'provider_ollama' in _detect_providers_in_file(f)
+
+    def test_network_marker_remains_whole_file_derived(self, tmp_path):
+        """Narrowing providers must not narrow `network`.
+
+        That is what keeps this change selection-neutral for the 96 integration
+        tests that stay deselected. Letting `network` narrow too would newly
+        select 48 tests, 25 of them with no skipif.
+        """
+        from tests._pytest_plugins.test_gating import (
+            _detect_providers_in_file, _file_content_cache,
+        )
+        _file_content_cache.clear()
+        f = tmp_path / "test_mixed_providers.py"
+        f.write_text(self.MIXED_SOURCE)
+        assert {'provider_openai', 'provider_ollama'} <= _detect_providers_in_file(f)
+
+    def test_offline_marker_is_registered(self):
+        """`offline` must be in both marker tables or every use warns."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[4]
+        for ini in ("praisonai/pytest.ini", "praisonai-agents/pytest.ini"):
+            text = (root / ini).read_text()
+            assert "offline:" in text, f"{ini} is missing the offline marker"
+
+    FIXTURE_SUPPLIED_SOURCE = '''
+import pytest
+
+@pytest.fixture
+def sample_document():
+    """A doc that names OpenAI, mirroring a live RAG fixture."""
+    return "PraisonAI supports OpenAI, Anthropic and Google."
+
+class TestRAGLive:
+    def test_rag_query(self, sample_document):
+        assert sample_document
+
+def test_plain(sample_document):
+    assert sample_document
+'''
+
+    def test_module_scope_provider_reaches_every_test(self, tmp_path):
+        """A provider named only in a shared fixture must still mark each test.
+
+        Guards the D7 follow-up: positive selectors like
+        ``-m "provider_openai or real"`` must keep live tests whose provider
+        identity is supplied by a module-level fixture, not the test body.
+        """
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_fixture_supplied.py"
+        f.write_text(self.FIXTURE_SUPPLIED_SOURCE)
+        m = _build_per_test_provider_map(f)
+        assert 'provider_openai' in m[('TestRAGLive', 'test_rag_query')]
+        assert 'provider_openai' in m[(None, 'test_plain')]
+
+    def test_module_scope_does_not_leak_sibling_bodies(self, tmp_path):
+        """Module-scope union must not reintroduce sibling-body leakage.
+
+        A provider named only inside one test body stays out of its siblings.
+        """
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_mixed_providers.py"
+        f.write_text(self.MIXED_SOURCE)
+        m = _build_per_test_provider_map(f)
+        assert 'provider_ollama' not in m[('TestMixed', 'test_mocked_openai_only')]
+        assert 'provider_openai' not in m[('TestMixed', 'test_mentions_ollama')]

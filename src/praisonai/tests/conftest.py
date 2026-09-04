@@ -20,6 +20,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "provider_openai: OpenAI provider test")
     config.addinivalue_line("markers", "provider_google: Google provider test")
     config.addinivalue_line("markers", "local_service: Test requires local service")
+    config.addinivalue_line("markers", "offline: Fully mocked - opt out of provider/network auto-marking")
     config.addinivalue_line("markers", "allow_sleep: Allow real sleep in test")
     config.addinivalue_line("markers", "slow: Slow running test")
     config.addinivalue_line("markers", "xdist_group: Group for xdist parallelization")
