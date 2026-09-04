@@ -7,10 +7,9 @@ exchange in a conversation. Uses a lightweight model for fast generation.
 
 import asyncio
 from typing import Optional
+from ..llm.model_providers import default_auxiliary_model
 
 __all__ = ["generate_title", "generate_title_async"]
-
-_DEFAULT_SMALL_MODEL = "gpt-4o-mini"
 
 
 def _resolve_small_model(llm_model: Optional[str], primary_model: Optional[str]) -> str:
@@ -19,18 +18,21 @@ def _resolve_small_model(llm_model: Optional[str], primary_model: Optional[str])
     An explicit ``llm_model`` always wins. Otherwise the configured
     ``defaults.small_model`` is used, falling back to the primary model and
     finally to the historical ``gpt-4o-mini`` default so existing behaviour is
-    preserved when nothing is configured.
+    preserved when nothing is configured. The default is resolved at call time
+    so ``PRAISONAI_AUXILIARY_MODEL`` / ``OPENAI_MODEL_NAME`` set after import
+    still take effect.
     """
     if llm_model:
         return llm_model
+    default_small_model = default_auxiliary_model()
     try:
         from ..config.loader import get_small_model
-        resolved = get_small_model(primary_model=primary_model, fallback=_DEFAULT_SMALL_MODEL)
+        resolved = get_small_model(primary_model=primary_model, fallback=default_small_model)
         if resolved:
             return resolved
     except Exception:
         pass
-    return primary_model or _DEFAULT_SMALL_MODEL
+    return primary_model or default_small_model
 
 
 def generate_title(

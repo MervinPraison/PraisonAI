@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from .models import ContextLedger, OptimizerStrategy, OptimizationResult
 from .tokens import estimate_messages_tokens, get_estimator
 from .compressor import ContextCompressor
+from ..llm.model_providers import default_auxiliary_model
 
 logger = logging.getLogger(__name__)
 
@@ -638,7 +639,7 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
             use_accurate_tokenizer: Use model-specific tokenizer if available
         """
         self.llm_client = llm_client
-        self.auxiliary_model = auxiliary_model or "gpt-4o-mini"
+        self.auxiliary_model = default_auxiliary_model(auxiliary_model)
         self.protect_last_n_tokens = protect_last_n_tokens
         self.summary_target_tokens = summary_target_tokens
         

@@ -74,6 +74,37 @@ def is_hosted_only_model(model_name: str) -> bool:
     return False
 
 
+# The small helper model used for internal auxiliary calls -- memory quality
+# scoring, context compaction, session titling, workflow routing. Historically
+# about a dozen sites resolved this from OPENAI_MODEL_NAME while about twenty
+# more hardcoded the same string, so half of them could not be pointed anywhere
+# else. That, not the endpoint, is what blocks running fully locally: litellm and
+# the openai SDK both honour OPENAI_BASE_URL, so those sites do reach a local
+# server -- and then ask it for a model no local server serves.
+DEFAULT_AUXILIARY_MODEL = "gpt-4o-mini"
+
+
+def default_auxiliary_model(explicit: Optional[str] = None) -> str:
+    """Resolve the model to use for an internal auxiliary LLM call.
+
+    Precedence: an explicit argument, then PRAISONAI_AUXILIARY_MODEL, then
+    OPENAI_MODEL_NAME, then DEFAULT_AUXILIARY_MODEL.
+
+    PRAISONAI_AUXILIARY_MODEL exists because a local setup often wants a
+    *smaller* model for helper calls than for the agent itself -- pointing
+    OPENAI_MODEL_NAME at a 70B local model should not make every internal
+    summarisation call use it.
+    """
+    if explicit:
+        return explicit
+    import os
+    for var in ("PRAISONAI_AUXILIARY_MODEL", "OPENAI_MODEL_NAME"):
+        value = (os.environ.get(var) or "").strip()
+        if value:
+            return value
+    return DEFAULT_AUXILIARY_MODEL
+
+
 def _entry_point_matchers():
     """Yield (provider_id, matcher) pairs registered by third-party plugins.
 

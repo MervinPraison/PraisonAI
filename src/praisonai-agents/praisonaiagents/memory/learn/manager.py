@@ -19,6 +19,7 @@ from .stores import (
     ImprovementStore,
     LearnEntry,
 )
+from ...llm.model_providers import default_auxiliary_model
 
 
 class LearnManager:
@@ -555,7 +556,7 @@ Return empty arrays if nothing is found for a category."""
             from ...llm import LLM
             import json
             
-            model = llm or "gpt-4o-mini"
+            model = default_auxiliary_model(llm)
             llm_instance = LLM(model=model)
             response = llm_instance.get_response(
                 prompt=extraction_prompt,
@@ -659,7 +660,7 @@ Return empty arrays if nothing is found for a category."""
             import json
             import asyncio
             
-            model = llm or "gpt-4o-mini"
+            model = default_auxiliary_model(llm)
             llm_instance = LLM(model=model)
             
             # Run sync LLM call in executor for async compatibility

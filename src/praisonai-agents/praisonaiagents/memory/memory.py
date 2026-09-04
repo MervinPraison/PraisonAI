@@ -19,6 +19,7 @@ from .protocols import MemoryProtocol
 from .adapters import get_memory_adapter, get_first_available_memory_adapter
 from .adapters.sqlite_adapter import SqliteMemoryAdapter
 from .adapters.factories import sanitize_chroma_metadata
+from ..llm.model_providers import default_auxiliary_model
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -2171,7 +2172,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 import litellm
                 
                 # Convert model name if it's in litellm format
-                model_name = llm or "gpt-4o-mini"
+                model_name = default_auxiliary_model(llm)
                 
                 response = litellm.completion(
                     model=model_name,
@@ -2185,10 +2186,24 @@ class Memory(SearchMixin, MemoryCoreMixin):
             elif openai_available:
                 # Fallback to OpenAI client
                 from openai import OpenAI
-                client = OpenAI()
+                # Pass the endpoint explicitly. A bare OpenAI() happens to work
+                # when OPENAI_BASE_URL is exported, but silently ignores a
+                # base_url supplied through config -- which is the shape the rest
+                # of the memory layer uses.
+                _client_kwargs = {}
+                _cfg = getattr(self, "cfg", None) or {}
+                _base_url = _cfg.get("base_url")
+                if not _base_url and isinstance(_cfg.get("config"), dict):
+                    _base_url = _cfg["config"].get("base_url")
+                _base_url = _base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+                if _base_url:
+                    _client_kwargs["base_url"] = _base_url
+                    # Local servers reject an empty key; any non-empty value works.
+                    _client_kwargs["api_key"] = os.getenv("OPENAI_API_KEY") or "local"
+                client = OpenAI(**_client_kwargs)
                 
                 response = client.chat.completions.create(
-                    model=llm or "gpt-4o-mini",
+                    model=default_auxiliary_model(llm),
                     messages=[{
                         "role": "user", 
                         "content": custom_prompt or default_prompt
