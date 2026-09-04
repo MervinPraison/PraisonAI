@@ -255,6 +255,26 @@ class TestEnhancedStickyComment:
         # File should be clickable link
         assert "https://github.com/MervinPraison/PraisonAI/blob/feature/test/src/main.py" in body
 
+    def test_failed_branch_creation_clears_sticky_branch(self):
+        """A rejected branch must not remain rendered as active."""
+        from praisonai.cli.commands.github import StickyComment
+
+        sticky = StickyComment(
+            api_base="https://api.github.com",
+            issue=112,
+            token="fake",
+            task_type="Issue",
+            title="Test",
+            run_url="",
+            repo_name="owner/repo",
+        )
+
+        sticky.set_branch("@{-1}")
+        sticky.on_tool_end("agent", "github_create_branch", "Error: invalid branch name '@{-1}'")
+
+        assert sticky._branch_name is None
+        assert "@{-1}" not in sticky._build_body()
+
 
 @pytest.mark.manual
 class TestEnhancedIntegration:

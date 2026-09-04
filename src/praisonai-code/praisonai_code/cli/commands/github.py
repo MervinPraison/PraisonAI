@@ -171,6 +171,12 @@ class StickyComment:
     def on_tool_end(self, agent_name: str, tool_name: str, result: Any = None) -> None:
         with self._lock:
             self._current_tool = None
+            # A branch name is captured eagerly at tool start so the live
+            # comment can show the operation immediately.  Do not leave a
+            # rejected branch rendered as active after validation or checkout
+            # fails.
+            if tool_name == "github_create_branch" and str(result).startswith("Error"):
+                self._branch_name = None
             # Extract features from tool results
             if result and isinstance(result, str):
                 self._extract_features_from_output(result)
