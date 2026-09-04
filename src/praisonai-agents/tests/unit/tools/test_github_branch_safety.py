@@ -215,3 +215,44 @@ def test_slugify_and_auto_branch():
     name = github_tools._auto_branch_name("Fix parser")
     assert name.startswith("praisonai/fix-parser-")
     assert github_tools._branch_push_safety("praisonai/anything") is None
+
+
+def test_create_branch_validates_full_ref(monkeypatch):
+    # Validation must check the literal ``refs/heads/<name>`` ref so Git cannot
+    # expand checkout shorthand (e.g. ``@{-1}``) before ``checkout -B`` runs.
+    responses = {
+        ("rev-parse", "--is-inside-work-tree"): ("true\n", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    _run_tool(github_tools.github_create_branch, "praisonai/fix")
+    ref_checks = [c for c in calls if c[:2] == ["git", "check-ref-format"]]
+    assert ref_checks, "expected a check-ref-format validation"
+    for c in ref_checks:
+        assert "--branch" not in c, "must not use --branch (expands shorthand)"
+        assert "refs/heads/praisonai/fix" in c
+
+
+def test_create_branch_rejects_checkout_shorthand(monkeypatch):
+    # ``@{-1}`` is a valid checkout shorthand but an invalid full ref, so it must
+    # be rejected before any checkout runs (no destructive branch reset).
+    responses = {
+        ("rev-parse", "--is-inside-work-tree"): ("true\n", 0),
+        ("check-ref-format", "refs/heads/@{-1}"): ("", 1),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(github_tools.github_create_branch, "@{-1}")
+    assert "invalid branch name" in result
+    assert not [c for c in calls if c[:2] == ["git", "checkout"]]
+
+
+def test_create_branch_accepts_slash_names(monkeypatch):
+    # Ordinary slash-containing branch names must still be created.
+    responses = {
+        ("rev-parse", "--is-inside-work-tree"): ("true\n", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(github_tools.github_create_branch, "feature/new-thing")
+    assert "Successfully" in result
+    checkouts = [c for c in calls if c[:2] == ["git", "checkout"]]
+    assert checkouts, "expected a checkout for a valid branch name"
+    assert ["git", "checkout", "-B", "feature/new-thing"] in checkouts
