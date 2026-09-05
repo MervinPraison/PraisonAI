@@ -27,6 +27,7 @@
 import type { Task } from './types';
 import { planTaskBatches, type SchedulableTask } from './engine/task-schedule';
 import { hasWhenRouting, linkPreviousTasks, startTaskOf } from './engine/task-routing';
+import { cleanJsonOutput } from './engine/task-output';
 
 /** The part of a team's normalised task entry this module needs to see. */
 export interface RunnerEntry {
@@ -169,11 +170,14 @@ export function indexByName(entries: ReadonlyArray<RunnerEntry & { name: string 
  * The `decision` a `decision`/`loop` task's answer carries.
  *
  * Python reads `result.pydantic.decision` and falls back to the lowercased raw
- * text (`process.py`); here a JSON answer with a `decision` field is read the
- * same way, and anything else is the raw text.
+ * text (`process.py`). The structured answer is what a `decision` task is asked
+ * to produce, and the model routinely wraps JSON in a ```json fence, so the
+ * fence is stripped first (Python `clean_json_output`) before a `decision`
+ * field is read the same way. Anything that is not such an object is the raw
+ * text.
  */
 export function decisionFrom(raw: string): string {
-  const text = raw.trim();
+  const text = cleanJsonOutput(raw);
   if (text.startsWith('{')) {
     try {
       const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -183,7 +187,7 @@ export function decisionFrom(raw: string): string {
       // Not JSON: the raw text is the decision.
     }
   }
-  return text.toLowerCase();
+  return raw.trim().toLowerCase();
 }
 
 /** True when one of the task's declared dependencies ended the run failed. */

@@ -721,6 +721,30 @@ describe('Task workflow routing', () => {
 
     expect(prompts().map((p) => p.split('\n')[0])).toEqual(['approve or reject', 'ship it']);
   });
+
+  it('routes on a decision wrapped in a ```json fence', async () => {
+    const gate = new Task({ name: 'gate', description: 'approve or reject', isStart: true, taskType: 'decision', condition: { approve: ['ship'] } });
+    const ship = new Task({ name: 'ship', description: 'ship it' });
+    // The model routinely fences JSON; Python strips the fence before reading
+    // `decision`, so the `approve` route must still be taken.
+    mockLlm.responder = (_model, prompt) =>
+      (prompt.includes('approve or reject') ? '```json\n{"decision":"approve"}\n```' : undefined);
+
+    await new AgentTeam({ agents: [member()], tasks: [gate, ship], process: 'workflow', ...quiet }).start();
+
+    expect(prompts().map((p) => p.split('\n')[0])).toEqual(['approve or reject', 'ship it']);
+  });
+
+  it('control: a fenced decision that does not match the table ends the run', async () => {
+    const gate = new Task({ name: 'gate', description: 'approve or reject', isStart: true, taskType: 'decision', condition: { approve: ['ship'] } });
+    const ship = new Task({ name: 'ship', description: 'ship it' });
+    mockLlm.responder = (_model, prompt) =>
+      (prompt.includes('approve or reject') ? '```json\n{"decision":"reject"}\n```' : undefined);
+
+    await new AgentTeam({ agents: [member()], tasks: [gate, ship], process: 'workflow', ...quiet }).start();
+
+    expect(prompts().map((p) => p.split('\n')[0])).toEqual(['approve or reject']);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
