@@ -22,6 +22,9 @@ const SAMPLES: Readonly<Record<string, () => string>> = {
   bootFailed: () => en.bootFailed("no storage"),
   engineNotReady: () => en.engineNotReady("ECONNREFUSED"),
   settingRejected: () => en.settingRejected("Engine address"),
+  settingRejectedExample: () =>
+    en.settingRejectedExample("Engine address", "http://192.168.1.10:8765"),
+  settingInactive: () => en.settingInactive("Engine", "remote-http"),
   secretStored: () => en.secretStored("OpenAI API key"),
   secretCleared: () => en.secretCleared("OpenAI API key"),
   chatUnreadable: () => en.chatUnreadable("chat-7"),

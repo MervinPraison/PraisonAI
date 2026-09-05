@@ -35,12 +35,27 @@
  *     the control from it means one bad write turns a toggle into a text box
  *     and the setting can no longer be changed back.
  *
+ *  5. A CONTROL THAT CANNOT DO ANYTHING IS SAID TO BE OFF, NOT DRAWN AS IF IT
+ *     WERE ON. Two of them shipped. `Remove` sat under a key that read "Not
+ *     set", so the one control on the row destroyed nothing and reported
+ *     nothing. `Engine address` rendered identically whether or not an engine
+ *     that reads it was selected -- its own help text said "Only used by the
+ *     remote engine" while the field beside it accepted edits that changed
+ *     what nothing read. `canClear` and `applies` are computed HERE, from the
+ *     same presence and the same registry the rest of the row comes from, so a
+ *     renderer cannot forget one and a test can assert both without a DOM.
+ *
  * Row ids are derived from the setting key, never from array position, so a
  * keyed renderer (render/reconcile.ts) cannot paint one row's contents into
  * another row's node when a section gains an entry.
  */
 import type { SecretRef } from "../../../core/src/ports/secrets.ts";
-import type { SettingDef, SettingValue, SettingsFacade } from "../../../core/src/settings/store.ts";
+import {
+  appliesTo,
+  type SettingDef,
+  type SettingValue,
+  type SettingsFacade,
+} from "../../../core/src/settings/store.ts";
 import { UNKNOWN } from "../format.ts";
 
 /** Where a def with no `section` lands. Named so a test and a renderer agree. */
@@ -84,6 +99,28 @@ export interface ValueRow {
   readonly value: SettingValue;
   /** The closed set for a `choice` control, null for every other kind. */
   readonly choices: readonly SettingValue[] | null;
+  /**
+   * Does anything read this setting right now?
+   *
+   * False when the def's `appliesWhen` names another setting that does not
+   * currently hold the required value. The row is still rendered -- see rule 5
+   * -- but as a field that is switched off rather than as one that works.
+   */
+  readonly applies: boolean;
+  /**
+   * The switch that would turn it on, in the words the screen already uses for
+   * it, or null when the row applies (or names a setting the registry does not
+   * declare). A raw key here would send the user hunting for `engineId` on a
+   * screen that only ever says "Engine".
+   */
+  readonly inactiveBecause: InactiveBecause | null;
+}
+
+/** Which other setting switches this one on, and to what. Both already
+ *  rendered as text elsewhere on the screen, so both are strings. */
+export interface InactiveBecause {
+  readonly label: string;
+  readonly value: string;
 }
 
 /**
@@ -104,6 +141,17 @@ export interface SecretRow {
   /** Where to write it. Null when nothing has told this view which slot the
    *  def belongs to -- see the note on `secretPresence`. */
   readonly ref: SecretRef | null;
+  /**
+   * Is there anything for `Remove` to remove?
+   *
+   * ONLY `configured`. Not "not `not-set`" -- `unknown` is a check still in
+   * flight (rule 2), and offering to destroy a credential the app has not yet
+   * confirmed exists is the same false promise in the other direction. The
+   * screen shipped with an unconditional `Remove` under a row reading "Not
+   * set": a control that cannot do anything, which is the defect class this
+   * package spent two days removing everywhere else.
+   */
+  readonly canClear: boolean;
   /** Structurally unfillable. Do not remove. */
   readonly value?: never;
 }
@@ -218,12 +266,23 @@ function secretRow(def: SettingDef, presence: SecretPresence): SecretRow {
     state,
     presence: presenceLabel(state),
     ref: status?.ref ?? null,
+    // A ref is required as well as presence: `clearSecret` needs somewhere to
+    // clear, and a row that is "configured" with nowhere to write is a row
+    // whose button would resolve to nothing.
+    canClear: state === "configured" && status?.ref !== undefined,
   };
 }
 
-function valueRow(def: SettingDef, facade: SettingsFacade): ValueRow {
+function valueRow(
+  def: SettingDef,
+  facade: SettingsFacade,
+  byKey: ReadonlyMap<string, SettingDef>,
+): ValueRow {
   const stored = facade.get(def.key);
   const control = controlFor(def);
+  const applies = appliesTo(def, (key) => facade.get(key));
+  const dependency = def.appliesWhen;
+  const controller = dependency === undefined ? undefined : byKey.get(dependency.key);
   return {
     kind: "value",
     id: `setting:${def.key}`,
@@ -236,6 +295,11 @@ function valueRow(def: SettingDef, facade: SettingsFacade): ValueRow {
     // user switched off that switches itself back on when the screen reopens.
     value: stored ?? def.default,
     choices: control === "choice" ? (def.choices ?? null) : null,
+    applies,
+    inactiveBecause:
+      applies || dependency === undefined || controller === undefined
+        ? null
+        : { label: labelOf(controller), value: String(dependency.equals) },
   };
 }
 
@@ -255,6 +319,9 @@ export function buildSettings(
   // reshuffle the screen the day a section is renamed.
   const sections = new Map<string, SettingsRow[]>();
   const seen = new Set<string>();
+  // Resolved once. A dependent row names its controller by LABEL, and looking
+  // that up per row would be a scan of the whole registry per row.
+  const byKey = new Map(facade.defs().map((def) => [def.key, def]));
 
   for (const def of facade.defs()) {
     // Defensive: two defs sharing a key would produce two rows with the same
@@ -265,7 +332,9 @@ export function buildSettings(
 
     const title = def.section?.trim() === "" ? GENERAL_SECTION : (def.section ?? GENERAL_SECTION);
     const rows = sections.get(title) ?? [];
-    rows.push(def.secret === true ? secretRow(def, secretPresence) : valueRow(def, facade));
+    rows.push(
+      def.secret === true ? secretRow(def, secretPresence) : valueRow(def, facade, byKey),
+    );
     sections.set(title, rows);
   }
 

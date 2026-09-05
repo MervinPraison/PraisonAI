@@ -9,9 +9,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  appliesTo,
   clampNum,
   createSettingsStore,
   facadeFor,
+  httpUrl,
   plainOnly,
   readSecretSetting,
   secretRefOf,
@@ -612,4 +614,120 @@ test("a secret never reaches the plain storage port UNDER ANY KEY", async () => 
     true,
     "the secret was not stored anywhere either; the loop proved nothing",
   );
+});
+
+// ---- httpUrl: the validator `baseUrl` never had ------------------------------
+//
+// The field accepted `7.0.0.1:8765` -- no scheme, not a real address -- with no
+// validation, no error, and no way to discover the value was bad until a turn
+// failed with a transport error naming nothing the user had typed. The refusal
+// PATH has existed since #4694 (validateInput -> set -> a `role="alert"` note
+// beside the field); nothing was ever handed to it to refuse.
+
+test("an address with no scheme is REFUSED, not stored", () => {
+  const url = httpUrl();
+  // The exact value the device accepted.
+  assert.equal(url("7.0.0.1:8765"), null);
+  assert.equal(url("127.0.0.1:8765"), null, "a bare host and port is not an address");
+  assert.equal(url("engine.local"), null);
+  assert.equal(url(""), null);
+  assert.equal(url("   "), null);
+  assert.equal(url("http://"), null, "a scheme with no host reaches nothing");
+});
+
+test("a scheme that is not http is refused, including the ones that PARSE", () => {
+  const url = httpUrl();
+  // `localhost:8765` is a VALID URL -- protocol `localhost:`, path `8765` --
+  // which is exactly why a bare `new URL()` in a try/catch is not enough. It is
+  // also the near-miss a developer actually types.
+  assert.equal(url("localhost:8765"), null);
+  assert.equal(url("ftp://engine.local:8765"), null);
+  assert.equal(url("javascript:alert(1)"), null);
+  assert.equal(url("file:///etc/hosts"), null);
+});
+
+test("a real address is accepted, and normalised so one engine is not three settings", () => {
+  const url = httpUrl();
+  assert.equal(url("http://192.168.1.10:8765"), "http://192.168.1.10:8765");
+  assert.equal(url("https://engine.example.com"), "https://engine.example.com");
+  // A trailing slash, surrounding whitespace and an uppercase host all name the
+  // same engine. Stored apart they are three values that look different and
+  // behave identically -- and every caller was doing its own `.replace()`.
+  assert.equal(url("  http://192.168.1.10:8765/  "), "http://192.168.1.10:8765");
+  assert.equal(url("http://192.168.1.10:8765//"), "http://192.168.1.10:8765");
+  assert.equal(url("HTTP://Engine.Local:8765"), "http://engine.local:8765");
+  // A path is kept: an engine behind a reverse proxy lives at one.
+  assert.equal(url("http://proxy.example.com/praisonai/"), "http://proxy.example.com/praisonai");
+});
+
+test("an address carrying a query or fragment is REFUSED, not stored to be mis-joined", () => {
+  // The engine builds `${base}/chat` by concatenation, so a stored
+  // "http://host:8765/?token=abc" becomes "http://host:8765/?token=abc/chat" --
+  // a request for "/" with a mangled query, reaching none of the endpoints a
+  // turn needs. Refuse at the point of acceptance rather than report a save
+  // that cannot work.
+  const url = httpUrl();
+  assert.equal(url("http://192.168.1.10:8765?token=abc"), null, "a query has no place in an engine base");
+  assert.equal(url("http://192.168.1.10:8765/?token=abc"), null);
+  assert.equal(url("http://192.168.1.10:8765/#frag"), null, "nor does a fragment");
+  assert.equal(url("http://proxy.example.com/praisonai?x=1"), null, "not even beside a real path");
+});
+
+test("a non-string never reaches URL parsing", () => {
+  const url = httpUrl();
+  assert.equal(url(8765), null);
+  assert.equal(url(true), null);
+});
+
+test("a store REFUSES a malformed address rather than persisting it", () => {
+  // The validator wired to the machinery that uses it: `set` runs `validate`,
+  // and a null answer is a `false` the screen turns into a message. Without
+  // this the two could be correct separately and never meet.
+  const store = createSettingsStore(
+    [{ key: "baseUrl", default: "http://127.0.0.1:8765", validate: httpUrl() }],
+    createFakeStorage(),
+    createFakeSecrets(),
+  );
+  return store.set("baseUrl", "7.0.0.1:8765").then(async (ok) => {
+    assert.equal(ok, false, "a malformed address must be refused");
+    assert.equal(store.get("baseUrl"), "http://127.0.0.1:8765", "and the old value must stand");
+    assert.equal(await store.set("baseUrl", "http://10.0.0.7:9000"), true);
+    assert.equal(store.get("baseUrl"), "http://10.0.0.7:9000");
+  });
+});
+
+test("a malformed address in a hand-edited settings file is dropped on load", () => {
+  // `load` runs `validate` too. Without it the one path that skips the UI puts
+  // back exactly the value the UI refuses.
+  const storage = createFakeStorage();
+  const secrets = createFakeSecrets();
+  const defs: readonly SettingDef[] = [
+    { key: "baseUrl", default: "http://127.0.0.1:8765", validate: httpUrl() },
+  ];
+  return storage
+    .write({ namespace: "settings", id: "app" }, JSON.stringify({ baseUrl: "7.0.0.1:8765" }))
+    .then(async () => {
+      const store = createSettingsStore(defs, storage, secrets);
+      await store.load();
+      assert.equal(store.get("baseUrl"), "http://127.0.0.1:8765");
+      assert.equal(store.isSet("baseUrl"), false, "a dropped value is not a chosen one");
+    });
+});
+
+// ---- appliesTo: a setting that depends on another ----------------------------
+
+test("a setting applies unless its switch says otherwise", () => {
+  const plain: SettingDef = { key: "model", default: "gpt-4o-mini" };
+  const dependent: SettingDef = {
+    key: "baseUrl",
+    default: "http://127.0.0.1:8765",
+    appliesWhen: { key: "engineId", equals: "remote-http" },
+  };
+  assert.equal(appliesTo(plain, () => undefined), true, "no dependency, always on");
+  assert.equal(appliesTo(dependent, () => "remote-http"), true);
+  assert.equal(appliesTo(dependent, () => "praisonai-ts"), false);
+  // A controller the registry does not declare reads as undefined, which is not
+  // the required value -- so the dependent setting is off rather than silently
+  // treated as on.
+  assert.equal(appliesTo(dependent, () => undefined), false);
 });

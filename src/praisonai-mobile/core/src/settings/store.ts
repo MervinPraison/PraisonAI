@@ -15,6 +15,12 @@ import type { StoragePort } from "../ports/storage.ts";
 
 export type SettingValue = string | number | boolean;
 
+/** "This setting only does something while THAT one holds this value." */
+export interface SettingDependency {
+  readonly key: string;
+  readonly equals: SettingValue;
+}
+
 export interface SettingDef {
   readonly key: string;
   readonly default: SettingValue;
@@ -28,6 +34,32 @@ export interface SettingDef {
   /** A closed set of choices. Renders as a picker rather than a free field,
    *  which is the difference between choosing a model and typing one. */
   readonly choices?: readonly SettingValue[];
+  /**
+   * A value that would be accepted, spelled out.
+   *
+   * Shown only when `validate` REFUSES what was typed. The refusal machinery
+   * added in #4694 could say which setting was rejected and nothing about what
+   * a good value looks like, so "Engine address was not changed" left the user
+   * staring at the same field with the same wrong string in it. A def that can
+   * refuse should be able to say what it wants instead; a def with no
+   * `validate` has nothing to refuse and needs no example.
+   */
+  readonly example?: string;
+  /**
+   * The other setting this one depends on, and the value that switches it on.
+   *
+   * Declared here rather than discovered by the screen, for the same reason
+   * `secretRef` is: the registry is the only layer allowed to name a concrete
+   * setting, and a view that hard-codes "baseUrl is dead unless engineId is
+   * remote-http" is a view that goes stale the day a third engine lands.
+   *
+   * A setting that does not apply is still SHOWN -- disabled, and saying which
+   * switch turns it on. Hiding it loses the value the user typed from the
+   * screen (never from the store) and, worse, makes the field unfindable for
+   * anyone who is looking for it before they have chosen the engine that uses
+   * it.
+   */
+  readonly appliesWhen?: SettingDependency;
   /** Secret values are routed to SecretsPort and never to StoragePort. */
   readonly secret?: boolean;
   /**
@@ -298,6 +330,78 @@ export function facadeFor(store: SettingsStore, secrets: SecretsPort): SettingsF
     clearSecret: (ref) => store.clearSecret(ref),
     hasSecret: (ref) => store.hasSecret(ref),
     secretsAreHardwareBacked: secrets.isHardwareBacked,
+  };
+}
+
+/**
+ * Does this setting do anything right now?
+ *
+ * True for a def with no `appliesWhen`, which is nearly all of them. The
+ * dependency is read through `get`, not `isSet`: a def's DEFAULT is a live
+ * value -- the engine really is remote-http on the web before anyone touches
+ * the picker -- and asking `isSet` would report every dependent setting as
+ * inactive until its controller had been changed at least once.
+ */
+export function appliesTo(
+  def: SettingDef,
+  read: (key: string) => SettingValue | undefined,
+): boolean {
+  const dependency = def.appliesWhen;
+  if (dependency === undefined) return true;
+  return read(dependency.key) === dependency.equals;
+}
+
+/**
+ * An http(s) address, normalised -- or null.
+ *
+ * `baseUrl` shipped with no `validate` at all, so `7.0.0.1:8765` was stored,
+ * displayed back, and discovered to be wrong only when a turn failed with a
+ * transport error naming nothing the user had typed. The refusal machinery to
+ * say so already existed (#4694): `validateInput` -> `set` -> a `role="alert"`
+ * note beside the field. What was missing was anything that ever refused.
+ *
+ * Everything `new URL` will not parse is refused, and so is every scheme that
+ * is not http or https -- `localhost:8765` PARSES, as a URL whose protocol is
+ * `localhost:`, which is exactly the near-miss a user types. A bare host with
+ * no scheme cannot parse at all when it starts with a digit and parses as a
+ * scheme when it does not, so neither shape is let through.
+ *
+ * The stored value is the parsed one, not the typed one: a trailing slash, a
+ * trailing space and an uppercase host all mean the same engine, and storing
+ * them apart is three settings that look different and behave identically.
+ * Trailing slashes go here rather than at the two call sites that were each
+ * doing `.replace(/\/+$/, "")` on their own.
+ *
+ * A query string or fragment is refused, not carried through. The engine
+ * builds `${base}/chat`, `${base}/health`, `${base}/approve/{id}` by plain
+ * concatenation (engines/src/remote-http/engine.ts), so a stored
+ * "http://host:8765/?token=abc" becomes "http://host:8765/?token=abc/chat" --
+ * a request for "/" with a mangled query, not "/chat". The address the user is
+ * told was saved reaches none of the endpoints a turn needs. `?` and `#` have
+ * no place in an engine base, so they are refused at the point the value is
+ * accepted rather than silently kept and mis-joined later.
+ */
+export function httpUrl(): (value: SettingValue) => SettingValue | null {
+  return (value) => {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (text === "") return null;
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.hostname === "") return null;
+    // A base the endpoints append to cannot carry a query or fragment: `?x` and
+    // `#y` would land BEFORE the `/chat` the engine concatenates, addressing "/"
+    // with a broken query instead of the endpoint. Refuse rather than keep-and-
+    // mis-join.
+    if (url.search !== "" || url.hash !== "") return null;
+    const normalised = `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+    // `origin` alone for a bare "http://host/", which strips to "http://host".
+    return normalised === "" ? url.origin : normalised;
   };
 }
 

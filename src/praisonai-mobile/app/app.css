@@ -388,6 +388,22 @@ button:disabled { opacity: .45; cursor: default; }
   border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
 .setting-error { display: block; margin: .1rem 0 0; color: var(--warn); font-size: .84rem; }
 .setting-error[hidden] { display: none; }
+/* The `help` every def has carried since the registry was written, painted for
+   the first time. It sits between the label and the control, so it is read
+   before the field rather than as a footnote under it. */
+.row-setting .setting-help { display: block; margin: 0; color: var(--soft); font-size: .84rem; }
+/* "Set Engine to remote-http to use this." Not `--warn`: nothing is wrong, the
+   field is simply switched off, and a warning colour on a normal state is how
+   a screen teaches people to ignore warnings. `[hidden]` explicitly, for the
+   same reason `.setting-error[hidden]` is: this rule's `display: block` is an
+   author declaration and beats the user agent's `[hidden] { display: none }`. */
+.row-setting .setting-inactive { display: block; margin: .1rem 0 0; color: var(--soft); font-size: .84rem; }
+.row-setting .setting-inactive[hidden] { display: none; }
+/* A field nothing reads, drawn as a field nothing reads. `opacity` alone would
+   also fade the label and the help, which are still worth reading -- this is on
+   the control only. */
+.row-setting .setting-input:disabled,
+.row-setting select:disabled { color: var(--soft); background: transparent; border-style: dashed; }
 
 /* A secret row. The presence word sits above the field, so "Configured" is the
    first thing read -- the answer to the only question a masked field cannot
@@ -397,6 +413,31 @@ button:disabled { opacity: .45; cursor: default; }
 .setting-clear { font: inherit; font-size: .84rem; align-self: flex-start;
   margin-top: .25rem; padding: .3rem .6rem; color: var(--ink);
   background: none; border: 1px solid var(--rule); border-radius: .4rem; }
+/* Stated explicitly, exactly like `.setting-error[hidden]`: `align-self` does
+   not create a display declaration but `.setting-clear` is a flex ITEM, and the
+   button is hidden by main.ts the moment there is no key to remove. An
+   always-visible Remove under a row reading "Not set" is the defect this rule
+   is half of. */
+.setting-clear[hidden] { display: none; }
+
+/*
+ * The settings screen's information architecture.
+ *
+ * `buildSettingsScreen` has emitted `<h3 class="settings-section">` since it
+ * was written and this stylesheet styled `.section-heading`, which nothing
+ * paints -- so every heading rendered at the browser's default `h3`, and the
+ * screen read as one flat list in which a credential and an engine address had
+ * the same weight. The lead section is the one a new user came for: it keeps
+ * the ink colour while the rest go soft, and its rows sit in a panel so the
+ * eye lands there first.
+ */
+.screen-settings .settings-section { font-size: .72rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--soft); margin: 1.4rem 0 .3rem; font-weight: 600; }
+.screen-settings .settings-section:first-of-type { margin-top: .6rem; }
+.screen-settings .settings-section[data-lead] { color: var(--ink); }
+.screen-settings .row-setting .setting-label { font-weight: 550; }
+.screen-settings .row-setting[data-lead] { background: var(--panel); border-radius: var(--radius);
+  padding: .6rem .75rem; }
 
 .section-heading { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
   color: var(--soft); margin: 1.2rem 0 .3rem; }

@@ -56,7 +56,7 @@ import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
 import { PROTOCOL_VERSION } from "../../protocol/src/version.ts";
-import { appEngines, mount, EMPTY_TITLE_ID } from "./main.ts";
+import { appEngines, buildSettingsScreen, mount, EMPTY_TITLE_ID } from "./main.ts";
 import { ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { createSettingsStore, facadeFor, type SettingsFacade } from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
@@ -3030,4 +3030,320 @@ test("the chrome is never a blank rectangle, not even while boot is still runnin
   // guidance -- so the seed is a starting state, not a state it gets stuck in.
   assert.ok(emptyWords(dom).includes(en.emptyNeedsKeyTitle), emptyWords(dom));
   await app?.dispose();
+});
+
+// ---- the settings screen's four defects, on the real composition root -------
+//
+// All four were seen on a device running main: a `Remove` under a key that read
+// "Not set", an engine address that rendered as if it applied while the
+// in-process engine answered, a malformed address accepted in silence, and the
+// credential filed under a heading called "Engine". Everything above asserts a
+// piece in isolation; these drive `mount()` and read the DOM the user taps.
+
+/** The Remove button for one secret row, whether or not it is showing. */
+const removeButton = (dom: ReturnType<typeof createFakeDom>, key: string) =>
+  dom.find((n) => n.dataset["action"] === "clear-secret" && n.dataset["settingKey"] === key);
+
+
+test("Remove is NOT offered while the key row says Not set", async () => {
+  // The defect. A control that cannot do anything, sitting under the word that
+  // says there is nothing for it to do.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Not set");
+  const remove = removeButton(dom, "openaiApiKey");
+  assert.ok(remove !== null, "the row is built with the control, it is simply not offered");
+  assert.equal(remove.hidden, true, `Remove must not be offered with no key:\n${dom.text()}`);
+  // Hidden AND disabled: the click handler is delegated on root, so a hidden
+  // node still answers a click that reaches it.
+  assert.equal(remove.disabled, true);
+  await app?.dispose();
+});
+
+test("Remove appears the moment a key is stored, and it works -- the pair", async () => {
+  // Without this, hiding it unconditionally would satisfy the test above and
+  // "no key" would become a state nobody can get back OUT of.
+  const { dom, platform, secrets } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+  assert.equal(removeButton(dom, "openaiApiKey")?.hidden, true);
+
+  const field = keyField(dom);
+  field!.value = "sk-fresh";
+  dom.change(field as never);
+  await settle();
+
+  const remove = removeButton(dom, "openaiApiKey");
+  assert.equal(remove?.hidden, false, "a stored key must be removable");
+  assert.equal(remove?.disabled, false);
+  dom.click(remove as never);
+  await settle();
+
+  assert.equal(await secrets.has({ slot: "openai", account: "default" }), false);
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Not set");
+  // And the button goes away again in the SAME pass that repaints the word.
+  assert.equal(removeButton(dom, "openaiApiKey")?.hidden, true, "the offer must go with the key");
+  await app?.dispose();
+});
+
+test("the engine address is switched OFF while the in-process engine answers", async () => {
+  // Its own help text said "Only used by the remote engine" and it rendered
+  // identically while `praisonai-ts` -- which runs on the device and never
+  // contacts an address -- was selected.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const engine = settingField(dom, "Engine");
+  assert.ok(engine, `there must be an engine picker:\n${dom.text()}`);
+  engine.value = ENGINE_PRAISONAI_TS;
+  dom.change(engine as never);
+  await settle();
+
+  const address = settingField(dom, "Engine address");
+  // SHOWN, not hidden. A field that disappears takes the value the user typed
+  // off the screen with it, and cannot teach anyone that the two settings are
+  // connected before they have chosen the engine that uses it.
+  assert.ok(address, `the address must still be on screen:\n${dom.text()}`);
+  assert.equal(address.disabled, true, "nothing reads it under this engine");
+  const note = dom.find((n) => n.dataset["settingInactive"] === "baseUrl");
+  assert.ok(note !== null, "a field that is off must say what turns it on");
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, en.settingInactive("Engine", ENGINE_REMOTE_HTTP));
+  await app?.dispose();
+});
+
+test("the engine address is LIVE under the remote engine -- the pair", async () => {
+  // The recovery path a phone depends on (#4694): reach no 127.0.0.1:8765,
+  // open Settings, type the engine's real address. Disabling it always would
+  // close that path for good.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const address = settingField(dom, "Engine address");
+  assert.equal(address?.disabled, false, "the web starts on the remote engine");
+  assert.equal(dom.find((n) => n.dataset["settingInactive"] === "baseUrl")?.hidden, true);
+  await app?.dispose();
+});
+
+test("switching back to the remote engine gives the address back, with what was typed", async () => {
+  // The reason it is disabled rather than hidden: a value the user typed must
+  // survive a round trip through the other engine, and be VISIBLE surviving it.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const address = settingField(dom, "Engine address");
+  address!.value = "http://10.0.0.7:9000";
+  dom.change(address as never);
+  await settle();
+
+  const engine = settingField(dom, "Engine");
+  engine!.value = ENGINE_PRAISONAI_TS;
+  dom.change(engine as never);
+  await settle();
+  assert.equal(settingField(dom, "Engine address")?.value, "http://10.0.0.7:9000", "still shown");
+  assert.equal(settingField(dom, "Engine address")?.disabled, true);
+
+  engine!.value = ENGINE_REMOTE_HTTP;
+  dom.change(engine as never);
+  await settle();
+  const back = settingField(dom, "Engine address");
+  assert.equal(back?.disabled, false);
+  assert.equal(back?.value, "http://10.0.0.7:9000", "the typed address must survive the round trip");
+  await app?.dispose();
+});
+
+test("a malformed engine address is REFUSED on screen, with an address that would work", async () => {
+  // `7.0.0.1:8765` was stored, displayed back, and discovered to be wrong only
+  // when a turn failed. There is no Save button -- a field commits on blur --
+  // so the refusal has to be the thing that tells the user, immediately.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const address = settingField(dom, "Engine address");
+  address!.value = "7.0.0.1:8765";
+  dom.change(address as never);
+  await settle();
+
+  const note = dom.find((n) => n.dataset["settingError"] === "baseUrl");
+  assert.ok(note !== null && note.textContent !== "", `a bad address must be said:\n${dom.text()}`);
+  assert.equal(note.hidden, false);
+  assert.equal(
+    note.textContent,
+    en.settingRejectedExample("Engine address", "http://192.168.1.10:8765"),
+  );
+  // Naming the setting is not enough on this field: the user is looking at the
+  // string they typed with no idea which part of it was wrong.
+  assert.match(note.textContent, /http:\/\//, "the message must show a good address");
+  // And the field is back to what is actually stored, not left holding a value
+  // the app will never use.
+  assert.equal(address!.value, "http://127.0.0.1:8765");
+  await app?.dispose();
+});
+
+test("a corrected address after a refusal is accepted, and clears the refusal", async () => {
+  // The pair: a validator that refused everything would satisfy the test above
+  // and make the one recovery path on a phone impossible.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const address = settingField(dom, "Engine address");
+  address!.value = "7.0.0.1:8765";
+  dom.change(address as never);
+  await settle();
+  address!.value = "http://10.0.0.7:9000/";
+  dom.change(address as never);
+  await settle();
+
+  const note = dom.find((n) => n.dataset["settingError"] === "baseUrl");
+  assert.equal(note?.hidden, true, "an accepted write must clear its own refusal");
+  // Normalised on the way in, so the trailing slash is not a second spelling of
+  // the same engine.
+  assert.equal(address!.value, "http://10.0.0.7:9000");
+  await app?.dispose();
+});
+
+test("Settings LEADS with the API key, not with the engine", async () => {
+  // It was third of three, under a heading called "Engine" -- the wrong noun
+  // for a credential, and the wrong order for the one field that decides
+  // whether the app works at all.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const headings = dom.all().filter((n) => n.className === "settings-section");
+  assert.deepEqual(headings.map((h) => h.textContent), ["API key", "Engine"]);
+  assert.equal(headings[0]?.dataset["lead"], "true", "the first section is marked as the lead");
+  assert.equal(headings[1]?.dataset["lead"], undefined);
+
+  // And the key's ROW comes before either engine row on the page.
+  const rows = dom.all().filter((n) => n.className.includes("row-setting"));
+  assert.deepEqual(rows.map((r) => r.dataset["settingKey"]), ["openaiApiKey", "engineId", "baseUrl"]);
+  assert.equal(rows[0]?.dataset["lead"], "true");
+  await app?.dispose();
+});
+
+test("a setting's help text reaches the screen", async () => {
+  // Every def has carried `help` since the registry was written and NOTHING
+  // rendered it: the screen painted a label, a control and a refusal note and
+  // dropped the sentence explaining what the field is for. That is the same
+  // defect as an inert setting, one layer along -- the registry describes a
+  // field the user never sees described.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const helps = dom.all().filter((n) => n.className === "setting-help");
+  assert.equal(helps.length, SETTING_DEFS.filter((d) => d.help !== undefined).length);
+  for (const def of SETTING_DEFS) {
+    if (def.help === undefined) continue;
+    assert.ok(
+      helps.some((h) => h.textContent === def.help),
+      `${def.key}'s help is declared and never painted:\n${dom.text()}`,
+    );
+  }
+  await app?.dispose();
+});
+
+test("a setting's help and inactive note are ASSOCIATED with the control, not just beside it", async () => {
+  // Sitting a help paragraph next to a field tells a sighted user what it is
+  // for; a screen-reader user who focuses the field hears only its aria-label
+  // unless the control POINTS at the note. `aria-describedby` is that pointer.
+  const dom = createFakeDom();
+  // In-process engine: the address is inactive, so its "turn this on" sentence
+  // must be announced with it, alongside the help every field carries.
+  const off = paintSettings(dom, { engineId: ENGINE_PRAISONAI_TS }, new Map());
+  dom.root.append(off as never);
+
+  const address = dom.find((n) => n.getAttribute("aria-label") === "Engine address");
+  const describedBy = (address?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+  const help = dom.find((n) => n.className === "setting-help" && n.id === "setting-help-baseUrl");
+  const inactive = dom.find((n) => n.dataset["settingInactive"] === "baseUrl");
+  assert.ok(help !== undefined && help.id !== "", "the help note needs a stable id to be pointed at");
+  assert.ok(describedBy.includes(help!.id), "the address must describe itself with its help");
+  assert.ok(
+    describedBy.includes(inactive!.id),
+    "and, while it is off, with the sentence that turns it on",
+  );
+
+  // Live engine: the field applies, so the inactive id must NOT linger in the
+  // description -- a screen reader would otherwise read a reason that is gone.
+  const dom2 = createFakeDom();
+  const on = paintSettings(dom2, { engineId: ENGINE_REMOTE_HTTP }, new Map());
+  dom2.root.append(on as never);
+  const live = dom2.find((n) => n.getAttribute("aria-label") === "Engine address");
+  const liveDesc = (live?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+  assert.ok(liveDesc.includes("setting-help-baseUrl"), "help stays whether or not the field applies");
+  assert.ok(
+    !liveDesc.includes("setting-inactive-baseUrl"),
+    "a live field must not point at an inactive reason",
+  );
+});
+
+// The two tests above drive the screen through a CHANGE, which reaches the
+// sync walk. These two assert the FIRST PAINT, which is a different branch:
+// `buildSettingsScreen` decides what a row looks like before any event, and a
+// renderer that ignored `canClear` or `applies` there would be corrected a
+// moment later by the sync and pass everything above.
+
+const paintSettings = (
+  dom: ReturnType<typeof createFakeDom>,
+  values: Readonly<Record<string, string>>,
+  presence: Map<string, { ref: { slot: "openai"; account: string }; configured: boolean }>,
+) => {
+  const store = createSettingsStore(SETTING_DEFS, createFakeStorage(), createFakeSecrets());
+  const facade: SettingsFacade = {
+    ...facadeFor(store, createFakeSecrets()),
+    get: (key) => values[key] ?? SETTING_DEFS.find((d) => d.key === key)?.default,
+  };
+  return buildSettingsScreen(dom.root.ownerDocument as never, facade, en, presence);
+};
+
+test("Remove is not PAINTED for a key that is known to be missing", async () => {
+  const dom = createFakeDom();
+  const OPENAI = { slot: "openai" as const, account: "default" };
+
+  const missing = paintSettings(dom, {}, new Map([["openaiApiKey", { ref: OPENAI, configured: false }]]));
+  dom.root.append(missing as never);
+  const hiddenOne = dom.find((n) => n.dataset["action"] === "clear-secret");
+  assert.equal(hiddenOne?.hidden, true, "a row painted as Not set must not paint a Remove");
+  assert.equal(hiddenOne?.disabled, true);
+
+  // The pair, in the same test so a renderer cannot satisfy one by never
+  // painting the button at all.
+  const dom2 = createFakeDom();
+  const present = paintSettings(dom2, {}, new Map([["openaiApiKey", { ref: OPENAI, configured: true }]]));
+  dom2.root.append(present as never);
+  const shown = dom2.find((n) => n.dataset["action"] === "clear-secret");
+  assert.equal(shown?.hidden, false, "a row painted as Configured must offer Remove");
+  assert.equal(shown?.disabled, false);
+});
+
+test("the engine address is PAINTED switched off when the stored engine is in-process", async () => {
+  // No `change` is fired here on purpose: this is what the user sees the
+  // instant Settings opens, having chosen the in-process engine on a previous
+  // launch. A renderer corrected only by the sync walk shows a live field until
+  // something else is touched.
+  const dom = createFakeDom();
+  const off = paintSettings(dom, { engineId: ENGINE_PRAISONAI_TS }, new Map());
+  dom.root.append(off as never);
+  const address = dom.find((n) => n.getAttribute("aria-label") === "Engine address");
+  assert.equal(address?.disabled, true, "nothing reads the address under the in-process engine");
+  assert.equal(dom.find((n) => n.dataset["settingInactive"] === "baseUrl")?.hidden, false);
+
+  const dom2 = createFakeDom();
+  const on = paintSettings(dom2, { engineId: ENGINE_REMOTE_HTTP }, new Map());
+  dom2.root.append(on as never);
+  assert.equal(
+    dom2.find((n) => n.getAttribute("aria-label") === "Engine address")?.disabled,
+    false,
+    "and it is live the moment the remote engine is chosen",
+  );
+  assert.equal(dom2.find((n) => n.dataset["settingInactive"] === "baseUrl")?.hidden, true);
 });
