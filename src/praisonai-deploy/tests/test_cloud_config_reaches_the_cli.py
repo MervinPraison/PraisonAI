@@ -44,15 +44,58 @@ def _config(provider, **overrides):
 
 class TestFlyCarriesWhatFlyctlAccepts:
 
-    def test_env_vars_reach_the_command(self):
+    def test_secrets_do_not_reach_the_deploy_argv(self):
+        """Env values can be credentials; the argv is process-visible.
+
+        They travel through `fly secrets set` instead (see _set_secrets), so
+        the deploy command must not carry --env pairs at all.
+        """
         cmd = " ".join(FlyProvider(_config("fly"))._deploy_command("demo"))
-        assert "--env OPENAI_API_KEY=sk-secret" in cmd
-        assert "--env LOG_LEVEL=debug" in cmd
+        assert "--env" not in cmd
+        assert "sk-secret" not in cmd
+
+    def test_secrets_are_staged_out_of_the_argument_vector(self):
+        """`fly secrets set --stage` receives the env values, not `flyctl deploy`."""
+        recorded = []
+
+        def fake_run(cmd, **kwargs):
+            recorded.append(cmd)
+            class _R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _R()
+
+        provider = FlyProvider(_config("fly"))
+        import praisonai_deploy.providers.fly as fly_mod
+        original = fly_mod.subprocess.run
+        fly_mod.subprocess.run = fake_run
+        try:
+            provider.deploy()
+        finally:
+            fly_mod.subprocess.run = original
+
+        secret_cmds = [c for c in recorded if c[:3] == ["flyctl", "secrets", "set"]]
+        assert secret_cmds, "env_vars never reached `fly secrets set`"
+        staged = " ".join(secret_cmds[0])
+        assert "--stage" in staged
+        assert "OPENAI_API_KEY=sk-secret" in staged
+        deploy_cmds = [c for c in recorded if c[:2] == ["flyctl", "deploy"]]
+        assert deploy_cmds and "--env" not in " ".join(deploy_cmds[0])
 
     def test_cpu_and_memory_reach_the_command(self):
         cmd = " ".join(FlyProvider(_config("fly"))._deploy_command("demo"))
         assert "--vm-cpus 2" in cmd
         assert "--vm-memory 2048" in cmd
+
+    def test_the_ecs_cpu_default_is_not_forwarded_to_fly(self):
+        """CloudConfig.cpu defaults to "256" (an ECS CPU unit), which is not a
+        Fly VM core count -- `--vm-cpus 256` would fail. A config leaving the
+        defaults must not forward them."""
+        cfg = CloudConfig(provider="fly", region="", service_name="demo")
+        cmd = " ".join(FlyProvider(cfg)._deploy_command("demo"))
+        assert "--vm-cpus" not in cmd
+        assert "--vm-memory" not in cmd
 
     def test_the_image_reaches_the_command(self):
         cmd = " ".join(FlyProvider(_config("fly"))._deploy_command("demo"))
@@ -96,6 +139,33 @@ class TestProvidersThatCannotApplyThemSaySo:
     def test_a_default_config_reports_nothing(self, provider_cls, name):
         cfg = CloudConfig(provider=name, region="", service_name="demo")
         assert provider_cls(cfg)._unapplied_settings() == []
+
+    def test_unapplied_settings_reach_the_structured_result(self, provider_cls, name):
+        """A `deploy --json` consumer must see that settings were dropped, not
+        just a log line -- the DeployResult carries them in metadata."""
+        provider = provider_cls(_config(name))
+        import praisonai_deploy.providers.railway as railway_mod
+        import praisonai_deploy.providers.render as render_mod
+
+        def fake_run(cmd, **kwargs):
+            class _R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _R()
+
+        originals = (railway_mod.subprocess.run, render_mod.subprocess.run)
+        railway_mod.subprocess.run = fake_run
+        render_mod.subprocess.run = fake_run
+        try:
+            result = provider.deploy()
+        finally:
+            railway_mod.subprocess.run, render_mod.subprocess.run = originals
+
+        assert result.success is True
+        assert result.metadata.get("unapplied"), "dropped settings absent from result"
+        assert any("env_vars" in item for item in result.metadata["unapplied"])
+        assert "sk-secret" not in " ".join(result.metadata["unapplied"])
 
 
 if __name__ == "__main__":

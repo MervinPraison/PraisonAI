@@ -107,18 +107,47 @@ class FlyProvider(BaseProvider):
 
         Flags verified against flyctl v0.4.14: -e/--env, --vm-cpus,
         --vm-memory and --image exist; --region does not.
+
+        `cpu`/`memory` are only forwarded when set away from the CloudConfig
+        defaults ("256"/"512"). Those defaults are ECS CPU-unit conventions
+        consumed by the AWS provider, not Fly VM core counts -- passing
+        `--vm-cpus 256` would request an unavailable machine size and fail a
+        previously valid deploy. Fly's own default VM is used when the caller
+        does not override it.
+
+        Secrets are NOT placed here: env values can carry credentials, and the
+        argument vector is visible to other processes on the host. They go
+        through `fly secrets set` in `deploy()` instead.
         """
         cmd = ["flyctl", "deploy", "--app", app, "--remote-only"]
         cfg = self.config
         if cfg.image:
             cmd += ["--image", str(cfg.image)]
-        if cfg.cpu:
+        if cfg.cpu not in (None, "256"):
             cmd += ["--vm-cpus", str(cfg.cpu)]
-        if cfg.memory:
+        if cfg.memory not in (None, "512"):
             cmd += ["--vm-memory", str(cfg.memory)]
-        for key, value in (cfg.env_vars or {}).items():
-            cmd += ["--env", f"{key}={value}"]
         return cmd
+
+    def _set_secrets(self, app: str) -> None:
+        """Push env_vars through `fly secrets set` rather than the argv.
+
+        Placing `KEY=value` in the deploy argument vector would expose secret
+        values (e.g. OPENAI_API_KEY) to anyone able to inspect processes on the
+        host. `fly secrets set` is the path the starter already documents.
+        `--stage` records the secrets without triggering a second deploy; the
+        subsequent `flyctl deploy` applies them.
+        """
+        env_vars = self.config.env_vars or {}
+        if not env_vars:
+            return
+        pairs = [f"{key}={value}" for key, value in env_vars.items()]
+        subprocess.run(
+            ["flyctl", "secrets", "set", "--app", app, "--stage", *pairs],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
 
     def deploy(self) -> DeployResult:
         app = self.config.service_name
@@ -128,6 +157,7 @@ class FlyProvider(BaseProvider):
                 "flyctl deploy cannot apply: %s", "; ".join(ignored)
             )
         try:
+            self._set_secrets(app)
             result = subprocess.run(
                 self._deploy_command(app),
                 capture_output=True,
@@ -139,9 +169,15 @@ class FlyProvider(BaseProvider):
                     success=False,
                     message="Fly deploy failed",
                     error=(result.stderr or result.stdout or "").strip(),
+                    metadata={"unapplied": ignored} if ignored else {},
                 )
             url = f"https://{app}.fly.dev"
-            return DeployResult(success=True, message=f"Deployed to Fly app {app}", url=url)
+            return DeployResult(
+                success=True,
+                message=f"Deployed to Fly app {app}",
+                url=url,
+                metadata={"unapplied": ignored} if ignored else {},
+            )
         except FileNotFoundError:
             return DeployResult(
                 success=False,

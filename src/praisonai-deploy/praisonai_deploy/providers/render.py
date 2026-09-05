@@ -83,6 +83,7 @@ class RenderProvider(BaseProvider):
             return DeployResult(
                 success=True,
                 message=f"Render deploy triggered for {self.config.service_name}",
+                metadata={"unapplied": unapplied} if unapplied else {},
             )
         except FileNotFoundError:
             return DeployResult(

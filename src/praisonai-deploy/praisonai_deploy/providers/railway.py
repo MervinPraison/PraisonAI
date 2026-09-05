@@ -79,10 +79,13 @@ class RailwayProvider(BaseProvider):
                     message="Railway deploy failed",
                     error=(result.stderr or result.stdout or "").strip(),
                 )
+            metadata = {"stdout": (result.stdout or "").strip()}
+            if unapplied:
+                metadata["unapplied"] = unapplied
             return DeployResult(
                 success=True,
                 message="Railway deploy initiated",
-                metadata={"stdout": (result.stdout or "").strip()},
+                metadata=metadata,
             )
         except FileNotFoundError:
             return DeployResult(
