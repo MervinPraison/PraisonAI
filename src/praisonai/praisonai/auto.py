@@ -41,11 +41,6 @@ async def _maybe_await(value):
     return value
 
 
-# Module-level cache for lazily constructed Pydantic workflow models.
-# Populated on first call to _get_workflow_models() / _get_job_workflow_models().
-_models_cache: Dict[str, Any] = {}
-_models_lock = threading.Lock()
-
 def _rich_print(*args, **kwargs):
     """Lazy-loaded rich.print wrapper."""
     from rich import print as rich_print_impl
@@ -1411,14 +1406,13 @@ Remember: emit ONLY tool names from the allow-list stated at the top.
 # =============================================================================
 
 def _get_workflow_models():
-    """Get workflow structure models, creating them on first use."""
-    if 'workflow_models' in _models_cache:
-        return _models_cache['workflow_models']
-    
-    with _models_lock:
-        if 'workflow_models' in _models_cache:
-            return _models_cache['workflow_models']
-        
+    """Get workflow structure models, creating them on first use.
+
+    Routed through the shared ``lazy_get`` (single source of truth for
+    thread-safe optional-dep loading) so exception caching and ``lazy_reset``
+    semantics match ``_get_team_models`` instead of drifting.
+    """
+    def _create():
         from pydantic import BaseModel
 
         class WorkflowStepDetails(BaseModel):
@@ -1453,14 +1447,15 @@ def _get_workflow_models():
             steps: List[Dict]  # Can be agent steps, route, parallel, etc.
             gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
 
-        _models_cache['workflow_models'] = {
+        return {
             'WorkflowStepDetails': WorkflowStepDetails,
             'WorkflowRouteDetails': WorkflowRouteDetails,
             'WorkflowParallelDetails': WorkflowParallelDetails,
             'WorkflowAgentDetails': WorkflowAgentDetails,
             'WorkflowStructure': WorkflowStructure
         }
-        return _models_cache['workflow_models']
+
+    return lazy_get("workflow_models", _create)
 
 
 # Names exposed lazily via module __getattr__ (PEP 562) so that
@@ -1935,33 +1930,33 @@ Example structure:
 # =============================================================================
 
 def _get_job_workflow_models():
-    """Get job workflow models, creating them on first use."""
-    if 'job_workflow_models' in _models_cache:
-        return _models_cache['job_workflow_models']
-    
-    with _models_lock:
-        if 'job_workflow_models' in _models_cache:
-            return _models_cache['job_workflow_models']
-        
+    """Get job workflow models, creating them on first use.
+
+    Routed through the shared ``lazy_get`` (single source of truth for
+    thread-safe optional-dep loading) so exception caching and ``lazy_reset``
+    semantics match ``_get_team_models`` instead of drifting.
+    """
+    def _create():
         from pydantic import BaseModel
-        
+
         class JobWorkflowStep(BaseModel):
             """A single step in a job workflow."""
             name: str
             step_type: str  # "agent", "judge", "approve", "run", "action"
             config: Dict[str, Any]
-        
+
         class JobWorkflowStructure(BaseModel):
             """Structure for a job workflow with agent-centric steps."""
             name: str
             description: str
             steps: List[JobWorkflowStep]
-        
-        _models_cache['job_workflow_models'] = {
+
+        return {
             'JobWorkflowStep': JobWorkflowStep,
             'JobWorkflowStructure': JobWorkflowStructure
         }
-        return _models_cache['job_workflow_models']
+
+    return lazy_get("job_workflow_models", _create)
 
 
 class JobWorkflowAutoGenerator(BaseAutoGenerator):
