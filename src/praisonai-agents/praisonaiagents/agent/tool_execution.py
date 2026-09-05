@@ -1682,6 +1682,40 @@ class ToolExecutionMixin:
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
+                # Consult the registry's standing grants before prompting.
+                # This branch used to go straight to the backend, skipping
+                # is_env_auto_approve / is_yaml_approved / is_auto_approved /
+                # is_already_approved entirely -- and it is the DEFAULT branch,
+                # since a bare Agent() on a TTY installs a ConsoleBackend. So
+                # PRAISONAI_AUTO_APPROVE=true still prompted (measured: 3 of 3
+                # identical calls), a YAML approval was ignored, and an
+                # "approve for this session" grant was never remembered.
+                agent_name_for_registry = getattr(self, 'name', None)
+                scope_id = getattr(self, '_approval_scope_id', None) or agent_name_for_registry
+                try:
+                    standing_grant = (
+                        approval_registry.is_env_auto_approve()
+                        or approval_registry.is_yaml_approved(tool_name)
+                        or approval_registry.is_auto_approved(tool_name, scope_id)
+                        or approval_registry.is_already_approved(
+                            tool_name, tool_args, scope_id
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - a grant lookup must never
+                    # block the call; fall through and ask, which is the safe
+                    # direction to fail in.
+                    standing_grant = False
+                if standing_grant:
+                    decision = ApprovalDecision(
+                        approved=True,
+                        reason="Approved by a standing registry grant",
+                    )
+                    if is_async:
+                        async def _granted():
+                            return decision
+                        return _granted()
+                    return decision
+
                 # Attach a rendered unified diff for file-mutating tools so the
                 # reviewer approves the actual change rather than a truncated
                 # argument dump. Non-edit tools get no diff (``None``) and keep
