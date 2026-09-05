@@ -73,6 +73,7 @@ class StickyComment:
 
         # Branch and PR tracking
         self._branch_name: Optional[str] = None
+        self._branch_before_create: Optional[str] = None
         self._pr_url: Optional[str] = None
         self._pr_number: Optional[int] = None
         self._summary_lines: List[str] = []
@@ -161,6 +162,8 @@ class StickyComment:
     def on_tool_start(self, agent_name: str, tool_name: str, tool_args: dict) -> None:
         with self._lock:
             self._current_tool = tool_name
+            if tool_name == "github_create_branch":
+                self._branch_before_create = self._branch_name
             label = self._tool_label(tool_name, tool_args)
             self._logs.append(f"🔧 {label}")
             # Extract file modifications from commands
@@ -169,12 +172,23 @@ class StickyComment:
         self._schedule_push()
 
     def on_tool_end(self, agent_name: str, tool_name: str, result: Any = None) -> None:
+        refresh = False
         with self._lock:
             self._current_tool = None
+            # A branch name is captured eagerly at tool start so the live
+            # comment can show the operation immediately.  Do not leave a
+            # rejected branch rendered as active after validation or checkout
+            # fails.
+            if tool_name == "github_create_branch" and str(result).startswith("Error"):
+                self._branch_name = self._branch_before_create
+                refresh = True
+            if tool_name == "github_create_branch":
+                self._branch_before_create = None
             # Extract features from tool results
             if result and isinstance(result, str):
                 self._extract_features_from_output(result)
-        # no extra log for tool end – keeps comment clean
+        if refresh:
+            self._schedule_push()
 
     def _extract_file_from_command(self, command: str) -> None:
         """Extract file paths from shell commands to track modifications."""
