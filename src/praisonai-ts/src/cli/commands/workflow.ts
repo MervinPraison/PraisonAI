@@ -135,17 +135,77 @@ export async function execute(args: string[], options: WorkflowOptions): Promise
     const results: Record<string, any> = {};
     const steps = workflow.steps || [];
 
-    for (const step of steps) {
+    // A file that parses to no steps is not a workflow that ran. This reported
+    // success:true, steps:0, exit 0 -- so a wrong-schema or corrupted file was
+    // indistinguishable from a completed run.
+    if (steps.length === 0) {
+      throw new Error(
+        `No steps found in ${filePath}. A workflow needs a 'steps:' list, ` +
+        `each entry naming an 'agent' and a 'task'.`
+      );
+    }
+
+    const { Agent } = await import('../../agent');
+
+    // Every step used to be marked 'completed' without an agent being built or
+    // a model being called, so a typo'd agent name, a missing task or an absent
+    // API key all reported success. Steps run in declaration order so each can
+    // see what came before; --parallel runs them together without that context.
+    const failures: Array<{ step: string; error: string }> = [];
+    const priorOutputs: string[] = [];
+
+    const runStep = async (step: Task): Promise<string> => {
       if (outputFormat !== 'json') {
         await pretty.info(`Running step: ${step.name}`);
       }
+      if (!step.task) {
+        throw new Error(`Step '${step.name}' has no 'task' to run`);
+      }
+      const declared: any = (workflow.agents || {})[step.agent || ''] || {};
+      const agent = new Agent({
+        name: step.agent || step.name,
+        instructions: declared.instructions || declared.role ||
+          'You are a helpful AI assistant executing one step of a workflow.',
+        llm: declared.llm || config.model,
+        verbose: config.verbose,
+      });
+      const prompt = priorOutputs.length && !options.parallel
+        ? `${priorOutputs.join('\n\n')}\n\n${step.task}`
+        : step.task;
+      const output = await agent.start(prompt);
+      return String(output ?? '');
+    };
 
-      // For now, we'll simulate step execution
-      // In a full implementation, this would create agents and execute tasks
-      results[step.name] = {
-        status: 'completed',
-        output: `Step ${step.name} completed`
-      };
+    const record = (step: Task, outcome: PromiseSettledResult<string>) => {
+      if (outcome.status === 'fulfilled') {
+        results[step.name] = { status: 'completed', output: outcome.value };
+        priorOutputs.push(outcome.value);
+      } else {
+        const message = outcome.reason instanceof Error
+          ? outcome.reason.message : String(outcome.reason);
+        results[step.name] = { status: 'failed', error: message };
+        failures.push({ step: step.name, error: message });
+      }
+    };
+
+    if (options.parallel) {
+      const settled = await Promise.allSettled(steps.map(runStep));
+      steps.forEach((step, i) => record(step, settled[i]));
+    } else {
+      for (const step of steps) {
+        const settled = await Promise.allSettled([runStep(step)]);
+        record(step, settled[0]);
+        // A failed step stops a sequential run; carrying on would feed the next
+        // step context that was never produced.
+        if (failures.length) break;
+      }
+    }
+
+    if (failures.length) {
+      throw new Error(
+        `${failures.length} of ${steps.length} step(s) failed: ` +
+        failures.map(f => `${f.step}: ${f.error}`).join('; ')
+      );
     }
 
     const duration = Date.now() - startTime;
