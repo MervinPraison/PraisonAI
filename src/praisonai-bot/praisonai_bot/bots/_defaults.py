@@ -134,22 +134,42 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
     return agent
 
 
+def _config_learn_value(config: Optional[Any]) -> Any:
+    """Read the operator's ``learn``/``session_learning`` intent from config.
+
+    ``BotConfig`` has no native ``learn`` field, so the gateway forwards the
+    YAML key through ``config.metadata`` (the same passthrough used for ``stt``
+    / ``voice``). Direct callers may also set an attribute or pass a mapping.
+    Checked in order: attribute, ``config.metadata[...]``, mapping key. Returns
+    the first non-None value found, else ``None`` ("unset").
+    """
+    if config is None:
+        return None
+    metadata = getattr(config, "metadata", None)
+    for key in ("learn", "session_learning"):
+        val = getattr(config, key, None)
+        if val is not None:
+            return val
+        if isinstance(metadata, dict) and metadata.get(key) is not None:
+            return metadata.get(key)
+        if isinstance(config, dict) and config.get(key) is not None:
+            return config.get(key)
+    return None
+
+
 def _learning_opt_out(config: Optional[Any]) -> bool:
     """Return True when the bot config explicitly disables session learning.
 
     Opt-out via ``learn: false`` (or ``session_learning: false``) in the bot
     config. Absence means "use the sensible default" (enabled).
     """
-    if config is None:
+    val = _config_learn_value(config)
+    if val is None:
         return False
-    for attr in ("learn", "session_learning"):
-        val = getattr(config, attr, None)
-        if val is None:
-            continue
-        if isinstance(val, bool):
-            return not val
-        if isinstance(val, str):
-            return val.strip().lower() in ("false", "0", "no", "off", "disabled")
+    if isinstance(val, bool):
+        return not val
+    if isinstance(val, str):
+        return val.strip().lower() in ("false", "0", "no", "off", "disabled")
     return False
 
 
@@ -197,9 +217,14 @@ def _enable_bot_learning(
     agent._learn_config = learn_config
 
     # Auto-memory / auto-learning need a LearnManager on the memory instance.
-    # Only rebuild the backend when the bot itself injected the memory config
-    # (a user-supplied memory=... is never rewritten). When memory was injected
-    # it is the bot's own history dict, so merging learn in is safe.
+    # Only rebuild the backend when the bot itself injected the memory config: it
+    # is the bot's own history dict, so merging learn in is non-destructive. A
+    # user-supplied ``memory=`` (a live instance, ``memory=True``, a provider
+    # string, or a dict) is never rewritten — rewriting it would change the
+    # operator's chosen backend/intent. For those, the periodic nudge still
+    # fires (it only needs ``_learn_config``) and drives the auto-injected
+    # ``store_learning`` tool, so persona/preferences are still persisted; we
+    # just don't silently swap their memory instance out from under them.
     if memory_was_injected:
         try:
             current = getattr(agent, "memory", None)
@@ -208,7 +233,10 @@ def _enable_bot_learning(
             user_id = getattr(agent, "user_id", None)
             if hasattr(agent, "_init_memory"):
                 agent._init_memory(mem_dict, user_id=user_id)
-            if getattr(agent, "_auto_memory", None) is None:
+            # A bot-injected history dict resolves ``_auto_memory`` to the
+            # framework default (None/False), not an explicit opt-out, so turn
+            # it on — a LearnManager without auto-extraction would be inert.
+            if not getattr(agent, "_auto_memory", None):
                 agent._auto_memory = True
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(f"Bot: could not rebuild memory for learning: {e}")
