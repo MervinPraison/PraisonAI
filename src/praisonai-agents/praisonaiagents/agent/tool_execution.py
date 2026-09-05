@@ -983,6 +983,13 @@ class ToolExecutionMixin:
                         )
                         time.sleep(delay)
             
+            # Tool-result guardrail gate (protocol-driven). Runs on the raw
+            # result before any middleware/trust-wrapping/hooks so a guardrail
+            # can inspect or redact unsafe tool output (a leaked secret, a
+            # prompt-injection payload) before it re-enters the LLM context.
+            # Fail-closed. Zero overhead when unset.
+            result = self._apply_tool_result_guardrails(function_name, result)
+
             # Apply runtime-scoped middleware normalization BEFORE hooks fire
             # Plugin harnesses can register middleware to normalize vendor-specific results
             runtime_id = getattr(self, '_runtime_id', 'praisonai')  # Default to native runtime
@@ -2562,6 +2569,62 @@ class ToolExecutionMixin:
             if isinstance(processed, dict):
                 arguments = processed
         return None, arguments
+
+    def _apply_tool_result_guardrails(self, function_name, result):
+        """Gate a tool's raw result through any tool-result guardrails.
+
+        Runs after execution and before the result re-enters the LLM context so
+        a guardrail can inspect or redact unsafe tool output (a leaked secret, a
+        prompt-injection payload) that ``validate_output`` never sees. Returns
+        the (possibly rewritten) result when allowed, or an error dict tagged
+        ``guardrail_denied`` when rejected. Fail-closed on guardrail error,
+        mirroring ``_check_tool_policy_and_guardrails``. Zero overhead when no
+        tool-result guardrail is set. Denial error dicts pass straight through
+        untouched so a gated/failed tool is not re-inspected.
+        """
+        guardrails = getattr(self, "_tool_result_guardrails", None)
+        if not guardrails:
+            return result
+        # Only skip results the framework itself already gated/denied — those
+        # carry an explicit control marker and were never real tool output. An
+        # ordinary tool-authored ``{"error": ...}`` (a crawl result with both
+        # ``error`` and ``content``, a shell tool's recoverable failure) is still
+        # untrusted content that can carry a secret or an injection payload, so
+        # it MUST be validated like any other result.
+        if isinstance(result, dict) and (
+            result.get("guardrail_denied")
+            or result.get("policy_denied")
+            or result.get("approval_denied")
+            or result.get("permission_denied")
+            or result.get("approval_error")
+        ):
+            return result
+        for guardrail in guardrails:
+            validate = getattr(guardrail, "validate_tool_result", None)
+            if validate is None:
+                continue
+            try:
+                is_valid, processed = validate(function_name, result)
+            except Exception as e:  # noqa: BLE001
+                # Fail closed: a guardrail dependency/implementation error must
+                # block, not deliver, the unchecked result.
+                logging.warning(
+                    f"Tool '{function_name}' result denied: guardrail validate_tool_result raised: {e}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' result denied: guardrail check failed ({e})",
+                    "guardrail_denied": True,
+                }
+            if not is_valid:
+                logging.warning(
+                    f"Tool '{function_name}' result rejected by tool-result guardrail"
+                )
+                return {
+                    "error": f"Tool '{function_name}' result rejected by guardrail",
+                    "guardrail_denied": True,
+                }
+            result = processed  # Accept the (possibly redacted) result
+        return result
 
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""

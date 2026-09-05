@@ -6644,6 +6644,9 @@ Answer:"""
         # ``self._tool_call_guardrails`` but nothing ever assigned it, so the
         # whole ``validate_tool_call`` surface was dead code. Always define it.
         self._tool_call_guardrails = []
+        # ``tool_execution._apply_tool_result_guardrails`` reads this to gate a
+        # tool's raw output before it re-enters the LLM context. Always define it.
+        self._tool_result_guardrails = []
         if self.guardrail is None:
             self._guardrail_fn = None
             return
@@ -6719,6 +6722,17 @@ Answer:"""
             and not getattr(_fn, "_praison_output_only", False)
         ):
             self._tool_call_guardrails = [_fn]
+
+        # Register the tool-result surface the same way. Output-only (string/LLM)
+        # guardrails are excluded on purpose: running an LLM validation after
+        # every tool result would be a hot-path regression, mirroring the
+        # tool-call exclusion above.
+        if (
+            _fn is not None
+            and callable(getattr(_fn, "validate_tool_result", None))
+            and not getattr(_fn, "_praison_output_only", False)
+        ):
+            self._tool_result_guardrails = [_fn]
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
