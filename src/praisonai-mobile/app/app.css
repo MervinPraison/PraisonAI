@@ -367,7 +367,7 @@ html, body {
 /* `tabindex="-1"` is what lets focus.ts move focus here on a route change; it
    must not also paint a ring when the move was made for a tap. A real keyboard
    focus still gets one, from `:focus-visible` below. */
-.screen-heading:focus { outline: none; }
+.screen-heading:focus:not(:focus-visible) { outline: none; }
 
 .transcript {
   flex: 1;
