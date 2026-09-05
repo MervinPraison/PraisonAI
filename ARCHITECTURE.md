@@ -222,15 +222,15 @@ The Python SDK is organised as three publishable tiers (see [§2](#2-python-thre
 
 Core execution modules live in `praisonaiagents`:
 
-- `agent/` — Agent class, handoff, autonomy
-- `llm/` — Model runtime with provider routing, rate limiting, failover
-- `tools/` — Tool runtime with sandbox, approval, retry
-- `memory/` — Memory runtime (in-memory, SQLite, MongoDB, Mem0 adapters)
-- `knowledge/` — Knowledge management (indexing, retrieval, chunking)
-- `workflows/` — Workflow engine (YAML/SDK-based orchestration)
-- `hooks/`, `bus/` — Hook system and event bus
-- `mcp/` — MCP protocol support
-- `a2a/`, `a2ui/` — Agent-to-agent and agent-to-UI protocols (wrapper/SDK)
+- `src/praisonai-agents/praisonaiagents/agent/` — Agent class, handoff, autonomy
+- `src/praisonai-agents/praisonaiagents/llm/` — Model runtime with provider routing, rate limiting, failover
+- `src/praisonai-agents/praisonaiagents/tools/` — Tool runtime with sandbox, approval, retry
+- `src/praisonai-agents/praisonaiagents/memory/` — Memory runtime (in-memory, SQLite, MongoDB, Mem0 adapters)
+- `src/praisonai-agents/praisonaiagents/knowledge/` — Knowledge management (indexing, retrieval, chunking)
+- `src/praisonai-agents/praisonaiagents/workflows/` — Workflow engine (YAML/SDK-based orchestration)
+- `src/praisonai-agents/praisonaiagents/hooks/`, `src/praisonai-agents/praisonaiagents/bus/` — Hook system and event bus
+- `src/praisonai-agents/praisonaiagents/mcp/` — MCP protocol support
+- `src/praisonai-agents/praisonaiagents/ui/a2a/`, `src/praisonai-agents/praisonaiagents/ui/a2ui/` — Agent-to-agent and agent-to-UI protocols
 
 Wrapper-only surfaces remain in `src/praisonai/`:
 
@@ -243,9 +243,9 @@ Wrapper-only surfaces remain in `src/praisonai/`:
 - **Python Core SDK** — `src/praisonai-agents/` (`praisonaiagents`)
 - **Python Terminal CLI** — `src/praisonai-code/` (`praisonai-code`)
 - **Python Wrapper** — `src/praisonai/` (`praisonai`)
-- **TypeScript SDK** — JS/TS runtime (`ts-sdk/`)
-- **Rust SDK** — High-performance Rust runtime (`rust-sdk/`)
-- **UI** — Web UI (`ui/`)
+- **TypeScript SDK** — JS/TS runtime (`src/praisonai-ts/`)
+- **Rust SDK** — High-performance Rust runtime (`src/praisonai-rust/`)
+- **UI** — Web UI applications (`src/praisonai/praisonai/ui_chat/`, `src/praisonai/praisonai/ui_agents/`, `src/praisonai/praisonai/ui_bot/`, `src/praisonai/praisonai/ui_realtime/`); shared support code lives in `src/praisonai/praisonai/ui/`.
 
 ---
 
