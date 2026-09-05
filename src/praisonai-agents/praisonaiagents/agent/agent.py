@@ -1450,7 +1450,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 elif memory_backend == "file":
                     memory = True
                 elif _memory_config.config:
-                    memory = _memory_config.config
+                    # Carry the backend into the dict. _init_memory reads the
+                    # provider as memory.get("provider", memory.get("backend",
+                    # "file")), so handing it the bare config lost the backend
+                    # entirely and silently fell back to FileMemory --
+                    # MemoryConfig(backend="sqlite", config={...}) built a
+                    # FileMemory while to_dict() went on reporting "sqlite".
+                    # An explicit provider/backend inside config still wins.
+                    memory = dict(_memory_config.config)
+                    if "provider" not in memory and "backend" not in memory:
+                        memory["provider"] = memory_backend
                 else:
                     memory = memory_backend
             elif hasattr(_memory_config, 'search') and hasattr(_memory_config, 'add'):
