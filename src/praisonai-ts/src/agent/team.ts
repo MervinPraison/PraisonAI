@@ -29,6 +29,19 @@ import {
   type TeamPlanningInput,
   type TeamPlanningSettings,
 } from './team-planning';
+import {
+  declaresRouting,
+  decisionFrom,
+  dependenciesFailed,
+  expandTask,
+  indexByName,
+  linkEntries,
+  planRunSteps,
+  startIndexOf,
+} from './team-runner';
+import { cacheKey } from './engine/task-features';
+import type { PreviousOutput } from './engine/task-context';
+import type { RoutingContext } from './engine/task-routing';
 
 /**
  * How an AgentTeam runs its tasks. `workflow` runs like `sequential`;
@@ -216,6 +229,17 @@ interface TeamTask {
   assignedAgent?: Agent;
 }
 
+/** True when `value` is an Agent-shaped object, i.e. something a task can run on. */
+function isAgentLike(value: unknown): value is Agent {
+  return !!value && typeof (value as Agent).start === 'function';
+}
+
+/** The raw text of a Task's stored result, in either of the shapes it can take. */
+function rawOfResult(result: TaskOutput | string | null | undefined): string | undefined {
+  if (result === null || result === undefined) return undefined;
+  return typeof result === 'string' ? result : result.raw;
+}
+
 function looksLikeJsonSchema(value: unknown): value is Record<string, any> {
   return !!value && typeof value === 'object'
     && ('type' in value || 'properties' in value || '$schema' in value || 'anyOf' in value || 'oneOf' in value);
@@ -319,6 +343,17 @@ export class AgentTeam {
   /** Python parity: auto_approve_plan. */
   readonly autoApprovePlan: boolean;
 
+  /**
+   * Variables published by a task `handler` during the run (Python
+   * `StepResult.variables`). They join the team's own for `{{placeholder}}`
+   * substitution and for evaluating a later task's `when` condition.
+   */
+  private runVariables: Record<string, unknown> = {};
+  /** Set when a handler returned `stopWorkflow`: the run ends after that task. */
+  private stopRequested = false;
+  /** The `content` the current run was started with, handed to task handlers. */
+  private runContent?: string;
+
   private readonly planningSettings: TeamPlanningSettings;
   /** Python parity: _current_plan. Set once a planning run has produced a plan. */
   private currentPlan?: Plan;
@@ -417,9 +452,12 @@ export class AgentTeam {
       }
     }
 
-    // Auto-generate tasks if not provided
+    // Auto-generate tasks if not provided. `loopOver` and `inputFile` fan a
+    // template task out into one task per item or row BEFORE the run starts, so
+    // batching, routing and the results array all see the expanded list
+    // (Python: Process._create_loop_subtasks / Workflows._run_step_loop).
     this.tasks = config.tasks
-      ? config.tasks.map((task, i) => this.normaliseTask(task, i))
+      ? this.expandTasks(config.tasks).map((task, i) => this.normaliseTask(task, i))
       : this.generateTasks();
 
     // The shared context starts from what the members are for, so a task that
@@ -467,12 +505,32 @@ export class AgentTeam {
   private defaultCompletionChecker = (_task: TeamTaskRef, agentOutput: string): boolean =>
     agentOutput.trim().length > 0;
 
+  /**
+   * Apply the engine's plan-time fan-out to every Task in the list: a task with
+   * an `inputFile` becomes one task per row, a task with `loopOver` becomes one
+   * task per item. Everything else passes through untouched.
+   */
+  private expandTasks(tasks: (string | Task)[]): (string | Task)[] {
+    const scope: Record<string, unknown> = { ...(this.variables ?? {}) };
+    const expanded: (string | Task)[] = [];
+    for (const task of tasks) {
+      if (typeof task === 'string') { expanded.push(task); continue; }
+      expanded.push(...expandTask(task, scope));
+    }
+    return expanded;
+  }
+
   /** Turn a prompt string or Task object into a TeamTask, applying `variables`. */
   private normaliseTask(task: string | Task, index: number): TeamTask {
     if (typeof task === 'string') {
       return { name: `task_${index + 1}`, prompt: this.substituteVariables(task), status: 'not started' };
     }
-    let prompt = this.substituteVariables(task.description ?? '');
+    // A Task's own `variables` are applied first -- they carry the bound
+    // `loopVar` of a `loopOver` fan-out child -- and the team's afterwards.
+    const described = Object.keys(task.variables ?? {}).length > 0
+      ? task.renderDescription()
+      : (task.description ?? '');
+    let prompt = this.substituteVariables(described);
     if (task.expected_output) {
       prompt += `\n\nExpected output: ${this.substituteVariables(task.expected_output)}`;
     }
@@ -515,10 +573,40 @@ export class AgentTeam {
    * Python parity: `run_task` -- the on_task_start hook, the retry loop bounded
    * by `max_retries` and driven by `completion_checker`, the shared-memory
    * context and write-back, and the on_task_complete hook.
+   *
+   * This is also where the per-task half of the execution engine
+   * (`agent/engine/`) is applied, in the order Python applies it: the `rerun`
+   * gate and the dependency-failure gate before anything runs, then the task's
+   * own start hook, its `handler` in place of the model, its memory and
+   * knowledge folded into the prompt, its `images` carried on the call, its
+   * cache consulted around the call, the engine's TaskOutput built from the
+   * answer, and its memory written back.
    */
   private async runTask(entry: TeamTask, agent: Agent, prompt: string, previousResult?: string): Promise<string> {
     const index = this.tasks.indexOf(entry);
-    entry.task?.markStarted();
+    const task = entry.task;
+
+    // `rerun`: a task that already completed is not executed again unless it
+    // asked to be (engine `needsRun`; Python TaskExecutionConfig.rerun).
+    if (task && !task.needsRun()) {
+      entry.status = 'completed';
+      entry.result = entry.result ?? rawOfResult(task.result) ?? '';
+      await Logger.debug(`Task ${entry.name}: already completed and rerun is off; skipping.`);
+      return entry.result;
+    }
+
+    // `skipOnFailure` / `onError`: a task whose dependency failed is failed with
+    // it unless it opted into running degraded
+    // (Python `Agents._should_continue_on_dep_failure`).
+    if (task && dependenciesFailed(task) && !task.continuesOnDependencyFailure()) {
+      entry.status = 'failed';
+      entry.result = '';
+      task.markFailed();
+      await Logger.debug(`Task ${entry.name}: a dependency failed and it did not opt into continuing; skipping.`);
+      return '';
+    }
+
+    task?.markStarted();
     entry.status = 'in progress';
 
     if (this.onTaskStart) {
@@ -528,58 +616,129 @@ export class AgentTeam {
         await Logger.error(`Error in onTaskStart callback: ${(error as Error)?.message ?? String(error)}`);
       }
     }
+    // `hooks`: the task's own onTaskStart fires after the team's.
+    if (task) await task.notifyStart(index < 0 ? 0 : index);
 
+    // `handler`: the task's own function runs INSTEAD of the model, and its
+    // return value is the task's result (Python `Workflows._run_step`).
+    let handled: string | undefined;
+    if (task?.handler) {
+      const outcome = await task.runHandler({
+        input: this.runContent,
+        previousResult,
+        currentStep: entry.name,
+        variables: { ...this.variables, ...this.runVariables },
+        task,
+      });
+      if (outcome) {
+        if (outcome.variables) Object.assign(this.runVariables, outcome.variables);
+        if (outcome.stop) this.stopRequested = true;
+        if (!outcome.success) {
+          entry.status = 'failed';
+          entry.result = '';
+          task.markFailed();
+          await Logger.error(`Task ${entry.name}: handler failed: ${outcome.error ?? 'unknown error'}`);
+          return '';
+        }
+        handled = outcome.output ?? '';
+      }
+    }
+
+    // `memory` / `knowledge`: what the task itself recalls and knows is folded
+    // into the prompt (Python `_prepare_task_prompt`'s memory branch).
+    let finalPrompt = prompt;
+    if (task) {
+      const recalled = await task.memoryContext(prompt);
+      if (recalled) finalPrompt = `${finalPrompt}\n\n${recalled}`;
+      const known = await task.knowledgeContext(prompt);
+      if (known) finalPrompt = `${finalPrompt}\n\n${known}`;
+    }
     // Shared memory is context, not history: what it recalls is appended to the
     // prompt exactly as Python appends it, as bare bullet lines.
-    let finalPrompt = prompt;
     if (this.sharedMemory) {
       const recalled = await this.sharedMemory.recall(prompt);
-      if (recalled) finalPrompt = `${prompt}\n\n${recalled}`;
+      if (recalled) finalPrompt = `${finalPrompt}\n\n${recalled}`;
     }
+
+    // `images`: the model call carries the pictures alongside the text, as the
+    // OpenAI multimodal content list (Python `get_multimodal_message`).
+    let options = entry.options;
+    if (task && task.images.length > 0) {
+      options = { ...(options ?? {}), attachments: [...task.images] };
+    }
+
+    // `caching`: a repeat of the same agent + prompt is answered from the task's
+    // own cache instead of the model.
+    const key = task?.cache ? cacheKey(agent.name, finalPrompt) : undefined;
 
     let result = '';
     let completed = false;
-    const attempts = Math.max(1, this.maxRetries);
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      try {
-        result = await agent.start(finalPrompt, previousResult, undefined, undefined, undefined, entry.options);
-      } catch (error) {
-        entry.status = 'failed';
-        entry.task?.markFailed();
-        throw error;
+    const cached = key && task?.cache ? task.cache.get(key) : undefined;
+    const passes = (raw: string): boolean => this.completionChecker(this.refFor(entry, agent), raw);
+
+    if (handled !== undefined) {
+      // A handler already answered. There is nothing to retry: re-running a
+      // deterministic function would produce the same answer.
+      result = handled;
+      completed = passes(result);
+    } else if (cached !== undefined) {
+      // `caching`: this agent has answered this exact prompt before. The lookup
+      // is outside the retry loop deliberately -- serving the cached answer to a
+      // retry would make the retry pointless.
+      await Logger.debug(`Task ${entry.name}: answered from the task's cache.`);
+      result = cached;
+      completed = passes(result);
+    } else {
+      const attempts = Math.max(1, this.maxRetries);
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+          result = await agent.start(finalPrompt, previousResult, undefined, undefined, undefined, options);
+        } catch (error) {
+          entry.status = 'failed';
+          task?.markFailed();
+          throw error;
+        }
+        if (passes(result)) {
+          completed = true;
+          break;
+        }
+        await Logger.debug(`Task ${entry.name}: completion check failed (attempt ${attempt + 1}/${attempts})`);
+        // `retryDelay`: Python waits min(delay * 2**attempt, 300) seconds before
+        // the next attempt. The default of 0 never waits, which is what makes
+        // the option observable at all.
+        if (task && attempt < attempts - 1) await task.waitBeforeRetry(attempt);
       }
-      if (this.completionChecker(this.refFor(entry, agent), result)) {
-        completed = true;
-        break;
-      }
-      await Logger.debug(`Task ${entry.name}: completion check failed (attempt ${attempt + 1}/${attempts})`);
+      if (completed && key && task?.cache) task.cache.set(key, result);
     }
 
     entry.result = result;
     entry.status = completed ? 'completed' : 'failed';
 
-    const output: TaskOutput = {
-      description: entry.task?.description ?? entry.prompt,
-      raw: result,
-      agent: agent.name,
-      outputFormat: 'RAW',
-    };
-    if (entry.options?.outputJson || entry.options?.outputPydantic) {
+    // `memory` / `failOnMemoryError`: the answer goes into the task's own store.
+    // A store that throws is a degraded run, unless the task asked for it to be
+    // a failed one.
+    if (task) {
       try {
-        const parsed = JSON.parse(result);
-        if (entry.options.outputJson) { output.outputJson = parsed; output.outputFormat = 'JSON'; }
-        else { output.outputPydantic = parsed; output.outputFormat = 'Pydantic'; }
-      } catch {
-        // Not JSON: the raw text stands.
+        await task.storeInMemory(result, agent.name);
+      } catch (error) {
+        entry.status = 'failed';
+        task.markFailed();
+        throw error;
       }
     }
 
-    if (entry.task) {
+    // `outputPydantic` / `outputConfig`: the engine builds the TaskOutput and
+    // parses the structured payload the task asked for.
+    const output: TaskOutput = task
+      ? task.buildOutput(result, agent.name)
+      : this.rawOutput(entry, result, agent.name);
+
+    if (task) {
       if (completed) {
-        entry.task.markCompleted(output);
-        await entry.task.notifyComplete(output);
+        task.markCompleted(output);
+        await task.notifyComplete(output);
       } else {
-        entry.task.markFailed();
+        task.markFailed();
       }
     }
 
@@ -600,10 +759,34 @@ export class AgentTeam {
     return result;
   }
 
+  /**
+   * The TaskOutput for an entry that came from a prompt string rather than a
+   * Task: there is no Task to ask, so the shape the team always built stands.
+   */
+  private rawOutput(entry: TeamTask, result: string, agentName: string): TaskOutput {
+    const output: TaskOutput = {
+      description: entry.prompt,
+      raw: result,
+      agent: agentName,
+      outputFormat: 'RAW',
+    };
+    if (entry.options?.outputJson || entry.options?.outputPydantic) {
+      try {
+        const parsed = JSON.parse(result);
+        if (entry.options.outputJson) { output.outputJson = parsed; output.outputFormat = 'JSON'; }
+        else { output.outputPydantic = parsed; output.outputFormat = 'Pydantic'; }
+      } catch {
+        // Not JSON: the raw text stands.
+      }
+    }
+    return output;
+  }
+
   private substituteVariables(text: string): string {
-    if (!this.variables) return text;
+    const scope: Record<string, unknown> = { ...this.variables, ...this.runVariables };
+    if (Object.keys(scope).length === 0) return text;
     return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (match, key: string) => {
-      const value = this.variables![key];
+      const value = scope[key];
       return value === undefined ? match : String(value);
     });
   }
@@ -617,9 +800,72 @@ export class AgentTeam {
     });
   }
 
-  /** The agent that runs task `i`: a manager's pick, the Task's own agent, else the i-th (or last) member. */
-  private agentFor(task: TeamTask, index: number): Agent {
-    return task.assignedAgent ?? task.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
+  /**
+   * The agent that runs task `i`: a manager's pick, the Task's own agent, an
+   * agent built from its `agentConfig`, else the i-th (or last) member.
+   *
+   * Python parity: `Agents._create_agent_from_config` -- a task that names no
+   * agent but carries an `agentConfig` gets one constructed from it, and the
+   * constructed agent is assigned back onto the task.
+   */
+  private agentFor(entry: TeamTask, index: number): Agent {
+    if (entry.assignedAgent) return entry.assignedAgent;
+    const fallback = entry.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
+    if (!entry.task) return fallback;
+    // `agentConfig`: resolveAgent returns the task's own agent when it has one,
+    // builds one from `agentConfig` when it does not, and otherwise hands back
+    // the default -- so this covers all three cases in one call.
+    const resolved = entry.task.resolveAgent({
+      defaultAgent: fallback,
+      defaultLlm: this.llm,
+      memory: this.getSharedMemory(),
+    });
+    return isAgentLike(resolved) ? resolved : fallback;
+  }
+
+  /**
+   * Run the task at `index`, assembling its prompt first.
+   *
+   * @param isFirst - the first task to execute in this run gets no "input so
+   *   far" block, exactly as the plain sequential loop always behaved.
+   */
+  private async runOne(
+    index: number,
+    isFirst: boolean,
+    content: string | undefined,
+    previousResult: string | undefined,
+    previousOutputs: readonly PreviousOutput[],
+  ): Promise<string> {
+    const entry = this.tasks[index];
+    const agent = this.agentFor(entry, index);
+    await Logger.debug(`Running agent ${index + 1}: ${agent?.name}`);
+    await Logger.debug(`Task: ${entry.prompt}`);
+    const prompt = this.promptFor(entry, isFirst, content, previousResult, previousOutputs);
+    return this.runTask(entry, agent, prompt, previousResult);
+  }
+
+  /**
+   * The prompt one task runs.
+   *
+   * `retainFullContext` is the switch: with it the upstream block is the
+   * engine's, which folds in EVERY earlier result; without it the team's
+   * long-standing "here is the input" line carries only the most recent one
+   * (Python `Process._build_task_context`).
+   */
+  private promptFor(
+    entry: TeamTask,
+    isFirst: boolean,
+    content?: string,
+    previousResult?: string,
+    previousOutputs: readonly PreviousOutput[] = [],
+  ): string {
+    const base = this.withContent(this.substituteVariables(entry.prompt), content);
+    if (entry.task?.retainFullContext) {
+      const block = entry.task.buildContext(previousOutputs);
+      return block ? `${base}\n${block}` : base;
+    }
+    const input = this.inputSoFar(previousResult);
+    return isFirst || !input ? base : `${base}\n\nHere is the input: ${input}`;
   }
 
   /** `content` (Python parity) is added to every task's context. */
@@ -641,28 +887,87 @@ export class AgentTeam {
     return produced.length > 0 ? produced.join('\n\n') : undefined;
   }
 
+  /**
+   * Run the tasks in order.
+   *
+   * `asyncExecution` is what makes this more than a for-loop: the engine plans
+   * the list into steps, collapsing a run of async tasks into one parallel
+   * batch and flushing that batch before a synchronous task or an in-batch
+   * dependency (Python `Agents.arun_all_tasks` / `_depends_on_pending`).
+   */
   private async executeSequential(content?: string): Promise<string[]> {
-    const results: string[] = [];
+    const previousOutputs: PreviousOutput[] = [];
     let previousResult: string | undefined;
+    let isFirst = true;
 
-    for (let i = 0; i < this.tasks.length; i++) {
-      const task = this.tasks[i];
-      const agent = this.agentFor(task, i);
-
-      await Logger.debug(`Running agent ${i + 1}: ${agent.name}`);
-      await Logger.debug(`Task: ${task.prompt}`);
-
-      // For first agent, use task directly
-      // For subsequent agents, append the input so far to their instructions
-      const base = this.withContent(task.prompt, content);
-      const input = this.inputSoFar(previousResult);
-      const prompt = i === 0 || !input ? base : `${base}\n\nHere is the input: ${input}`;
-      const result = await this.runTask(task, agent, prompt, previousResult);
-      results.push(result);
-      previousResult = result;
+    for (const step of planRunSteps(this.tasks)) {
+      if (this.stopRequested) break;
+      if (step.parallel && step.indices.length > 1) {
+        // Every task in a batch sees the same upstream state: they are running
+        // at the same time, so none of them can see another's answer.
+        const carried = previousResult;
+        const snapshot = [...previousOutputs];
+        const first = isFirst;
+        const raws = await Promise.all(
+          step.indices.map((index) => this.runOne(index, first, content, carried, snapshot)),
+        );
+        step.indices.forEach((index, k) => previousOutputs.push({ name: this.tasks[index].name, raw: raws[k] }));
+        previousResult = raws[raws.length - 1];
+      } else {
+        const index = step.indices[0];
+        const raw = await this.runOne(index, isFirst, content, previousResult, previousOutputs);
+        previousOutputs.push({ name: this.tasks[index].name, raw });
+        previousResult = raw;
+      }
+      isFirst = false;
     }
 
-    return results;
+    return this.tasks.map((task) => task.result ?? '');
+  }
+
+  /**
+   * Follow the workflow graph instead of the list order.
+   *
+   * Python parity: `process.workflow()` -- `isStart` (or the task nothing points
+   * at) is the entry point, and each finished task's `condition`/`routing`
+   * table, `when`/`thenTask`/`elseTask` pair or `nextTasks` picks the next one.
+   * `exit`, an unroutable name, or no route at all ends the run, and `maxIter`
+   * bounds it so a cycle cannot spin forever.
+   */
+  private async executeWorkflow(content?: string): Promise<string[]> {
+    const byName = indexByName(this.tasks);
+    const previousOutputs: PreviousOutput[] = [];
+    let previousResult: string | undefined;
+    let isFirst = true;
+    let current: number | undefined = startIndexOf(this.tasks);
+
+    for (let iteration = 0; current !== undefined && iteration < this.maxIter; iteration++) {
+      const entry = this.tasks[current];
+      const raw = await this.runOne(current, isFirst, content, previousResult, previousOutputs);
+      isFirst = false;
+      previousOutputs.push({ name: entry.name, raw });
+      previousResult = raw;
+      if (this.stopRequested) break;
+
+      const task = entry.task;
+      if (!task) break;
+      const context: RoutingContext = {
+        ...this.variables,
+        ...this.runVariables,
+        previous_output: raw,
+        decision: decisionFrom(raw),
+      };
+      const route = task.routeAfter(context);
+      if (route.kind !== 'task') break;
+      const next = byName.get(route.name);
+      if (next === undefined) {
+        await Logger.warn(`Task ${entry.name} routed to "${route.name}", which is not a task on this team.`);
+        break;
+      }
+      current = next;
+    }
+
+    return this.tasks.map((task) => task.result ?? '');
   }
 
   /**
@@ -691,12 +996,13 @@ export class AgentTeam {
         if (picked) this.tasks[taskId].assignedAgent = picked;
       },
       runTask: async (taskId) => {
-        const entry = this.tasks[taskId];
-        const agent = this.agentFor(entry, taskId);
-        const base = this.withContent(entry.prompt, content);
-        const input = this.inputSoFar(taskId > 0 ? this.tasks[taskId - 1].result : undefined);
-        const prompt = input ? `${base}\n\nHere is the input: ${input}` : base;
-        await this.runTask(entry, agent, prompt);
+        const previous = taskId > 0 ? this.tasks[taskId - 1].result : undefined;
+        const produced = this.tasks
+          .filter((entry) => entry.result !== undefined)
+          .map((entry) => ({ name: entry.name, raw: entry.result as string }));
+        // Never "first": the manager's pick is handed whatever the team has
+        // produced so far, as it always was.
+        await this.runOne(taskId, false, content, previous, produced);
       },
     });
 
@@ -776,10 +1082,17 @@ export class AgentTeam {
 
     // Fresh run: clear stale status/results so a reused team does not skip
     // already-"completed" tasks, and scope the shared context to this run so a
-    // task is handed only what this run has produced.
+    // task is handed only what this run has produced. Per-run engine state --
+    // the variables a handler publishes and the stop flag -- starts clean too,
+    // and `nextTasks` edges become each task's `previousTasks` before anything
+    // runs (Python does this at the top of process.workflow()).
     const savedTasks = this.tasks;
     this.resetTaskState();
     this.contextRunOffset = this.contextManager?.getByRole('assistant').length ?? 0;
+    this.runContent = content;
+    this.runVariables = {};
+    this.stopRequested = false;
+    linkEntries(this.tasks);
 
     try {
       if (this.planningSettings.enabled) {
@@ -790,13 +1103,17 @@ export class AgentTeam {
       let results: string[];
 
       if (this.process === 'parallel') {
-        // Run all tasks in parallel
-        const promises = this.tasks.map((task, i) => this.runTask(task, this.agentFor(task, i), this.withContent(task.prompt, content)));
-        results = await Promise.all(promises);
+        // Run all tasks in parallel: none of them can see another's answer, so
+        // every one is handed the run's starting state.
+        results = await Promise.all(this.tasks.map((_, i) => this.runOne(i, true, content, undefined, [])));
       } else if (this.process === 'hierarchical') {
         results = await this.executeHierarchical(content);
+      } else if (this.process === 'workflow' && declaresRouting(this.tasks)) {
+        // `workflow` follows the graph only when the tasks actually declare one;
+        // a workflow team whose tasks name no edges runs in order, as before.
+        results = await this.executeWorkflow(content);
       } else {
-        // sequential (default) and workflow run in order
+        // sequential (default), and workflow over a list with no edges
         results = await this.executeSequential(content);
       }
 

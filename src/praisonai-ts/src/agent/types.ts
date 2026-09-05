@@ -476,7 +476,11 @@ export class Task {
         for (const option of ENGINE_LEVEL_OPTIONS) {
             if (config[option] !== undefined) notYetHonoured('Task', option);
         }
-        if (config.taskType !== undefined && config.taskType !== 'task') notYetHonoured('Task', 'taskType');
+        // 'decision' is honoured: the runner reads it to drive the routing table
+        // (see team-runner.ts). Anything else still has no meaning here.
+        if (config.taskType !== undefined && config.taskType !== 'task' && config.taskType !== 'decision') {
+            notYetHonoured('Task', 'taskType');
+        }
         if (typeof this.guardrail === 'string') {
             notYetHonoured('Task', 'guardrails', 'String guardrails need an LLM judge; callable guardrails run via runGuardrail().');
         }

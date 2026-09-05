@@ -95,7 +95,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:74` (ctor `src/praisonai-ts/src/agent/team.ts:332`)
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:87` (ctor `src/praisonai-ts/src/agent/team.ts:373`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
 
@@ -130,7 +130,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 ### `Task.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:48`
-- TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:322`)
+- TypeScript: `src/praisonai-ts/src/agent/types.ts:115` (ctor `src/praisonai-ts/src/agent/types.ts:379`)
 - Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 62
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -213,7 +213,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3101`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3338`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3344`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -241,7 +241,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:744`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:1072`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
