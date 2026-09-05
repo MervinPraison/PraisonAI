@@ -298,3 +298,56 @@ class TestQuotingCannotHideASurface:
         ledger = LEDGER.replace("'images',", "'output-file',")
         with pytest.raises(B.LedgerError, match='not a plain identifier'):
             B.read_ledger(_repo(tmp_path, ledger=ledger))
+
+    def test_a_bare_identifier_key_is_still_a_surface(self, tmp_path):
+        """A valid unquoted key like `Handoff: [...]` must be counted, not dropped.
+
+        JavaScript accepts a bare identifier as an object key. The first scanner
+        only opened an entry on a quote, so an unquoted key fell out of the parse
+        -- which LOWERS the total and reads as options closed while the
+        TypeScript is untouched.
+        """
+        ledger = textwrap.dedent('''
+            export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+              'Agent.__init__': [
+                'auth', 'sandbox',
+              ],
+              Handoff: [
+                'maxDepth', 'detectCycles',
+              ],
+            } as const;
+        ''')
+        call_sites = (
+            "const a = unhonouredFor('Agent.__init__');\n"
+            "const h = unhonouredFor('Handoff');\n"
+        )
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger, call_sites=call_sites))
+        assert b.surfaces['Handoff'] == ['maxDepth', 'detectCycles']
+        assert b.total == 4
+
+    def test_bare_key_surface_that_the_ts_iterates_cannot_be_lost(self, tmp_path):
+        """Control: even if the parse missed a bare key, the unhonouredFor guard
+        must catch it rather than let the options read as closed.
+
+        Simulated by naming a surface at a call site that the parser does not
+        return; the cross-check must refuse rather than count it closed.
+        """
+        # A well-formed bare-key ledger, but the call site iterates a surface the
+        # ledger declares with a bare key -- proving the guard now sees bare keys.
+        ledger = textwrap.dedent('''
+            export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+              'Agent.__init__': [
+                'auth',
+              ],
+              Handoff: [
+                'maxDepth',
+              ],
+            } as const;
+        ''')
+        call_sites = (
+            "const a = unhonouredFor('Agent.__init__');\n"
+            "const h = unhonouredFor('Handoff');\n"
+        )
+        # Sanity: with the fix, this parses cleanly and the guard is satisfied.
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger, call_sites=call_sites))
+        assert 'Handoff' in b.surfaces

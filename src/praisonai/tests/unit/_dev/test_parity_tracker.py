@@ -1122,6 +1122,85 @@ class TestNamedReexportMustResolve:
             )
             assert 'Deep' in TypeScriptFeatureExtractor(root).extract().get_export_names()
 
+    def test_nested_named_reexport_of_a_real_symbol_resolves(self):
+        """Control: a name reaching index.ts through a barrel's `export { X } from`."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Deep } from './agent';\n",
+                ts_files={
+                    "agent/index.ts": "export { Deep } from './deep';\n",
+                    "agent/deep.ts": "export class Deep {}\n",
+                },
+                autostub_reexports=False,
+            )
+            assert 'Deep' in TypeScriptFeatureExtractor(root).extract().get_export_names()
+
+    def test_nested_named_reexport_of_a_phantom_symbol_is_dropped(self):
+        """A barrel that re-exports a name from a module that does not exist must
+        not validate that name. Before the fix, ``export { Phantom } from
+        './missing'`` inside a barrel was trusted by source name alone, so an
+        uncompilable phantom re-export reached parity through one extra hop.
+        """
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Phantom } from './agent';\n",
+                ts_files={
+                    # The barrel resolves, but the module it re-exports from does not.
+                    "agent/index.ts": "export { Phantom } from './no-such-module';\n",
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Phantom' not in names
+
+    def test_nested_named_reexport_of_a_symbol_the_target_lacks_is_dropped(self):
+        """The barrel and its target both resolve, but the target does not declare
+        the named symbol -- so it cannot compile and is not parity."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Missing } from './agent';\n",
+                ts_files={
+                    "agent/index.ts": "export { Missing } from './deep';\n",
+                    "agent/deep.ts": "export class SomethingElse {}\n",
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Missing' not in names
+
+    def test_phantom_nested_reexport_does_not_close_a_gap(self):
+        """Generator level: a phantom nested re-export leaves the row TODO."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent', 'TotallyNewCapability'),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    "export { TotallyNewCapability } from './barrel';\n"
+                ),
+                ts_files={
+                    "agent/index.ts": "export class Agent {}\n",
+                    "barrel/index.ts": "export { TotallyNewCapability } from './nope';\n",
+                },
+                autostub_reexports=False,
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            rows = all_rows(tracker)
+            assert rows['Agent']['status'] == 'DONE'
+            assert rows['TotallyNewCapability']['status'] == 'TODO'
+            assert tracker['summary']['gapCount'] == 1
+
     def test_phantom_reexport_does_not_close_a_gap(self):
         """Generator level: the row stays TODO and gapCount stays 1."""
         from praisonai._dev.parity.generator import ParityTrackerGenerator

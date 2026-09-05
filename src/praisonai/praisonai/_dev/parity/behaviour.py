@@ -84,9 +84,20 @@ _OPTION_RE = re.compile(r"([\'\"`])([A-Za-z_][A-Za-z0-9_]*)\1")
 _ANY_STRING_RE = re.compile(r"([\'\"`])((?:[^\\\n]|\\.)*?)\1")
 # An independent second opinion on which surfaces the literal declares, used
 # only to cross-check the scanner below. Deliberately not the same technique.
-_KEY_RE = re.compile(r"([\'\"`])([^\'\"`\n]+)\1\s*:\s*\[")
-# The start of one entry, matched at brace depth 0 by the scanner.
-_ENTRY_RE = re.compile(r"([\'\"`])([^\'\"`\n]+)\1\s*:\s*")
+# A JavaScript object key may be quoted OR a bare identifier: `Handoff: [...]`
+# is as valid as `'Handoff': [...]`. Recognising only the quoted form let a bare
+# key drop out of the parse -- which LOWERS the total and reads as progress.
+_KEY_RE = re.compile(
+    r"(?:([\'\"`])([^\'\"`\n]+)\1|([A-Za-z_$][\w$]*))\s*:\s*\["
+)
+# The start of one entry, matched at brace depth 0 by the scanner. Group 2 is a
+# quoted key; group 3 is a bare identifier key.
+_ENTRY_RE = re.compile(
+    r"(?:([\'\"`])([^\'\"`\n]+)\1|([A-Za-z_$][\w$]*))\s*:\s*"
+)
+# A bare identifier at the top level of the literal, where the scanner meets a
+# key that is not quoted.
+_BARE_KEY_RE = re.compile(r"[A-Za-z_$][\w$]*")
 
 
 @dataclass
@@ -209,44 +220,62 @@ def _parse_entries(body: str) -> Dict[str, List[str]]:
         if ch in _QUOTE and depth != 0:
             i = _end_of_string(body, i) + 1
             continue
-        if ch in _QUOTE:
-            match = _ENTRY_RE.match(body, i)
-            if not match:
-                raise LedgerError(
-                    f'{LEDGER}: a quoted string at the top level of UNHONOURED_OPTIONS '
-                    f'near offset {i} is not a `\'Surface\': [...]` entry'
-                )
-            key = match.group(2)
-            value_at = match.end()
-            if value_at >= n or body[value_at] != '[':
-                raise LedgerError(
-                    f"{LEDGER}: the value of '{key}' is not a list of option names. "
-                    'Every entry must be `\'Surface\': [ ... ]` so the options can be counted.'
-                )
-            close = _matching_bracket(body, value_at)
-            if key in surfaces:
-                raise LedgerError(
-                    f"{LEDGER}: surface '{key}' is declared twice; the second wins at "
-                    'runtime and the first is uncounted. Merge them.'
-                )
-            inner = body[value_at + 1:close]
-            options = [m.group(2) for m in _OPTION_RE.finditer(inner)]
-            if len(options) != len(_ANY_STRING_RE.findall(inner)):
-                raise LedgerError(
-                    f"{LEDGER}: '{key}' lists a name that is not a plain identifier, so it "
-                    'would be dropped from the count. Every option must be quoted and match '
-                    '[A-Za-z_][A-Za-z0-9_]*.'
-                )
-            surfaces[key] = options
-            i = close + 1
+        # At the top level a key opens an entry -- quoted (`'Surface':`) or a
+        # bare JavaScript identifier (`Handoff:`). Both are valid and both must
+        # be counted; a bare key that fell through would LOWER the total.
+        if depth == 0 and (ch in _QUOTE or (ch.isalpha() or ch in '_$')):
+            i = _consume_entry(body, i, surfaces)
             continue
         i += 1
     return surfaces
 
 
+def _consume_entry(body: str, i: int, surfaces: Dict[str, List[str]]) -> int:
+    """Read one top-level `Surface: [...]` entry starting at ``i``; return the
+    index just past its closing bracket.
+
+    ``Surface`` may be quoted or a bare identifier. Anything at the top level
+    that is not such an entry raises, so a stray token can never quietly drop a
+    surface from the count.
+    """
+    n = len(body)
+    match = _ENTRY_RE.match(body, i)
+    if not match:
+        raise LedgerError(
+            f'{LEDGER}: a token at the top level of UNHONOURED_OPTIONS near offset '
+            f"{i} is not a `Surface: [...]` entry"
+        )
+    key = match.group(2) if match.group(2) is not None else match.group(3)
+    value_at = match.end()
+    if value_at >= n or body[value_at] != '[':
+        raise LedgerError(
+            f"{LEDGER}: the value of '{key}' is not a list of option names. "
+            'Every entry must be `Surface: [ ... ]` so the options can be counted.'
+        )
+    close = _matching_bracket(body, value_at)
+    if key in surfaces:
+        raise LedgerError(
+            f"{LEDGER}: surface '{key}' is declared twice; the second wins at "
+            'runtime and the first is uncounted. Merge them.'
+        )
+    inner = body[value_at + 1:close]
+    options = [m.group(2) for m in _OPTION_RE.finditer(inner)]
+    if len(options) != len(_ANY_STRING_RE.findall(inner)):
+        raise LedgerError(
+            f"{LEDGER}: '{key}' lists a name that is not a plain identifier, so it "
+            'would be dropped from the count. Every option must be quoted and match '
+            '[A-Za-z_][A-Za-z0-9_]*.'
+        )
+    surfaces[key] = options
+    return close + 1
+
+
 def _keys_in_source(body: str) -> List[str]:
     """A second, independent reading of which surfaces the literal declares."""
-    return [m.group(2) for m in _KEY_RE.finditer(body)]
+    return [
+        m.group(2) if m.group(2) is not None else m.group(3)
+        for m in _KEY_RE.finditer(body)
+    ]
 
 
 def _verify_parse(body: str, surfaces: Dict[str, List[str]], iterated: Iterable[str]) -> None:
@@ -277,7 +306,12 @@ def _verify_parse(body: str, surfaces: Dict[str, List[str]], iterated: Iterable[
     for surface in sorted(set(iterated)):
         if surface in surfaces:
             continue
-        if re.search(r'([\'"`])' + re.escape(surface) + r'\1\s*:', body):
+        # A surface named at a `unhonouredFor('X')` call site may be declared in
+        # the ledger with a quoted OR a bare key; both must be searched, or a
+        # bare-key surface that dropped from the parse would slip through here.
+        quoted = r'([\'"`])' + re.escape(surface) + r'\1\s*:'
+        bare = r'(?<![\w$])' + re.escape(surface) + r'\s*:' if re.fullmatch(r'[A-Za-z_$][\w$]*', surface) else None
+        if re.search(quoted, body) or (bare and re.search(bare, body)):
             raise LedgerError(
                 f"{LEDGER} still declares '{surface}', which the TypeScript iterates with "
                 f"unhonouredFor('{surface}'), but the parse did not see it. That would count "

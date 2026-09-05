@@ -462,15 +462,22 @@ class TypeScriptFeatureExtractor:
             keyword = re.sub(r'\s+', ' ', match.group(1))
             add(match.group(2), keyword in _TYPE_KEYWORDS)
 
-        # Named re-exports from other modules (names are known, no recursion)
+        # Named re-exports from other modules. A binding here is only real if
+        # the module it names resolves AND provides the source symbol -- exactly
+        # the rule the root index applies. Without this, `export { Foo } from
+        # './barrel'` re-surfaced through a star would validate a phantom Foo
+        # even when the barrel re-exports it from a module that does not exist.
         for match in _code_matches(_NAMED_REEXPORT, content, spans):
-            for name, is_type in self._parse_export_entries(match.group(1)):
-                add(name, is_type)
+            self._add_nested_reexport(
+                add, module_file.parent, match.group(2), match.group(1),
+                visited, depth, force_type=False)
         for match in _code_matches(_TYPE_REEXPORT, content, spans):
-            for name, _ in self._parse_export_entries(match.group(1)):
-                add(name, True)
+            self._add_nested_reexport(
+                add, module_file.parent, match.group(2), match.group(1),
+                visited, depth, force_type=True)
         for match in _code_matches(_STAR_AS_REEXPORT, content, spans):
-            add(match.group(1), False)
+            if self._resolve_module(module_file.parent, match.group(2)) is not None:
+                add(match.group(1), False)
 
         # Local export lists: export { a, b as c }
         for match in _code_matches(_LOCAL_EXPORT_LIST, content, spans):
@@ -487,6 +494,34 @@ class TypeScriptFeatureExtractor:
                 add(name, is_type)
 
         return found
+
+    def _add_nested_reexport(
+        self,
+        add,
+        base_dir: Path,
+        spec: str,
+        names_str: str,
+        visited: Set[Path],
+        depth: int,
+        force_type: bool,
+    ) -> None:
+        """Add a nested ``export { .. } from spec`` only for bindings that exist.
+
+        The named symbols are validated against what ``spec`` provides, resolved
+        recursively so a chain of barrels is followed to the module that really
+        declares each name. An unresolvable ``spec`` or a binding the target does
+        not provide is dropped: neither can compile, so neither is parity.
+        """
+        resolved = self._resolve_module(base_dir, spec)
+        if resolved is None:
+            return
+        provided = {
+            name for name, _ in
+            self._collect_star_exports(resolved, set(visited), depth + 1)
+        }
+        for source_name, local_name, is_type in self._parse_export_bindings(names_str):
+            if source_name in provided:
+                add(local_name, force_type or is_type)
 
     # --- helpers -------------------------------------------------------------
 
