@@ -342,7 +342,7 @@ version = {attr = "praisonai.version.__version__"}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonai*"]
-exclude = ["praisonai_code*", "praisonai_bot*", "praisonai.persistence.tests*"]
+exclude = ["praisonai_code*", "praisonai_bot*", "praisonai.persistence.tests*", "praisonai._dev.parity*"]
 
 [tool.setuptools.package-data]
 "praisonai.cli.configuration" = ["*.json"]
