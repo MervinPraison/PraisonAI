@@ -1732,6 +1732,12 @@ Write the complete compiled report:"""
                         normalize_mcp = getattr(self, "_normalize_mcp_result", None)
                         if normalize_mcp is not None:
                             mcp_result = normalize_mcp(mcp_result)
+                        # Tool-result guardrail gate — the native path applies this
+                        # below, but the MCP branch returns early, so gate here too
+                        # or successful MCP output would bypass validation entirely.
+                        apply_result_guardrails = getattr(self, "_apply_tool_result_guardrails", None)
+                        if apply_result_guardrails is not None:
+                            mcp_result = apply_result_guardrails(function_name, mcp_result)
                         return mcp_result
 
             # Try to find the function in the override tools list first, then agent's tools list.

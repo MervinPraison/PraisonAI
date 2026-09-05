@@ -124,3 +124,60 @@ class TestAsyncExecution:
         a = _agent(NoSecretsGuardrail())
         res = asyncio.run(a.execute_tool_async("run_shell", {"cmd": "env"}))
         assert isinstance(res, dict) and res.get("guardrail_denied") is True
+
+
+class TestErrorShapedResultsAreValidated:
+    """A tool-authored ``{"error": ...}`` is still untrusted content and must be
+    validated — only framework-issued denial markers skip re-inspection."""
+
+    def test_error_dict_with_secret_is_still_validated(self):
+        a = _agent(NoSecretsGuardrail())
+        result = {"error": "partial failure", "content": "API_KEY=sk-leaked-secret-123"}
+        out = a._apply_tool_result_guardrails("crawl", result)
+        assert isinstance(out, dict) and out.get("guardrail_denied") is True
+
+    def test_error_dict_is_redacted(self):
+        a = _agent(RedactingGuardrail())
+        result = {"error": "partial", "content": "API_KEY=sk-leaked-secret-123"}
+        out = a._apply_tool_result_guardrails("crawl", result)
+        assert "[REDACTED]" in str(out)
+        assert "sk-leaked-secret-123" not in str(out)
+
+    def test_framework_denial_dict_passes_through_untouched(self):
+        a = _agent(NoSecretsGuardrail())
+        denied = {"error": "denied by guardrail", "guardrail_denied": True,
+                  "leak": "sk-leaked-secret-123"}
+        out = a._apply_tool_result_guardrails("run_shell", denied)
+        assert out is denied
+
+    def test_policy_denial_dict_passes_through_untouched(self):
+        a = _agent(NoSecretsGuardrail())
+        denied = {"error": "denied by policy", "policy_denied": True}
+        out = a._apply_tool_result_guardrails("run_shell", denied)
+        assert out is denied
+
+
+class TestAsyncMCPResultIsValidated:
+    """The async MCP branch returns early — a successful MCP result must still be
+    gated there, or configured tool-result guardrails would never see it."""
+
+    def test_async_mcp_secret_is_rejected(self):
+        a = _agent(NoSecretsGuardrail())
+
+        def fake_resolve(function_name, arguments):
+            return True, "API_KEY=sk-leaked-secret-123"
+
+        a._resolve_mcp_tool_result = fake_resolve
+        res = asyncio.run(a.execute_tool_async("mcp_tool", {}))
+        assert isinstance(res, dict) and res.get("guardrail_denied") is True
+
+    def test_async_mcp_secret_is_redacted(self):
+        a = _agent(RedactingGuardrail())
+
+        def fake_resolve(function_name, arguments):
+            return True, "API_KEY=sk-leaked-secret-123"
+
+        a._resolve_mcp_tool_result = fake_resolve
+        res = asyncio.run(a.execute_tool_async("mcp_tool", {}))
+        assert "[REDACTED]" in str(res)
+        assert "sk-leaked-secret-123" not in str(res)

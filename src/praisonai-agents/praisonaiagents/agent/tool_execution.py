@@ -2585,7 +2585,19 @@ class ToolExecutionMixin:
         guardrails = getattr(self, "_tool_result_guardrails", None)
         if not guardrails:
             return result
-        if isinstance(result, dict) and result.get("error"):
+        # Only skip results the framework itself already gated/denied — those
+        # carry an explicit control marker and were never real tool output. An
+        # ordinary tool-authored ``{"error": ...}`` (a crawl result with both
+        # ``error`` and ``content``, a shell tool's recoverable failure) is still
+        # untrusted content that can carry a secret or an injection payload, so
+        # it MUST be validated like any other result.
+        if isinstance(result, dict) and (
+            result.get("guardrail_denied")
+            or result.get("policy_denied")
+            or result.get("approval_denied")
+            or result.get("permission_denied")
+            or result.get("approval_error")
+        ):
             return result
         for guardrail in guardrails:
             validate = getattr(guardrail, "validate_tool_result", None)
