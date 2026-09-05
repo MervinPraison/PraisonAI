@@ -131,7 +131,17 @@ def gateway_start(
     preflight: bool = typer.Option(
         True,
         "--preflight/--no-preflight",
-        help="Validate channel credentials before starting (fail fast on bad tokens)",
+        help="Validate channel credentials before starting. A channel with a bad "
+        "token is reported and skipped (parked degraded, auto-recovers); the "
+        "gateway still serves every healthy channel. Use --no-preflight to skip "
+        "probing entirely, or --strict-preflight to abort on any bad token",
+    ),
+    strict_preflight: Optional[bool] = typer.Option(
+        None,
+        "--strict-preflight/--no-strict-preflight",
+        help="Fail fast and abort the whole gateway if ANY channel credential is "
+        "bad, instead of isolating that one channel as degraded. Defaults to the "
+        "config's gateway.preflight.strict (off) (#4862)",
     ),
     strict_tools: bool = typer.Option(
         True,
@@ -271,31 +281,64 @@ def gateway_start(
         # are not falsely rejected (#2426).
         channels = _load_channels(config)
         if channels:
+            # Resolve strict mode: the CLI flag overrides, else fall back to the
+            # config's gateway.preflight.strict (default off; #4862).
+            strict = _resolve_strict_preflight(config)
+            if strict_preflight is not None:
+                strict = strict_preflight
+
             results = asyncio.run(_probe_channels(channels))
             all_ok = _render_probe_results(results)
             if not all_ok:
-                # An SSL certificate-verify failure (corporate proxy / MITM)
-                # is NOT a credential problem — the same token connects fine at
-                # runtime (#2845). Only hard-abort when a *non-SSL* channel
-                # failed; otherwise warn and proceed so the runtime adapter can
-                # connect, matching --no-preflight behavior.
-                non_ssl_failures = any(
-                    not getattr(r, "ok", False) and not _is_ssl_error(r)
-                    for r in results.values()
-                )
-                if non_ssl_failures:
+                # Partition the failures. An SSL certificate-verify failure
+                # (corporate proxy / MITM) is NOT a credential problem — the same
+                # token connects fine at runtime (#2845) — so SSL-only failures
+                # always warn-and-continue.
+                healthy = [
+                    name for name, r in results.items()
+                    if getattr(r, "ok", False)
+                ]
+                cred_failures = [
+                    name for name, r in results.items()
+                    if not getattr(r, "ok", False) and not _is_ssl_error(r)
+                ]
+                # The isolate-vs-abort-vs-ssl decision is a pure function so it
+                # can be unit-tested without typer (#4862).
+                action = _classify_preflight_action(healthy, cred_failures, strict)
+                if action == "abort":
+                    # A bad/expired token isolates ONLY that channel: the runtime
+                    # parks it in ChannelState.CREDENTIAL_UNAVAILABLE (queryable
+                    # via gateway status/doctor, auto-recovers on hot-reload)
+                    # while every healthy channel keeps serving (#4862). Fail
+                    # closed only when the operator opted into strict mode, or
+                    # when NO channel is serviceable (nothing left to serve).
+                    why = (
+                        "--strict-preflight set"
+                        if strict and healthy
+                        else "no serviceable channel"
+                    )
                     print(
-                        "\nPre-flight check failed — aborting start. "
-                        "Fix the channel credentials above or pass --no-preflight to skip."
+                        f"\nPre-flight check failed — aborting start ({why}). "
+                        "Fix the channel credentials above, or pass "
+                        "--no-preflight to skip / --no-strict-preflight to "
+                        "isolate the degraded channel and serve the rest."
                     )
                     raise typer.Exit(1)
-                print(
-                    "\nPre-flight found SSL certificate-verify failures only "
-                    "(likely a proxy/MITM network). Tokens may still be valid — "
-                    "continuing start. Set SSL_CERT_FILE / REQUESTS_CA_BUNDLE / "
-                    "PRAISONAI_SSL_CA_BUNDLE to your corporate CA, or pass "
-                    "--no-preflight to skip this check."
-                )
+                elif action == "isolate":
+                    print(
+                        f"\nPre-flight: {len(healthy)} channel(s) OK; skipping "
+                        f"{', '.join(cred_failures)} as configured-unavailable "
+                        "(auto-recovers when the credential is fixed). "
+                        "See `gateway status`."
+                    )
+                else:
+                    print(
+                        "\nPre-flight found SSL certificate-verify failures only "
+                        "(likely a proxy/MITM network). Tokens may still be valid — "
+                        "continuing start. Set SSL_CERT_FILE / REQUESTS_CA_BUNDLE / "
+                        "PRAISONAI_SSL_CA_BUNDLE to your corporate CA, or pass "
+                        "--no-preflight to skip this check."
+                    )
 
     # Tool pre-flight: a tool named in the config that cannot be resolved (a
     # typo, an uninstalled optional package, or a gated local tools.py) is
@@ -628,6 +671,7 @@ def _health_payload(results):
 
 from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
     apply_probe_ca_bundle as _apply_probe_ca_bundle,
+    classify_preflight_action as _classify_preflight_action,
     check_duplicates as _check_duplicates,
     check_gateway_running as _check_gateway_running,
     check_inbound as _check_inbound,
@@ -636,6 +680,7 @@ from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for 
     probe_results_to_dict as _probe_results_to_dict,
     resolve_env_token as _resolve_env_token,
     resolve_platform_dlq_path as _resolve_platform_dlq_path,
+    resolve_strict_preflight as _resolve_strict_preflight,
     resolve_verify_turn as _resolve_verify_turn,
     run_shell_readiness_check as _run_shell_readiness_check,
     run_turn_test as _run_gateway_turn_test,

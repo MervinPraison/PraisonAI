@@ -164,6 +164,72 @@ def test_resolve_verify_turn_opt_out(tmp_path):
     assert prompt == "hello"
 
 
+def test_resolve_strict_preflight_defaults_off(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: x\n")
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(cfg)) is False
+
+
+def test_resolve_strict_preflight_opt_in(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("gateway:\n  preflight:\n    strict: true\n")
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(cfg)) is True
+
+
+def test_resolve_strict_preflight_missing_file(tmp_path):
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(tmp_path / "nope.yaml")) is False
+
+
+def test_classify_preflight_isolates_degraded_channel():
+    # One bad token + healthy peers, non-strict: isolate the bad channel and
+    # keep serving the fleet (the #4862 fix's core behaviour).
+    from praisonai_bot.gateway.preflight import classify_preflight_action
+
+    assert (
+        classify_preflight_action(["slack", "discord"], ["telegram"], strict=False)
+        == "isolate"
+    )
+
+
+def test_classify_preflight_strict_aborts_with_healthy():
+    # Strict mode fails closed even when healthy channels remain.
+    from praisonai_bot.gateway.preflight import classify_preflight_action
+
+    assert (
+        classify_preflight_action(["slack"], ["telegram"], strict=True) == "abort"
+    )
+
+
+def test_classify_preflight_no_serviceable_channel_aborts():
+    # No healthy channel left: nothing to serve, so fail closed even non-strict.
+    from praisonai_bot.gateway.preflight import classify_preflight_action
+
+    assert classify_preflight_action([], ["telegram"], strict=False) == "abort"
+
+
+def test_classify_preflight_ssl_only_continues():
+    # No real credential failures (SSL-only handled upstream): warn-and-continue.
+    from praisonai_bot.gateway.preflight import classify_preflight_action
+
+    assert classify_preflight_action(["slack"], [], strict=False) == "ssl_only"
+    assert classify_preflight_action([], [], strict=True) == "ssl_only"
+
+
+def test_cli_reexports_classify_preflight_action():
+    # The CLI consumes the pure helper rather than duplicating the branch, so a
+    # regression in partitioning shows up in the shared function under test.
+    from praisonai_bot.gateway.preflight import classify_preflight_action
+    from praisonai_bot.cli.commands import gateway as gw
+
+    assert gw._classify_preflight_action is classify_preflight_action
+
+
 def test_verify_turn_preflight_uses_first_channel(tmp_path, monkeypatch):
     cfg = tmp_path / "bot.yaml"
     cfg.write_text(

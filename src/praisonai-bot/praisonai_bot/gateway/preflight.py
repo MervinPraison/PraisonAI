@@ -331,6 +331,51 @@ def resolve_verify_turn(config_path: str) -> Tuple[bool, str]:
     return bool(enabled), prompt
 
 
+def resolve_strict_preflight(config_path: str) -> bool:
+    """Resolve the ``gateway.preflight.strict`` toggle.
+
+    Returns ``True`` when the operator opted into strict startup preflight —
+    any bad channel credential hard-aborts the whole gateway. Defaults to
+    ``False`` so a single rotated/expired token degrades ONLY that channel
+    (parked in ``ChannelState.CREDENTIAL_UNAVAILABLE`` by the runtime) while
+    every healthy channel keeps serving (#4862).
+    """
+    import yaml
+
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return False
+    pre = ((cfg.get("gateway") or {}).get("preflight") or {})
+    return bool(pre.get("strict", False))
+
+
+def classify_preflight_action(
+    healthy: "list[str]",
+    cred_failures: "list[str]",
+    strict: bool,
+) -> str:
+    """Decide what ``gateway start`` does when a credential probe fails (#4862).
+
+    Pure decision function so the availability-critical isolate-vs-fail-closed
+    branch is independently testable without ``typer``. Callers pass the already
+    partitioned channel names (SSL-only failures are handled separately and must
+    NOT appear in ``cred_failures``). Returns one of:
+
+    - ``"ssl_only"`` — no real credential failures: warn-and-continue.
+    - ``"abort"`` — fail closed: the operator set ``strict`` (with healthy
+      channels remaining) OR no channel is serviceable (nothing left to serve).
+    - ``"isolate"`` — park the failed channel(s) as credential-unavailable and
+      serve every healthy channel (the runtime's degradation contract).
+    """
+    if not cred_failures:
+        return "ssl_only"
+    if strict or not healthy:
+        return "abort"
+    return "isolate"
+
+
 VERIFY_TURN_TIMEOUT_DEFAULT = 60.0
 
 
