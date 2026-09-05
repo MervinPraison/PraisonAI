@@ -2035,6 +2035,14 @@ Write the complete compiled report:"""
                     )
                     breaker_record(function_name, not is_breaker_failure)
 
+                # Tool-result guardrail gate (protocol-driven) — parity with the
+                # sync path in tool_execution.py. Runs on the raw result before it
+                # re-enters the LLM context so a guardrail can inspect or redact
+                # unsafe tool output. Fail-closed. Zero overhead when unset.
+                apply_result_guardrails = getattr(self, "_apply_tool_result_guardrails", None)
+                if apply_result_guardrails is not None:
+                    result = apply_result_guardrails(function_name, result)
+
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring
                 # the sync path in tool_execution.py so repeated failures accumulate

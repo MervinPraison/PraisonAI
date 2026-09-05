@@ -16,6 +16,7 @@ class GuardrailProtocol(Protocol):
     Guardrails can validate:
     - Input prompts (before processing)
     - Tool call arguments (before execution)  
+    - Tool results (before they re-enter the LLM context)
     - Agent outputs (before returning to user)
     
     Example:
@@ -73,6 +74,29 @@ class GuardrailProtocol(Protocol):
             
         Returns:
             Tuple of (is_valid: bool, processed_arguments: Dict[str, Any])
+        """
+        ...
+
+    def validate_tool_result(self, tool_name: str, result: Any, **kwargs) -> Tuple[bool, Any]:
+        """
+        Validate/redact a tool's result before it re-enters the LLM context.
+
+        Runs after the tool executes and before its output is handed back to
+        the model, trace, or downstream channel. Lets a guardrail inspect or
+        rewrite raw tool output (e.g. redact a leaked secret, strip a
+        prompt-injection payload) that ``validate_output`` never sees because
+        it only ever receives the model's paraphrase.
+
+        Args:
+            tool_name: Name of the tool that produced the result
+            result: The tool's raw result to validate
+            **kwargs: Additional context (agent_name, etc.)
+
+        Returns:
+            Tuple of (is_valid: bool, processed_result: Any)
+            - If is_valid=False, the result is rejected (fail-closed)
+            - If is_valid=True, processed_result may be the original or a
+              redacted/rewritten value
         """
         ...
 
@@ -178,7 +202,7 @@ class PolicyGuardrailProtocol(Protocol):
 
 # Method names that make an object a guardrail. An object exposing at least one
 # of these is a protocol-conforming guardrail even though it is not ``callable``.
-GUARDRAIL_PROTOCOL_METHODS = ("validate_input", "validate_output", "validate_tool_call")
+GUARDRAIL_PROTOCOL_METHODS = ("validate_input", "validate_output", "validate_tool_call", "validate_tool_result")
 
 
 def is_guardrail_object(obj: Any) -> bool:
