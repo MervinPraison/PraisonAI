@@ -229,6 +229,12 @@ class SubprocessSandbox:
         Python is checked by parsing rather than substring matching, so a
         blocked name inside a string or comment is not a false positive. Code
         that will not parse is left to the interpreter to reject.
+
+        Import bindings are resolved so aliases cannot slip a blocked call past
+        the check: `import os as x; x.system(...)` and `from os import system;
+        system(...)` both resolve back to `os.system`. Bare names are only
+        flagged when they are read (a Load) -- `subprocess = 3` or
+        `def f(eval): ...` bind a local of the same spelling and are harmless.
         """
         blocked = [b for b in (getattr(policy, "blocked_imports", None) or []) if b]
         if not blocked or language != "python":
@@ -245,6 +251,33 @@ class SubprocessSandbox:
         modules = {b for b in blocked if "." not in b}
         dotted = {b for b in blocked if "." in b}
 
+        # Names used in call position -- `eval(...)` -- so a bare blocked builtin
+        # is caught while a mere mention (`print(subprocess_count)`) is not.
+        called_names = {
+            n.func
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+
+        # Resolve local bindings introduced by imports back to their real dotted
+        # names, so an alias cannot spell a blocked call differently:
+        #   import os as x        -> x     resolves to os
+        #   from os import system -> system resolves to os.system
+        # aliases: local name -> real module path (for attribute-call resolution)
+        # from_binds: local name -> real dotted name (for bare-name calls)
+        aliases: Dict[str, str] = {}
+        from_binds: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.split(".")[0]
+                    aliases[bound] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    from_binds[bound] = f"{base}.{alias.name}" if base else alias.name
+
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -255,6 +288,9 @@ class SubprocessSandbox:
                 name = node.module or ""
                 if name in modules or name.split(".")[0] in modules:
                     return f"Blocked import: {name}"
+                for alias in node.names:
+                    if from_binds.get(alias.asname or alias.name) in dotted:
+                        return f"Blocked import: {from_binds[alias.asname or alias.name]}"
             elif isinstance(node, ast.Attribute):
                 target = node
                 parts = []
@@ -262,13 +298,27 @@ class SubprocessSandbox:
                     parts.append(target.attr)
                     target = target.value
                 if isinstance(target, ast.Name):
-                    parts.append(target.id)
+                    # Translate the root through any import alias so
+                    # `import os as x; x.system()` resolves to os.system.
+                    root_real = aliases.get(target.id, target.id)
+                    parts.append(root_real)
                     full = ".".join(reversed(parts))
                     if full in dotted:
                         return f"Blocked call: {full}"
             elif isinstance(node, ast.Name):
-                if node.id in modules or node.id in dotted:
+                # Only a *read* of the name is a use; an assignment target or
+                # parameter merely rebinds the spelling and is harmless.
+                if not isinstance(node.ctx, ast.Load):
+                    continue
+                # A bare blocked name is only a threat when it is called:
+                # `eval('1+1')` matters, `print(subprocess)` (where subprocess
+                # is a local int or an unused mention) does not. Modules stay
+                # dangerous solely via `import`, already handled above.
+                if node in called_names and (node.id in modules or node.id in dotted):
                     return f"Blocked call: {node.id}"
+                # from os import system; system() -> resolves to os.system
+                if from_binds.get(node.id) in dotted:
+                    return f"Blocked call: {from_binds[node.id]}"
 
         return None
 

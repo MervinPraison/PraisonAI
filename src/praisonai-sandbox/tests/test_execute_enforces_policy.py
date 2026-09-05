@@ -64,6 +64,19 @@ class TestBlockedImportsAreDetected:
         assert _validator()("eval('1+1')\n") is not None
 
 
+class TestAliasesCannotBypass:
+    """A blocked dotted call must not be reachable by renaming the import."""
+
+    def test_a_dotted_call_through_an_import_alias(self):
+        assert _validator()("import os as x\nx.system('echo hi')\n") is not None
+
+    def test_a_dotted_call_through_a_from_import(self):
+        assert _validator()("from os import system\nsystem('echo hi')\n") is not None
+
+    def test_a_dotted_call_through_an_aliased_from_import(self):
+        assert _validator()("from os import system as s\ns('echo hi')\n") is not None
+
+
 class TestNoFalsePositives:
 
     def test_a_blocked_word_inside_a_string(self):
@@ -75,6 +88,14 @@ class TestNoFalsePositives:
 
     def test_a_variable_merely_named_like_one(self):
         assert _validator()("subprocess_count = 3\nprint(subprocess_count)\n") is None
+
+    def test_assigning_to_a_blocked_name_is_not_a_use(self):
+        """`subprocess = 3` rebinds the spelling; it does not import or call it."""
+        assert _validator()("subprocess = 3\nprint(subprocess)\n") is None
+
+    def test_a_parameter_named_like_a_blocked_name(self):
+        """A parameter definition is a binding, not a call to the builtin."""
+        assert _validator()("def f(eval):\n    return 1\nf(1)\n") is None
 
     def test_harmless_code(self):
         assert _validator()("print('hello')\n") is None
