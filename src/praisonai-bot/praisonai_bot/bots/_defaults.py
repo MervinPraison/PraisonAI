@@ -69,12 +69,24 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
     # NOTE: No session_id here — BotSessionManager handles per-user
     # isolation by swapping chat_history before/after each agent.chat().
     current_memory = getattr(agent, 'memory', None)
-    if current_memory is None:
+    memory_was_injected = current_memory is None
+    if memory_was_injected:
         agent.memory = {
             "history": True,
             "history_limit": 20,
         }
         logger.debug(f"Bot: injected session history for agent '{getattr(agent, 'name', '?')}'")
+
+    # Enable the coordinated session-learning posture by default (Issue #4864).
+    # The always-on gateway/bot is the flagship "assistant that learns who you
+    # are across sessions" surface, so an out-of-the-box bot should accrue
+    # persona/preferences from the relationship. This reuses the core
+    # ``Agent(learn=True)`` posture (auto_memory + conversational-aware nudge
+    # cadence) rather than adding any new bot knob. Opt-out with ``learn: false``
+    # in the bot config; a pre-configured agent (learn already set) is untouched.
+    # ``memory_was_injected`` tells the helper it may safely rebuild the memory
+    # backend with a LearnManager; a user-supplied memory is never rewritten.
+    _enable_bot_learning(agent, config, memory_was_injected=memory_was_injected)
     
     # Setup workspace for file operations containment
     workspace = None
@@ -120,6 +132,90 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
                 )
     
     return agent
+
+
+def _learning_opt_out(config: Optional[Any]) -> bool:
+    """Return True when the bot config explicitly disables session learning.
+
+    Opt-out via ``learn: false`` (or ``session_learning: false``) in the bot
+    config. Absence means "use the sensible default" (enabled).
+    """
+    if config is None:
+        return False
+    for attr in ("learn", "session_learning"):
+        val = getattr(config, attr, None)
+        if val is None:
+            continue
+        if isinstance(val, bool):
+            return not val
+        if isinstance(val, str):
+            return val.strip().lower() in ("false", "0", "no", "off", "disabled")
+    return False
+
+
+def _enable_bot_learning(
+    agent: Any, config: Optional[Any] = None, memory_was_injected: bool = False
+) -> None:
+    """Turn on the coordinated session-learning posture for a bot agent.
+
+    Reuses the core ``Agent(learn=True)`` posture (Issue #4864): AGENTIC
+    extraction + conversational-aware nudge cadence + auto_memory. This is the
+    default for gateway/bot agents so the flagship "assistant that learns who
+    you are" surface actually accrues persona/preferences from plain chat.
+
+    No-ops when learning is already configured on the agent (pre-configured
+    agents win), when the operator opts out (``learn: false``), or when the
+    core learn machinery is unavailable.
+    """
+    # Respect a pre-configured agent: if the developer already set learn=,
+    # leave their choice untouched (including an explicit learn=False opt-out,
+    # which leaves _learn_config None but sets _learn_enabled=False).
+    if getattr(agent, "_learn_config", None) is not None:
+        return
+    if getattr(agent, "_learn_enabled", None) is not None:
+        return
+    if _learning_opt_out(config):
+        logger.debug("Bot: session learning opted out via config")
+        return
+
+    try:
+        from praisonaiagents.config.feature_configs import LearnConfig
+        from praisonaiagents.memory.learn.protocols import LearnMode
+    except ImportError:
+        logger.debug("Bot: learn machinery unavailable — skipping session learning")
+        return
+
+    # Same coordinated posture as core Agent(learn=True): conversational turns
+    # count (nudge_min_tool_iters=0) and a cheap periodic cadence.
+    learn_config = LearnConfig(
+        mode=LearnMode.AGENTIC,
+        nudge_interval=10,
+        nudge_min_tool_iters=0,
+    )
+
+    # The nudge cadence only needs _learn_config, so it is always safe to set.
+    agent._learn_config = learn_config
+
+    # Auto-memory / auto-learning need a LearnManager on the memory instance.
+    # Only rebuild the backend when the bot itself injected the memory config
+    # (a user-supplied memory=... is never rewritten). When memory was injected
+    # it is the bot's own history dict, so merging learn in is safe.
+    if memory_was_injected:
+        try:
+            current = getattr(agent, "memory", None)
+            mem_dict = dict(current) if isinstance(current, dict) else {"history": True, "history_limit": 20}
+            mem_dict["learn"] = learn_config.to_dict() if hasattr(learn_config, "to_dict") else learn_config
+            user_id = getattr(agent, "user_id", None)
+            if hasattr(agent, "_init_memory"):
+                agent._init_memory(mem_dict, user_id=user_id)
+            if getattr(agent, "_auto_memory", None) is None:
+                agent._auto_memory = True
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(f"Bot: could not rebuild memory for learning: {e}")
+    else:
+        logger.debug("Bot: enabled nudge cadence (user memory left intact)")
+
+    logger.debug(f"Bot: session learning enabled for agent '{getattr(agent, 'name', '?')}'")
 
 
 def _get_default_safe_tools(config: Optional[Any] = None, workspace=None) -> List[str]:
