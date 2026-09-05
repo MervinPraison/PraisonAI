@@ -958,9 +958,15 @@ are therefore enforced by `test_sloc_ceiling` (non-blank, non-comment lines), no
 | `target.py` | 180 | 240 |
 | `manage.py` | 120 | 160 |
 | `embed.py` | 90 | 120 |
-| **package total** | **1020** | **1150** |
+| `embed.py` (local embedder selection) | 100 | 140 |
+| **package total** | **1120** | **1300** |
 
-Per-file ceilings sum to 1370, but the **package** ceiling of 1150 binds first — one module
+**Raised 2026-09-05 (1150 -> 1300)** to admit `embed.py`. It closes a data leak: a local
+agent embedded against OpenAI, sending the user's documents and queries off the machine.
+The ceiling test failed on the addition, which is the mechanism working -- the budget was
+raised deliberately here rather than absorbed silently.
+
+Per-file ceilings sum to 1510, but the **package** ceiling of 1300 binds first — one module
 may grow only if another shrinks. Raising a ceiling requires editing this document in the same
 commit. Exceeding it is a failing test, not a review comment.
 

@@ -138,12 +138,24 @@ class TestNonStreamingFallbackRunsTools:
         assert "".join(out).strip()
 
     def test_it_stops_at_max_tool_calls_per_turn(self):
-        """The fallback must honour the same per-turn guardrail as the other loops."""
+        """The fallback must honour the same per-turn guardrail as the other loops.
+
+        The provider asks for a DIFFERENT city each round, so this is a genuine
+        multi-step chain and only the guardrail can stop it. (An identical
+        repeated call is a stall and is stopped sooner -- see the test below.)
+        """
         llm = LLM(model="anthropic/claude-sonnet-4-20250514")
         state = {"ran": 0}
 
         def always_calls(**kwargs):
-            message = types.SimpleNamespace(content=None, tool_calls=[_tool_call()])
+            # The tools-disabled finalisation request the loop makes once it
+            # stops. _finalise_on_limit reads the response by subscript, as a
+            # litellm ModelResponse supports, so the fake answers in kind.
+            if not kwargs.get("tools"):
+                return {"choices": [{"message": {"content": "Done.", "tool_calls": None}}]}
+            city = f"City{state['ran']}"
+            message = types.SimpleNamespace(
+                content=None, tool_calls=[_tool_call(args='{"city":"%s"}' % city)])
             return types.SimpleNamespace(
                 choices=[types.SimpleNamespace(message=message, finish_reason="tool_calls")])
 
@@ -157,6 +169,37 @@ class TestNonStreamingFallbackRunsTools:
                                      max_tool_calls_per_turn=3))
         assert state["ran"] == 3, (
             "the fallback ran tools past max_tool_calls_per_turn")
+
+    def test_an_identical_repeated_tool_call_is_stopped_as_a_stall(self):
+        """A provider re-emitting the same call with no prose makes no progress.
+
+        Before this guard the loop ran the user's tool ten times for one
+        question and then yielded nothing at all.
+        """
+        llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+        state = {"ran": 0}
+
+        def same_call_forever(**kwargs):
+            # A request with no tools is the tools-disabled finalisation.
+            # _finalise_on_limit reads it by subscript, as a litellm
+            # ModelResponse supports, so the fake answers in kind.
+            if not kwargs.get("tools"):
+                return {"choices": [{"message": {"content": "It is sunny.",
+                                                 "tool_calls": None}}]}
+            message = types.SimpleNamespace(content=None, tool_calls=[_tool_call()])
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(message=message, finish_reason="stop")])
+
+        def execute(name, args, *a, **kw):
+            state["ran"] += 1
+            return get_weather(**args)
+
+        llm._completion_with_retry = same_call_forever
+        out = "".join(str(c) for c in llm.get_response_stream(
+            prompt="weather?", system_prompt="x", tools=[get_weather],
+            execute_tool_fn=execute, max_tool_calls_per_turn=10))
+        assert state["ran"] == 1, f"the identical call was dispatched {state['ran']} times"
+        assert "sunny" in out, "the stalled turn yielded nothing"
 
 
 if __name__ == "__main__":

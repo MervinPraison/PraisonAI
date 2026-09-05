@@ -1120,8 +1120,11 @@ ollama pull llama3.2
 ```python
 from praisonaiagents import Agent
 
-agent = Agent(instructions="You are a helpful assistant", llm="ollama/llama3.2")
-agent.start("Why is the sky blue?")
+# Simplest: let PraisonAI find the running server and pick a model.
+Agent(instructions="You are a helpful assistant", llm="local").start("Hello!")
+
+# Or name the model yourself.
+Agent(instructions="You are a helpful assistant", llm="ollama/llama3.2").start("Why is the sky blue?")
 ```
 
 The `ollama/` prefix is what selects Ollama's handling — tool-call repair,

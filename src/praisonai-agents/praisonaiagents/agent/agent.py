@@ -308,6 +308,15 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     cls._env_output_checked = True
         return cls._env_output_mode
     
+    @staticmethod
+    def _local_discovery(target):
+        """Re-read the discovery for a resolved local target (cached upstream)."""
+        try:
+            from ..local import probe_endpoint
+            return probe_endpoint(target.base_url, expect=target.engine)
+        except Exception:
+            return None
+
     # Ordered (credential env-var, provider-appropriate default model). The
     # first provider whose credential is present wins. OpenAI is first so
     # existing OpenAI users keep their default; any other single configured
@@ -2191,6 +2200,35 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             if api_key is None:
                 api_key = _target.api_key
             self._local_target = _target
+
+            # Keep a local agent local end to end. Without this, chat went to
+            # the local server while knowledge/memory embedded against OpenAI --
+            # sending the user's documents AND their queries off the machine
+            # with no warning, which defeats the entire point of asking for a
+            # local model. Only fills a gap: an explicit embedder always wins.
+            _wants_embeddings = (retrieval_config is not None
+                                 or embedder_config is not None
+                                 or memory not in (None, False))
+            if _wants_embeddings and not embedder_config and not (
+                    retrieval_config or {}).get('embedder_config'):
+                from ..local import (local_embedder_config as _local_embedder,
+                                     select_embedding_model as _select_embed)
+                _embed_model = _select_embed(
+                    getattr(_d, 'models', ()) if (_d := Agent._local_discovery(_target)) else (),
+                    getattr(_d, 'model_meta', ()) if _d else ())
+                if _embed_model:
+                    embedder_config = _local_embedder(
+                        _target.engine, _target.base_url, _embed_model)
+                    if retrieval_config is not None:
+                        retrieval_config.setdefault('embedder_config', embedder_config)
+                else:
+                    logging.warning(
+                        "llm=%r resolved a local model, but %s serves no embedding "
+                        "model, so knowledge/memory would embed against a remote "
+                        "provider -- sending your documents off this machine. "
+                        "Pull one (e.g. `ollama pull nomic-embed-text`) or set an "
+                        "explicit embedder to silence this.",
+                        llm, _target.base_url)
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.

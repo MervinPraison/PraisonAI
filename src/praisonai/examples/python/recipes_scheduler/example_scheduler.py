@@ -31,7 +31,7 @@ def main():
     agent = Agent(
         name="News Monitor",
         instructions="You are a news monitoring assistant. Provide brief updates.",
-        verbose=True
+        output='verbose'
     )
     
     # Create scheduler
