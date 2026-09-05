@@ -9,9 +9,13 @@ parameter exists. Both pass for an option that is accepted and then ignored, so
 this file counts those: every option the TypeScript SDK takes for Python parity
 and does not yet act on. The source is the `UNHONOURED_OPTIONS` ledger in
 `src/praisonai-ts/src/utils/parity-notice.ts`, which the surfaces iterate at
-runtime, so the count cannot drift from the behaviour.
+runtime, so every option listed here announces itself when it is passed.
 
-The check is a ratchet: the total may fall, never rise.
+The check is a ratchet: the total may fall, never rise, and `--write` enforces
+the same ratchet so a rise cannot be committed without `--allow-growth` and a
+reason. What no check can see is whether a row DELETED from the ledger was
+really implemented: the ledger is hand-written, so each removal is a claim that
+needs a test proving the option changes what the code does.
 
 ## Summary
 
