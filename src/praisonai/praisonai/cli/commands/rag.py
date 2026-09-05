@@ -75,7 +75,15 @@ def rag_index(
                         "collection_name": collection,
                         "path": f"./.praison/knowledge/{collection}",
                     }
-                }
+                },
+                # --chunking and --chunk-size were declared, shown in this
+                # command's own example, and never read: knowledge_config
+                # carried only vector_store, so Knowledge used its defaults
+                # (recursive / 512) whatever the user asked for.
+                "chunker": {
+                    "type": chunking,
+                    "chunk_size": chunk_size,
+                },
             }
             
             # Load config file if provided
@@ -88,6 +96,7 @@ def rag_index(
             
             # Initialize Knowledge
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
+            failed = []
             
             # Index sources
             with Progress(
@@ -101,11 +110,30 @@ def rag_index(
                     try:
                         result = knowledge.add(source)
                         count = len(result.get("results", [])) if isinstance(result, dict) else 0
-                        console.print(f"[green]✓[/green] Indexed {source}: {count} chunks")
+                        if count:
+                            console.print(f"[green]✓[/green] Indexed {source}: {count} chunks")
+                        else:
+                            # Zero chunks is not success. Knowledge swallows per-file
+                            # failures, so this is the only place a user can be told
+                            # nothing was actually stored.
+                            failed.append(source)
+                            console.print(
+                                f"[yellow]![/yellow] Indexed nothing from {source} "
+                                "(no supported files, or every file failed)"
+                            )
                     except Exception as e:
+                        failed.append(source)
                         console.print(f"[red]✗[/red] Failed to index {source}: {e}")
                     progress.remove_task(task)
             
+            if failed:
+                # "Indexing complete!" printed unconditionally, so a run in
+                # which every source failed still ended green, exit 0.
+                console.print(
+                    f"\n[bold red]Indexing finished with {len(failed)} "
+                    f"failed source(s)[/bold red] Collection: {collection}"
+                )
+                raise typer.Exit(1)
             console.print(f"\n[bold green]Indexing complete![/bold green] Collection: {collection}")
             if profile_data:
                 profile_data["command"] = "rag index"
