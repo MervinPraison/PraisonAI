@@ -224,3 +224,90 @@ test("the empty state keeps clear of the safe area", () => {
   }
   assert.match(value, /\+\s*[\d.]+rem/, `the gutter must survive a zero inset: ${value}`);
 });
+
+/**
+ * Rules parsed by BRACE MATCHING, not by a `}`-anchored regex.
+ *
+ * `[^}]*` stops at the first closing brace it meets, which for a declaration
+ * containing `calc(...)` or a nested block is not the end of the rule -- an
+ * earlier agent's colour test silently matched nothing and passed over a rule
+ * it had never seen. This walks the stylesheet, so a selector that is absent is
+ * absent rather than "not matched".
+ */
+function rules(source: string): readonly { selector: string; body: string }[] {
+  const found: { selector: string; body: string }[] = [];
+  let index = 0;
+  while (index < source.length) {
+    const open = source.indexOf("{", index);
+    if (open === -1) break;
+    let depth = 1;
+    let cursor = open + 1;
+    while (cursor < source.length && depth > 0) {
+      if (source[cursor] === "{") depth += 1;
+      else if (source[cursor] === "}") depth -= 1;
+      cursor += 1;
+    }
+    const selector = source.slice(index, open).trim();
+    const body = source.slice(open + 1, cursor - 1);
+    // An at-rule (`@media`) holds rules rather than declarations; recurse into
+    // it so a token redefined for dark mode is found under its own selector.
+    if (selector.startsWith("@")) found.push(...rules(body));
+    else found.push({ selector, body });
+    index = cursor;
+  }
+  return found;
+}
+
+/** Every rule whose selector list contains `wanted`, asserted non-empty -- so a
+ *  selector that was renamed fails here instead of passing vacuously. */
+function rulesFor(wanted: string): readonly { selector: string; body: string }[] {
+  const matched = rules(css).filter((rule) =>
+    rule.selector.split(",").some((part) => part.trim() === wanted),
+  );
+  assert.ok(matched.length > 0, `no rule in app.css has the selector "${wanted}"`);
+  return matched;
+}
+
+test("a hidden Remove button is actually hidden", () => {
+  // `.setting-clear` is a flex ITEM in a `.row-setting` flex column, and
+  // main.ts sets `hidden` on it the moment there is no key to remove. The
+  // pairing this file already asserts for `.screen[hidden]` applies: an author
+  // `display` declaration beats the user agent's `[hidden] { display: none }`,
+  // and the failure mode is the exact defect being fixed -- a `Remove` button
+  // under a row that reads "Not set".
+  const hiding = rulesFor(".setting-clear[hidden]");
+  assert.ok(
+    hiding.some((rule) => /display\s*:\s*none/.test(rule.body)),
+    `.setting-clear[hidden] must set display: none -- found: ${hiding.map((r) => r.body).join(" | ")}`,
+  );
+});
+
+test("a field that is switched off says so in the note, not in a warning colour", () => {
+  // "Set Engine to remote-http to use this" is not an error. Painting it
+  // `--warn` beside a field the user has not touched teaches people that the
+  // warning colour means nothing, which is what it costs when a real refusal
+  // appears in `.setting-error` two lines below.
+  const inactive = rulesFor(".row-setting .setting-inactive");
+  const body = inactive.map((r) => r.body).join(" ");
+  assert.match(body, /color\s*:\s*var\(--soft\)/, `the inactive note must be soft, not loud: ${body}`);
+  assert.equal(/var\(--warn\)/.test(body), false, `nothing is wrong: ${body}`);
+  // And it hides properly, for the same author-declaration reason as above.
+  const hidden = rulesFor(".row-setting .setting-inactive[hidden]");
+  assert.ok(hidden.some((rule) => /display\s*:\s*none/.test(rule.body)), "an empty note must not paint");
+});
+
+test("the settings sections are styled on the class the app actually emits", () => {
+  // app.css styled `.section-heading`; `buildSettingsScreen` emits
+  // `.settings-section`. So every heading rendered at the browser's default
+  // `h3` and the screen read as one flat list -- a credential and an engine
+  // address at the same weight. The class names have to be the SAME name.
+  assert.ok(main.includes('className = "settings-section"'), "main.ts still emits settings-section");
+  const styled = rulesFor(".screen-settings .settings-section");
+  const body = styled.map((r) => r.body).join(" ");
+  assert.match(body, /text-transform|font-size|letter-spacing/, `a heading must look like one: ${body}`);
+  // The lead section keeps the ink colour while the others go soft: that is the
+  // hierarchy, and it is the whole reason main.ts writes `data-lead`.
+  assert.ok(main.includes('dataset["lead"]'), "main.ts must mark the lead section");
+  const lead = rulesFor('.screen-settings .settings-section[data-lead]');
+  assert.match(lead.map((r) => r.body).join(" "), /color\s*:\s*var\(--ink\)/);
+});

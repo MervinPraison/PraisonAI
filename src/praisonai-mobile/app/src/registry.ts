@@ -15,7 +15,12 @@ import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { SecretsPort } from "../../core/src/ports/secrets.ts";
-import { readSecretSetting, type SettingDef, type SettingsFacade } from "../../core/src/settings/store.ts";
+import {
+  httpUrl,
+  readSecretSetting,
+  type SettingDef,
+  type SettingsFacade,
+} from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
 import { createRemoteHttpEngine, probeHealth } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
@@ -23,6 +28,17 @@ import type { ConversationHistory, RunPersistence } from "../../engines/src/prai
 
 export const ENGINE_REMOTE_HTTP = "remote-http";
 export const ENGINE_PRAISONAI_TS = "praisonai-ts";
+
+/**
+ * The headings, in the order they are rendered.
+ *
+ * Named constants rather than literals repeated on each def, so a section
+ * cannot be split in two by a typo -- `buildSettings` groups by the STRING,
+ * and "Engine " with a trailing space is a second heading with one row under
+ * it. registry.test.ts asserts the credential's section is not the engine's.
+ */
+export const SECTION_API_KEY = "API key";
+export const SECTION_ENGINE = "Engine";
 
 /**
  * What the app offers, with the metadata a screen needs to draw a control.
@@ -49,36 +65,19 @@ export const ENGINE_PRAISONAI_TS = "praisonai-ts";
  * empty" -- with no field anywhere in the app to put one in.
  */
 export const SETTING_DEFS: readonly SettingDef[] = [
-  {
-    key: "engineId",
-    default: ENGINE_REMOTE_HTTP,
-    label: "Engine",
-    help: "Which agent runtime answers. Remote talks to a PraisonAI engine over HTTP; in-process runs the agent loop on this device.",
-    section: "Engine",
-    // Exactly what `appEngines` in main.ts can build -- registry.test.ts
-    // compares this list against that composition, because a picker offering
-    // an id `selectEngine` rejects is a dead end: the choice persists, the
-    // NEXT launch cannot build it, and boot dies at `renderFatal` with no way
-    // back except editing storage by hand. That is what happened when
-    // ENGINE_PRAISONAI_TS was listed here while nothing supplied
-    // `createInProcess`. It is back because main.ts supplies the factory and
-    // the engine ships as a chunk beside app.js (engines/praisonai-ts/
-    // load-agent.ts).
-    //
-    // `default` here is the WEB default; `settingDefsFor` swaps in the
-    // platform's, so the value Settings shows and the engine that answers a
-    // first launch are the same one.
-    choices: [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS],
-  },
-  {
-    key: "baseUrl",
-    default: "http://127.0.0.1:8765",
-    label: "Engine address",
-    help: "Only used by the remote engine.",
-    section: "Engine",
-  },
   /**
-   * The one credential the shipping app can actually use.
+   * FIRST, and in a section of its own.
+   *
+   * It sat third, under a heading called "Engine", at the same visual weight
+   * as two settings that matter less -- and it is the one field that decides
+   * whether the app answers at all. A credential is not an engine setting: the
+   * heading was the wrong noun for it, and a new user with a key in their
+   * clipboard had to read past two rows about runtimes and addresses to find
+   * the only row they came for.
+   *
+   * Registry order IS screen order (view-model.ts: "section order is REGISTRY
+   * order: the order the author of the registry chose"), so moving it here is
+   * the whole of the reordering -- there is no second list to keep in step.
    *
    * ONE slot, not five. `SecretSlot` is a closed union of openai | anthropic |
    * google | openrouter | custom, and it is closed for a keychain-namespace
@@ -105,10 +104,64 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     key: "openaiApiKey",
     default: "",
     label: "OpenAI API key",
-    help: "Used by the in-process engine. Kept in the platform secret store, never in the settings file, and never shown back to you.",
-    section: "Engine",
+    help: "The in-process engine signs its requests with this. It is kept in the platform secret store, never in the settings file, and never shown back to you.",
+    section: SECTION_API_KEY,
     secret: true,
     secretRef: { slot: "openai", account: "default" },
+  },
+  {
+    key: "engineId",
+    default: ENGINE_REMOTE_HTTP,
+    label: "Engine",
+    help: "Which agent runtime answers. Remote talks to a PraisonAI engine over HTTP; in-process runs the agent loop on this device.",
+    section: SECTION_ENGINE,
+    // Exactly what `appEngines` in main.ts can build -- registry.test.ts
+    // compares this list against that composition, because a picker offering
+    // an id `selectEngine` rejects is a dead end: the choice persists, the
+    // NEXT launch cannot build it, and boot dies at `renderFatal` with no way
+    // back except editing storage by hand. That is what happened when
+    // ENGINE_PRAISONAI_TS was listed here while nothing supplied
+    // `createInProcess`. It is back because main.ts supplies the factory and
+    // the engine ships as a chunk beside app.js (engines/praisonai-ts/
+    // load-agent.ts).
+    //
+    // `default` here is the WEB default; `settingDefsFor` swaps in the
+    // platform's, so the value Settings shows and the engine that answers a
+    // first launch are the same one.
+    choices: [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS],
+  },
+  {
+    key: "baseUrl",
+    default: "http://127.0.0.1:8765",
+    label: "Engine address",
+    help: "Where the remote engine listens. Include the scheme and the port.",
+    section: SECTION_ENGINE,
+    // The field's own help text used to say "Only used by the remote engine"
+    // while the field rendered, and accepted edits, identically under the
+    // in-process engine -- which runs on the device and never contacts an
+    // address. Saying it in prose and denying it in the control is the worst
+    // of both: the sentence is true and the screen contradicts it.
+    //
+    // DISABLED rather than hidden, and it is a close call. Hiding is tidier
+    // and it is what a phone settings screen usually does. Two things decide
+    // it the other way. A field that disappears takes its value off the screen
+    // with it -- the store keeps it, so nothing is lost, but the user cannot
+    // SEE that nothing is lost, and someone flipping between engines to
+    // compare is watching their typed address vanish and reappear. And an
+    // address is the thing a user goes looking for BEFORE they have chosen the
+    // engine that uses it: a row that is not there cannot teach that the two
+    // are connected, while a row that is there, greyed, and says "Set Engine
+    // to remote-http to use this" teaches it in one glance.
+    appliesWhen: { key: "engineId", equals: ENGINE_REMOTE_HTTP },
+    // `7.0.0.1:8765` was accepted in silence: no scheme, no such host, no
+    // error, and no way to find out until a turn failed. There was never a
+    // validator here at all -- the refusal PATH has existed since #4694
+    // (validateInput -> set -> the `role="alert"` note beside the field), and
+    // nothing was ever handed to it to refuse. `httpUrl` is that missing half,
+    // and it normalises as well as refuses, so one address is not stored three
+    // ways.
+    validate: httpUrl(),
+    example: "http://192.168.1.10:8765",
   },
 ];
 

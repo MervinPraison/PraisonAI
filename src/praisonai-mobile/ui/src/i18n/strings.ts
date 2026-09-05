@@ -90,6 +90,27 @@ export interface Strings {
    */
   readonly settingRejected: (label: string) => string;
   /**
+   * The same refusal, plus a value that WOULD be accepted.
+   *
+   * `settingRejected` names the setting and stops there, which is the whole of
+   * what it can say for a def whose `validate` is a clamp. For a def that
+   * declares an `example`, stopping there leaves the user looking at the field
+   * they just typed into with no idea which part of it was wrong -- and the
+   * engine address is exactly that field: `7.0.0.1:8765` and
+   * `http://192.168.1.10:8765` differ in a scheme, and nothing on the screen
+   * said a scheme was expected.
+   */
+  readonly settingRejectedExample: (label: string, example: string) => string;
+  /**
+   * A field that is switched off, and the switch that turns it on.
+   *
+   * Not "This field is disabled" -- that describes the screen back to the
+   * person looking at it. It names the OTHER setting and the value to put it
+   * at, so the sentence is an instruction the reader can carry out on the same
+   * screen without scrolling.
+   */
+  readonly settingInactive: (label: string, value: string) => string;
+  /**
    * A secret field's placeholder, and its accessible name.
    *
    * Deliberately NOT the stored value and not a masked stand-in like
@@ -379,6 +400,8 @@ export const en: Strings = {
   // neither the setting nor the outcome. "was not changed" is the fact the
   // user needs: the old value is still in force.
   settingRejected: (label) => `${label} was not changed: that value was refused.`,
+  settingRejectedExample: (label, example) => `${label} was not changed. Enter it like ${example}.`,
+  settingInactive: (label, value) => `Set ${label} to ${value} to use this.`,
   // "Paste" rather than "Enter": on a phone nobody types an API key, and the
   // instruction that matches what the user is actually about to do is the one
   // that reads as written for them.

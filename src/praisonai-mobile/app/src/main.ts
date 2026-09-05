@@ -52,6 +52,7 @@ import {
   buildSettings,
   labelOf,
   presenceLabel,
+  rowsOf,
   validateInput,
   type SecretPresence,
   type SecretRow,
@@ -90,7 +91,12 @@ import {
 } from "../../engines/src/praisonai-ts/engine.ts";
 import { loadPraisonAgent, type PraisonAgentModule } from "../../engines/src/praisonai-ts/load-agent.ts";
 import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
-import { secretRefOf, type SettingDef, type SettingsFacade } from "../../core/src/settings/store.ts";
+import {
+  appliesTo,
+  secretRefOf,
+  type SettingDef,
+  type SettingsFacade,
+} from "../../core/src/settings/store.ts";
 import type { SecretsPort } from "../../core/src/ports/secrets.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
@@ -285,9 +291,9 @@ function screenHeading(doc: Document, route: Route, strings: Strings): HTMLEleme
  * had no way to point it at one.
  */
 function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings: SettingsFacade): HTMLElement {
-  let control: HTMLElement & { value: string };
+  let control: HTMLElement & { value: string; disabled: boolean };
   if (row.control === "choice" && row.choices !== null) {
-    const select = doc.createElement("select") as HTMLElement & { value: string };
+    const select = doc.createElement("select") as HTMLElement & { value: string; disabled: boolean };
     for (const choice of row.choices) {
       const option = doc.createElement("option") as HTMLElement & { value: string };
       option.value = String(choice);
@@ -296,7 +302,11 @@ function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings:
     }
     control = select;
   } else {
-    const input = doc.createElement("input") as HTMLElement & { value: string; type: string };
+    const input = doc.createElement("input") as HTMLElement & {
+      value: string;
+      type: string;
+      disabled: boolean;
+    };
     input.type = row.control === "number" ? "number" : "text";
     control = input;
   }
@@ -305,12 +315,88 @@ function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings:
   control.value = String(settings.get(def.key) ?? def.default);
   control.className = "setting-value setting-input";
   control.setAttribute("aria-label", row.label);
+  // Point the control at the notes that explain it: its help, and -- only while
+  // it is inactive -- the sentence naming the switch that turns it on. Without
+  // this a screen-reader user who focuses the field hears its label and nothing
+  // of what it is for or why it is greyed out. `syncSettings` keeps the
+  // inactive id in step as the field flips between applies/does-not.
+  const describedBy: string[] = [];
+  if (def.help !== undefined && def.help.trim() !== "") describedBy.push(helpId(def.key));
+  if (!row.applies) describedBy.push(inactiveId(def.key));
+  if (describedBy.length > 0) control.setAttribute("aria-describedby", describedBy.join(" "));
   // `change`, not `input`: a field commits on blur or Enter, so a half-typed
   // address is never stored and `set` is not called once per keystroke.
   // Delegated on root -- `change` bubbles.
   control.dataset["action"] = "set-setting";
   control.dataset["settingKey"] = def.key;
+  // A field nothing reads is switched OFF rather than drawn as if it worked.
+  // `baseUrl` accepted edits while the in-process engine was selected -- the
+  // engine that runs on the device and never contacts an address -- so a value
+  // typed there changed nothing and said nothing. `disabled` also keeps the
+  // control out of the tab order and out of the accessibility tree's list of
+  // things that can be operated, which a greyed-out colour alone would not.
+  control.disabled = !row.applies;
   return control;
+}
+
+/**
+ * A def's `help`, on screen at last.
+ *
+ * Every def has carried one since the registry was written and NOTHING
+ * rendered it: `buildSettingsScreen` painted the label, the control and the
+ * refusal note, and dropped `row.help` on the floor. That is the same defect
+ * as an inert setting one layer up -- a field the registry describes and the
+ * screen does not -- and it is why the engine address could say "Only used by
+ * the remote engine" in the source while the user saw a bare box.
+ */
+function settingHelp(doc: Document, key: string, help: string | null): HTMLElement | null {
+  if (help === null || help.trim() === "") return null;
+  const note = doc.createElement("p");
+  note.className = "setting-help";
+  note.id = helpId(key);
+  note.textContent = help;
+  return note;
+}
+
+/** Stable id for a def's help note, so the control can point `aria-describedby`
+ *  at it. A screen reader that focuses a field otherwise hears its label and
+ *  nothing of what the field is for. */
+function helpId(key: string): string {
+  return `setting-help-${key}`;
+}
+
+/** Stable id for a def's inactive note ("Set Engine to remote-http to use
+ *  this"), so a disabled field announces WHY it is disabled rather than leaving
+ *  a screen-reader user to guess. */
+function inactiveId(key: string): string {
+  return `setting-inactive-${key}`;
+}
+
+/**
+ * "Set Engine to remote-http to use this."
+ *
+ * Its own node, addressed by `data-setting-inactive`, for the same reason the
+ * refusal note is: switching the engine has to be able to turn this sentence
+ * on and off without rebuilding the screen and losing what is in the fields.
+ * It is NOT `role="alert"` -- nothing has gone wrong, and announcing it would
+ * interrupt the user in the middle of changing the very setting that produced
+ * it.
+ */
+function settingInactiveNote(doc: Document, key: string): HTMLElement {
+  const note = doc.createElement("p");
+  note.className = "setting-inactive";
+  note.id = inactiveId(key);
+  note.dataset["settingInactive"] = key;
+  note.hidden = true;
+  return note;
+}
+
+/** The sentence for a row that does not apply, or "" when it does. Shared by
+ *  the first paint and by every later `syncSettings`, so the two cannot drift
+ *  into saying different things about the same state. */
+function inactiveTextFor(row: ValueRow, strings: Strings): string {
+  const because = row.inactiveBecause;
+  return because === null ? "" : strings.settingInactive(because.label, because.value);
 }
 
 /**
@@ -377,7 +463,7 @@ function secretControls(doc: Document, row: SecretRow, strings: Strings): readon
   input.dataset["action"] = "set-secret";
   input.dataset["settingKey"] = row.key;
 
-  const clear = doc.createElement("button") as HTMLElement & { type: string };
+  const clear = doc.createElement("button") as HTMLElement & { type: string; disabled: boolean };
   clear.type = "button";
   clear.className = "setting-clear";
   clear.textContent = strings.actionClearSecret;
@@ -386,6 +472,15 @@ function secretControls(doc: Document, row: SecretRow, strings: Strings): readon
   // Named for the key it clears. "Remove" alone, repeated once per secret, is
   // a list of identical buttons to anyone navigating by control name.
   clear.setAttribute("aria-label", `${strings.actionClearSecret}: ${row.label}`);
+  // OFFERED ONLY WHEN THERE IS SOMETHING TO REMOVE. It shipped unconditional,
+  // sitting under a row that read "Not set" -- a control that destroys nothing
+  // and reports nothing, which is the exact defect class this screen was meant
+  // to be free of. `canClear` is false for UNKNOWN too, so the button does not
+  // flash into existence and out again while the keychain lookup lands.
+  // `disabled` as well as `hidden`: the click handler is delegated on root, so
+  // hiding alone would leave a node that still answers a synthetic click.
+  clear.hidden = !row.canClear;
+  clear.disabled = !row.canClear;
 
   return [presence, input, clear, settingError(doc, row.key)];
 }
@@ -424,26 +519,42 @@ export function buildSettingsScreen(
     note.textContent = warning.text;
     section.append(note);
   }
-  for (const group of view.sections) {
+  for (const [index, group] of view.sections.entries()) {
     const title = doc.createElement("h3");
     title.className = "settings-section";
+    // The first section is the one a new user came for, and it is marked as
+    // such so the stylesheet can give it weight without the renderer having to
+    // know WHICH section that is -- registry order decides, here as everywhere.
+    if (index === 0) title.dataset["lead"] = "true";
     title.textContent = group.title;
     section.append(title);
     for (const row of group.rows) {
       const el = doc.createElement("div");
       el.className = `row row-setting row-setting-${row.kind}`;
       el.dataset["settingKey"] = row.key;
+      // Rows in the lead section carry the mark too: the heading alone cannot
+      // make the field under it read as the primary thing on the screen.
+      if (index === 0) el.dataset["lead"] = "true";
       const label = doc.createElement("span");
       label.className = "setting-label";
       label.textContent = row.label;
       el.append(label);
+      // Label, then what it is for, then the control. The help was declared on
+      // every def and painted by nothing at all until now.
+      const help = settingHelp(doc, row.key, row.help);
+      if (help !== null) el.append(help);
       const def = row.kind === "value" ? defByKey.get(row.key) : undefined;
       if (row.kind === "value" && def !== undefined) {
-        // The field and the place its refusal is written, together. The alert
-        // node ships empty and hidden rather than being created on the failure
-        // -- an alert region inserted at the moment it has something to say is
-        // announced unreliably by every screen reader.
-        el.append(settingControl(doc, def, row, settings), settingError(doc, row.key));
+        // The field, the sentence that says which switch turns it on, and the
+        // place its refusal is written. The alert node ships empty and hidden
+        // rather than being created on the failure -- an alert region inserted
+        // at the moment it has something to say is announced unreliably by
+        // every screen reader.
+        const inactive = settingInactiveNote(doc, row.key);
+        const text = inactiveTextFor(row, strings);
+        inactive.textContent = text;
+        inactive.hidden = text === "";
+        el.append(settingControl(doc, def, row, settings), inactive, settingError(doc, row.key));
       } else if (row.kind === "secret") {
         // Editable, at last. This row was a read-only `<span>` reporting
         // "Not set" forever: there was no secret def to render it and, had
@@ -1355,7 +1466,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const refreshSecretPresence = (scope: HTMLElement): void => {
     const seq = ++latestPresenceSeq;
     void (async (): Promise<void> => {
-      const answers = new Map<string, string>();
+      const answers = new Map<string, boolean>();
       // Whether ANY credential is on file, which is the question the empty chat
       // screen asks. Resolved from the same walk rather than from a second one:
       // two independent lookups over the same keychain can land out of order
@@ -1367,7 +1478,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         if (ref === null) continue;
         const present = await app.settings.hasSecret(ref);
         anyPresent = anyPresent || present;
-        answers.set(def.key, presenceLabel(present ? "configured" : "not-set"));
+        answers.set(def.key, present);
       }
       // A newer refresh started while this one awaited: its answer is the
       // current truth, so this one must not overwrite it.
@@ -1375,10 +1486,22 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       keyPresence = anyPresent ? "present" : "absent";
       refreshEmptyState();
       for (const node of everyElement(scope)) {
-        const key = node.dataset["secretPresence"];
-        if (key === undefined) continue;
-        const label = answers.get(key);
-        if (label !== undefined) node.textContent = label;
+        const presenceKey = node.dataset["secretPresence"];
+        if (presenceKey !== undefined) {
+          const configured = answers.get(presenceKey);
+          if (configured !== undefined) {
+            node.textContent = presenceLabel(configured ? "configured" : "not-set");
+          }
+          continue;
+        }
+        // Remove follows presence in the SAME pass. Two passes, or a rebuild,
+        // is how a row comes to say "Not set" with a live Remove under it --
+        // the state the screen shipped in permanently.
+        if (node.dataset["action"] !== "clear-secret") continue;
+        const configured = answers.get(node.dataset["settingKey"] ?? "");
+        if (configured === undefined) continue;
+        node.hidden = !configured;
+        (node as HTMLElement & { disabled: boolean }).disabled = !configured;
       }
     })().catch(() => {
       // A keychain that will not answer leaves the row at UNKNOWN, which is
@@ -1687,6 +1810,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
    */
   const syncSettings = (key: string, refusal: string | null): void => {
     const defs = new Map(app.settings.defs().map((d) => [d.key, d]));
+    // The CURRENT rows, built once, from the same function the first paint
+    // used -- so "which switch turns this field on" is answered in one place
+    // and the paint and the sync cannot drift into saying different things.
+    const rows = new Map(
+      rowsOf(buildSettings(app.settings))
+        .filter((row): row is ValueRow => row.kind === "value")
+        .map((row) => [row.key, row]),
+    );
     const stack: HTMLElement[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
@@ -1700,7 +1831,30 @@ export async function mount(deps: MountDeps): Promise<App | null> {
           (node as HTMLElement & { value: string }).value = String(
             app.settings.get(def.key) ?? def.default,
           );
+          // Changing ONE setting can switch another one off: picking the
+          // in-process engine is what makes the engine address stop meaning
+          // anything. Recomputed here rather than on a rebuild, so the fields
+          // keep what is in them while the dependency flips.
+          const applies = appliesTo(def, (key) => app.settings.get(key));
+          (node as HTMLElement & { disabled: boolean }).disabled = !applies;
+          // Keep the description in step with the disabled state: a field that
+          // has just gone inactive must POINT at the sentence that says why, and
+          // one that has gone live must stop, or a screen reader keeps reading a
+          // reason that no longer applies. Help stays whether or not it applies.
+          const describedBy: string[] = [];
+          if (def.help !== undefined && def.help.trim() !== "") describedBy.push(helpId(def.key));
+          if (!applies) describedBy.push(inactiveId(def.key));
+          if (describedBy.length > 0) node.setAttribute("aria-describedby", describedBy.join(" "));
+          else node.removeAttribute("aria-describedby");
         }
+        continue;
+      }
+      const inactiveFor = node.dataset["settingInactive"];
+      if (inactiveFor !== undefined) {
+        const row = rows.get(inactiveFor);
+        const text = row === undefined ? "" : inactiveTextFor(row, strings);
+        node.textContent = text;
+        node.hidden = text === "";
         continue;
       }
       const errorFor = node.dataset["settingError"];
@@ -1812,7 +1966,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // Said, not merely undone. A field that snaps back in silence is
         // indistinguishable from a mis-tap or from a save that worked, and on
         // this screen that leaves someone re-typing the same refused value.
-        const refusal = stored ? null : strings.settingRejected(labelOf(def));
+        // The example, when the def offers one. `baseUrl` is the field a user
+        // gets wrong -- it now REFUSES `7.0.0.1:8765` instead of storing it,
+        // and a refusal that only names the setting leaves them looking at the
+        // same string with no idea which part of it was wrong.
+        const refusal = stored
+          ? null
+          : def.example === undefined
+            ? strings.settingRejected(labelOf(def))
+            : strings.settingRejectedExample(labelOf(def), def.example);
         if (refusal !== null) assertive.textContent = refusal;
         syncSettings(intent.key, refusal);
         return;
