@@ -199,7 +199,9 @@ class TestModalSandbox:
             result = await sandbox.execute_file("/nonexistent/file.py")
             
             assert result.status == SandboxStatus.FAILED
-            assert "File not found" in result.error
+            # "File not found" sent the user hunting for a path problem. The
+            # real cause is that this backend cannot store files at all.
+            assert "no file storage" in result.error
     
     @pytest.mark.asyncio
     async def test_write_file_warning(self):
@@ -209,7 +211,11 @@ class TestModalSandbox:
         with patch('praisonai_sandbox.modal.logger.warning') as mock_warning:
             result = await sandbox.write_file("/tmp/test.py", "print('Hello')")
             
-            assert result
+            # This asserted `result` -- pinning a True return from a call that
+            # wrote nothing. Modal has no file storage here, so False is the
+            # honest answer and callers that check the return value already
+            # branch on it.
+            assert result is False
             mock_warning.assert_called_once()
     
     @pytest.mark.asyncio
