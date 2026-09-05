@@ -3,6 +3,7 @@ Fly.io deployment provider (optional — prefer infra/starters/fly for full scaf
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 from typing import Any, Dict
 
@@ -37,6 +38,9 @@ def _check_cli(name: str, version_args: list[str]) -> DoctorCheckResult:
         )
     except Exception as e:
         return DoctorCheckResult(name=f"{name} CLI", passed=False, message=str(e))
+
+
+logger = logging.getLogger(__name__)
 
 
 class FlyProvider(BaseProvider):
@@ -77,11 +81,55 @@ class FlyProvider(BaseProvider):
             "notes": "Use praisonai deploy create --template fly for starter scaffold",
         }
 
+    def _unsupported_settings(self) -> list:
+        """CloudConfig values `flyctl deploy` has no flag for.
+
+        Returned so the caller can say so rather than discard them silently.
+        Region is set in fly.toml, not on the deploy command; instance counts
+        are a scaling concern (`flyctl scale count`).
+        """
+        unsupported = []
+        cfg = self.config
+        if cfg.region:
+            unsupported.append("region (set it in fly.toml)")
+        if cfg.min_instances not in (None, 1) or cfg.max_instances not in (None, 10):
+            unsupported.append("min_instances/max_instances (use `flyctl scale count`)")
+        return unsupported
+
+    def _deploy_command(self, app: str) -> list:
+        """Build the flyctl invocation, carrying the settings it accepts.
+
+        CloudConfig declares env_vars, cpu, memory, image, region and instance
+        counts, validates them, and echoes them from `deploy validate --json`.
+        This command used to send none of them: a config naming
+        env_vars={"OPENAI_API_KEY": ...} deployed an app without its key and
+        reported success.
+
+        Flags verified against flyctl v0.4.14: -e/--env, --vm-cpus,
+        --vm-memory and --image exist; --region does not.
+        """
+        cmd = ["flyctl", "deploy", "--app", app, "--remote-only"]
+        cfg = self.config
+        if cfg.image:
+            cmd += ["--image", str(cfg.image)]
+        if cfg.cpu:
+            cmd += ["--vm-cpus", str(cfg.cpu)]
+        if cfg.memory:
+            cmd += ["--vm-memory", str(cfg.memory)]
+        for key, value in (cfg.env_vars or {}).items():
+            cmd += ["--env", f"{key}={value}"]
+        return cmd
+
     def deploy(self) -> DeployResult:
         app = self.config.service_name
+        ignored = self._unsupported_settings()
+        if ignored:
+            logger.warning(
+                "flyctl deploy cannot apply: %s", "; ".join(ignored)
+            )
         try:
             result = subprocess.run(
-                ["flyctl", "deploy", "--app", app, "--remote-only"],
+                self._deploy_command(app),
                 capture_output=True,
                 text=True,
                 timeout=600,
