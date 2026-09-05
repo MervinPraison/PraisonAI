@@ -1865,6 +1865,61 @@ class ToolExecutionMixin:
             )
             return False
 
+    async def _doom_loop_approved_async(self, function_name, arguments, verdict) -> bool:
+        """Async twin of :meth:`_doom_loop_approved`.
+
+        Identical decision semantics, but routes the backend prompt through the
+        registry's native ``approve_async`` so an async-only or event-loop-bound
+        approval backend runs on the *caller's* loop (preserving loop-bound
+        resources) instead of the sync bridge's throwaway worker-thread loop.
+        Every non-allow outcome — deny, timeout, no backend, or any error —
+        returns ``False`` so the caller falls back to the historical hard-stop.
+        """
+        try:
+            from ..approval import get_approval_registry
+            from ..approval.registry import DOOM_LOOP_TARGET
+
+            manager = getattr(self, "_permission_manager", None)
+            if manager is not None:
+                try:
+                    from ..permissions import PermissionAction
+                    action = manager.resolve_tool_action(
+                        "doom_loop", getattr(self, "name", None)
+                    )
+                    if action == PermissionAction.ALLOW:
+                        return True
+                    if action == PermissionAction.DENY:
+                        return False
+                except Exception as e:  # noqa: BLE001
+                    logging.debug(
+                        "doom_loop permission-manager resolve failed (%s); "
+                        "falling through to backend", e,
+                    )
+
+            registry = get_approval_registry()
+            request_args = {
+                "tool": function_name,
+                "detector": verdict.get("detector"),
+                "count": verdict.get("count"),
+                "args_fingerprint": self._doom_loop_args_fingerprint(
+                    function_name, arguments
+                ),
+            }
+            decision = await registry.approve_async(
+                getattr(self, "name", None),
+                DOOM_LOOP_TARGET,
+                request_args,
+                force=True,
+                scope_id=getattr(self, "_approval_scope_id", None),
+            )
+            return bool(getattr(decision, "approved", False))
+        except Exception as e:  # noqa: BLE001 — fail closed to the block path
+            logging.debug(
+                "doom_loop async approval routing failed for %s (%s); blocking",
+                function_name, e,
+            )
+            return False
+
     @staticmethod
     def _doom_loop_args_fingerprint(function_name, arguments) -> str:
         """Stable, immutable fingerprint of the looping (tool, args) pair."""
