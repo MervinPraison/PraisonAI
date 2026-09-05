@@ -22,6 +22,89 @@ import type { SkillManager, SkillDiscoveryOptions } from '../skills';
 import type { PlanningAgentConfig, Plan } from '../planning';
 import type { LLMConfig } from '../llm';
 import type { Task, TaskOutput } from './types';
+import {
+  buildMultimodalPrompt,
+  resolveTaskContext,
+  withTaskContext,
+  type PromptPart,
+  type TaskContext,
+} from './features/chat-options';
+import { loadToolsetTools, resolveToolsetToolNames } from './features/toolsets';
+import { resolveLearnConfig, type LearnConfig } from './features/learn';
+import { executeWithToolConfig, resolveToolConfig, truncateToolOutput, type ToolConfig } from './features/tool-config';
+import {
+  resolveAgentRuntime,
+  runTurnOnRuntime,
+  type ResolvedAgentRuntime,
+} from './features/runtime';
+import {
+  assertAuthProviderRegistered,
+  authDefaultModel,
+  resolveAgentAuth,
+  withAuthHeaders,
+} from './features/auth';
+import {
+  executeCodeInSandbox,
+  resolveSandbox,
+  type ExecuteCodeOptions,
+  type SandboxConfig as AgentSandboxConfig,
+  type SandboxResult,
+  type SandboxRunner,
+} from './features/sandbox';
+import {
+  resolveMessageSteering,
+  steeringNotesFor,
+  SteeringPriority,
+  type MessageSteeringProtocol,
+} from './features/message-steering';
+import {
+  resolveSelfImprove,
+  runSkillReviewTurn,
+  type RawSkillToolCall,
+  type SelfImproveConfig,
+  type SkillProposal,
+} from './features/self-improve';
+import {
+  applyAutonomyToApproval,
+  doomLoopMessage,
+  DoomLoopTracker,
+  resolveAutonomy,
+  type AutonomyConfig,
+} from './features/autonomy';
+// Type-only: the learn stores import fs/os/path at their top level, and a
+// value import would put them on this file's graph, which the webview gate
+// rejects. The manager is constructed on first use instead.
+import type { LearnManager } from '../memory/learn';
+import {
+  assembleToolDefs,
+  dispatchToolDescribe,
+  dispatchToolSearch,
+  resolveToolSearch,
+  resolveUnderlyingCall,
+  type ToolSearchAssembly,
+} from './features/tool-search';
+import type { ToolSearchConfig } from '../config';
+import {
+  applyPromptTemplate,
+  applyResponseTemplate,
+  applySystemTemplate,
+  responseTemplateIsWrapper,
+  resolveTemplates,
+  type TemplateConfig,
+} from './features/templates';
+import {
+  runReflectionLoop,
+  resolveReflection,
+  type ReflectionConfig,
+  type ReflectionRound,
+} from './features/reflection';
+import {
+  delegateToBackend,
+  resolvePlacement,
+  type BackendDelegationOptions,
+  type ManagedBackendLike,
+  type ToolPlaceLike,
+} from './features/placement';
 
 /**
  * The default token sink for `start()` when no `onToken` is supplied.
@@ -487,6 +570,20 @@ interface PreparedTurn {
   outputSchema?: Record<string, any>;
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
   seed?: number;
+  /**
+   * The user message actually sent. A plain string normally; an OpenAI
+   * multimodal `content` array when the call carried `attachments`
+   * (Python `_build_multimodal_prompt`). `prompt` stays the text, because
+   * that -- and only that -- is what goes into history.
+   */
+  promptContent: string | PromptPart[];
+  /** Python `task_name`/`task_description`/`task_id` for this turn. */
+  task?: TaskContext;
+  /**
+   * The tool-search decision for this turn: which tools were sent, and which
+   * were held back behind the bridge. `undefined` when `toolSearch` is off.
+   */
+  toolSearch?: ToolSearchAssembly;
 }
 
 /** Web search tool factories keyed by the provider name accepted by `web`. */
@@ -693,6 +790,56 @@ export class Agent {
   private defaultMaxTokens?: number;
   private _turnSeed?: number;
   private _currentPrompt?: string;
+  /** Python `task_name`/`task_description`/`task_id` of the most recent turn. */
+  private _taskContext?: TaskContext;
+  /** Resolved from `backend`/`runOn`: the managed runtime the whole agent runs on. */
+  private _managedBackend?: ManagedBackendLike;
+  /** Resolved from `toolsRunOn`: where this agent's tool calls execute. */
+  private _toolPlace?: ToolPlaceLike;
+  /** Resolved from `reflection`: the self-critique loop's settings. */
+  private _reflectionConfig?: ReflectionConfig;
+  /** Resolved from `templates`: system/prompt/response wrappers. */
+  private _templates?: TemplateConfig;
+  /** Resolved from `toolSearch`: progressive tool disclosure settings. */
+  private _toolSearchConfig?: ToolSearchConfig;
+  /** The tool-search decision for the turn in flight (bridge mode + deferred set). */
+  private _toolSearchTurn?: ToolSearchAssembly;
+  /** Tool names the configured `toolsets` resolved to (validated in the constructor). */
+  private _toolsetToolNames: string[] = [];
+  private _toolsetsAttached = false;
+  /** Resolved from `learn`: continuous-learning settings, or `undefined` when off. */
+  private _learnConfig?: LearnConfig;
+  private _learnManager?: LearnManager;
+  /** Turns since the last learning nudge (Python `_turns_since_nudge`). */
+  private _turnsSinceNudge = 0;
+  /** Tool calls executed in the most recent turn (Python `_recent_tool_calls_count`). */
+  private _recentToolCalls = 0;
+  /** Resolved from `toolConfig`: timeout, retry, output budget, global-tool lookup. */
+  private _toolConfig?: ToolConfig;
+  /** Resolved from `autonomy`: how much the agent may do without asking. */
+  private _autonomyConfig?: AutonomyConfig;
+  /** Spots the model repeating itself, so a loop costs 3 calls rather than the whole budget. */
+  private _doomLoop?: DoomLoopTracker;
+  /** Resolved from `selfImprove`: the post-task skill review. */
+  private _selfImprove?: SelfImproveConfig;
+  /** Guards against a review turn triggering another review. */
+  private _inSkillReview = false;
+  /** Tool names used in the turn just finished (the review policy's input). */
+  private _turnToolsUsed: string[] = [];
+  /** Skills the most recent review turn proposed. */
+  public lastSkillProposals: SkillProposal[] = [];
+  /** Resolved from `messageSteering`: the live-guidance queue, or `undefined` when off. */
+  private _messageSteering?: MessageSteeringProtocol;
+  /** Resolved from `sandbox`: where `executeCode()` runs, or `undefined` when unset. */
+  private _sandboxConfig?: AgentSandboxConfig;
+  /** Runners cached per sandbox type: a fresh one per call would restart a container each time. */
+  private _sandboxRunners = new Map<string, SandboxRunner>();
+  /** Resolves once, on the first turn: the subscription credentials `auth` names. */
+  private _authPromise?: Promise<void>;
+  /** Resolved from `runtime`: the runtime each turn is delegated to. */
+  private _runtime?: ResolvedAgentRuntime;
+  /** Every critique made during the most recent turn (Python `display_self_reflection`). */
+  public lastReflections: ReflectionRound[] = [];
 
   // ---- Python-parity options: wired ----
   /** Python parity: handoffs (Optional[List[Union['Agent', 'Handoff']]]). Registered as transfer tools. */
@@ -788,8 +935,19 @@ export class Agent {
     // resolved from whichever provider credential is actually present, so a
     // user holding only ANTHROPIC_API_KEY gets a Claude model rather than an
     // OpenAI default that cannot authenticate.
-    this.llm = config.model || llmName || resolveDefaultModel();
-    this._llmExplicit = config.model !== undefined || config.llm !== undefined;
+    // `auth` is validated before the model is chosen: an unknown subscription
+    // provider must fail here, not at request time where the surrounding
+    // error handling would turn it into API-key billing (Python agent.py:2093).
+    if (config.auth !== undefined) assertAuthProviderRegistered(config.auth);
+    // A subscription seat is tied to one vendor, so an unnamed model must not
+    // default to OpenAI and ship the provider's OAuth token to the wrong
+    // endpoint (Python `_AUTH_DEFAULT_MODELS`).
+    const authModel = config.auth !== undefined && llmName === undefined && config.model === undefined
+      ? authDefaultModel(config.auth)
+      : undefined;
+    this.llm = config.model || llmName || authModel || resolveDefaultModel();
+    // auth= pins the vendor too, so it counts as an explicit choice.
+    this._llmExplicit = config.model !== undefined || config.llm !== undefined || config.auth !== undefined;
     if (llmConfig?.temperature !== undefined) this.defaultTemperature = llmConfig.temperature;
     this.defaultMaxTokens = llmConfig?.maxTokens;
     this.markdown = config.markdown ?? true;
@@ -1003,6 +1161,72 @@ export class Agent {
       if (value !== undefined && value !== false) notYetHonoured('Agent', name);
     }
 
+    // Where does this run? Resolved before anything else is built so a
+    // contradiction fails at the call site, with the parameter name the caller
+    // actually wanted, instead of surfacing later as tools mysteriously
+    // running on the wrong machine (Python `resolve_placement`).
+    const placement = resolvePlacement({
+      owner: 'Agent',
+      runOn: config.runOn,
+      toolsRunOn: config.toolsRunOn,
+      backend: config.backend,
+    });
+    this._managedBackend = placement.backend;
+    this._toolPlace = placement.toolPlace;
+    this._runtime = resolveAgentRuntime(config.runtime);
+    if (this._runtime && this._managedBackend) {
+      throw new TypeError(
+        'Agent(runtime, backend/runOn) sets where the loop runs twice. A runtime and a managed ' +
+        'backend both take the whole turn; pass one or the other.'
+      );
+    }
+    this._reflectionConfig = resolveReflection(config.reflection);
+    this._templates = resolveTemplates(config.templates);
+    this._toolSearchConfig = resolveToolSearch(config.toolSearch);
+    // Resolved (and validated) here rather than on first use: an unknown
+    // toolset name is a typo, and it must not survive until the first turn.
+    this._toolsetToolNames = resolveToolsetToolNames(config.toolsets ?? [], this.llm);
+    // Autonomy decides which tool calls need a human, so it shapes the
+    // approval gate (Python bridges `full_auto` to an auto-approve backend).
+    this._autonomyConfig = resolveAutonomy(config.autonomy);
+    if (this._autonomyConfig?.enabled) {
+      if (!this.approvalManager) {
+        const manager = new ApprovalManager();
+        // `full_auto` never prompts, so it needs no handler; the other levels
+        // do, and a manager without one would stall every call until timeout.
+        if (this._autonomyConfig.level !== 'full_auto') manager.onApprovalRequest(createCLIApprovalPrompt());
+        this.approvalManager = manager;
+      }
+      applyAutonomyToApproval(this._autonomyConfig, this.approvalManager);
+      this._doomLoop = new DoomLoopTracker(this._autonomyConfig.doomLoopThreshold);
+      this.maxIterations = config.maxIterations ?? this._autonomyConfig.maxIterations;
+    }
+    this._messageSteering = resolveMessageSteering(config.messageSteering);
+    this._sandboxConfig = resolveSandbox(config.sandbox);
+    this._selfImprove = resolveSelfImprove(config.selfImprove, (message) => { void Logger.warn(`Agent ${this.name}: ${message}`); });
+    this._toolConfig = resolveToolConfig(config.toolConfig);
+    // `parallel` is Python's deprecated alias for
+    // ExecutionConfig.parallel_tool_calls, which is forwarded to the model as
+    // the `parallel_tool_calls` request field -- it decides whether the MODEL
+    // may batch tool calls, not how this process runs them. It therefore
+    // travels the same way `seed` does, and is unavailable for the same reason.
+    if (this._toolConfig?.parallel !== undefined && (this._useAISDKBackend || !this._fetchWrapped)) {
+      notYetHonoured(
+        'Agent',
+        'toolConfig',
+        this._useAISDKBackend
+          ? '`parallel` is only forwarded on the OpenAI-compatible path; non-OpenAI backends do not receive it yet.'
+          : 'No fetch implementation is available to carry `parallel`.'
+      );
+    }
+    this._learnConfig = resolveLearnConfig(config.learn, (message) => { void Logger.warn(`Agent ${this.name}: ${message}`); });
+    if (this._learnConfig) {
+      // `scope: 'global'` is accepted by the resolver (Python's enum has it)
+      // but LearnManagerConfig types only private/shared; the manager reads
+      // the value as a string, so the cast loses nothing.
+      // Constructed on first use; see ensureLearnManager().
+    }
+
     this.attachHandoffs(config.handoffs);
     this.attachMemory(config.memory);
     this.attachKnowledge(config.knowledge);
@@ -1031,6 +1255,7 @@ export class Agent {
     if (this.reasoningEffort && this.reasoningEffort !== 'off') extras.reasoning_effort = this.reasoningEffort;
     if (this.defaultMaxTokens !== undefined) extras.max_tokens = this.defaultMaxTokens;
     if (this._turnSeed !== undefined) extras.seed = this._turnSeed;
+    if (this._toolConfig?.parallel !== undefined) extras.parallel_tool_calls = this._toolConfig.parallel;
     return extras;
   }
 
@@ -1275,6 +1500,46 @@ export class Agent {
     this.contextManager.addSystem(this.instructions);
   }
 
+  /**
+   * Apply the subscription credentials behind `auth` to the transport
+   * (Python injects them into the LLM client). Resolved once and cached: the
+   * provider may read a keychain or refresh a token, and doing that per turn
+   * would be both slow and rude.
+   */
+  private async ensureAuthCredentials(): Promise<void> {
+    if (this.auth === undefined) return;
+    if (!this._authPromise) {
+      this._authPromise = (async () => {
+        const credentials = await resolveAgentAuth(this.auth as string);
+        if (credentials.apiKey !== undefined) this._apiKey = credentials.apiKey;
+        if (credentials.baseURL !== undefined) this._baseURL = credentials.baseURL;
+        if (credentials.headers) this._fetch = withAuthHeaders(this._fetch, credentials.headers);
+        // Rebuild the transport so the resolved key, endpoint and headers are
+        // the ones the request actually carries.
+        this.configureModel(this.llm);
+      })();
+    }
+    await this._authPromise;
+  }
+
+  /**
+   * Attach the tools behind `toolsets` (Python `agent.py` lines 2358-2392).
+   * Idempotent, and lazy so the provider SDKs load only for an agent that
+   * actually asked for them.
+   */
+  private async ensureToolsetTools(): Promise<void> {
+    if (this._toolsetsAttached) return;
+    this._toolsetsAttached = true;
+    if (this._toolsetToolNames.length === 0) return;
+    const existing = new Set(this.getFlatToolDefinitions().map((t) => t.name));
+    const tools = await loadToolsetTools(this._toolsetToolNames, existing, (message) => {
+      void Logger.warn(`Agent ${this.name}: ${message}`);
+    });
+    if (tools.length === 0) return;
+    this.tools = this.tools || [];
+    this.processToolInputs(tools, this.tools);
+  }
+
   /** Resolve `web` into a search tool once (loads a provider module, so it is deferred). */
   private async ensureWebTool(): Promise<void> {
     const web = this._webInput;
@@ -1400,6 +1665,115 @@ export class Agent {
   /** The guardrails attached via `guardrails`. */
   getGuardrails(): readonly Guardrail[] {
     return this.guardrails;
+  }
+
+  /**
+   * The `taskName`/`taskDescription`/`taskId` of the most recent turn, or
+   * `undefined` when the caller named none (Python threads the same triple
+   * into `display_interaction` and the interaction callbacks).
+   */
+  getTaskContext(): TaskContext | undefined {
+    return this._taskContext;
+  }
+
+  /**
+   * The continuous-learning store behind `learn`, or `undefined` when the
+   * option was not set. Read it to inspect or approve what was learned.
+   */
+  getLearnManager(): LearnManager | undefined {
+    return this._learnManager;
+  }
+
+  /**
+   * Build the learn manager on first use.
+   *
+   * The store imports fs/os/path at its top level, so importing it eagerly
+   * would put Node builtins on the Agent's graph and fail the webview gate.
+   * The specifier is computed so the bundler leaves it as a runtime import;
+   * nothing loads unless an agent actually asked for `learn`.
+   */
+  private async ensureLearnManager(): Promise<void> {
+    if (this._learnManager || !this._learnConfig) return;
+    const mod: typeof import('../memory/learn') = await import(
+      /* @vite-ignore */ ['..', 'memory', 'learn'].join('/')
+    );
+    this._learnManager = new mod.LearnManager(
+      this._learnConfig as unknown as ConstructorParameters<typeof mod.LearnManager>[0],
+      this.name,
+      this._learnConfig.storePath ?? null,
+    );
+  }
+
+  /**
+   * The managed runtime this agent's turns are handed to, resolved from
+   * `backend` or `runOn`. `undefined` means the loop runs here.
+   */
+  getManagedBackend(): ManagedBackendLike | undefined {
+    return this._managedBackend;
+  }
+
+  /** Where this agent's tool calls run, resolved from `toolsRunOn`. */
+  getToolPlace(): ToolPlaceLike | undefined {
+    return this._toolPlace;
+  }
+
+  /**
+   * Queue live guidance for the next turn (Python `Agent.steer`). Returns the
+   * message id, or `''` when steering is off or the queue is full.
+   */
+  steer(message: string, priority: number = SteeringPriority.NORMAL): string {
+    return this._messageSteering?.queueMessage(message, priority) ?? '';
+  }
+
+  /** Whether a sandbox is configured (Python `Agent.has_sandbox`). */
+  get hasSandbox(): boolean {
+    return this._sandboxConfig !== undefined;
+  }
+
+  /** The resolved `sandbox` settings, or `undefined` when the option was not set. */
+  getSandboxConfig(): AgentSandboxConfig | undefined {
+    return this._sandboxConfig;
+  }
+
+  /**
+   * Run code in the agent's sandbox (Python `Agent.execute_code`).
+   *
+   * The code is analysed before it runs and the warnings are attached to the
+   * result under `metadata.securityWarnings`, so a caller can act on them
+   * rather than having them logged and lost.
+   *
+   * @param code - The source to run.
+   * @param options.language - `python` (default), `bash`, `javascript`, ...
+   * @param options.checkSecurity - Run the static pre-check (default true).
+   * @param options.runIn - Where to run THIS call: a sandbox type, a config,
+   *   or `true` for the default subprocess sandbox. Overrides the agent's.
+   */
+  async executeCode(code: string, options: ExecuteCodeOptions = {}): Promise<SandboxResult> {
+    return executeCodeInSandbox({
+      code,
+      options,
+      defaultConfig: this._sandboxConfig,
+      runners: this._sandboxRunners,
+      agentName: this.name,
+      onWarning: (message) => {
+        if (this.verbose) void Logger.warn(`Security warnings for code execution:\n${message}`);
+      },
+    });
+  }
+
+  /** The steering queue behind `messageSteering`, or `undefined` when off. */
+  getMessageSteering(): MessageSteeringProtocol | undefined {
+    return this._messageSteering;
+  }
+
+  /** The runtime each turn is delegated to, resolved from `runtime`. */
+  getRuntime(): ResolvedAgentRuntime | undefined {
+    return this._runtime;
+  }
+
+  /** The resolved `autonomy` settings, or `undefined` when the option was not set. */
+  getAutonomy(): AutonomyConfig | undefined {
+    return this._autonomyConfig;
   }
 
   /** The rules manager attached via `rules`, if any. */
@@ -1553,8 +1927,26 @@ export class Agent {
     this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
   }
 
+  /**
+   * The system messages for one turn: exactly one, or none at all when
+   * `templates.useSystemPrompt` is false (Python `use_system_prompt=False`
+   * sends no system message rather than an empty one).
+   */
+  private systemMessages(extraSystem: string[] = []): Array<{ role: string; content: string }> {
+    if (this._templates && this._templates.useSystemPrompt === false) return [];
+    return [{ role: 'system', content: this.createSystemPrompt(extraSystem) }];
+  }
+
   private createSystemPrompt(extraSystem: string[] = []): string {
-    let prompt = this.instructions;
+    // `templates.system` replaces the instructions as the system prompt,
+    // with {instructions}/{role}/{goal}/{backstory}/{name} substituted.
+    let prompt = applySystemTemplate(this._templates, {
+      instructions: this.instructions,
+      name: this.name,
+      role: this.role,
+      goal: this.goal,
+      backstory: this.backstory,
+    });
     if (this.handoffs.length > 0) {
       prompt = promptWithHandoffInstructions(prompt, this.handoffs);
     }
@@ -1655,6 +2047,48 @@ export class Agent {
   }
 
   /**
+   * Run one registered tool implementation.
+   *
+   * The single place a tool actually executes, so the options that govern
+   * execution have one seam rather than several: `toolsRunOn` decides WHERE
+   * it runs (Python `tools_placement.ensure_tools_placed`).
+   */
+  private async invokeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    const local = () => Promise.resolve(this.toolFunctions[name](args));
+    const placed = this._toolPlace
+      ? () => this._toolPlace!.runTool(name, args, local)
+      : local;
+    if (!this._toolConfig) return placed();
+    return executeWithToolConfig(this._toolConfig, name, placed);
+  }
+
+  /**
+   * `toolConfig.allowGlobalTools`: resolve a tool the model named but the
+   * agent does not carry from the process-global tool registry, registering
+   * it for the rest of the run. Returns whether one was found.
+   */
+  private async resolveGlobalTool(name: string): Promise<boolean> {
+    if (this.toolFunctions[name]) return true;
+    if (!this._toolConfig?.allowGlobalTools) return false;
+    try {
+      // Loaded lazily through a computed specifier: the registry pulls in every
+      // builtin's metadata, and require() would earn this file the esm-shim's
+      // createRequire banner -- a top-level await esbuild refuses at the
+      // chrome58 floor the mobile app ships against.
+      const registry: typeof import('../tools/registry/registry') = await import(
+        /* @vite-ignore */ ['..', 'tools', 'registry', 'registry'].join('/')
+      );
+      const { getTool } = registry;
+      const tool = getTool(name) as { execute?: (input: unknown) => unknown } | null;
+      if (!tool || typeof tool.execute !== 'function') return false;
+      this.registerToolFunction(name, (input: unknown) => tool.execute!(input));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Process tool calls from the model
    * @param toolCalls Tool calls from the model
    * @param signal Optional AbortSignal; if already aborted, no tool is invoked
@@ -1662,9 +2096,15 @@ export class Agent {
    */
   private async processToolCalls(toolCalls: Array<any>, signal?: AbortSignal, onEvent?: (event: AgentEvent) => void): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
     const results = [];
+    // Counted for the learning nudge, which only fires once the agent has
+    // actually done some work (Python `_recent_tool_calls_count`).
+    this._recentToolCalls += toolCalls.length;
     
     for (const toolCall of toolCalls) {
-      const { id, function: { name, arguments: argsString } } = toolCall;
+      const { id, function: { name: calledName, arguments: argsString } } = toolCall;
+      // `tool_call` is unwrapped below, so `name` is rebound to the REAL tool
+      // for every observer after that point (Python invariant 6).
+      let name: string = calledName;
       await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
 
       // Track whether tool_call was already announced so the catch below can
@@ -1691,7 +2131,41 @@ export class Agent {
         if (parsedArgs === null || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
           throw new Error(`Invalid arguments for tool ${name}: expected a JSON object`);
         }
-        const args = parsedArgs as Record<string, unknown>;
+        let args = parsedArgs as Record<string, unknown>;
+
+        // Tool-search bridge. `tool_search` and `tool_describe` are answered
+        // here from the deferred set (they never reach a user tool);
+        // `tool_call` is unwrapped into the real call BEFORE the event, the
+        // hooks and the approval gate, so every one of them sees the tool the
+        // model actually asked for rather than the bridge.
+        const bridge = this._toolSearchTurn;
+        if (bridge && bridge.bridgeMode) {
+          if (name === 'tool_search' || name === 'tool_describe') {
+            const payload = name === 'tool_search'
+              ? dispatchToolSearch(
+                  String(args.query ?? ''),
+                  typeof args.limit === 'number' ? args.limit : undefined,
+                  bridge.deferrableTools,
+                  bridge.config,
+                )
+              : dispatchToolDescribe(String(args.tool_name ?? ''), bridge.deferrableTools);
+            const content = JSON.stringify(payload);
+            onEvent?.({ type: 'tool_call', callId: id, name, args });
+            toolCallEmitted = true;
+            results.push({ role: 'tool', tool_call_id: id, name, content });
+            onEvent?.({ type: 'tool_result', callId: id, name, ok: true, output: content });
+            continue;
+          }
+          if (name === 'tool_call') {
+            const unwrapped = resolveUnderlyingCall(name, args);
+            name = unwrapped.name;
+            args = unwrapped.args;
+          }
+        }
+
+        // Recorded after the bridge unwrap so the skill-review policy sees the
+        // tool the model actually used, not `tool_call`.
+        this._turnToolsUsed.push(name);
 
         // Announced BEFORE anything can reject it, so every tool_result -- a
         // denial, a missing function, a thrown error -- has a matching
@@ -1700,8 +2174,8 @@ export class Agent {
         onEvent?.({ type: 'tool_call', callId: id, name, args });
         toolCallEmitted = true;
 
-        // Check if function exists
-        if (!this.toolFunctions[name]) {
+        // Check if function exists (allowGlobalTools may still find it).
+        if (!(await this.resolveGlobalTool(name))) {
           throw new Error(`Function ${name} not registered`);
         }
 
@@ -1736,8 +2210,28 @@ export class Agent {
           }
         }
 
-        // Call the function - registered wrappers handle positional mapping
-        let result = await this.toolFunctions[name](effectiveArgs);
+        // Doom-loop guard: the same call with the same arguments, over and
+        // over, will not start working on the fourth try. Feed the model a
+        // recovery instruction instead of burning the iteration budget.
+        if (this._doomLoop?.wouldLoop(name, effectiveArgs)) {
+          const repeats = this._doomLoop.identicalRun(name, effectiveArgs) + 1;
+          this._doomLoop.record(name, effectiveArgs, undefined, false);
+          const recovery = this._doomLoop.getRecoveryAction();
+          const message = doomLoopMessage(name, repeats, recovery);
+          if (recovery === 'abort') {
+            this.lastStopReason = 'error';
+            throw new Error(`Agent ${this.name}: ${message}`);
+          }
+          results.push({ role: 'tool', tool_call_id: id, name, content: message });
+          onEvent?.({ type: 'tool_result', callId: id, name, ok: false, output: message });
+          continue;
+        }
+
+        // Call the function - registered wrappers handle positional mapping.
+        // Routed through invokeTool so `toolsRunOn` (where it runs) and
+        // `toolConfig` (timeout/retry) apply to every path that runs a tool.
+        let result = await this.invokeTool(name, effectiveArgs);
+        this._doomLoop?.record(name, effectiveArgs, result, true);
         const postHook = await this.runHook('post_tool_call', { agent: this.name, name, args: effectiveArgs, result });
         if (postHook && 'result' in postHook) result = postHook.result;
 
@@ -1745,11 +2239,12 @@ export class Agent {
         // "[object Object]" and threw on null/undefined results. Preserve a
         // real null result as JSON "null" (result ?? '' collapsed it to "");
         // only undefined becomes empty content.
-        const content = typeof result === 'string'
+        const rawContent = typeof result === 'string'
           ? result
           : result === undefined
             ? ''
             : JSON.stringify(result);
+        const content = this._toolConfig ? truncateToolOutput(this._toolConfig, rawContent) : rawContent;
 
         // Add result to messages. `name` is required so the AI SDK adapter
         // (toAISDKPrompt) can set a non-empty toolName on the tool-result part —
@@ -1845,6 +2340,24 @@ export class Agent {
     onEvent: ((event: AgentEvent) => void) | undefined,
     options?: AgentChatOptions,
   ): Promise<string> {
+    // Steering guidance is folded in first, exactly where Python injects it at
+    // the top of `chat()` -- before the backend/runtime branches, so a turn
+    // that runs elsewhere is steered too.
+    const steering = steeringNotesFor(this._messageSteering?.drain() ?? []);
+    if (steering) prompt = `${prompt}\n\n${steering}`;
+
+    // A managed runtime hosts the whole loop -- model calls, tools, the lot --
+    // so the local turn machinery is skipped entirely (Python
+    // `chat_mixin.py`: the `self.backend is not None` branch returns before
+    // `_chat_impl`).
+    if (this._managedBackend) {
+      return this.delegateTurnToBackend(this._managedBackend, prompt, previousResult, onToken, options);
+    }
+    // Same for a model-scoped runtime: it owns the turn (Python
+    // `unified_execution_mixin`: runtime routing precedes the local loop).
+    if (this._runtime) {
+      return this.delegateTurnToRuntime(this._runtime, prompt, previousResult, onToken, options);
+    }
     const turn = await this.prepareTurn(prompt, previousResult, options);
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
     // there instead of the terminal. Defaulting to stdout preserves CLI
@@ -1859,7 +2372,195 @@ export class Agent {
       // cancelled run is not a transient failure.
       () => !emitted && !abortSignal?.aborted,
     );
-    return this.finishTurn(turn.userPrompt, response);
+    const reflected = await this.applyReflection(turn, response, signal);
+    return this.finishTurn(turn.userPrompt, reflected, turn.task);
+  }
+
+  /**
+   * One non-streaming completion, used by the features that need to ask the
+   * model something outside the main turn (reflection's critique, the
+   * self-improvement review).
+   *
+   * `model` overrides the agent's own for this call (Python's `reflect_llm` /
+   * per-feature `llm`), routed the same way the constructor routes the agent's
+   * model so a `claude-*` critique model does not get sent to OpenAI.
+   */
+  private async completeOnce(
+    messages: Array<{ role: string; content: any; [key: string]: unknown }>,
+    opts: { model?: string; schema?: Record<string, any>; temperature?: number; signal?: AbortSignal } = {},
+  ): Promise<string> {
+    const temperature = opts.temperature ?? this.defaultTemperature;
+    const model = opts.model;
+    const hasCustomEndpoint = this._baseURL !== undefined && this._baseURL !== '';
+
+    if (model === undefined || model === this.llm) {
+      if (this._useAISDKBackend) {
+        const backend = await this.getBackend();
+        if (opts.schema) {
+          const structured = await backend.generateObject({
+            messages: messages as any,
+            schema: opts.schema,
+            temperature,
+            signal: opts.signal,
+          });
+          return typeof structured.object === 'string' ? structured.object : JSON.stringify(structured.object);
+        }
+        const result = await backend.generateText({ messages: messages as any, temperature, signal: opts.signal });
+        return result.text ?? '';
+      }
+      const response = await this.llmService.generateChat(
+        messages as any, temperature, undefined, undefined,
+        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal,
+      );
+      return response.content ?? '';
+    }
+
+    const parsed = hasCustomEndpoint && !model.includes('/')
+      ? { providerId: 'openai', modelId: model }
+      : parseModelString(model);
+    if (parsed.providerId === 'openai') {
+      const service = new OpenAIService(parsed.modelId, {
+        apiKey: this._apiKey,
+        baseURL: this._baseURL,
+        fetch: this._fetch,
+      });
+      const response = await service.generateChat(
+        messages as any, temperature, undefined, undefined,
+        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal,
+      );
+      return response.content ?? '';
+    }
+    const { resolveBackend } = await import('../llm/backend-resolver');
+    const resolved = await resolveBackend(model, { attribution: { agentId: this.name } });
+    if (opts.schema) {
+      const structured = await resolved.provider.generateObject({
+        messages: messages as any, schema: opts.schema, temperature, signal: opts.signal,
+      });
+      return typeof structured.object === 'string' ? structured.object : JSON.stringify(structured.object);
+    }
+    const result = await resolved.provider.generateText({ messages: messages as any, temperature, signal: opts.signal });
+    return result.text ?? '';
+  }
+
+  /**
+   * Python parity: the reflection loop in `agent/chat_mixin.py`. The model is
+   * asked to critique its own answer and to say whether it is satisfactory;
+   * an unsatisfactory answer is regenerated from the critique, up to
+   * `maxIterations` rounds, and a "yes" only counts once `minIterations`
+   * reflections have run.
+   */
+  private async applyReflection(turn: PreparedTurn, response: string, signal?: AbortSignal): Promise<string> {
+    this.lastReflections = [];
+    const config = this._reflectionConfig;
+    if (!config) return response;
+
+    const messages: Array<{ role: string; content: any; [key: string]: unknown }> =
+      this.systemMessages(turn.extraSystem) as Array<{ role: string; content: any }>;
+    for (const msg of this.messages) {
+      if (!msg.role || (msg.content == null && !msg.tool_calls)) continue;
+      messages.push({ role: msg.role, content: msg.content });
+    }
+    messages.push({ role: 'user', content: turn.promptContent });
+    messages.push({ role: 'assistant', content: response });
+
+    const result = await runReflectionLoop({
+      response,
+      messages,
+      config,
+      complete: (msgs, schema) => this.completeOnce(msgs as any, {
+        model: config.llm,
+        schema,
+        temperature: turn.temperature,
+        signal: signal ?? this.signal,
+      }),
+      onReflection: (round) => {
+        void Logger.debug(`Agent ${this.name} self reflection`, round);
+      },
+    });
+    this.lastReflections = result.rounds;
+    return result.response;
+  }
+
+  /**
+   * Hand the turn to the managed runtime named by `backend`/`runOn`
+   * (Python `execution_mixin.py::_delegate_to_backend`). Every per-call
+   * option the caller passed -- `config` included -- is forwarded verbatim,
+   * because the runtime, not this process, decides what to do with them.
+   */
+  private async delegateTurnToBackend(
+    backend: ManagedBackendLike,
+    prompt: string,
+    previousResult: string | undefined,
+    onToken: ((token: string) => void) | undefined,
+    options?: AgentChatOptions,
+  ): Promise<string> {
+    if (previousResult) prompt = prompt.replace('{{previous}}', previousResult);
+    const opts = options ?? {};
+    this._taskContext = resolveTaskContext(opts);
+    const delegation: BackendDelegationOptions = {
+      temperature: opts.temperature ?? this.defaultTemperature,
+      tools: opts.tools,
+      outputJson: opts.outputJson,
+      outputPydantic: opts.outputPydantic,
+      reasoningSteps: opts.reasoningSteps,
+      stream: opts.reasoningSteps === true ? false : (opts.stream ?? this.streamEnabled),
+      taskName: opts.taskName,
+      taskDescription: opts.taskDescription,
+      taskId: opts.taskId,
+      config: opts.config,
+      forceRetrieval: opts.forceRetrieval,
+      skipRetrieval: opts.skipRetrieval,
+      attachments: opts.attachments,
+      toolChoice: opts.toolChoice,
+    };
+    this.lastStopReason = null;
+    try {
+      const response = await delegateToBackend(backend, prompt, delegation, onToken);
+      this.lastStopReason = 'completed';
+      return response;
+    } catch (error) {
+      this.lastStopReason = 'error';
+      throw error;
+    }
+  }
+
+  /**
+   * Hand the turn to the runtime named by `runtime` (Python
+   * `_chat_via_runtime`). The runtime runs the whole loop -- model calls and
+   * tools -- so the local turn machinery is skipped, exactly as for a managed
+   * backend.
+   */
+  private async delegateTurnToRuntime(
+    resolved: ResolvedAgentRuntime,
+    prompt: string,
+    previousResult: string | undefined,
+    onToken: ((token: string) => void) | undefined,
+    options?: AgentChatOptions,
+  ): Promise<string> {
+    if (previousResult) prompt = prompt.replace('{{previous}}', previousResult);
+    const opts = options ?? {};
+    this._taskContext = resolveTaskContext(opts);
+    this.lastStopReason = null;
+    try {
+      const response = await runTurnOnRuntime(resolved, prompt, {
+        systemPrompt: this.systemMessages()[0]?.content ?? null,
+        modelRef: this.llm,
+        tools: opts.tools ?? this.tools,
+        temperature: opts.temperature ?? this.defaultTemperature,
+        taskName: opts.taskName,
+        taskDescription: opts.taskDescription,
+        taskId: opts.taskId,
+        config: opts.config,
+      });
+      // The builtin runtime answers in one piece, so a streaming caller still
+      // gets its text rather than nothing at all.
+      if (response) onToken?.(response);
+      this.lastStopReason = 'completed';
+      return response;
+    } catch (error) {
+      this.lastStopReason = 'error';
+      throw error;
+    }
   }
 
   private async withRetry<T>(fn: () => Promise<T>, canRetry: () => boolean): Promise<T> {
@@ -1898,25 +2599,86 @@ export class Agent {
     }
 
     const userPrompt = prompt;
-    const started = await this.runHook('agent_start', { agent: this.name, prompt });
+    // The nudge injected into THIS turn's prompt reflects work already done,
+    // so capture the finished turn's tool count before the reset. Python fires
+    // the nudge post-turn (`tool_execution.py` after the loop) for the next
+    // call; here it rides the next prompt, which needs the previous count --
+    // reading the freshly-zeroed counter meant the threshold could never pass.
+    const previousToolCalls = this._recentToolCalls;
+    this._recentToolCalls = 0;
+    // A new turn is a new task: forget the action history but keep the
+    // escalation count, so an agent that loops twice escalates rather than
+    // starting over with the gentlest advice.
+    this._doomLoop?.clearActions();
+    this._turnToolsUsed = [];
+    // Python parity (`chat_mixin.py`): task_name/task_description/task_id are
+    // metadata for the whole turn, threaded to every observer. Hooks are this
+    // SDK's observer channel, so they travel on the hook contexts, and the
+    // agent keeps them readable via getTaskContext().
+    const task = resolveTaskContext(opts);
+    this._taskContext = task;
+    const started = await this.runHook('agent_start', withTaskContext({ agent: this.name, prompt }, task));
     if (started === null) throw new Error(`Agent ${this.name}: run blocked by an agent_start hook`);
     if (typeof started.prompt === 'string') prompt = started.prompt;
 
     const extraSystem: string[] = [];
+    await this.ensureAuthCredentials();
     await this.ensureSkillsPrompt();
     await this.ensureWebTool();
+    await this.ensureToolsetTools();
     if (!opts.skipRetrieval) {
       const knowledgeContext = await this.retrieveKnowledge(prompt);
       if (knowledgeContext) extraSystem.push(`Relevant knowledge:\n${knowledgeContext}`);
       const memoryContext = await this.recallMemory(prompt);
       if (memoryContext) extraSystem.push(`Relevant memories:\n${memoryContext}`);
     }
+    // What the agent has learned so far, injected the way Python's
+    // LearnManager.to_system_prompt_context() is.
+    await this.ensureLearnManager();
+    if (this._learnManager) {
+      const learned = this._learnManager.toSystemPromptContext();
+      if (learned) extraSystem.push(learned);
+      const nudge = this.maybeEmitNudge(previousToolCalls);
+      if (nudge) extraSystem.push(nudge);
+    }
     prompt = await this.applyPlanning(prompt);
+    // `templates.prompt` wraps the user prompt; a `templates.response` with no
+    // {response} placeholder is a formatting INSTRUCTION appended to the
+    // prompt (Python `_chat_impl`) -- appending it to the system prompt would
+    // lose it entirely under `useSystemPrompt: false`.
+    prompt = applyPromptTemplate(this._templates, prompt);
+    if (this._templates?.response && !responseTemplateIsWrapper(this._templates)) {
+      prompt += `\n\nIMPORTANT: Format your response according to this template:\n${this._templates.response}`;
+    }
 
     const outputSchema = opts.outputJson
       ?? (opts.outputPydantic ? await toJsonSchema(opts.outputPydantic) : undefined)
       ?? this.outputSchema;
-    const tools = opts.tools ? this.processToolInputs(opts.tools, []) : this.tools;
+    const requestedTools = opts.tools ? this.processToolInputs(opts.tools, []) : this.tools;
+    // Progressive disclosure: a large deferrable tool list is replaced by the
+    // three bridge tools, and the model searches for what it needs.
+    const toolSearch = this._toolSearchConfig
+      ? assembleToolDefs(requestedTools, this._toolSearchConfig)
+      : undefined;
+    const tools = toolSearch && toolSearch.bridgeMode ? toolSearch.tools : requestedTools;
+
+    // Python (`llm/llm.py`): "If reasoning_steps is True, do a single
+    // non-streaming call" -- a reasoning answer is only readable whole, so the
+    // flag overrides both the agent default and a per-call `stream: true`.
+    const streaming = opts.reasoningSteps === true ? false : (opts.stream ?? this.streamEnabled);
+
+    // Attachments are ephemeral: the multimodal content is sent, the plain
+    // text is what history, memory and the context manager keep.
+    if (opts.attachments !== undefined && opts.attachments.length > 0 && this._useAISDKBackend) {
+      notYetHonoured(
+        'Agent.chat',
+        'attachments',
+        'They are only carried on the OpenAI-compatible path; the AI SDK transport sends text only.'
+      );
+    }
+    const promptContent = await buildMultimodalPrompt(prompt, opts.attachments, {
+      onWarning: (message) => { void Logger.warn(`Agent ${this.name}: ${message}`); },
+    });
 
     return {
       prompt,
@@ -1924,24 +2686,142 @@ export class Agent {
       extraSystem,
       temperature: opts.temperature ?? this.defaultTemperature,
       tools,
-      streaming: opts.stream ?? this.streamEnabled,
+      streaming,
       outputSchema,
       toolChoice: normaliseToolChoice(opts.toolChoice),
       seed: opts.seed,
+      promptContent,
+      task,
+      toolSearch,
     };
   }
 
-  private async finishTurn(prompt: string, response: string): Promise<string> {
-    let final = this.applyRules(response);
+  /**
+   * Python `_maybe_emit_nudge`: every `nudgeInterval` turns, and only once the
+   * agent has actually done some work (`nudgeMinToolIters` tool calls), remind
+   * it to persist anything reusable it discovered.
+   */
+  private maybeEmitNudge(recentToolCalls: number): string | null {
+    const config = this._learnConfig;
+    if (!config || config.nudgeInterval <= 0) return null;
+    this._turnsSinceNudge += 1;
+    if (this._turnsSinceNudge < config.nudgeInterval) return null;
+    this._turnsSinceNudge = 0;
+    if (recentToolCalls < config.nudgeMinToolIters) return null;
+    return (
+      '[System nudge] Review the recent conversation. If you discovered a ' +
+      'non-trivial procedure or pattern, consider using available tools to ' +
+      'persist this knowledge for future use. Skip if nothing noteworthy.'
+    );
+  }
+
+  /**
+   * Python `_process_auto_learning`: after the answer, `agentic` mode extracts
+   * and stores learnings from the turn, `propose` mode extracts them into the
+   * pending queue for a human to approve. Failures are swallowed -- a learning
+   * pass must never break the turn that produced it.
+   */
+  private async captureLearnings(prompt: string, response: string): Promise<void> {
+    const manager = this._learnManager;
+    const config = this._learnConfig;
+    if (!manager || !config) return;
+    if (config.mode !== 'agentic' && config.mode !== 'propose') return;
+    // `processAutoLearning` is the port of Python's `_process_auto_learning`:
+    // it applies the mode (agentic stores, propose queues for approval) and
+    // swallows its own failures. The extractor is bound to this agent's
+    // transport so the extraction call goes wherever the agent's calls go.
+    try {
+      await manager.processAutoLearning(
+        [{ role: 'user', content: prompt }, { role: 'assistant', content: response }],
+        (extractionPrompt: string) => this.completeOnce(
+          [{ role: 'user', content: extractionPrompt }],
+          { model: config.llm },
+        ),
+      );
+    } catch (error) {
+      await Logger.debug(`Agent ${this.name}: auto-learning extraction failed`, error);
+    }
+  }
+
+  private async finishTurn(prompt: string, response: string, task?: TaskContext): Promise<string> {
+    // A `templates.response` that DOES carry {response} is a wrapper around
+    // the answer rather than an instruction to the model.
+    let final = this.applyRules(applyResponseTemplate(this._templates, response));
     final = await this.applyOutputGuardrails(final);
-    const completed = await this.runHook('agent_complete', { agent: this.name, prompt, response: final });
+    const completed = await this.runHook(
+      'agent_complete',
+      withTaskContext({ agent: this.name, prompt, response: final }, task)
+    );
     if (completed && typeof completed.response === 'string') final = completed.response;
     if (this.contextManager) {
       this.contextManager.addUser(prompt);
       this.contextManager.addAssistant(final);
     }
     await this.rememberTurn(prompt, final);
+    await this.captureLearnings(prompt, final);
+    await this.runSkillReview(prompt, final);
     return final;
+  }
+
+  /**
+   * Python parity: `agent/skill_review.py` `SkillReviewMixin`. After a task
+   * finishes, an opt-in guarded review turn runs an isolated model call
+   * restricted to the single `skill_manage` tool and asks whether the session
+   * revealed a reusable technique worth persisting.
+   *
+   * The guarantees are Python's and each is deliberate: off by default; never
+   * run with the agent's full toolset; a review cannot trigger another
+   * review; and any failure is swallowed, because a bookkeeping pass must
+   * never break the task that produced it.
+   */
+  private async runSkillReview(prompt: string, response: string): Promise<void> {
+    const config = this._selfImprove;
+    if (!config?.enabled || this._inSkillReview) return;
+    const trajectory = { prompt, response, toolsUsed: [...this._turnToolsUsed] };
+
+    const review = (async () => {
+      this._inSkillReview = true;
+      try {
+        this.lastSkillProposals = await runSkillReviewTurn(
+          config,
+          trajectory,
+          (reviewPrompt, tool) => this.askWithSingleTool(reviewPrompt, tool),
+          (error) => { void Logger.debug(`Agent ${this.name}: skill review failed`, error); },
+        );
+      } finally {
+        this._inSkillReview = false;
+      }
+    })();
+
+    if (config.mode === 'background') {
+      // Detached on purpose: a background review must not delay the answer.
+      void review;
+      return;
+    }
+    await review;
+  }
+
+  /**
+   * One isolated model call offering exactly one tool, and nothing else.
+   * Used by the skill review, whose whole guarantee is that it never runs
+   * with the agent's own toolset.
+   */
+  private async askWithSingleTool(prompt: string, tool: unknown): Promise<RawSkillToolCall[]> {
+    const messages = [{ role: 'user', content: prompt }];
+    if (this._useAISDKBackend) {
+      const backend = await this.getBackend();
+      const result = await backend.generateText({
+        messages: messages as any,
+        temperature: this.defaultTemperature,
+        tools: this.getFlatToolDefinitions([tool as any]),
+        toolChoice: 'auto',
+      });
+      return (result.toolCalls ?? []) as RawSkillToolCall[];
+    }
+    const result = await this.llmService.generateChat(
+      messages as any, this.defaultTemperature, [tool as any], 'auto',
+    );
+    return (result.tool_calls ?? []) as RawSkillToolCall[];
   }
 
   private async runTurnOnce(
@@ -1966,6 +2846,7 @@ export class Agent {
     const toolChoice = turn.toolChoice;
     this._turnSeed = turn.seed;
     this._currentPrompt = prompt;
+    this._toolSearchTurn = turn.toolSearch;
 
     try {
       // Replace placeholder with previous result if available
@@ -1974,9 +2855,7 @@ export class Agent {
       }
 
       // Initialize messages array with system prompt and conversation history
-      const messages: Array<any> = [
-        { role: 'system', content: this.createSystemPrompt(turn.extraSystem) }
-      ];
+      const messages: Array<any> = [...this.systemMessages(turn.extraSystem)];
       
       // Add conversation history (excluding the current prompt which will be added below).
       // Preserve tool context so a restored tool-calling conversation replays
@@ -1994,8 +2873,9 @@ export class Agent {
         messages.push(replay);
       }
       
-      // Add current user prompt
-      messages.push({ role: 'user', content: prompt });
+      // Add current user prompt. `promptContent` is the plain prompt unless the
+      // call carried attachments, in which case it is the multimodal array.
+      messages.push({ role: 'user', content: turn.promptContent });
       
       let finalResponse = '';
       // Reset per run; set to a terminal value before returning/throwing so
@@ -2264,8 +3144,11 @@ export class Agent {
           abortSignal
         );
         finalResponse = response.content || '';
-      } else if (this.messages.length > 0) {
+      } else if (this.messages.length > 0 || Array.isArray(turn.promptContent)) {
         // Prior conversation history exists (e.g. restored via setHistory).
+        // A multimodal prompt lands here too: generateText takes a single
+        // string, so an attachment array would be stringified into "[object
+        // Object]" and the image silently lost.
         // generateText only takes a single prompt + system prompt and drops
         // every earlier turn, so a restored chat would be invisible to the
         // model. generateChat sends the full `messages` history built above.
@@ -2282,7 +3165,10 @@ export class Agent {
         // Use regular text generation without streaming
         const response = await this.llmService.generateText(
           prompt,
-          this.createSystemPrompt(turn.extraSystem),
+          // '' rather than the instructions when `useSystemPrompt` is false:
+          // generateText takes the system prompt as a string, so this is how
+          // "no system message" is spelled on that path.
+          this.systemMessages(turn.extraSystem)[0]?.content ?? '',
           temperature,
           undefined,
           undefined,
@@ -2309,6 +3195,7 @@ export class Agent {
     } finally {
       this._turnSeed = undefined;
       this._currentPrompt = undefined;
+      this._toolSearchTurn = undefined;
     }
   }
 
@@ -2683,11 +3570,15 @@ export class Agent {
         const { resolveBackend } = await import('../llm/backend-resolver');
         // Forward the per-agent apiKey/baseURL so a bare claude-*/gemini-*
         // that now routes here can authenticate on the same key the caller
-        // gave the constructor -- not only via a provider env var.
-        const config = (this._apiKey || this._baseURL)
+        // gave the constructor -- not only via a provider env var. `this._fetch`
+        // is the wrapped fetch that carries `auth` provider headers (user
+        // agent, beta flags); without forwarding it, a subscription route on
+        // the AI SDK path would omit the headers the provider requires.
+        const config = (this._apiKey || this._baseURL || this._fetch)
           ? {
               ...(this._apiKey ? { apiKey: this._apiKey } : {}),
               ...(this._baseURL ? { baseUrl: this._baseURL } : {}),
+              ...(this._fetch ? { fetch: this._fetch } : {}),
             }
           : undefined;
         const result = await resolveBackend(this.llm, {

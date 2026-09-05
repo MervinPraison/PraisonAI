@@ -33,13 +33,6 @@
  * The list is the work queue, and it is meant to shrink to nothing.
  */
 export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
-  'Agent.__init__': [
-    'auth', 'toolsets', 'reflection', 'autonomy', 'templates', 'selfImprove', 'toolConfig',
-    'learn', 'backend', 'runOn', 'toolsRunOn', 'runtime', 'toolSearch', 'messageSteering', 'sandbox',
-  ],
-  'Agent.chat': [
-    'reasoningSteps', 'taskName', 'taskDescription', 'taskId', 'config', 'attachments',
-  ],
   'AgentTeam.__init__': [
     'managerLlm', 'memory', 'planning', 'context', 'execution', 'hooks', 'autonomy', 'knowledge',
     'guardrails', 'web', 'reflection', 'caching', 'learn', 'toolsRunOn', 'runOn',

@@ -182,7 +182,7 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=`llmName || resolveDefaultModel()` (TS `model`)",
+            "detail": "default differs: python=null typescript=`llmName || authModel || resolveDefaultModel()` (TS `model`)",
             "kind": "default"
           },
           "kind": "positional",
@@ -191,7 +191,7 @@
           "required": false,
           "ts": {
             "canonical": "model",
-            "default": "llmName || resolveDefaultModel()",
+            "default": "llmName || authModel || resolveDefaultModel()",
             "default_kind": "expr",
             "kind": "property",
             "name": "model",
@@ -1221,8 +1221,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:753",
-        "location": "src/praisonai-ts/src/agent/simple.ts:113"
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:900",
+        "location": "src/praisonai-ts/src/agent/simple.ts:196"
       }
     },
     "Agent.chat": {
@@ -1692,7 +1692,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2457",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3338",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -1946,7 +1946,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:1810",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2305",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],

@@ -42,7 +42,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 ### `Agent.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:609`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:113` (ctor `src/praisonai-ts/src/agent/simple.ts:753`)
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:196` (ctor `src/praisonai-ts/src/agent/simple.ts:900`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 6 mismatches; 6 waived; 14 TS-only of 59
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -53,7 +53,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `backstory` | positional | null | `Optional[str]` | exact | `backstory` | `config.instructions` | `string` | default mismatch (waived) |
 | `instructions` | positional | null | `Optional[str]` | exact | `instructions` | undefined | `string` | ok |
 | `llm` | positional | null | `Optional[Union[str, Any]]` | exact | `llm` | undefined | `string \| LLMConfig` | ok |
-| `model` | positional | null | `Optional[Union[str, Any]]` | exact | `model` | `llmName \|\| resolveDefaultModel()` | `string` | default mismatch (waived) |
+| `model` | positional | null | `Optional[Union[str, Any]]` | exact | `model` | `llmName \|\| authModel \|\| resolveDefaultModel()` | `string` | default mismatch (waived) |
 | `base_url` | positional | null | `Optional[str]` | alias | `baseURL` | undefined | `string` | ok |
 | `api_key` | positional | null | `Optional[str]` | camelCase | `apiKey` | undefined | `string` | ok |
 | `auth` | positional | null | `Optional[str]` | exact | `auth` | undefined | `string` | ok |
@@ -201,7 +201,7 @@ TS-only members: `dependencies`?
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1810`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2305`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -213,7 +213,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3101`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2457`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3338`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
