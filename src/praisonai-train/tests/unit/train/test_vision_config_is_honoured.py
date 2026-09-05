@@ -23,6 +23,7 @@ The LLM trainer already does the right thing, with a comment saying so
 the vision path in line.
 """
 import importlib.util
+import os
 import sys
 import types
 
@@ -30,17 +31,24 @@ import pytest
 
 
 @pytest.fixture(scope="module")
-def cls():
+def mod():
     """Load train_vision with its GPU-only dependencies stubbed."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.normpath(
+        os.path.join(here, "..", "..", "..", "praisonai_train", "train_vision.py"))
     for name in ("torch", "unsloth", "transformers", "datasets", "trl", "peft"):
         module = types.ModuleType(name)
         module.__version__ = "0.0-stub"
         sys.modules.setdefault(name, module)
-    spec = importlib.util.spec_from_file_location(
-        "train_vision_under_test", "praisonai_train/train_vision.py")
+    spec = importlib.util.spec_from_file_location("train_vision_under_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.TrainVisionModel
+    return module
+
+
+@pytest.fixture(scope="module")
+def cls(mod):
+    return mod.TrainVisionModel
 
 
 def _run(cls, config):
@@ -99,19 +107,62 @@ class TestFlagsAcceptBothYamlForms:
         assert "train_model" in _run(cls, {"model_name": "v"})
 
 
+def _peft_kwargs(mod, config):
+    """Run prepare_model with the model loader stubbed, return the kwargs that
+    reached FastVisionModel.get_peft_model -- the arguments that actually train."""
+    captured = {}
+
+    class _Tokenizer:
+        pad_token = "<pad>"
+        eos_token = "</s>"
+        model_max_length = 2048
+
+    class _FastVisionModel:
+        @staticmethod
+        def from_pretrained(**kwargs):
+            return object(), _Tokenizer()
+
+        @staticmethod
+        def get_peft_model(model, **kwargs):
+            captured.update(kwargs)
+            return model
+
+    inst = mod.TrainVisionModel.__new__(mod.TrainVisionModel)
+    inst.config = config
+    original = mod.FastVisionModel if hasattr(mod, "FastVisionModel") else None
+    mod.FastVisionModel = _FastVisionModel
+    try:
+        inst.prepare_model()
+    finally:
+        if original is not None:
+            mod.FastVisionModel = original
+    return captured
+
+
 class TestLoraReadsTheConfig:
 
-    def test_the_literals_are_gone(self, cls):
-        import inspect
-        src = inspect.getsource(cls.prepare_model)
-        assert "r=16," not in src, "LoRA rank is still hardcoded"
-        assert 'self.config.get("lora_r"' in src
+    def test_configured_values_reach_get_peft_model(self, mod):
+        """The whole point of the fix: a value in the config must arrive at the
+        adapter. A swapped key or a lingering literal would fail here."""
+        kwargs = _peft_kwargs(mod, {
+            "model_name": "v", "load_in_4bit": True,
+            "lora_r": 8, "lora_alpha": 32, "lora_dropout": 0.05,
+            "random_state": 123, "use_rslora": True,
+        })
+        assert kwargs["r"] == 8
+        assert kwargs["lora_alpha"] == 32
+        assert kwargs["lora_dropout"] == 0.05
+        assert kwargs["random_state"] == 123
+        assert kwargs["use_rslora"] is True
 
-    def test_the_previous_literals_remain_the_defaults(self, cls):
-        import inspect
-        src = inspect.getsource(cls.prepare_model)
-        for default in ('"lora_r", 16', '"lora_alpha", 16', '"random_state", 3407'):
-            assert default in src, f"default changed: {default}"
+    def test_the_previous_literals_remain_the_defaults(self, mod):
+        """An existing config that set none of these must train identically."""
+        kwargs = _peft_kwargs(mod, {"model_name": "v", "load_in_4bit": True})
+        assert kwargs["r"] == 16
+        assert kwargs["lora_alpha"] == 16
+        assert kwargs["lora_dropout"] == 0
+        assert kwargs["random_state"] == 3407
+        assert kwargs["use_rslora"] is False
 
 
 if __name__ == "__main__":
