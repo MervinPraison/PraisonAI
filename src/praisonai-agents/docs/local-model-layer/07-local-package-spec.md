@@ -957,7 +957,6 @@ are therefore enforced by `test_sloc_ceiling` (non-blank, non-comment lines), no
 | `discover.py` | 220 | 300 |
 | `target.py` | 180 | 240 |
 | `manage.py` | 120 | 160 |
-| `embed.py` | 90 | 120 |
 | `embed.py` (local embedder selection) | 100 | 140 |
 | **package total** | **1120** | **1300** |
 

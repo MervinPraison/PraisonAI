@@ -327,7 +327,9 @@ def probe_endpoint(base_url: str, *, expect=None, timeout: float = DEFAULT_PROBE
     # It also makes the pinned-engine path reachable: an engine named by
     # PRAISONAI_LOCAL_ENGINE that has no ProbeSpec (llamafile, localai,
     # ramalama) produced an empty candidate list and could never resolve.
-    models_reply = fetch("GET", "/v1/models")
+    # A base the user pasted from LM Studio or vLLM already ends in /v1; adding
+    # another produced /v1/v1/models and a 404, so a healthy server looked absent.
+    models_reply = fetch("GET", "/models" if base.endswith("/v1") else "/v1/models")
     if 200 <= models_reply.status < 300:
         listing = _json(models_reply)
         pinned = LocalEngine(expect) if expect else None

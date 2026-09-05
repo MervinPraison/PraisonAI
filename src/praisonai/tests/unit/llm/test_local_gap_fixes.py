@@ -38,6 +38,17 @@ class TestDiscoveryFallback:
         # The fallback must not turn a transport failure into a discovery.
         assert local.probe_endpoint("http://127.0.0.1:9", transport=_transport({})) is None
 
+    def test_a_base_already_ending_in_v1_is_not_doubled(self):
+        """LM Studio and vLLM print a base ending in /v1; the fallback probe
+        appended /v1/models, producing /v1/v1/models -> a 404 that made a live
+        server look absent."""
+        d = local.probe_endpoint("http://127.0.0.1:9/v1", transport=_transport(
+            {("GET", "/v1/models"): HttpReply(
+                200, b'{"object":"list","data":[{"id":"m1"}]}', None)},
+            default=HttpReply(404, b"{}", "http")))
+        assert d is not None, "a /v1 base was probed at /v1/v1/models and looked absent"
+        assert d.models == ("m1",)
+
 
 class TestEnginePin:
     """S3: PRAISONAI_LOCAL_ENGINE only ever filtered, so engines with no
