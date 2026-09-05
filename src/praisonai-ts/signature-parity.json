@@ -2587,7 +2587,7 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/team.ts:332",
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:338",
         "location": "src/praisonai-ts/src/agent/team.ts:74"
       }
     },
@@ -2698,7 +2698,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:744",
+        "location": "src/praisonai-ts/src/agent/team.ts:766",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
