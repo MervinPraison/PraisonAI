@@ -201,39 +201,82 @@ async function embedManyWithAISDK(
   };
 }
 
+/** Provider ids this function accepts, after alias folding. Kept as an
+ *  explicit list so an unsupported provider still fails with the message it
+ *  always did, rather than with whatever `createAISDKProvider` says about a
+ *  chat-only package that has no embedding model. */
+const AI_SDK_EMBEDDING_PROVIDERS: Record<string, string> = {
+  openai: 'openai',
+  oai: 'openai',
+  google: 'google',
+  gemini: 'google',
+  cohere: 'cohere',
+};
+
 /**
- * Get AI SDK embedding model for a provider
+ * Get AI SDK embedding model for a provider.
+ *
+ * The provider package is obtained through {@link createAISDKProvider} -- the
+ * registry `llm/providers/ai-sdk/provider-map.ts` already uses for every CHAT
+ * provider -- rather than by naming `@ai-sdk/openai`, `@ai-sdk/google` and
+ * `@ai-sdk/cohere` in three literal `import()` calls here.
+ *
+ * Two reasons, and the second is why it changed:
+ *
+ *  1. ONE way to load a provider. Chat went through the registry and
+ *     embeddings did not, so `registerCustomProvider('openai', ...)` took
+ *     effect for a completion and was ignored for an embedding of the same
+ *     provider.
+ *  2. A literal `import()` is a BUNDLER instruction, not only a runtime one.
+ *     esbuild follows it and emits the package as a chunk whether or not any
+ *     reachable code path calls it -- so praisonai-mobile's webview bundle
+ *     carried 326.7kB of `@ai-sdk/openai` + `@ai-sdk/google` + `@ai-sdk/cohere`
+ *     for a phone that never embeds anything, against a 1600kB budget with
+ *     23.6kB left. `provider-map.ts` resolves `providerInfo.package`, which a
+ *     bundler cannot follow, so the package is loaded by the HOST at runtime --
+ *     which is what "optional peer dependency" was supposed to mean.
+ *
+ * Node behaviour is unchanged: `createAISDKProvider('openai')` imports
+ * `@ai-sdk/openai` and calls `createOpenAI({})`, exactly as the three literal
+ * branches did. What is genuinely gone is embedding through a BUNDLED AI SDK
+ * provider in an environment with no module resolver (a browser with no import
+ * map) -- an environment where the CHAT path could never load a provider
+ * either, because it has always gone through this same registry.
  */
 async function getAISDKEmbeddingModel(provider: string, modelId: string): Promise<any> {
-  switch (provider.toLowerCase()) {
-    case 'openai':
-    case 'oai': {
-      const { createOpenAI } = await import('@ai-sdk/openai');
-      const openai = createOpenAI({});
-      return openai.embedding(modelId);
-    }
-    case 'google':
-    case 'gemini': {
-      const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
-      const google = createGoogleGenerativeAI({});
-      return google.textEmbeddingModel(modelId);
-    }
-    case 'cohere': {
-      try {
-        // Dynamic import - cohere is optional
-        const cohereModule = await import('@ai-sdk/cohere' as string);
-        const cohere = cohereModule.createCohere({});
-        return cohere.embedding(modelId);
-      } catch {
-        throw new Error(`Cohere provider not installed. Install with: npm install @ai-sdk/cohere`);
-      }
-    }
-    default:
-      throw new Error(
-        `Embedding provider '${provider}' not supported via AI SDK. ` +
-        `Supported: openai, google, cohere`
-      );
+  const resolved = AI_SDK_EMBEDDING_PROVIDERS[provider.toLowerCase()];
+  if (!resolved) {
+    throw new Error(
+      `Embedding provider '${provider}' not supported via AI SDK. ` +
+      `Supported: openai, google, cohere`
+    );
   }
+
+  const { createAISDKProvider } = await import('./providers/ai-sdk/provider-map');
+  let sdkProvider: any;
+  try {
+    sdkProvider = await createAISDKProvider(resolved, {});
+  } catch (error: unknown) {
+    // Preserved verbatim: cohere is the one provider praisonai-ts does not
+    // itself depend on, and "not installed" is actionable where the registry's
+    // generic MISSING_DEPENDENCY wording was not.
+    if (resolved === 'cohere') {
+      throw new Error(`Cohere provider not installed. Install with: npm install @ai-sdk/cohere`);
+    }
+    throw error;
+  }
+
+  // `textEmbeddingModel` is the AI SDK's ProviderV2 member; `embedding` is the
+  // older per-package alias the branches above used. Try both rather than
+  // assume, so a provider shipping only one still works.
+  const factory = sdkProvider?.textEmbeddingModel ?? sdkProvider?.embedding;
+  if (typeof factory !== 'function') {
+    throw new Error(
+      `AI SDK provider '${resolved}' exposes no embedding model factory ` +
+      `(expected textEmbeddingModel or embedding)`
+    );
+  }
+  return factory.call(sdkProvider, modelId);
 }
 
 /**

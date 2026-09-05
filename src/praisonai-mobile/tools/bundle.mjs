@@ -248,6 +248,57 @@ export function chunkSizes(metafile) {
 }
 
 /**
+ * Every npm package whose source esbuild actually pulled INTO the bundle,
+ * by package name.
+ *
+ * Read off `metafile.inputs` -- the files that were compiled in -- so it says
+ * what SHIPPED rather than what was imported somewhere. An import esbuild left
+ * external is not here; `classifyBareImports` is the function for those.
+ *
+ * Exported so a test can ask "is package X in the bundle?" by calling this
+ * rather than re-deriving the node_modules path arithmetic inline, which is
+ * the sort of predicate that keeps passing after the thing it checked moved.
+ */
+export function bundledPackages(metafile) {
+  const found = new Set();
+  for (const path of Object.keys(metafile.inputs ?? {})) {
+    const at = path.lastIndexOf("node_modules/");
+    if (at === -1) continue;
+    const parts = path.slice(at + "node_modules/".length).split("/");
+    found.add(parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]);
+  }
+  return [...found].sort();
+}
+
+/**
+ * AI SDK PROVIDER packages a phone can never load, and must therefore never be
+ * charged for.
+ *
+ * praisonai-ts reaches every chat provider through the registry in
+ * `llm/providers/ai-sdk/provider-map.ts`, which does
+ * `await import(providerInfo.package)` -- a computed specifier no bundler can
+ * follow, so the package is the HOST's to supply at runtime. A webview has no
+ * host resolver and no import map, so that import cannot succeed whatever the
+ * bundle contains.
+ *
+ * `praisonai-ts`'s `llm/embeddings.ts` used to be the exception: three LITERAL
+ * `import()` calls naming `@ai-sdk/openai`, `@ai-sdk/google` and
+ * `@ai-sdk/cohere`. A literal is a BUNDLER instruction, so esbuild emitted all
+ * three as chunks -- 326.7kB, measured, charged to the lazy budget -- on a
+ * code path a phone has no way to reach and no reason to take. Routing
+ * embeddings through the same registry removed them, and this list is what
+ * stops them coming back one literal at a time.
+ *
+ * NOT the whole `@ai-sdk/*` namespace: `ai` statically imports
+ * `@ai-sdk/provider`, `@ai-sdk/provider-utils` and `@ai-sdk/gateway`, which are
+ * parts of `ai` itself rather than pluggable providers, and belong in the
+ * bundle for exactly as long as `ai` does.
+ */
+export const HOST_LOADED_AI_SDK_PROVIDERS = [
+  "@ai-sdk/openai", "@ai-sdk/google", "@ai-sdk/cohere", "@ai-sdk/anthropic",
+];
+
+/**
  * The chunks a browser fetches BEFORE the entry's body runs: the entry itself
  * plus the transitive closure of its STATIC imports.
  *

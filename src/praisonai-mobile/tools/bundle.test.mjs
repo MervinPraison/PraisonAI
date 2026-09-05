@@ -10,17 +10,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   bundle,
+  bundledPackages,
   forbiddenAmong,
   topLevelProcessReads,
   unresolvedBareImports,
   classifyBareImports,
   FORBIDDEN_BUILTINS,
+  HOST_LOADED_AI_SDK_PROVIDERS,
   SHELL_BUDGET_BYTES,
   LAZY_BUDGET_BYTES,
   isShippable,
@@ -325,6 +327,66 @@ test("the shipping bundle resolves everything it imports", async () => {
 
   assert.deepEqual(report.unresolved, [], `the shipped bundle must resolve everything: ${report.unresolved}`);
   assert.equal(isShippable(report), true, report.problems.join("\n"));
+});
+
+// ---- provider packages are the HOST's, not the bundle's ---------------------
+
+test("no AI SDK provider package is bundled into the shipping app", async () => {
+  // The headroom this asserts was reclaimed, not granted. `llm/embeddings.ts`
+  // named `@ai-sdk/openai`, `@ai-sdk/google` and `@ai-sdk/cohere` in three
+  // LITERAL `import()` calls, so esbuild emitted all three as chunks: 326.7kB
+  // of the 1600kB lazy budget, for an embedding path no mobile screen calls and
+  // that could not have loaded a provider anyway -- every OTHER provider goes
+  // through provider-map.ts's computed `import(providerInfo.package)`, which a
+  // webview has no resolver for.
+  //
+  // Without this test the next literal `import('@ai-sdk/anything')` upstream
+  // costs 100-170kB in silence until the budget trips, at which point the
+  // cheapest-looking fix is to raise the budget rather than find the import.
+  const outdir = mkdtempSync(join(tmpdir(), "providers-"));
+  const report = await bundle({ entry: "app/src/main.ts", outdir, write: false });
+  const shipped = bundledPackages(report.metafile);
+
+  const smuggled = HOST_LOADED_AI_SDK_PROVIDERS.filter((pkg) => shipped.includes(pkg));
+  assert.deepEqual(
+    smuggled,
+    [],
+    `these are loaded by the HOST through provider-map.ts's registry and cannot resolve in a ` +
+    `webview, so bundling them is pure weight: ${smuggled.join(", ")}. ` +
+    `Look for a LITERAL await import('<the package>') on praisonai-ts's Agent graph.`,
+  );
+
+  // The pair, so "nothing was found" cannot mean "nothing was looked at": the
+  // packages `ai` itself is built from ARE expected, and their presence proves
+  // bundledPackages reads a graph that really contains @ai-sdk scopes.
+  assert.ok(
+    shipped.includes("@ai-sdk/provider-utils"),
+    `expected ai's own @ai-sdk/* internals in the bundle; got ${shipped.join(", ")}`,
+  );
+});
+
+test("a literal import of a provider package IS reported -- the pair", async () => {
+  // Non-vacuity for the test above, driven through the real bundler. A
+  // `bundledPackages` that returned [] for everything, or a filter that never
+  // matched, would pass it forever; here the identical check must FAIL.
+  const dir = mkdtempSync(join(tmpdir(), "smuggle-"));
+  mkdirSync(join(dir, "node_modules/@ai-sdk/openai"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules/@ai-sdk/openai/package.json"),
+    JSON.stringify({ name: "@ai-sdk/openai", version: "0.0.0", main: "index.js" }),
+  );
+  writeFileSync(join(dir, "node_modules/@ai-sdk/openai/index.js"), "export const createOpenAI = () => ({});");
+  writeFileSync(join(dir, "main.js"), "export const go = async () => (await import('@ai-sdk/openai')).createOpenAI();");
+  try {
+    const report = await bundle({ entry: join(dir, "main.js"), outdir: join(dir, "out"), write: false });
+    const shipped = bundledPackages(report.metafile);
+    assert.ok(
+      HOST_LOADED_AI_SDK_PROVIDERS.some((pkg) => shipped.includes(pkg)),
+      `a literal import() of a provider must be seen in the bundle; got ${shipped.join(", ")}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("an unresolvable import fails the gate, with the package named", async () => {
