@@ -16,6 +16,23 @@ logger = logging.getLogger(__name__)
 _AUTOGEN_SUPPORTED_FIELDS = frozenset({"llm", "function_calling_llm"})
 
 
+def _owning_registry(adapter):
+    """Return the registry that created ``adapter``, else the process default.
+
+    ``FrameworkAdapterRegistry.create()`` post-attaches itself as
+    ``_owning_registry`` so routers honour the injected registry (the
+    ``adapter_registry`` DI seam) instead of silently reaching into the
+    process-default registry and ignoring tenant-local/entry-point
+    registrations. Adapters constructed outside a registry fall back to the
+    default so standalone use keeps working.
+    """
+    registry = getattr(adapter, "_owning_registry", None)
+    if registry is not None:
+        return registry
+    from .registry import get_default_registry
+    return get_default_registry()
+
+
 class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework with version resolution."""
     
@@ -47,8 +64,16 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         else:
             version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
         
-        # Import the specific adapters
-        v4_adapter = AutoGenV4Adapter()
+        # Resolve v0.4 through the owning registry so an entry-point-registered
+        # v0.4 replacement is honoured instead of the built-in stub. Only an
+        # *unregistered* name falls back to the built-in stub — if a v0.4
+        # adapter is registered but its loader/constructor/validation raises,
+        # that error is actionable and must surface, not be masked as "absent".
+        registry = _owning_registry(self)
+        if "autogen_v4" in registry.list_names():
+            v4_adapter = registry.create("autogen_v4")
+        else:
+            v4_adapter = AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
         if version == "v0.4" and v4_adapter.is_available():
@@ -403,8 +428,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         (no registered adapter) correctly report unavailable.
         """
         try:
-            from .registry import get_default_registry
-            registry = get_default_registry()
+            registry = _owning_registry(self)
             registered = set(registry.list_names())
         except ImportError:
             return False
@@ -434,8 +458,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         # A variant is selectable only if its adapter is registered in the
         # registry (built-in or entry-point) and reports availability.
         try:
-            from .registry import get_default_registry
-            registry = get_default_registry()
+            registry = _owning_registry(self)
             registered = set(registry.list_names())
 
             def _selectable(alias: str) -> bool:
@@ -510,13 +533,10 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         """
         # Get the adapter name to use (config autogen_version wins over env)
         adapter_name = self.resolve_alias(config)
-        
-        # Import registry to create the concrete adapter
-        from .registry import get_default_registry
-        registry = get_default_registry()
-        
-        # Create and return the concrete adapter
-        concrete_adapter = registry.create(adapter_name)
+
+        # Create the concrete adapter through the owning registry so tenant-local
+        # / entry-point registrations on the injected registry are honoured.
+        concrete_adapter = _owning_registry(self).create(adapter_name)
         logger.info(f"AutoGenFamilyAdapter resolved to: {adapter_name}")
         return concrete_adapter
     
