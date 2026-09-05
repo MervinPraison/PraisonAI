@@ -618,6 +618,53 @@ test("an error row is named with its TITLE, not only the provider's prose", () =
   assert.equal(el?.getAttribute("aria-label"), en.errorRowName("auth", "401 unauthorized"));
 });
 
+test("an error row SHOWS its title too, not only announces it", () => {
+  // The test above asserts the `aria-label`, and that is all that was ever
+  // repaired: `strings.errorTitle` had no renderer anywhere in the app, so a
+  // screen-reader user heard "Sign-in problem. ..." while a sighted user got
+  // the provider's sentence alone with nothing to say what kind of failure it
+  // was. Two audiences, two different accounts of one event.
+  //
+  // Reproduced on an Android 35 emulator: a fresh install with no key rendered
+  // the whole of the SDK's sentence -- an environment variable and a JavaScript
+  // constructor -- as the entire visible content of the row.
+  const { host, created } = fakeDoc();
+  const row: Row = {
+    kind: "error", id: "error", errorKind: "auth",
+    message: "The OPENAI_API_KEY environment variable is missing or empty",
+    recovery: "settings", tone: "failure",
+  } as Row;
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "error", index: 0, row }]);
+  const el = created.find((n) => n.dataset.rowId === "error");
+  assert.ok(el !== undefined, "the error row must exist");
+  const title = el.children.find((c: any) => c.className === "error-title");
+  assert.ok(title !== undefined, "the error row must SHOW a title, not only announce one");
+  assert.equal(title.textContent, en.errorTitle("auth"));
+  // And the provider's prose is kept, in full and unparsed -- it is what a
+  // support engineer searches for. Dropping it would trade one defect for a
+  // worse one.
+  const message = el.children.find((c: any) => c.className === "error-message");
+  assert.equal(message?.textContent, "The OPENAI_API_KEY environment variable is missing or empty");
+});
+
+test("the title an error row shows is chosen by KIND, not by the prose", () => {
+  // The pair. Hard-coding one title, or deriving it from the message, would
+  // pass the test above and mislabel every other failure -- which is the rule
+  // strings.ts states at `errorRowName`: a provider's message may say anything
+  // at all, so the kind is the only dependable part.
+  for (const kind of ["auth", "rate_limit", "transport", "internal"] as const) {
+    const { host, created } = fakeDoc();
+    const row: Row = {
+      kind: "error", id: "error", errorKind: kind, message: "same prose every time",
+      recovery: "none", tone: "failure",
+    } as Row;
+    applyOps(host, emptyNodes(), [{ kind: "insert", id: "error", index: 0, row }]);
+    const el = created.find((n) => n.dataset.rowId === "error");
+    const title = el?.children.find((c: any) => c.className === "error-title");
+    assert.equal(title?.textContent, en.errorTitle(kind), `the ${kind} title`);
+  }
+});
+
 test("a text row is left UNLABELLED, so its own words are read", () => {
   // `accessibleName` returns null here and null is a real answer: labelling a
   // paragraph replaces the answer with a summary of it. Writing "" instead of
@@ -734,4 +781,31 @@ test("a message that was never stored SAYS so, once and only when true", () => {
   applyOps(host, nodes, [{ kind: "update", id: "u0", row: userRow("hello", "stored") }]);
   assert.equal(row.children.some((c: any) => c.className === "user-note"), false,
     "a stale 'not saved' note survived the confirmation");
+});
+
+test("a reasoning row SAYS it is reasoning, not only looks like it", () => {
+  // `.row-reasoning` is a left rule, a softer colour and a smaller font. All
+  // three are CSS and none reaches the accessibility tree, so the model's
+  // private working and its actual answer were one undifferentiated run of
+  // paragraphs to a screen reader -- the "conveyed exclusively by hue" defect
+  // a11y/names.ts was written against, which the user row already fixed the
+  // same way. `strings.reasoningLabel` existed for this and had no caller.
+  //
+  // Content, NOT an aria-label: `accessibleName` returns null for this kind on
+  // purpose, because labelling prose replaces the prose in the tree and costs
+  // the reader the ability to navigate it.
+  const { host, created } = fakeDoc();
+  const row: Row = { kind: "reasoning", id: "reasoning", text: "weighing the options" };
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: "reasoning", index: 0, row }]);
+  const el = created.find((n) => n.dataset.rowId === "reasoning");
+  assert.ok(el !== undefined, "the reasoning row must exist");
+  assert.equal(el.getAttribute("aria-label"), null, "a label would replace the prose it labels");
+  const label = el.children.find((c: any) => c.className === "sr-only");
+  assert.ok(label !== undefined, "the row must carry a visually-hidden word saying what it is");
+  assert.equal(label.textContent, en.reasoningLabel);
+  // And the reasoning itself survives, as text and never as markup: it is
+  // model output like any other.
+  const said = el.children.find((c: any) => c.className !== "sr-only");
+  assert.equal(said?.textContent, "weighing the options");
+  assert.equal(said?._html, "", "innerHTML must never be written");
 });

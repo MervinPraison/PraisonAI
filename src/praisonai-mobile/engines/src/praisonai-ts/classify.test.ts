@@ -91,3 +91,58 @@ test("a 403 is an auth failure even when its message says nothing useful", () =>
   assert.equal(classifyError({ status: 403, message: "nope" } as never), "auth");
   assert.equal(classifyError({ status: 401, message: "nope" } as never), "auth");
 });
+
+/**
+ * The message a fresh install actually gets, byte for byte.
+ *
+ * This is the app's most likely failure by a wide margin -- it is what the very
+ * first message of a new install does, before anyone has been to Settings --
+ * and it classified as `internal`, whose recovery is `none`. The one error
+ * whose entire answer is "open Settings and paste a key" offered no route to
+ * settings, which is the outcome the docstring at the top of classify.ts says
+ * the function exists to prevent.
+ *
+ * Reproduced on an Android 35 emulator before the fix: a fresh install, no key,
+ * one message, and the transcript rendered this sentence and nothing else.
+ *
+ * It reaches none of the older alternatives, which is why it was missed --
+ * `unauthor`, `forbidden` and `authentication` do not occur in it; `no api key`
+ * does not either (it says "is missing or empty", and the only "no" nearby is
+ * inside neither phrase); and `api key not` needs "not" straight after "key".
+ */
+const MISSING_OPENAI_KEY =
+  "The OPENAI_API_KEY environment variable is missing or empty; either provide it, " +
+  "or instantiate the OpenAI client with an apiKey option, like new OpenAI({ apiKey: 'My API Key' }).";
+
+test("a key that was never SET is an auth failure, not an internal one", () => {
+  assert.equal(classifyError(new Error(MISSING_OPENAI_KEY)), "auth");
+});
+
+test("the other providers' ways of saying the same thing are auth too", () => {
+  assert.equal(
+    classifyError(new Error("The ANTHROPIC_API_KEY environment variable is missing or empty")),
+    "auth",
+  );
+  assert.equal(
+    classifyError(new Error("GOOGLE_GENERATIVE_AI_API_KEY environment variable is not set")),
+    "auth",
+  );
+  assert.equal(classifyError(new Error("API key is missing")), "auth");
+  assert.equal(classifyError(new Error("Missing credentials")), "auth");
+});
+
+test("the missing-key patterns do not swallow unrelated failures -- the pair", () => {
+  // Without this, a regex broad enough to catch the sentence above would be
+  // free to catch everything, and every `retry`/`none` recovery in the app
+  // would quietly become "open settings". The gap between "api key" and the
+  // word that qualifies it is bounded by `[^.;]`, and each of these either has
+  // no key phrase at all or puts a sentence boundary in between.
+  assert.equal(classifyError(new Error("The server had an error while processing your request")), "internal");
+  assert.equal(classifyError(new Error("something went sideways")), "internal");
+  assert.equal(classifyError(new Error("fetch failed")), "transport");
+  assert.equal(classifyError(new Error("429 Rate limit reached for gpt-4o")), "rate_limit");
+  // The one that matters most: the model answered nothing. Its recovery is
+  // `retry`, and sending that user to Settings to check a key that is fine
+  // would be the same defect pointing the other way.
+  assert.equal(classifyError(new Error("The model produced an empty response")), "internal");
+});

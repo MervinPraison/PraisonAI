@@ -179,3 +179,33 @@ test("getAttribute reads back what setAttribute wrote, and null otherwise", () =
   assert.equal(el.getAttribute("aria-live"), "polite");
   assert.equal(el.getAttribute("aria-label"), null);
 });
+
+test("`id` is reflected onto the attribute, in BOTH directions", () => {
+  // The fifth lying fixture this file was written to catch. `id` was not on
+  // FakeNode at all: the app's `note.id = helpId(key)` landed on the object
+  // anyway -- a plain JS object takes any key -- so the tests reading `n.id`
+  // got the right answer at runtime while `tsc` rejected the same line, and
+  // `npm run typecheck` exited 2 on main from #4847 until it was added.
+  //
+  // Reflection is the part worth pinning rather than the field. The app sets an
+  // id both ways (`note.id = ...` for a settings help note,
+  // `setAttribute("id", ...)` for the empty panel's heading) and the pointers
+  // that make either worth having -- `aria-describedby`, `aria-labelledby` --
+  // are read back through `getAttribute`. A fake storing the two independently
+  // would let a test assert a description pointing at an id no element answers
+  // to, which is precisely the bug those attributes exist to have caught.
+  const dom = createFakeDom();
+  const el = tagged(dom, "a");
+  assert.equal(el.id, "", 'an element with no id reports "", as HTMLElement.id does');
+  assert.equal(el.getAttribute("id"), null);
+
+  el.id = "setting-help-baseUrl";
+  assert.equal(el.getAttribute("id"), "setting-help-baseUrl", "the property must reach the attribute");
+
+  const other = tagged(dom, "b");
+  other.setAttribute("id", "empty-state-title");
+  assert.equal(other.id, "empty-state-title", "and the attribute must reach the property");
+
+  other.removeAttribute("id");
+  assert.equal(other.id, "", "removing the attribute clears the property too");
+});

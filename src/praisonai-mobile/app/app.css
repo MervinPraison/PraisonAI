@@ -184,6 +184,14 @@ html, body {
 .row-approval { border: 1px solid var(--warn); display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
 .row-approval p { margin: 0 0 .3rem; width: 100%; }
 .row-error { border: 1px solid var(--bad); color: var(--bad); }
+/* An error row is a TITLE chosen by kind and, under it, the provider's prose.
+   `display: block` is the whole rule and it is required rather than cosmetic:
+   both are spans inside one row, so without it they run together and the row
+   reads "Sign-in problemThe OPENAI_API_KEY environment variable...". No colour
+   is stated here on purpose -- `.row-error` above already sets one and both
+   spans inherit it, so this adds no token for the dark-scheme gate to check
+   and nothing for a palette pass to have to keep in step. */
+.row-error .error-title { display: block; font-weight: 600; }
 .row-notice { color: var(--soft); font-size: .88rem; text-align: center; }
 .row-dropped { color: var(--warn); font-size: .8rem; }
 
