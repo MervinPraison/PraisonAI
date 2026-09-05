@@ -387,6 +387,7 @@ Methods:
 * <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_input</a>(content: str, **kwargs) -> Tuple[bool, str]</code>
 * <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_output</a>(content: str, **kwargs) -> Tuple[bool, str]</code>
 * <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_tool_call</a>(tool_name: str, arguments: Dict[str, Any], **kwargs) -> Tuple[bool, Dict[str, Any]]</code>
+* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_tool_result</a>(tool_name: str, result: Any, **kwargs) -> Tuple[bool, Any]</code>
 
 # Planning
 
