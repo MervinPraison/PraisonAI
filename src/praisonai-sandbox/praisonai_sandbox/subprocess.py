@@ -211,6 +211,67 @@ class SubprocessSandbox:
         self._is_running = False
         logger.info("Subprocess sandbox stopped")
     
+    def _validate_code_against_policy(
+        self,
+        code: str,
+        language: str,
+        policy: SecurityPolicy,
+    ) -> Optional[str]:
+        """Return an error message when *code* violates *policy*.
+
+        blocked_imports was declared in SecurityPolicy, documented, and
+        serialised by to_dict() -- and read by nothing. Only run_command()
+        validated anything, and SandboxManager.run_code() goes through
+        execute(), so the default backend enforced no policy at all: strict()
+        still let code `import subprocess`, open a socket and read
+        /etc/passwd, reporting COMPLETED / exit 0.
+
+        Python is checked by parsing rather than substring matching, so a
+        blocked name inside a string or comment is not a false positive. Code
+        that will not parse is left to the interpreter to reject.
+        """
+        blocked = [b for b in (getattr(policy, "blocked_imports", None) or []) if b]
+        if not blocked or language != "python":
+            return None
+
+        import ast
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+
+        # "os.system" in the list means the attribute call, not the os module.
+        modules = {b for b in blocked if "." not in b}
+        dotted = {b for b in blocked if "." in b}
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if alias.name in modules or root in modules:
+                        return f"Blocked import: {alias.name}"
+            elif isinstance(node, ast.ImportFrom):
+                name = node.module or ""
+                if name in modules or name.split(".")[0] in modules:
+                    return f"Blocked import: {name}"
+            elif isinstance(node, ast.Attribute):
+                target = node
+                parts = []
+                while isinstance(target, ast.Attribute):
+                    parts.append(target.attr)
+                    target = target.value
+                if isinstance(target, ast.Name):
+                    parts.append(target.id)
+                    full = ".".join(reversed(parts))
+                    if full in dotted:
+                        return f"Blocked call: {full}"
+            elif isinstance(node, ast.Name):
+                if node.id in modules or node.id in dotted:
+                    return f"Blocked call: {node.id}"
+
+        return None
+
     async def execute(
         self,
         code: str,
@@ -225,7 +286,22 @@ class SubprocessSandbox:
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
-        
+
+        # Enforce the policy before the code is written or spawned. run_command()
+        # has always validated; execute() -- the default backend, and the path
+        # SandboxManager.run_code() takes -- validated nothing.
+        policy = self.config.security_policy
+        policy_error = self._validate_code_against_policy(code, language, policy)
+        if policy_error:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                stdout="",
+                stderr=f"Security policy violation: {policy_error}",
+                exit_code=1,
+                error=f"Security policy violation: {policy_error}",
+            )
+
         code_file = os.path.join(self._temp_dir, f"code_{execution_id}.py")
         with open(code_file, "w") as f:
             f.write(code)
