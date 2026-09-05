@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-sandbox"
-version = "0.1.2"
+version = "0.1.3"
 description = "Where PraisonAI agents run code — Docker, E2B, Modal, Daytona, Fly.io, Tenki, Novita, Sandlock, SSH and subprocess, as both single sandboxes and multi-instance compute providers."
 readme = "README.md"
 license = {text = "MIT"}

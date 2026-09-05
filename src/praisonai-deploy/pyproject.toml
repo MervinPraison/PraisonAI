@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-deploy"
-version = "0.1.2"
+version = "0.1.3"
 description = "Deployment for PraisonAI — API, Docker, and cloud (AWS, Azure, GCP) deployments extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
