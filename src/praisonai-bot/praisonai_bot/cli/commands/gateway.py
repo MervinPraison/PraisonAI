@@ -302,26 +302,29 @@ def gateway_start(
                     name for name, r in results.items()
                     if not getattr(r, "ok", False) and not _is_ssl_error(r)
                 ]
-                if cred_failures:
+                # The isolate-vs-abort-vs-ssl decision is a pure function so it
+                # can be unit-tested without typer (#4862).
+                action = _classify_preflight_action(healthy, cred_failures, strict)
+                if action == "abort":
                     # A bad/expired token isolates ONLY that channel: the runtime
                     # parks it in ChannelState.CREDENTIAL_UNAVAILABLE (queryable
                     # via gateway status/doctor, auto-recovers on hot-reload)
                     # while every healthy channel keeps serving (#4862). Fail
                     # closed only when the operator opted into strict mode, or
                     # when NO channel is serviceable (nothing left to serve).
-                    if strict or not healthy:
-                        why = (
-                            "--strict-preflight set"
-                            if strict and healthy
-                            else "no serviceable channel"
-                        )
-                        print(
-                            f"\nPre-flight check failed — aborting start ({why}). "
-                            "Fix the channel credentials above, or pass "
-                            "--no-preflight to skip / --no-strict-preflight to "
-                            "isolate the degraded channel and serve the rest."
-                        )
-                        raise typer.Exit(1)
+                    why = (
+                        "--strict-preflight set"
+                        if strict and healthy
+                        else "no serviceable channel"
+                    )
+                    print(
+                        f"\nPre-flight check failed — aborting start ({why}). "
+                        "Fix the channel credentials above, or pass "
+                        "--no-preflight to skip / --no-strict-preflight to "
+                        "isolate the degraded channel and serve the rest."
+                    )
+                    raise typer.Exit(1)
+                elif action == "isolate":
                     print(
                         f"\nPre-flight: {len(healthy)} channel(s) OK; skipping "
                         f"{', '.join(cred_failures)} as configured-unavailable "
@@ -668,6 +671,7 @@ def _health_payload(results):
 
 from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
     apply_probe_ca_bundle as _apply_probe_ca_bundle,
+    classify_preflight_action as _classify_preflight_action,
     check_duplicates as _check_duplicates,
     check_gateway_running as _check_gateway_running,
     check_inbound as _check_inbound,
