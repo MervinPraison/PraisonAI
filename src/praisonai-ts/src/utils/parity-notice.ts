@@ -37,11 +37,7 @@ export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
     'autonomy', 'knowledge', 'guardrails', 'web', 'reflection', 'caching', 'learn', 'toolsRunOn',
   ],
   'Task.__init__': [
-    'asyncExecution', 'config', 'outputPydantic', 'images', 'nextTasks', 'condition', 'isStart',
-    'loopState', 'memory', 'inputFile', 'rerun', 'retainFullContext', 'agentConfig', 'skipOnFailure',
-    'retryDelay', 'handler', 'loopOver', 'loopVar', 'execution', 'routing', 'outputConfig', 'when',
-    'thenTask', 'elseTask', 'autonomy', 'knowledge', 'web', 'reflection', 'planning', 'hooks',
-    'caching', 'failOnMemoryError',
+    'autonomy', 'web', 'reflection', 'planning',
   ],
 } as const;
 

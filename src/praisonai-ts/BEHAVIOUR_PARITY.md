@@ -22,8 +22,8 @@ needs a test proving the option changes what the code does.
 | Surface | Options not yet acted on |
 |---|---|
 | `AgentTeam.__init__` | 8 |
-| `Task.__init__` | 32 |
-| **Total** | **40** |
+| `Task.__init__` | 4 |
+| **Total** | **12** |
 
 Plus 17 options that work for some inputs and announce themselves for the rest.
 
@@ -43,40 +43,12 @@ add a test proving the option changes what the code does, and regenerate.
 - `learn`
 - `toolsRunOn`
 
-### `Task.__init__` (32)
+### `Task.__init__` (4)
 
-- `asyncExecution`
-- `config`
-- `outputPydantic`
-- `images`
-- `nextTasks`
-- `condition`
-- `isStart`
-- `loopState`
-- `memory`
-- `inputFile`
-- `rerun`
-- `retainFullContext`
-- `agentConfig`
-- `skipOnFailure`
-- `retryDelay`
-- `handler`
-- `loopOver`
-- `loopVar`
-- `execution`
-- `routing`
-- `outputConfig`
-- `when`
-- `thenTask`
-- `elseTask`
 - `autonomy`
-- `knowledge`
 - `web`
 - `reflection`
 - `planning`
-- `hooks`
-- `caching`
-- `failOnMemoryError`
 
 ## Partial
 

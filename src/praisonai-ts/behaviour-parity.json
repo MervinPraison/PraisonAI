@@ -98,39 +98,11 @@
       "web"
     ],
     "Task.__init__": [
-      "agentConfig",
-      "asyncExecution",
       "autonomy",
-      "caching",
-      "condition",
-      "config",
-      "elseTask",
-      "execution",
-      "failOnMemoryError",
-      "handler",
-      "hooks",
-      "images",
-      "inputFile",
-      "isStart",
-      "knowledge",
-      "loopOver",
-      "loopState",
-      "loopVar",
-      "memory",
-      "nextTasks",
-      "outputConfig",
-      "outputPydantic",
       "planning",
       "reflection",
-      "rerun",
-      "retainFullContext",
-      "retryDelay",
-      "routing",
-      "skipOnFailure",
-      "thenTask",
-      "web",
-      "when"
+      "web"
     ]
   },
-  "total": 40
+  "total": 12
 }
