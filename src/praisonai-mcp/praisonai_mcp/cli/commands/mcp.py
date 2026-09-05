@@ -646,11 +646,10 @@ def mcp_auth(
     name: str = typer.Argument(..., help="Server name to authenticate"),
     timeout: float = typer.Option(300.0, "--timeout", "-t", help="Timeout for OAuth flow in seconds"),
 ):
-    """[EXPERIMENTAL] Authenticate with an OAuth-enabled MCP server.
+    """Authenticate with an OAuth-enabled MCP server.
     
-    WARNING: OAuth implementation is currently experimental and stores
-    placeholder tokens only. Real token exchange is not yet implemented.
-    Use headers/API key authentication for production use.
+    Runs the OAuth 2.1 authorization-code flow with PKCE and exchanges the
+    returned code for real tokens at the server's token endpoint.
     
     This command initiates the OAuth 2.1 authorization flow for a remote
     MCP server. It will open your browser for authentication and wait
@@ -685,82 +684,26 @@ def mcp_auth(
     output.print(f"  URL: {server.url}")
     
     try:
-        from praisonaiagents.mcp import (
-            MCPAuthStorage,
-            OAuthCallbackHandler,
-            generate_state,
-            generate_code_verifier,
-            generate_code_challenge,
-            get_redirect_url,
-        )
-        import webbrowser
-        
-        # Initialize auth storage and callback handler
-        auth_storage = MCPAuthStorage()
-        callback_handler = OAuthCallbackHandler()
-        
-        # Generate PKCE parameters
-        state = generate_state()
-        code_verifier = generate_code_verifier()
-        code_challenge = generate_code_challenge(code_verifier)
-        
-        # Store state and verifier
-        auth_storage.set_oauth_state(name, state)
-        auth_storage.set_code_verifier(name, code_verifier)
-        
-        # Build authorization URL
-        # Note: In a real implementation, we'd discover the auth endpoint
-        # For now, we'll use a simple pattern
-        redirect_uri = get_redirect_url()
-        
-        # Get OAuth config
-        client_id = server.oauth.client_id if server.oauth else None
-        scopes = " ".join(server.oauth.scopes) if server.oauth and server.oauth.scopes else ""
-        
-        # Build auth URL (simplified - real impl would use OIDC discovery)
-        auth_url = f"{server.url}/oauth/authorize"
-        auth_url += "?response_type=code"
-        auth_url += f"&state={state}"
-        auth_url += f"&redirect_uri={redirect_uri}"
-        auth_url += f"&code_challenge={code_challenge}"
-        auth_url += "&code_challenge_method=S256"
-        if client_id:
-            auth_url += f"&client_id={client_id}"
-        if scopes:
-            auth_url += f"&scope={scopes}"
-        
-        output.print_info("Opening browser for authentication...")
-        output.print(f"  If browser doesn't open, visit: {auth_url}")
-        
-        # Open browser
-        webbrowser.open(auth_url)
-        
-        output.print_info(f"Waiting for callback (timeout: {timeout}s)...")
-        
-        # Wait for callback
-        try:
-            code = callback_handler.wait_for_callback(state, timeout=timeout)
-            
-            # Store a placeholder token (real impl would exchange code for tokens)
-            auth_storage.set_tokens(name, {
-                "access_token": f"oauth_{code[:20]}...",
-                "refresh_token": None,
-            }, server_url=server.url)
-            
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "authenticated"})
-            else:
-                output.print_success(f"Successfully authenticated with {name}")
-                
-        except TimeoutError:
-            output.print_error(f"Authentication timed out after {timeout} seconds")
+        # The hand-rolled flow that used to live here stopped at the callback
+        # and stored `f"oauth_{code[:20]}..."` -- a truncated authorization
+        # code, not a token -- then printed "Successfully authenticated".
+        # Because it wrote no expires_at, is_token_expired() returned False
+        # forever, so the fabricated entry permanently shadowed any real
+        # OAuth attempt. MCPOAuthProvider already implements the whole flow,
+        # including the code-for-token exchange this command never did.
+        from praisonaiagents.mcp.oauth_provider import MCPOAuthProvider
+
+        provider = MCPOAuthProvider(mcp_name=name, server_url=server.url)
+        token = provider.ensure_authenticated(timeout=timeout)
+        if not token:
+            output.print_error(f"Authentication with {name} returned no token")
             raise typer.Exit(1)
-        finally:
-            # Always clear temporary OAuth state, regardless of success,
-            # timeout, or interruption.
-            auth_storage.clear_oauth_state(name)
-            auth_storage.clear_code_verifier(name)
-            
+
+        if output.is_json_mode:
+            output.print_json({"name": name, "status": "authenticated"})
+        else:
+            output.print_success(f"Successfully authenticated with {name}")
+
     except ImportError as e:
         output.print_error(f"MCP auth modules not available: {e}")
         output.print("Install with: pip install praisonaiagents[mcp]")
