@@ -164,6 +164,28 @@ def test_resolve_verify_turn_opt_out(tmp_path):
     assert prompt == "hello"
 
 
+def test_resolve_strict_preflight_defaults_off(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: x\n")
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(cfg)) is False
+
+
+def test_resolve_strict_preflight_opt_in(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("gateway:\n  preflight:\n    strict: true\n")
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(cfg)) is True
+
+
+def test_resolve_strict_preflight_missing_file(tmp_path):
+    from praisonai_bot.gateway.preflight import resolve_strict_preflight
+
+    assert resolve_strict_preflight(str(tmp_path / "nope.yaml")) is False
+
+
 def test_verify_turn_preflight_uses_first_channel(tmp_path, monkeypatch):
     cfg = tmp_path / "bot.yaml"
     cfg.write_text(
