@@ -3293,6 +3293,10 @@ Your Goal: {self.goal}"""
                     prompt = res.output.modified_input["prompt"]
                     llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
 
+        # Track execution via telemetry
+        if hasattr(self, '_telemetry') and self._telemetry:
+            self._telemetry.track_agent_execution(self.name, success=True)
+
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
