@@ -289,14 +289,44 @@ export function bundledPackages(metafile) {
  * embeddings through the same registry removed them, and this list is what
  * stops them coming back one literal at a time.
  *
- * NOT the whole `@ai-sdk/*` namespace: `ai` statically imports
- * `@ai-sdk/provider`, `@ai-sdk/provider-utils` and `@ai-sdk/gateway`, which are
- * parts of `ai` itself rather than pluggable providers, and belong in the
- * bundle for exactly as long as `ai` does.
+ * A hand-kept list of four packages was the wrong shape: praisonai-ts's
+ * registry (`llm/providers/ai-sdk/types.ts`) names ~50 `@ai-sdk/*` providers,
+ * so a literal `import('@ai-sdk/mistral')` -- or groq, deepseek, any of the
+ * others -- would sail past a gate that only looked for openai/google/cohere/
+ * anthropic and cost 100-170kB in silence until the budget tripped. So the
+ * gate is a NAMESPACE rule now: every `@ai-sdk/*` package is host-loaded and
+ * must not ship, and a new provider is covered the day it is added upstream,
+ * with no second edit here.
+ *
+ * The exceptions are the packages `ai` is BUILT FROM, not providers it can
+ * load: `ai` statically imports `@ai-sdk/provider`, `@ai-sdk/provider-utils`
+ * and `@ai-sdk/gateway`, so they belong in the bundle for exactly as long as
+ * `ai` does. They are named individually -- an allowlist, not a prefix -- so a
+ * provider that happened to share a prefix could never hide behind them.
  */
-export const HOST_LOADED_AI_SDK_PROVIDERS = [
-  "@ai-sdk/openai", "@ai-sdk/google", "@ai-sdk/cohere", "@ai-sdk/anthropic",
+export const AI_INTERNAL_AI_SDK_PACKAGES = [
+  "@ai-sdk/provider", "@ai-sdk/provider-utils", "@ai-sdk/gateway",
 ];
+
+/**
+ * Whether `pkg` is an AI SDK PROVIDER a phone can never load (as opposed to one
+ * of `ai`'s own internals). The `@ai-sdk/` namespace minus {@link
+ * AI_INTERNAL_AI_SDK_PACKAGES}. Kept as a predicate, not a fixed list, so the
+ * whole provider registry is covered without enumerating it here.
+ */
+export function isHostLoadedAISDKProvider(pkg) {
+  return pkg.startsWith("@ai-sdk/") && !AI_INTERNAL_AI_SDK_PACKAGES.includes(pkg);
+}
+
+/**
+ * The host-loaded providers actually present in a shipped bundle: every
+ * `@ai-sdk/*` package `bundledPackages` found that is not one of `ai`'s
+ * internals. Empty is the healthy state; anything here is pure weight on a code
+ * path a webview cannot take.
+ */
+export function bundledHostLoadedProviders(metafile) {
+  return bundledPackages(metafile).filter(isHostLoadedAISDKProvider);
+}
 
 /**
  * The chunks a browser fetches BEFORE the entry's body runs: the entry itself

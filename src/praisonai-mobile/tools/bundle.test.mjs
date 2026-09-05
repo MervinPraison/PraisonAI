@@ -17,12 +17,14 @@ import { join } from "node:path";
 import {
   bundle,
   bundledPackages,
+  bundledHostLoadedProviders,
+  isHostLoadedAISDKProvider,
+  AI_INTERNAL_AI_SDK_PACKAGES,
   forbiddenAmong,
   topLevelProcessReads,
   unresolvedBareImports,
   classifyBareImports,
   FORBIDDEN_BUILTINS,
-  HOST_LOADED_AI_SDK_PROVIDERS,
   SHELL_BUDGET_BYTES,
   LAZY_BUDGET_BYTES,
   isShippable,
@@ -347,7 +349,10 @@ test("no AI SDK provider package is bundled into the shipping app", async () => 
   const report = await bundle({ entry: "app/src/main.ts", outdir, write: false });
   const shipped = bundledPackages(report.metafile);
 
-  const smuggled = HOST_LOADED_AI_SDK_PROVIDERS.filter((pkg) => shipped.includes(pkg));
+  // The whole `@ai-sdk/*` namespace minus `ai`'s own internals, so a new
+  // provider upstream is covered without a second edit here -- not a four-name
+  // allowlist that `@ai-sdk/mistral` and friends would walk straight past.
+  const smuggled = bundledHostLoadedProviders(report.metafile);
   assert.deepEqual(
     smuggled,
     [],
@@ -369,24 +374,42 @@ test("a literal import of a provider package IS reported -- the pair", async () 
   // Non-vacuity for the test above, driven through the real bundler. A
   // `bundledPackages` that returned [] for everything, or a filter that never
   // matched, would pass it forever; here the identical check must FAIL.
+  //
+  // The fixture names `@ai-sdk/mistral` ON PURPOSE: it was never in the old
+  // four-name allowlist, so this test is also the proof that the namespace rule
+  // catches a provider the hand-kept list would have missed.
   const dir = mkdtempSync(join(tmpdir(), "smuggle-"));
-  mkdirSync(join(dir, "node_modules/@ai-sdk/openai"), { recursive: true });
+  mkdirSync(join(dir, "node_modules/@ai-sdk/mistral"), { recursive: true });
   writeFileSync(
-    join(dir, "node_modules/@ai-sdk/openai/package.json"),
-    JSON.stringify({ name: "@ai-sdk/openai", version: "0.0.0", main: "index.js" }),
+    join(dir, "node_modules/@ai-sdk/mistral/package.json"),
+    JSON.stringify({ name: "@ai-sdk/mistral", version: "0.0.0", main: "index.js" }),
   );
-  writeFileSync(join(dir, "node_modules/@ai-sdk/openai/index.js"), "export const createOpenAI = () => ({});");
-  writeFileSync(join(dir, "main.js"), "export const go = async () => (await import('@ai-sdk/openai')).createOpenAI();");
+  writeFileSync(join(dir, "node_modules/@ai-sdk/mistral/index.js"), "export const createMistral = () => ({});");
+  writeFileSync(join(dir, "main.js"), "export const go = async () => (await import('@ai-sdk/mistral')).createMistral();");
   try {
     const report = await bundle({ entry: join(dir, "main.js"), outdir: join(dir, "out"), write: false });
-    const shipped = bundledPackages(report.metafile);
+    const smuggled = bundledHostLoadedProviders(report.metafile);
     assert.ok(
-      HOST_LOADED_AI_SDK_PROVIDERS.some((pkg) => shipped.includes(pkg)),
-      `a literal import() of a provider must be seen in the bundle; got ${shipped.join(", ")}`,
+      smuggled.includes("@ai-sdk/mistral"),
+      `a literal import() of a provider must be seen in the bundle; got ${smuggled.join(", ")}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the provider gate is the @ai-sdk namespace minus ai's own internals", () => {
+  // The rule in one place, so a future edit to either side is caught here
+  // rather than in a bundle run. Providers -- named and unnamed -- are
+  // host-loaded; the three packages `ai` is built from are not.
+  assert.ok(isHostLoadedAISDKProvider("@ai-sdk/openai"));
+  assert.ok(isHostLoadedAISDKProvider("@ai-sdk/mistral"), "a provider absent from any hand list is still covered");
+  assert.ok(isHostLoadedAISDKProvider("@ai-sdk/groq"));
+  for (const internal of AI_INTERNAL_AI_SDK_PACKAGES) {
+    assert.equal(isHostLoadedAISDKProvider(internal), false, `${internal} is part of ai, not a provider`);
+  }
+  assert.equal(isHostLoadedAISDKProvider("ai"), false, "ai itself is the adapter, not a provider");
+  assert.equal(isHostLoadedAISDKProvider("zod"), false, "a non-@ai-sdk package is not a provider");
 });
 
 test("an unresolvable import fails the gate, with the package named", async () => {
