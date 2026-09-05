@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 80 | **Documented:** 76 | **Parity:** 95.0%
+> **Categories:** 80 | **Documented:** 77 | **Parity:** 96.2%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -9,9 +9,9 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 80 |
-| **Documented Categories** | **76** |
-| **Undocumented Categories** | **4** |
-| **Parity** | **95.0%** |
+| **Documented Categories** | **77** |
+| **Undocumented Categories** | **3** |
+| **Parity** | **96.2%** |
 
 ## Documented Categories
 
@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 106 | 7 | 2414 |
+| ✅ Agent | 106 | 7 | 2860 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 281 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -30,6 +30,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ CLI | 14 | 1 | 159 |
 | ✅ Caching | 2 | 1 | 249 |
 | ✅ Callbacks | 3 | 1 | 211 |
+| ✅ Chat | 4 | 1 | 86 |
 | ✅ Chunking | 3 | 2 | 298 |
 | ✅ Citations | 3 | 1 | 156 |
 | ✅ Code Execution | 9 | 4 | 464 |
@@ -74,18 +75,18 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Reflection | 3 | 1 | 147 |
 | ✅ Retrieval | 5 | 1 | 150 |
 | ✅ Routing | 1 | 1 | 153 |
-| ✅ Sandbox | 8 | 2 | 132 |
+| ✅ Sandbox | 8 | 2 | 222 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 19 | 2 | 433 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
-| ✅ Tasks | 8 | 1 | 169 |
-| ✅ Teams | 1 | 1 | 191 |
+| ✅ Tasks | 8 | 1 | 173 |
+| ✅ Teams | 1 | 1 | 200 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 49 | 15 | 3267 |
+| ✅ Tools | 49 | 16 | 3366 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |
@@ -99,7 +100,6 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Category | Features |
 |----------|----------|
 | ❌ Agent-to-User (A2U) | 6 |
-| ❌ Chat | 4 |
 | ❌ Documents | 1 |
 | ❌ Process | 3 |
 
