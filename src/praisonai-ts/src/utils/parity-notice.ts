@@ -51,10 +51,6 @@ export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
     'thenTask', 'elseTask', 'autonomy', 'knowledge', 'web', 'reflection', 'planning', 'hooks',
     'caching', 'failOnMemoryError',
   ],
-  'Handoff': [
-    'contextPolicy', 'maxContextTokens', 'maxContextMessages', 'preserveSystem',
-    'timeoutSeconds', 'maxConcurrent', 'detectCycles', 'maxDepth',
-  ],
 } as const;
 
 /** The options still unhonoured for one surface, or [] if the surface is clean. */
