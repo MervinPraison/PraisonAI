@@ -155,8 +155,18 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         self._validated_classes.add(cls)
 
     def create(self, name: str, *args, **kwargs):
-        """Create an adapter instance with protocol validation."""
+        """Create an adapter instance with protocol validation.
+
+        Post-attaches this registry onto the created adapter so router adapters
+        (e.g. the AutoGen family router) resolve concrete variants through the
+        *owning* registry rather than reaching into the process-default one,
+        honouring the ``adapter_registry`` DI seam for multi-tenant/test setups.
+        """
         adapter = super().create(name, *args, **kwargs)
+        try:
+            adapter._owning_registry = self
+        except AttributeError:
+            pass  # frozen/slotted adapters keep the default-registry fallback
         self._validate_adapter(name, adapter)
         return adapter
 

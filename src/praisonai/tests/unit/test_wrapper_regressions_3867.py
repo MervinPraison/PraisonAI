@@ -325,8 +325,9 @@ async def test_store_dispatch_helpers_cover_sync_async_and_missing_methods():
         PraisonAIDB._store_callable(store, "sync_value", "async_value")
         == store.async_value
     )
-    assert PraisonAIDB._call_store(store, "sync_value", "missing") == "sync"
-    assert PraisonAIDB._call_store(store, "missing", "also_missing") is None
+    db = PraisonAIDB._from_stores()
+    assert db._call_store(store, "sync_value", "missing") == "sync"
+    assert db._call_store(store, "missing", "also_missing") is None
     assert (
         await PraisonAIDB._dispatch_async(store, "sync_value", "async_value")
         == "async"
