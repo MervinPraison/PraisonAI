@@ -132,6 +132,46 @@ def test_a_plain_agent_is_untouched():
     assert agent._tools_sandbox is None
 
 
+# ── the default path pays nothing for placement it never asked for ────────────
+def test_the_default_path_runs_no_registry_lookups(monkeypatch):
+    """The whole point of the deferral: with neither run_on= nor tools_run_on=,
+    resolve_placement must not touch managed_runtimes() or tool_places() -- the
+    latter scans entry points and is the dominant cost of a warm Agent(). A
+    later refactor that hoists the lookups back to the top would leave every
+    validation test green while silently restoring that overhead; this bites."""
+    import praisonaiagents.agent.placement as placement
+
+    calls = []
+    monkeypatch.setattr(placement, "managed_runtimes",
+                        lambda: calls.append("managed") or ("anthropic",))
+    monkeypatch.setattr(placement, "tool_places",
+                        lambda: calls.append("places") or ["local"])
+
+    placement.resolve_placement("Agent")
+    assert calls == [], f"the default path performed lookups: {calls}"
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"run_on": "anthropic"},
+    {"tools_run_on": "subprocess"},
+])
+def test_a_named_placement_still_runs_the_lookups(monkeypatch, kwargs):
+    """Deferral must not become suppression: as soon as a placement is named,
+    validation needs the real registries, so both must be consulted."""
+    import praisonaiagents.agent.placement as placement
+
+    calls = []
+    monkeypatch.setattr(placement, "managed_runtimes",
+                        lambda: calls.append("managed") or ("anthropic",))
+    monkeypatch.setattr(placement, "tool_places",
+                        lambda: calls.append("places") or ["local", "subprocess"])
+
+    placement.resolve_placement("Agent", **kwargs)
+    assert "managed" in calls and "places" in calls, (
+        f"a named placement skipped a lookup: {calls}"
+    )
+
+
 def _team(**kw):
     worker = _agent("W")
     return AgentTeam(agents=[worker], tasks=[Task(description="d", agent=worker)], **kw)
