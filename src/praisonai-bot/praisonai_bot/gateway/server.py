@@ -7267,6 +7267,18 @@ class WebSocketGateway:
                 except Exception:  # pragma: no cover — defensive
                     pass
 
+            # Carry the session-learning opt-out (Issue #4864) through the same
+            # metadata passthrough. Gateway/bot session learning is on by
+            # default; ``learn: false`` (or ``session_learning: false``) in the
+            # channel config opts a channel out. BotConfig has no native field,
+            # so apply_bot_smart_defaults reads it back from config.metadata.
+            _raw_learn = ch_cfg.get("learn", ch_cfg.get("session_learning"))
+            if _raw_learn is not None:
+                try:
+                    config.metadata["learn"] = _raw_learn
+                except Exception:  # pragma: no cover — defensive
+                    pass
+
             # Warn if no allowlist is configured. Issue #2855: the message must
             # reflect the effective ``unknown_user_policy`` — an empty allowlist
             # with the default ``deny`` policy SILENTLY DROPS unknown DMs, so the

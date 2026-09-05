@@ -1473,9 +1473,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             if learn is False:
                 _learn_config = None
             elif learn is True:
-                # learn=True shorthand enables AGENTIC mode (auto-learning)
+                # learn=True is a coordinated posture (Issue #4864): enable
+                # AGENTIC extraction AND a conversational-aware nudge cadence in
+                # one switch, so an always-on companion bot actually learns.
+                # nudge_min_tool_iters=0 lets a chat-only turn (no tool calls)
+                # still nudge; auto_memory is turned on below so durable facts
+                # are captured on every turn, not just tool-using ones.
                 from ..memory.learn.protocols import LearnMode
-                _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
+                _learn_config = LearnConfig(
+                    mode=LearnMode.AGENTIC,
+                    nudge_interval=10,
+                    nudge_min_tool_iters=0,
+                )
             elif isinstance(learn, LearnConfig):
                 _learn_config = learn
             elif isinstance(learn, dict):
@@ -1522,6 +1531,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif _learn_config is not None and isinstance(memory, dict):
             # Merge learn config into memory dict
             memory["learn"] = _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config
+
+        # Coordinated learn posture (Issue #4864): the ``learn=True`` shorthand
+        # turns on conversational fact extraction too, so an always-on companion
+        # accrues durable persona/preferences from plain chat — not just from
+        # tool-using turns. Only defaults it on when the caller did not set
+        # auto_memory explicitly (via MemoryConfig), so an explicit choice wins.
+        if learn is True and auto_memory is None:
+            auto_memory = True
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HISTORY from MemoryConfig - FAST PATH
@@ -2870,6 +2887,10 @@ Your Goal: {self.goal}
         # Learning configuration (top-level, peer to memory)
         # Stored for access via agent._learn_config
         self._learn_config = _learn_config
+        # Raw learn= intent, so surfaces that default-enable learning (e.g. the
+        # gateway/bot) can tell "unset" (None) apart from an explicit opt-out
+        # (learn=False) — both of which leave _learn_config None (Issue #4864).
+        self._learn_enabled = learn
 
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory

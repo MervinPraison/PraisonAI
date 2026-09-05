@@ -791,11 +791,16 @@ class MemoryMixin:
         # Reset counter and emit nudge
         self._turns_since_nudge = 0
         
-        # Optional: only nudge if agent has done meaningful work
+        # Optional tool-work floor (Issue #4864): ``nudge_min_tool_iters`` is a
+        # tunable override, not a hard floor. When it is <= 0 the cadence fires
+        # on conversational (tool-less) turns too, so a chat-only companion bot
+        # still learns; a positive value keeps the "only nudge after real tool
+        # work" behaviour for task-oriented agents.
         min_iters = getattr(self._learn_config, 'nudge_min_tool_iters', 3)
-        tool_calls_count = getattr(self, '_recent_tool_calls_count', 0)
-        if tool_calls_count < min_iters:
-            return None
+        if min_iters > 0:
+            tool_calls_count = getattr(self, '_recent_tool_calls_count', 0)
+            if tool_calls_count < min_iters:
+                return None
             
         return (
             "\n\n[System nudge] Review the recent conversation. If you discovered a "
