@@ -22,6 +22,8 @@ MCPOAuthProvider already implemented the whole flow including the exchange
 """
 import ast
 import inspect
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -83,6 +85,142 @@ class TestTheProviderReallyExchanges:
             "expiry handling changed; re-check that a token with no expires_at "
             "cannot shadow re-authentication indefinitely"
         )
+
+
+class TestExpiryStorageBehaviour:
+    """Exercise the real storage, not its source, for the shadow property."""
+
+    def test_legacy_entry_without_expires_at_reports_not_expired(self, tmp_path):
+        """This is the exact state that made the fake token unrecoverable."""
+        from praisonaiagents.mcp.mcp_auth_storage import MCPAuthStorage
+
+        storage = MCPAuthStorage(filepath=str(tmp_path / "auth.json"))
+        storage.set_tokens(
+            "srv",
+            {"access_token": "oauth_ABCDEFGHIJKLMNOPQRST...", "refresh_token": None},
+            server_url="https://srv.example/mcp",
+        )
+        # No expires_at -> is_token_expired() is False, i.e. "looks valid".
+        assert storage.is_token_expired("srv") is False
+
+    def test_expired_token_reports_expired(self, tmp_path):
+        from praisonaiagents.mcp.mcp_auth_storage import MCPAuthStorage
+
+        storage = MCPAuthStorage(filepath=str(tmp_path / "auth.json"))
+        storage.set_tokens(
+            "srv",
+            {"access_token": "real", "expires_at": time.time() - 1},
+            server_url="https://srv.example/mcp",
+        )
+        assert storage.is_token_expired("srv") is True
+
+
+def _run_auth(remote_config, storage, provider, monkeypatch_targets):
+    """Invoke mcp_auth with storage/provider/config/output all mocked."""
+    from praisonai_mcp.cli.commands import mcp as mcp_cli
+
+    loader = MagicMock()
+    config = MagicMock()
+    config.mcp.servers = {"srv": remote_config}
+    loader.load.return_value = config
+
+    schema = MagicMock()
+    schema.MCPRemoteConfig = type(remote_config)
+
+    with patch.object(mcp_cli, "_require_code", lambda: None), \
+         patch.object(mcp_cli, "get_config_loader", return_value=loader), \
+         patch.object(mcp_cli, "get_output_controller", return_value=MagicMock(is_json_mode=False)), \
+         patch.object(mcp_cli, "configuration_schema", return_value=schema), \
+         patch("praisonaiagents.mcp.MCPAuthStorage", return_value=storage), \
+         patch(
+             "praisonaiagents.mcp.oauth_provider.MCPOAuthProvider",
+             return_value=provider,
+         ):
+        mcp_cli.mcp_auth("srv", timeout=1.0)
+
+
+class TestLegacyCredentialPurge:
+    """Seed the legacy fake entry and prove a real flow replaces it."""
+
+    def _remote(self, oauth=None):
+        from praisonai_code.cli.configuration.schema import (
+            MCPRemoteConfig,
+        )
+        return MCPRemoteConfig(url="https://srv.example/mcp", oauth=oauth)
+
+    def test_legacy_placeholder_is_removed_before_delegating(self, tmp_path):
+        from praisonaiagents.mcp.mcp_auth_storage import MCPAuthStorage
+
+        storage = MCPAuthStorage(filepath=str(tmp_path / "auth.json"))
+        storage.set_tokens(
+            "srv",
+            {"access_token": "oauth_ABCDEFGHIJKLMNOPQRST...", "refresh_token": None},
+            server_url="https://srv.example/mcp",
+        )
+
+        provider = MagicMock()
+        provider.ensure_authenticated.return_value = "real-access-token"
+
+        _run_auth(self._remote(), storage, provider, None)
+
+        # The provider ran a real exchange...
+        provider.ensure_authenticated.assert_called_once()
+        # ...and the fabricated entry was cleared before delegation.
+        entry = storage.get("srv")
+        if entry:
+            access = (entry.get("tokens") or {}).get("access_token") or ""
+            assert not (access.startswith("oauth_") and access.endswith("..."))
+
+    def test_genuine_token_is_not_purged(self, tmp_path):
+        from praisonaiagents.mcp.mcp_auth_storage import MCPAuthStorage
+
+        storage = MCPAuthStorage(filepath=str(tmp_path / "auth.json"))
+        storage.set_tokens(
+            "srv",
+            {"access_token": "gho_real_looking_token", "refresh_token": "r"},
+            server_url="https://srv.example/mcp",
+        )
+
+        provider = MagicMock()
+        provider.ensure_authenticated.return_value = "gho_real_looking_token"
+
+        _run_auth(self._remote(), storage, provider, None)
+
+        entry = storage.get("srv")
+        assert entry is not None
+        assert entry["tokens"]["access_token"] == "gho_real_looking_token"
+
+
+class TestConfiguredClientIsCarried:
+    """A pre-registered client_id from config must reach the provider."""
+
+    def _remote_with_oauth(self):
+        from praisonai_code.cli.configuration.schema import (
+            MCPRemoteConfig,
+            MCPOAuthConfig,
+        )
+        oauth = MCPOAuthConfig(
+            client_id="preregistered-id",
+            client_secret="s3cr3t",
+            scopes=["read", "write"],
+        )
+        return MCPRemoteConfig(url="https://srv.example/mcp", oauth=oauth)
+
+    def test_configured_client_id_is_seeded_into_storage(self, tmp_path):
+        from praisonaiagents.mcp.mcp_auth_storage import MCPAuthStorage
+
+        storage = MCPAuthStorage(filepath=str(tmp_path / "auth.json"))
+
+        provider = MagicMock()
+        provider.ensure_authenticated.return_value = "real-access-token"
+
+        _run_auth(self._remote_with_oauth(), storage, provider, None)
+
+        entry = storage.get_for_url("srv", "https://srv.example/mcp")
+        assert entry is not None
+        client_info = entry.get("client_info") or {}
+        assert client_info.get("client_id") == "preregistered-id"
+        assert client_info.get("client_secret") == "s3cr3t"
 
 
 if __name__ == "__main__":

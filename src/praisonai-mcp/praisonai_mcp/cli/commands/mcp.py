@@ -691,9 +691,40 @@ def mcp_auth(
         # forever, so the fabricated entry permanently shadowed any real
         # OAuth attempt. MCPOAuthProvider already implements the whole flow,
         # including the code-for-token exchange this command never did.
+        from praisonaiagents.mcp import MCPAuthStorage
         from praisonaiagents.mcp.oauth_provider import MCPOAuthProvider
 
-        provider = MCPOAuthProvider(mcp_name=name, server_url=server.url)
+        storage = MCPAuthStorage()
+
+        # Purge any credential left by the old hand-rolled flow. Those entries
+        # held `f"oauth_{code[:20]}..."` with no expires_at, so is_token_expired()
+        # reported them permanently valid and the provider would return the fake
+        # token instead of running a real exchange. Only the placeholder shape is
+        # removed; genuine (possibly non-expiring) OAuth tokens are preserved.
+        entry = storage.get(name)
+        if entry:
+            access_token = (entry.get("tokens") or {}).get("access_token") or ""
+            if access_token.startswith("oauth_") and access_token.endswith("..."):
+                storage.remove(name)
+
+        provider = MCPOAuthProvider(
+            mcp_name=name, server_url=server.url, storage=storage
+        )
+
+        # Carry a pre-registered client from config into storage so servers
+        # without dynamic registration still authenticate. The provider reads
+        # client_info from storage in _ensure_client(); without this it would
+        # fail with "no registration_endpoint" for pre-registered clients.
+        if server.oauth and server.oauth.client_id:
+            existing = storage.get_for_url(name, server.url) or {}
+            if not (existing.get("client_info") or {}).get("client_id"):
+                client_info = {"client_id": server.oauth.client_id}
+                if server.oauth.client_secret:
+                    client_info["client_secret"] = server.oauth.client_secret
+                storage.set_client_info(
+                    name, client_info, server_url=server.url
+                )
+
         token = provider.ensure_authenticated(timeout=timeout)
         if not token:
             output.print_error(f"Authentication with {name} returned no token")
