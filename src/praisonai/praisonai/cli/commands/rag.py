@@ -92,7 +92,17 @@ def rag_index(
                 with open(config) as f:
                     file_config = yaml.safe_load(f)
                     if "knowledge" in file_config:
-                        knowledge_config.update(file_config["knowledge"])
+                        file_knowledge = file_config["knowledge"] or {}
+                        # A shallow update would let a file's "chunker" replace the
+                        # whole dict, silently dropping the explicit --chunking /
+                        # --chunk-size the user passed. Merge chunker key-by-key so
+                        # the file only overrides the fields it actually sets.
+                        cli_chunker = dict(knowledge_config["chunker"])
+                        file_chunker = file_knowledge.get("chunker")
+                        knowledge_config.update(file_knowledge)
+                        if isinstance(file_chunker, dict):
+                            cli_chunker.update(file_chunker)
+                            knowledge_config["chunker"] = cli_chunker
             
             # Initialize Knowledge
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
@@ -144,6 +154,10 @@ def rag_index(
             console.print(f"[red]Error:[/red] Missing dependency: {e}")
             console.print("Install with: pip install 'praisonaiagents[knowledge]'")
             raise typer.Exit(1)
+        except typer.Exit:
+            # The failed-source summary above already raised typer.Exit(1);
+            # let it through so we don't print a second, misleading "Error:" line.
+            raise
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(1)

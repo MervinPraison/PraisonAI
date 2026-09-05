@@ -87,6 +87,34 @@ class TestChunkingFlagsReachKnowledge:
         assert vs["collection_name"] == "research"
 
 
+class TestConfigFileDoesNotSilentlyDropCliChunker:
+    """A --config file that sets its own chunker must not wipe the explicit
+    --chunking / --chunk-size the user typed on the same command line."""
+
+    def _write_config(self, d, body):
+        path = os.path.join(d, "cfg.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        return path
+
+    def test_explicit_flags_survive_a_config_without_a_chunker(self, src_dir, fake_knowledge):
+        seen = fake_knowledge(["a"])
+        cfg = self._write_config(src_dir, "knowledge:\n  vector_store:\n    provider: chroma\n")
+        CliRunner().invoke(rag.app, [
+            "index", src_dir, "--chunking", "semantic", "--chunk-size", "256",
+            "--config", cfg])
+        assert seen["config"]["chunker"] == {"type": "semantic", "chunk_size": 256}
+
+    def test_config_chunker_field_overrides_only_that_field(self, src_dir, fake_knowledge):
+        seen = fake_knowledge(["a"])
+        cfg = self._write_config(src_dir, "knowledge:\n  chunker:\n    type: token\n")
+        CliRunner().invoke(rag.app, [
+            "index", src_dir, "--chunking", "semantic", "--chunk-size", "256",
+            "--config", cfg])
+        assert seen["config"]["chunker"]["type"] == "token"
+        assert seen["config"]["chunker"]["chunk_size"] == 256
+
+
 class TestIndexingNothingIsNotSuccess:
 
     def test_exit_code_is_nonzero_when_nothing_was_indexed(self, src_dir, fake_knowledge):
@@ -100,6 +128,11 @@ class TestIndexingNothingIsNotSuccess:
         fake_knowledge([])
         result = CliRunner().invoke(rag.app, ["index", src_dir])
         assert "Indexing complete" not in result.output
+
+    def test_intentional_exit_does_not_print_a_redundant_error(self, src_dir, fake_knowledge):
+        fake_knowledge([])
+        result = CliRunner().invoke(rag.app, ["index", src_dir])
+        assert "Error:" not in result.output
 
     def test_a_real_success_still_exits_zero(self, src_dir, fake_knowledge):
         fake_knowledge(["a", "b"])
