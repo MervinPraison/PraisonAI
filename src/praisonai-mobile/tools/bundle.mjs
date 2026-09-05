@@ -157,11 +157,21 @@ export function praisonaiRoot() {
  * The ceiling sits ~10% above that on purpose: one more provider is 100-170kB
  * (measured), so adding one is a decision, not a drift.
  *
+ * That decision was taken: the parity work that filled the accepted-and-ignored
+ * option gaps -- the Task engine, the AgentTeam settings, and the Handoff
+ * context/limits engine -- landed the real behaviour those options always
+ * advertised, and the engine grew from 1459.6kB to ~1610kB across them. Not a
+ * drift (no provider was added) and not one PR's doing (each is ~10-50kB of
+ * honoured settings); the sum is the honest cost of the options finally working.
+ * The ceiling moves once, deliberately, to 1700kB: it clears the measured
+ * ~1610kB and leaves the ~90kB that a next provider would need to be its own
+ * decision rather than being pre-spent here.
+ *
  * `tools/depgraph.test.mjs` pins both values; `bundle.test.mjs` proves each
  * can fail, and that neither is the other in disguise.
  */
 export const SHELL_BUDGET_BYTES = 400 * 1024;
-export const LAZY_BUDGET_BYTES = 1600 * 1024;
+export const LAZY_BUDGET_BYTES = 1700 * 1024;
 
 /**
  * Every bare (non-relative) import esbuild could not resolve.

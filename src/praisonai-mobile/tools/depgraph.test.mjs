@@ -356,8 +356,11 @@ test("the size budgets and the webview targets are the values the gate claims", 
   assert.equal(SHELL_BUDGET_BYTES, 400 * 1024, "the shell budget is what makes a dependency a decision");
   // The lazy allowance is a second number on purpose (bundle.mjs says why),
   // pinned for the same reason as the first: the engine went from 0 to 1460kB
-  // in one PR, and the next provider is 100-170kB.
-  assert.equal(LAZY_BUDGET_BYTES, 1600 * 1024, "the lazy allowance is a decision too");
+  // in one PR, and the next provider is 100-170kB. Moved to 1700kB once the
+  // accepted-and-ignored option gaps were filled (Task engine, AgentTeam,
+  // Handoff) and the honoured behaviour grew the engine to ~1610kB -- a
+  // deliberate step, documented in bundle.mjs, not a silent raise.
+  assert.equal(LAZY_BUDGET_BYTES, 1700 * 1024, "the lazy allowance is a decision too");
   // The Chrome floor is DERIVED from `minSdkVersion`, not restated here. This
   // line said `chrome108` while tauri.conf.json declared `minSdkVersion: 26`
   // -- Android 8.0, WebView ~Chrome 58 -- so the two numbers disagreed and a
