@@ -35,29 +35,250 @@
   --inset-bottom: var(--safe-area-inset-bottom);
   --inset-left: var(--safe-area-inset-left);
 
-  --ground: #ffffff;
-  --panel: #f5f6f8;
+  /*
+   * ---- Type -------------------------------------------------------------
+   *
+   * The SYSTEM STACK, and that is a decision rather than a default.
+   *
+   * A webfont was considered and rejected on three counts, in order of weight:
+   *
+   *   1. Script coverage. ui/src/i18n/strings.ts is a translated UI and
+   *      main.ts sets `dir="rtl"` from the requested tag, so this app renders
+   *      Arabic, and on a Chinese or Japanese device it renders CJK. A
+   *      Latin-subset webfont would leave every one of those users reading a
+   *      MIXED typeface -- the webfont for the Latin, the system font for
+   *      everything else -- which looks worse than the system font alone and
+   *      cannot be fixed without shipping megabytes.
+   *   2. The boot indicator. app/index.html paints a wordmark and "Starting…"
+   *      on the first frame, before app.js exists, specifically so a cold
+   *      start does not look like a broken install. A webfont makes that first
+   *      frame either invisible (`font-display: block`) or a flash of one face
+   *      handing over to another -- reintroducing, in the app's first 200ms,
+   *      exactly the "is this broken?" the indicator was written to remove.
+   *   3. Bytes and a request. The shell budget is ~85 kB of 400 and app.css is
+   *      a render-blocking <link>; a self-hosted woff2 is another file in the
+   *      critical path, and `font-src 'self' data:` in index.html's CSP means
+   *      it could not be a CDN even if that were desirable.
+   *
+   * Committing to it means using it properly, which is what the scale below
+   * is for. `system-ui` leads the stack: it is the generic that resolves to
+   * whatever the platform actually ships, and the named faces behind it are
+   * the fallbacks for engines that do not know it.
+   */
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace;
+
+  /*
+   * Six steps, and not a geometric scale, on purpose.
+   *
+   * A constant ratio produces fractional pixels at the small end, where a
+   * phone has no room for them: 12px and 12.6px are the same size to the eye
+   * and different to the layout. So the scale is two bands with different
+   * jobs. 12-13-14 is the INFORMATION band -- timestamps, help notes, tool
+   * metadata -- where the steps are about a pixel and the job is to be quietly
+   * distinguishable without shouting. 16-18-22 is the HIERARCHY band, where
+   * the steps open up because that is where the eye is meant to be led.
+   *
+   * 16px (--text-base) is the message text and every text input. It is a floor
+   * as well as a size: iOS zooms the whole page when a field smaller than 16px
+   * takes focus, which is why `.composer textarea` states it in px below.
+   */
+  --text-xs: .75rem;      /* 12px -- eyebrows, tool meta, dropped-event counts */
+  --text-sm: .8125rem;    /* 13px -- help notes, timestamps, secondary states  */
+  --text-md: .875rem;     /* 14px -- buttons, reasoning, secondary UI          */
+  --text-base: 1rem;      /* 16px -- message text, inputs                      */
+  --text-lg: 1.125rem;    /* 18px -- screen headings, the empty-state title    */
+  --text-xl: 1.375rem;    /* 22px -- the boot wordmark, and nothing else       */
+
+  /*
+   * Three weights, because on Android there are three.
+   *
+   * Roboto ships 400/500/700 as separate faces, and CSS font matching for a
+   * requested weight above 500 searches UPWARD first -- so `font-weight: 550`,
+   * which this file used for settings labels, resolved to 550 on iOS (SF is
+   * variable) and to 700, full bold, on Android. A label meant to be a shade
+   * heavier than its value was rendering bolder than the screen heading above
+   * it. 500 is the only "slightly heavier" that means the same thing on both.
+   */
+  --weight-normal: 400;
+  --weight-medium: 500;   /* labels, chat titles: heavier, never bold          */
+  --weight-strong: 700;   /* headings and the wordmark                         */
+
+  --leading-tight: 1.25;  /* headings, where lines are short and few           */
+  --leading-snug: 1.4;    /* UI text and one-line rows                         */
+  --leading-normal: 1.55; /* message prose, read for minutes at a time         */
+  --tracking-eyebrow: .09em;
+
+  /*
+   * ---- Space ------------------------------------------------------------
+   *
+   * Seven steps on a 4px grid, in rem rather than px, and that is the
+   * consequential half.
+   *
+   * Android's font-scale setting reaches a WebView as a text zoom, which
+   * scales the root font size -- so rem spacing grows with the type and px
+   * spacing does not. At font_scale 1.5, px gutters around 24px text give a
+   * cramped screen. Keeping the ratio of text to space constant is the
+   * behaviour this file already had (every padding was a rem literal); the
+   * scale names those values instead of inventing a new one per element.
+   *
+   * Hairlines stay in px: a 1px border is a device pixel, not a text
+   * relationship, and a "1.5px" border is a blurry one.
+   */
+  --space-1: .25rem;      /*  4px */
+  --space-2: .375rem;     /*  6px */
+  --space-3: .5rem;       /*  8px */
+  --space-4: .75rem;      /* 12px */
+  --space-5: 1rem;        /* 16px */
+  --space-6: 1.5rem;      /* 24px */
+  --space-7: 2rem;        /* 32px */
+
+  /*
+   * The screen-edge gutter, and the one number in this file that is also
+   * written somewhere else: app/src/main.ts sets the composer's
+   * `padding-inline-start/end` INLINE (an inline style beats the stylesheet,
+   * so it has to) as `calc(<inset> + .75rem)`. The two must agree or the
+   * composer sits a few pixels off every other screen edge in the app.
+   * app/src/css.test.ts asserts they still do.
+   */
+  --gutter: var(--space-4);
+
+  /* ---- Radius -----------------------------------------------------------
+   *
+   * Three steps and a pill. The bubble radius is larger than the row radius so
+   * a message reads as a soft object and a settings row reads as a rectangle;
+   * `--radius` keeps its name because it is the middle step and most of the
+   * file already means that by it. */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /*
+   * ---- Colour: the LIGHT theme, designed as itself ----------------------
+   *
+   * Three surfaces, and the relationship between them is what carries the
+   * structure. `--ground` is the reading surface -- the transcript, the
+   * settings list, the page. `--chrome` is the topbar and the composer, the
+   * two bars that frame it. `--panel` is a control: a text field, a secondary
+   * button.
+   *
+   * In light, chrome is LIGHTER than ground and panel is DARKER. That is not
+   * an accident of picking greys; it is how the two behave. A bar brighter
+   * than the page reads as floating above it, and a control duller than the
+   * page reads as recessed into it. The dark block below re-derives both
+   * relationships rather than inverting these numbers -- see the note there,
+   * because one of them comes out the other way round.
+   *
+   * The neutrals are a cool grey, near enough to neutral to read as paper, and
+   * deliberately NOT tinted toward the accent: a teal-grey ground under a teal
+   * accent muddies both, and this app's one chromatic event should be the
+   * accent.
+   */
+  --ground: #f7f8fa;
+  --chrome: #ffffff;
+  --panel: #eceff4;
+  --rule: #dfe3e9;
+  --rule-strong: #c8ced7;
   --ink: #14171c;
   --soft: #5b636e;
-  --rule: #e2e5ea;
+
+  /* The brand green. It is also index.html's `theme-color`, so the Android
+     status bar and this token are the same decision. */
   --accent: #1f7a63;
+  --accent-ink: #ffffff;
+
+  /*
+   * The user's own message, as its OWN pair rather than as the accent.
+   *
+   * They were one token, and that is what forced the dark theme into a corner:
+   * `--accent` in dark has to be light enough to read as text on a near-black
+   * ground (it is #7fd1b9, 10.6:1), and a bubble filled with it is then the
+   * brightest object on the screen -- repeated down the whole transcript.
+   * Splitting the roles lets each theme answer the question its own way. See
+   * the dark block.
+   */
+  --user-bg: #1f7a63;
+  --user-ink: #ffffff;
+
   --bad: #a6413c;
+  --bad-bg: #fbeceb;
   --warn: #b34700;
-  --radius: 12px;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --warn-bg: #fdf1e7;
+
+  /*
+   * The five tones, which ui/src/transcript/view-model.ts already names
+   * (`RowTone`) and app/src/dom.ts already writes as `data-tone` -- and which
+   * this stylesheet had no rule for at all, so a `warning` notice and a
+   * `neutral` one were the same grey.
+   *
+   * Defined in terms of the tokens above rather than as fresh hexes, so the
+   * dark block redefines all five by redefining --soft/--accent/--bad/--warn.
+   * A custom property is substituted where it is USED, so these follow.
+   *
+   * `pending` and `neutral` share --soft on purpose: "in progress" and
+   * "nothing to report" are both the absence of an outcome, and giving
+   * in-progress a colour of its own would make every running tool an event.
+   */
+  --tone-neutral: var(--soft);
+  --tone-pending: var(--soft);
+  --tone-success: var(--accent);
+  --tone-failure: var(--bad);
+  --tone-warning: var(--warn);
 }
 
+/*
+ * ---- Colour: the DARK theme, designed as itself ------------------------
+ *
+ * Not an inversion of the block above, and three tokens in here are the proof.
+ *
+ * `--chrome` stays LIGHTER than `--ground` in both themes, because "the bar
+ * floats above the page" is a fact about bars, not about light. Inverting the
+ * light values would have made the dark topbar darker than the transcript,
+ * which reads as a hole rather than as a frame.
+ *
+ * `--panel` goes the other way. In light it is darker than the ground; here it
+ * is lighter. A control is distinguished from the page by being NEARER the
+ * light source, and in a dark UI that means brighter -- the one relationship
+ * that genuinely does flip, and the reason "invert the palette" produces
+ * recessed-looking buttons in dark mode.
+ *
+ * `--user-bg` is the clearest case. In light it is the full accent: a dark
+ * saturated block on a pale ground, which RECEDES -- legible at a glance
+ * without pulling the eye. Inverted, the same rule in dark is a pale mint
+ * block on near-black, which ADVANCES: 10.6:1 against the ground, the
+ * brightest thing on the screen, once per user message, all the way down a
+ * conversation. So dark gets its own deep green -- 2.05:1 against the ground,
+ * plainly a distinct surface and quietly so -- with its own light ink on it at
+ * 8.1:1. The bubble is still the second-loudest object in the transcript in
+ * both themes; it is no longer the loudest one in exactly one of them.
+ *
+ * Everything a screen reader relies on is unchanged either way: alignment,
+ * `data-speaker` and the visually-hidden "You said:" carry the speaker, and
+ * colour only confirms it.
+ *
+ * Every text pair in both themes clears WCAG AA for body text. The worst in
+ * this block is --soft on --panel at 6.3:1; the worst in the light block is
+ * --accent on --panel at 4.5:1.
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --ground: #0f1114;
-    --panel: #1a1e24;
+    --chrome: #16191f;
+    --panel: #1c2027;
+    --rule: #262b33;
+    --rule-strong: #39414c;
     --ink: #e8eaed;
     --soft: #9aa1ac;
-    --rule: #262b33;
     --accent: #7fd1b9;
+    --accent-ink: #0f1114;
+    --user-bg: #254f43;
+    --user-ink: #e8f3ee;
     --bad: #e58b86;
+    --bad-bg: #2e1c1b;
     --warn: #f78c6c;
+    --warn-bg: #2e2219;
   }
 }
 
@@ -73,8 +294,9 @@ html, body {
   color: var(--ink);
   font-family: var(--sans);
   font-size: 16px;
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* NO viewport units anywhere in this file, deliberately. 100vh includes an
@@ -102,28 +324,84 @@ html, body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: .5rem;
-  padding: calc(var(--inset-top) + .5rem) 
-           calc(var(--inset-right) + .75rem) .5rem
-           calc(var(--inset-left) + .75rem);
+  gap: var(--space-3);
+  padding: calc(var(--inset-top) + var(--space-3))
+           calc(var(--inset-right) + var(--gutter)) var(--space-3)
+           calc(var(--inset-left) + var(--gutter));
   border-bottom: 1px solid var(--rule);
-  background: var(--ground);
+  background: var(--chrome);
 }
-.topbar h1 { font-size: 1rem; font-weight: 600; margin: 0; flex: 1; }
+.topbar h1 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  /* Optical correction, and only at this size. Default tracking is set for
+     body text; at 18px and up a heading looks loose without a hair of
+     negative. */
+  letter-spacing: -.01em;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The heading on every screen that is NOT the chat screen.
+ *
+ * `screenHeading` in main.ts has emitted `<h2 class="screen-heading">` since it
+ * was written and this file had no rule for it at all, so Settings and Chats
+ * were titled at the user agent's default `h2` -- 1.5em (24px) bold with
+ * 0.83em margins above and below -- while the chat screen's own title, one tap
+ * away, was 16px. The two screens did not look like the same application.
+ */
+.screen-heading {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  letter-spacing: -.01em;
+  color: var(--ink);
+  margin: 0 0 var(--space-4);
+}
+/* `tabindex="-1"` is what lets focus.ts move focus here on a route change; it
+   must not also paint a ring when the move was made for a tap. A real keyboard
+   focus still gets one, from `:focus-visible` below. */
+.screen-heading:focus { outline: none; }
 
 .transcript {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: .75rem calc(var(--inset-right) + .75rem) .75rem
-           calc(var(--inset-left) + .75rem);
+  padding: var(--space-4) calc(var(--inset-right) + var(--gutter)) var(--space-4)
+           calc(var(--inset-left) + var(--gutter));
   display: flex;
   flex-direction: column;
-  gap: .6rem;
+  gap: var(--space-3);
+  background: var(--ground);
 }
 
-.row { border-radius: var(--radius); padding: .55rem .75rem; max-width: 100%; }
+.row { border-radius: var(--radius); padding: var(--space-3) var(--space-4); max-width: 100%; }
+
+/*
+ * The rhythm of a CONVERSATION, out of a flat list of rows.
+ *
+ * The transcript is a single flex column of siblings -- there is no turn
+ * element to hang a margin on, and ui/src/render/reconcile.ts places rows by
+ * index, so introducing one would mean changing the reconciler rather than the
+ * stylesheet. Adjacent siblings get it for free: the two boundaries worth
+ * marking are the ones either side of the user's message, because that is
+ * where one turn ends and the next begins. Everything inside a turn -- the
+ * answer, its reasoning, its tool rows -- keeps the tight base gap and reads
+ * as one block.
+ *
+ * `+` rather than `:has()`: this file is parsed by whatever WebView the
+ * declared minSdkVersion ships, and the adjacent sibling combinator has worked
+ * everywhere for twenty years.
+ */
+.row + .row-user { margin-top: var(--space-4); }
+.row-user + .row { margin-top: var(--space-4); }
 
 /*
  * The user's own message.
@@ -146,21 +424,73 @@ html, body {
  */
 .row-user {
   align-self: flex-end;
-  max-width: 85%;
-  background: var(--accent);
-  color: var(--ground);
+  max-width: 82%;
+  background: var(--user-bg);
+  color: var(--user-ink);
+  border-radius: var(--radius-lg);
+  /*
+   * One corner cut, on the trailing bottom edge -- the whole of this file's
+   * decoration budget, spent here because it is the one place it does work: it
+   * points the bubble back at the person who wrote it, so the SHAPE alone says
+   * which side a message is on, before any colour is read.
+   *
+   * A LOGICAL corner, not `border-bottom-right-radius`. `border-radius`'s
+   * physical corners do not follow `dir`, so the physical version would put
+   * the notch on the far side of an Arabic bubble -- pointing away from the
+   * speaker. An engine too old for logical radii simply keeps all four corners
+   * round, which is this design one notch short rather than a broken one.
+   */
+  border-end-end-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Sent, and NOT in the stored conversation. A block of its own so it reads as a
-   separate statement about the message rather than as part of it. */
+/*
+ * Sent, and NOT in the stored conversation. A block of its own so it reads as a
+ * separate statement about the message rather than as part of it.
+ *
+ * `opacity: .92`, and the exact number is load-bearing. It was `.85`, which
+ * put white text on the light-theme bubble at 4.26:1 -- under AA, on the one
+ * line in the transcript whose whole job is to tell you your message was not
+ * saved. Nothing reported it, because contrast through an `opacity` is a fact
+ * about the composited pixel and no stylesheet review sees it; the case in
+ * tools/screen-layout.test.mjs composites the layers and does. .92 is 4.68:1
+ * light and 7.16:1 dark, and it is still visibly a subordinate line.
+ */
 .row-user .user-note {
   display: block;
-  margin-top: .3rem;
-  font-size: .78rem;
-  opacity: .85;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  opacity: .92;
 }
-.row-text { background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/*
+ * The assistant's answer: prose on the page, NOT a bubble.
+ *
+ * It was a full-width `--panel` block, and that is the wrong shape for what it
+ * holds. A bubble is a device for short, alternating, roughly equal turns; the
+ * assistant's turn here is the long one -- paragraphs, sometimes the whole
+ * screen -- and a filled box at 100% width is not a bubble at all, it is a
+ * container with prose in it. Stacked down a transcript the effect was a
+ * column of grey slabs with the reading inside them.
+ *
+ * Unboxing it makes the two speakers ASYMMETRIC, which is the point: the user
+ * writes objects (short, aligned, bubbled) and the model writes text (long,
+ * full width, on the page). That reads as a conversation faster than two
+ * mirrored bubble colours do, and it gives the long side the full measure with
+ * no inner padding to lose it to.
+ *
+ * Nothing accessible rested on the background -- the comment on `.row-user`
+ * above names the three signals that do, and none of them is this one.
+ */
+.row-text {
+  padding-inline: 0;
+  padding-block: var(--space-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--leading-normal);
+}
 .row-text.streaming::after {
   content: "▍";
   color: var(--accent);
@@ -172,53 +502,193 @@ html, body {
   * { transition: none !important; }
 }
 
-.row-reasoning { color: var(--soft); font-size: .9rem; border-left: 2px solid var(--rule); border-radius: 0; }
-.row-tool { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: baseline;
-  border: 1px solid var(--rule); font-family: var(--mono); font-size: .82rem; }
-.row-tool[data-status="failed"] { border-color: var(--bad); color: var(--bad); }
+/* The model's thinking: the same prose column, set back behind it. Smaller,
+   soft, and marked with a rule on the leading edge rather than boxed, so it
+   reads as an aside to the answer below rather than as another message.
+   `border-inline-start` and `padding-inline` so the rule stays on the reading
+   edge in Arabic. */
+.row-reasoning {
+  color: var(--soft);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  border-inline-start: 2px solid var(--rule-strong);
+  border-radius: 0;
+  padding-block: var(--space-1);
+  padding-inline: var(--space-4) 0;
+}
+
+.row-tool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+  border: 1px solid var(--rule);
+  background: var(--chrome);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+.row-tool .tool-name { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.row-tool .tool-meta { color: var(--soft); margin-inline-start: auto; font-size: var(--text-xs); }
+.tool-output {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  width: 100%;
+  color: var(--soft);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+/*
+ * A tool's status, as a chip.
+ *
+ * app/src/dom.ts has written the status IN WORDS into `span.tool-status` since
+ * it was fixed -- "Running" / "Succeeded" / "Failed" / "No result" -- and this
+ * file had no rule for that span, so the word sat inside the mono run and read
+ * as part of the tool's name. Meanwhile the only colour on the row was a
+ * border, and there were rules for `failed` and `ok` and NONE for `running` or
+ * `unresolved`: a tool that never came back was pixel-for-pixel a tool still
+ * working, which ui/src/transcript/view-model.ts calls the defect the whole
+ * transcript layer is written against.
+ *
+ * Four statuses, four tones, taken from the map `toneForTool` already exports.
+ * The chip carries the tone and the border echoes it. The word is still the
+ * primary signal and still what a screen reader gets; this only makes the eye
+ * agree with it.
+ */
+.row-tool .tool-status {
+  flex: 0 0 auto;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  letter-spacing: .02em;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  color: var(--tone-neutral);
+}
+.row-tool[data-status="running"] { border-color: var(--rule); }
+.row-tool[data-status="running"] .tool-status { color: var(--tone-pending); }
 .row-tool[data-status="ok"] { border-color: var(--accent); }
-.row-tool .tool-meta { color: var(--soft); margin-left: auto; }
-.tool-output { margin: .35rem 0 0; white-space: pre-wrap; overflow-x: auto; width: 100%;
-  color: var(--soft); font-size: .78rem; }
+.row-tool[data-status="ok"] .tool-status { color: var(--tone-success); }
+.row-tool[data-status="failed"] { border-color: var(--bad); }
+.row-tool[data-status="failed"] .tool-status { color: var(--tone-failure); }
+.row-tool[data-status="unresolved"] { border-color: var(--warn); }
+.row-tool[data-status="unresolved"] .tool-status { color: var(--tone-warning); }
+/* Only the failed row tints its name as well. `unresolved` gets the warning
+   colour on the chip and the border and keeps its name in ink: "we never heard
+   back" is a fact about the call, not about the tool. */
+.row-tool[data-status="failed"] .tool-name { color: var(--bad); }
 
-.row-approval { border: 1px solid var(--warn); display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
-.row-approval p { margin: 0 0 .3rem; width: 100%; }
-.row-error { border: 1px solid var(--bad); color: var(--bad); }
+.row-approval {
+  border: 1px solid var(--warn);
+  background: var(--warn-bg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.row-approval p {
+  margin: 0 0 var(--space-1);
+  width: 100%;
+  font-weight: var(--weight-medium);
+}
+/* The buttons sit on the tinted panel, so they need their own ground to keep
+   reading as controls instead of dissolving into it. */
+.row-approval button { background: var(--chrome); }
+
+.row-error {
+  border: 1px solid var(--bad);
+  background: var(--bad-bg);
+  color: var(--bad);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+}
 /* An error row is a TITLE chosen by kind and, under it, the provider's prose.
-   `display: block` is the whole rule and it is required rather than cosmetic:
-   both are spans inside one row, so without it they run together and the row
-   reads "Sign-in problemThe OPENAI_API_KEY environment variable...". No colour
-   is stated here on purpose -- `.row-error` above already sets one and both
-   spans inherit it, so this adds no token for the dark-scheme gate to check
-   and nothing for a palette pass to have to keep in step. */
-.row-error .error-title { display: block; font-weight: 600; }
-.row-notice { color: var(--soft); font-size: .88rem; text-align: center; }
-.row-dropped { color: var(--warn); font-size: .8rem; }
+   `display: block` is required rather than cosmetic: both are spans inside one
+   row, so without it they run together and the row reads "Sign-in problemThe
+   OPENAI_API_KEY environment variable...". No colour is stated here on purpose
+   -- `.row-error` above already sets one and both spans inherit it. */
+.row-error .error-title { display: block; font-weight: var(--weight-strong); }
 
-/* A chat row is a DIV holding two controls now -- one that opens the chat and
-   one that deletes it -- because a button cannot legally contain a button and
-   there was no way to delete a conversation at all before. Only new selectors
-   are added here; nothing above changes. */
-.row-chat { display: flex; align-items: baseline; gap: .5rem; padding: 0; }
-.chat-open { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: .5rem;
-  text-align: start; background: none; border: none; }
-.chat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-/* The time the list is SORTED by, which nothing rendered until now. Muted and
-   smaller: it is context for the title, not a second title. */
-.chat-updated { flex: 0 0 auto; color: var(--soft); font-size: .8rem; }
-.chat-delete { flex: 0 0 auto; }
-.chat-delete[data-armed="true"] { border-color: var(--bad); color: var(--bad); }
+/*
+ * A notice, by TONE.
+ *
+ * app/src/dom.ts writes `data-tone` on every notice and error row and this
+ * file styled none of it, so "Stopped" (warning) and an informational line
+ * looked identical. The base is the quiet one -- centred and soft, which is
+ * right for the neutral case that is most of them -- and each tone that is
+ * actually emitted says so.
+ */
+.row-notice {
+  color: var(--tone-neutral);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  text-align: center;
+}
+/* The measure limit is scoped to the TRANSCRIPT, not put on `.row-notice`
+   itself. `buildSettingsScreen` emits the same class for its warnings, and
+   `.screen-settings` is a flex column too -- so an unscoped `align-self:
+   center; max-width: 34ch` would have quietly narrowed and floated the
+   settings warnings as well, which is a change to a screen this rule is not
+   about. In the transcript it earns its place: a centred line running the full
+   width of a phone reads as a paragraph rather than as an aside, the same
+   argument `.empty-body` makes. */
+.transcript .row-notice { align-self: center; max-width: 34ch; }
+.row-notice[data-tone="warning"] { color: var(--tone-warning); }
+.row-notice[data-tone="failure"] { color: var(--tone-failure); }
+.row-notice[data-tone="success"] { color: var(--tone-success); }
+
+.row-dropped {
+  color: var(--tone-warning);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  text-align: center;
+  align-self: center;
+}
+
+/*
+ * "Jump to latest", which had NO rule in this file at all.
+ *
+ * main.ts builds it as `button.jump-latest` and appends it as a direct child of
+ * the `.screen` flex column, between the transcript and the composer. With no
+ * rule of its own it fell to the bare `button` styling and to the column's
+ * default `align-items: stretch` -- so the moment scroll.ts unhid it, a
+ * full-bleed 44px slab appeared across the screen and pushed the composer
+ * down. It is an affordance, and it should look like one.
+ *
+ * In FLOW rather than absolutely positioned, deliberately. Floating it over
+ * the transcript would mean positioning it against the composer, whose height
+ * moves with the keyboard on every focus -- and the composer's relationship to
+ * the keyboard is the most expensive thing in this file to have got right. A
+ * centred pill costs one row of the transcript and cannot desynchronise from
+ * anything.
+ *
+ * `min-height` is inherited from `button` and stays 44px: this is a touch
+ * target, and a smaller pill would be a prettier one that is harder to hit.
+ */
+.jump-latest {
+  align-self: center;
+  flex: 0 0 auto;
+  margin-block: var(--space-1) var(--space-2);
+  padding-inline: var(--space-5);
+  border-radius: var(--radius-pill);
+  border-color: var(--rule-strong);
+  background: var(--chrome);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
 
 .composer {
   display: flex;
-  gap: .5rem;
+  gap: var(--space-3);
   align-items: flex-end;
   border-top: 1px solid var(--rule);
-  background: var(--ground);
-  padding: .5rem calc(var(--inset-right) + .75rem)
-           calc(var(--inset-bottom) + .5rem)
-           calc(var(--inset-left) + .75rem);
+  background: var(--chrome);
+  padding: var(--space-3) calc(var(--inset-right) + var(--gutter))
+           calc(var(--inset-bottom) + var(--space-3))
+           calc(var(--inset-left) + var(--gutter));
   /* main.ts sets this from the shell's live keyboard height. It is a padding
      rather than a transform so the transcript's scroll height shrinks with it
      and the last message stays reachable. */
@@ -229,24 +699,31 @@ html, body {
      reintroduced here: measured 76px of padding with a 34px home indicator
      where 42px is correct, and a keyboard's height of dead space above the
      keyboard once one opens. */
-  padding-bottom: calc(var(--keyboard-height, 0px) + .5rem);
+  padding-bottom: calc(var(--keyboard-height, 0px) + var(--space-3));
 }
 .composer textarea {
   flex: 1;
+  min-width: 0;
   resize: none;
   font: inherit;
+  line-height: var(--leading-snug);
   color: inherit;
   background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: .5rem .65rem;
-  /* 16px minimum: iOS zooms the whole page when focusing a smaller field. */
+  padding: var(--space-3) var(--space-4);
+  /* 16px minimum: iOS zooms the whole page when focusing a smaller field.
+     Stated in px rather than as --text-base because it is a FLOOR imposed by
+     the platform, not a step on the type scale that happens to sit there. */
   font-size: 16px;
 }
+.composer textarea::placeholder { color: var(--soft); }
 
 button {
   font: inherit;
-  font-size: .9rem;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
   cursor: pointer;
   border: 1px solid var(--rule);
   background: var(--panel);
@@ -255,13 +732,24 @@ button {
   /* 44px is the platform minimum touch target on both platforms. */
   min-height: 44px;
   min-width: 44px;
-  padding: 0 .75rem;
+  padding: 0 var(--space-4);
 }
-button[data-variant="primary"] { background: var(--accent); border-color: var(--accent); color: var(--ground); }
+button[data-variant="primary"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: var(--weight-strong);
+}
 button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.empty { margin: auto; color: var(--soft); text-align: center; padding: 2rem 1rem; }
+.empty {
+  margin: auto;
+  color: var(--soft);
+  text-align: center;
+  padding: var(--space-7) var(--space-5);
+  font-size: var(--text-md);
+}
 
 /*
  * The empty chat: the welcome, and the "you need a key" guidance.
@@ -295,13 +783,14 @@ button:disabled { opacity: .45; cursor: default; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: .5rem;
+  gap: var(--space-3);
   text-align: center;
   /* The inline padding follows the safe area for the same reason every other
      screen's does: a landscape cutout would otherwise clip the first and last
-     characters of every line. */
-  padding: 1.5rem calc(var(--inset-right) + 1.25rem)
-           1.5rem calc(var(--inset-left) + 1.25rem);
+     characters of every line. The gutter is ADDED to the inset, never
+     replacing it, so a device with no inset on a side still keeps it. */
+  padding: var(--space-6) calc(var(--inset-right) + var(--space-5))
+           var(--space-6) calc(var(--inset-left) + var(--space-5));
 }
 /* Stated explicitly, exactly as `.screen[hidden]` and `.setting-error[hidden]`
    are: the author `display: flex` above beats the user agent's
@@ -312,8 +801,10 @@ button:disabled { opacity: .45; cursor: default; }
 
 .empty-state .empty-title {
   margin: 0;
-  font-size: 1.15rem;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  letter-spacing: -.01em;
   color: var(--ink);
 }
 /* Muted, and narrow: a centred sentence running the full width of a phone is
@@ -322,24 +813,108 @@ button:disabled { opacity: .45; cursor: default; }
   margin: 0;
   max-width: 30ch;
   color: var(--soft);
-  font-size: .95rem;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
 }
-.empty-state button { margin-top: .5rem; }
+.empty-state button { margin-top: var(--space-3); }
 .empty-state button[hidden] { display: none; }
+
 /*
- * A row in the chat list. `.row-chat` is the class `buildChatsScreen` emits;
- * this block was written as `.chat-row`, which the app has never painted, so
- * every row fell back to the bare `button` rule: a centre-aligned, auto-width
- * pill instead of a full-width list row. The `.title` / `.when` children it
- * also styled do not exist either -- the row's title is its own text node --
- * so the truncation lives on the row itself, where a chat named from a long
- * first message would otherwise wrap to as many lines as it liked.
+ * A row in the chat list.
+ *
+ * There was one `.row-chat` block here and then a SECOND one 130 lines later,
+ * each written by a different fix and neither aware of the other: the first
+ * set `align-items: baseline; padding: 0` for the two-control row the list
+ * builds today, and the second -- a repair of a block that had been written as
+ * `.chat-row`, which nothing paints -- set `align-items: center` and put the
+ * padding back. Same specificity, so the later one silently won half the
+ * declarations of the earlier one. They are one rule now, and the surviving
+ * behaviour is what the later block produced, which is what has actually been
+ * on screen.
+ *
+ * The row is a DIV holding two controls -- one that opens the chat and one
+ * that deletes it -- because a button cannot legally contain a button. The
+ * padding is asymmetric for the same reason: the leading edge carries the
+ * gutter for the title, and the trailing edge gives way to the delete
+ * control's own 44px target.
  */
-.row-chat { display: flex; align-items: center; gap: .5rem; width: 100%;
-  border: 1px solid var(--rule); border-radius: var(--radius); padding: .6rem .75rem;
-  background: var(--panel); text-align: left;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-chat-unreadable { color: var(--warn); border-color: var(--warn); }
+.row-chat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  background: var(--chrome);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-chat + .row-chat { margin-top: var(--space-3); }
+.row-chat-unreadable { color: var(--warn); border-color: var(--warn); background: var(--warn-bg); }
+
+/*
+ * `align-items: center`, and it was `baseline`.
+ *
+ * Baseline is the better answer to "line up a 16px title with a 12px
+ * timestamp", and it is the wrong answer here because of the box it is in.
+ * `.chat-open` is a button, so it inherits `min-height: 44px` -- one line of
+ * text in a 44px box -- and a single-line flex container aligns a baseline
+ * group to the START of the line. So the title sat at the top of its 44px
+ * while `Delete`, whose label the user agent centres in ITS 44px, sat about
+ * 10px lower: two controls on one row visibly out of line.
+ *
+ * Measured on an Android 15 emulator at 420dpi. It was there before this
+ * change and hidden by `Delete` having a border of its own to sit inside; the
+ * moment the destructive control was quietened to plain text the two were
+ * plainly not on the same line. Centring costs the ~2px of baseline drift
+ * between the two sizes, which is invisible, and buys the alignment, which is
+ * not.
+ */
+.chat-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: start;
+  background: none;
+  border: none;
+  /* The row already carries the gutter. Without this the button keeps
+     `button`'s own `padding: 0 var(--space-4)` and the title is indented twice
+     as far as the row it sits in. */
+  padding-inline: 0;
+}
+.chat-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--ink);
+}
+/* The time the list is SORTED by, which nothing rendered until now. Muted and
+   smaller: it is context for the title, not a second title. */
+.chat-updated {
+  flex: 0 0 auto;
+  color: var(--soft);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+}
+/* Quiet until it is armed. It destroys a conversation, so it must not be the
+   loudest thing on the row -- and once armed it must be unmistakable. */
+.chat-delete {
+  flex: 0 0 auto;
+  background: none;
+  border-color: transparent;
+  color: var(--soft);
+  font-weight: var(--weight-normal);
+}
+.chat-delete[data-armed="true"] { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
 
 /*
  * Every screen that is NOT the chat screen.
@@ -370,20 +945,21 @@ button:disabled { opacity: .45; cursor: default; }
 .screen-chats {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: calc(var(--inset-top) + .75rem)
-           calc(var(--inset-right) + .75rem)
-           calc(var(--inset-bottom) + .75rem)
-           calc(var(--inset-left) + .75rem);
+  padding: calc(var(--inset-top) + var(--gutter))
+           calc(var(--inset-right) + var(--gutter))
+           calc(var(--inset-bottom) + var(--gutter))
+           calc(var(--inset-left) + var(--gutter));
 }
-/* The rows already carry `.row`'s own .75rem inline padding, so without this
+/* The rows already carry `.row`'s own gutter of inline padding, so without this
    they would be indented twice as far as the headings they sit under. */
 .screen-settings .row-setting { padding-inline: 0; }
 
-.setting { display: flex; flex-direction: column; gap: .25rem; padding: .6rem 0; border-bottom: 1px solid var(--rule); }
-.setting .label { font-weight: 550; }
-.setting .help { color: var(--soft); font-size: .84rem; }
-.setting input, .setting select { font: inherit; font-size: 16px; padding: .45rem .55rem;
-  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
+.setting { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule); }
+.setting .label { font-weight: var(--weight-medium); }
+.setting .help { color: var(--soft); font-size: var(--text-sm); }
+.setting input, .setting select { font: inherit; font-size: 16px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--panel); color: inherit; }
 /* A refused setting, next to the field it was refused for. The row builder in
    main.ts renders `.row-setting`, so the rules above (written against a
    `.setting` class nothing emits) do not reach it -- these are matched on the
@@ -391,21 +967,25 @@ button:disabled { opacity: .45; cursor: default; }
    same reason `.screen[hidden]` is: an author `display` declaration beats the
    user agent's, and an always-visible empty error box beside every field reads
    as a rendering fault. */
-.row-setting { display: flex; flex-direction: column; gap: .25rem; }
-.row-setting .setting-input { font: inherit; font-size: 16px; padding: .45rem .55rem;
-  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
-.setting-error { display: block; margin: .1rem 0 0; color: var(--warn); font-size: .84rem; }
+.row-setting { display: flex; flex-direction: column; gap: var(--space-1); }
+.row-setting .setting-input, .row-setting select { font: inherit; font-size: 16px;
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  background: var(--panel); color: inherit; }
+.setting-error { display: block; margin: var(--space-1) 0 0; color: var(--warn); font-size: var(--text-sm);
+  line-height: var(--leading-snug); }
 .setting-error[hidden] { display: none; }
 /* The `help` every def has carried since the registry was written, painted for
    the first time. It sits between the label and the control, so it is read
    before the field rather than as a footnote under it. */
-.row-setting .setting-help { display: block; margin: 0; color: var(--soft); font-size: .84rem; }
+.row-setting .setting-help { display: block; margin: 0; color: var(--soft); font-size: var(--text-sm);
+  line-height: var(--leading-snug); }
 /* "Set Engine to remote-http to use this." Not `--warn`: nothing is wrong, the
    field is simply switched off, and a warning colour on a normal state is how
    a screen teaches people to ignore warnings. `[hidden]` explicitly, for the
    same reason `.setting-error[hidden]` is: this rule's `display: block` is an
    author declaration and beats the user agent's `[hidden] { display: none }`. */
-.row-setting .setting-inactive { display: block; margin: .1rem 0 0; color: var(--soft); font-size: .84rem; }
+.row-setting .setting-inactive { display: block; margin: var(--space-1) 0 0; color: var(--soft);
+  font-size: var(--text-sm); line-height: var(--leading-snug); }
 .row-setting .setting-inactive[hidden] { display: none; }
 /* A field nothing reads, drawn as a field nothing reads. `opacity` alone would
    also fade the label and the help, which are still worth reading -- this is on
@@ -416,11 +996,12 @@ button:disabled { opacity: .45; cursor: default; }
 /* A secret row. The presence word sits above the field, so "Configured" is the
    first thing read -- the answer to the only question a masked field cannot
    show. `Remove` is a plain, small control: it destroys a credential, so it
-   must not be the easiest thing on the row to hit by accident. */
-.row-setting-secret .setting-presence { color: var(--soft); font-size: .84rem; }
-.setting-clear { font: inherit; font-size: .84rem; align-self: flex-start;
-  margin-top: .25rem; padding: .3rem .6rem; color: var(--ink);
-  background: none; border: 1px solid var(--rule); border-radius: .4rem; }
+   must not be the easiest thing on the row to hit by accident. It keeps
+   `button`'s 44px target; only its LOOK is quiet. */
+.row-setting-secret .setting-presence { color: var(--soft); font-size: var(--text-sm); }
+.setting-clear { font: inherit; font-size: var(--text-sm); font-weight: var(--weight-normal);
+  align-self: flex-start; margin-top: var(--space-1); padding: var(--space-1) var(--space-3);
+  color: var(--ink); background: none; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
 /* Stated explicitly, exactly like `.setting-error[hidden]`: `align-self` does
    not create a display declaration but `.setting-clear` is a flex ITEM, and the
    button is hidden by main.ts the moment there is no key to remove. An
@@ -439,18 +1020,21 @@ button:disabled { opacity: .45; cursor: default; }
  * the ink colour while the rest go soft, and its rows sit in a panel so the
  * eye lands there first.
  */
-.screen-settings .settings-section { font-size: .72rem; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--soft); margin: 1.4rem 0 .3rem; font-weight: 600; }
-.screen-settings .settings-section:first-of-type { margin-top: .6rem; }
+.screen-settings .settings-section { font-size: var(--text-xs); letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase; color: var(--soft); margin: var(--space-6) 0 var(--space-1);
+  font-weight: var(--weight-strong); line-height: var(--leading-snug); }
+.screen-settings .settings-section:first-of-type { margin-top: var(--space-3); }
 .screen-settings .settings-section[data-lead] { color: var(--ink); }
-.screen-settings .row-setting .setting-label { font-weight: 550; }
-.screen-settings .row-setting[data-lead] { background: var(--panel); border-radius: var(--radius);
-  padding: .6rem .75rem; }
+.screen-settings .row-setting .setting-label { font-weight: var(--weight-medium); }
+.screen-settings .row-setting[data-lead] { background: var(--chrome); border: 1px solid var(--rule);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 
-.section-heading { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--soft); margin: 1.2rem 0 .3rem; }
-.warning { border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius);
-  padding: .55rem .75rem; margin: .5rem 0; font-size: .86rem; }
+.section-heading { font-size: var(--text-xs); letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase; color: var(--soft); margin: var(--space-5) 0 var(--space-1);
+  font-weight: var(--weight-strong); }
+.warning { border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0;
+  font-size: var(--text-md); line-height: var(--leading-snug); }
 
 /*
  * Visually hidden, still announced.
@@ -488,6 +1072,12 @@ button:disabled { opacity: .45; cursor: default; }
  * the one outcome worse than the blank page -- a white flash handing over to a
  * dark UI on every launch.
  *
+ * It is also the only place --text-xl is used, and the only place the wordmark
+ * appears at all. That is the whole of this app's brand expression: one word,
+ * at one size, for the second before the conversation arrives. A chat app is
+ * looked at for long stretches, and anything a logo could add to the twentieth
+ * minute of reading it would subtract.
+ *
  * `margin: auto` inside `#root`'s flex column centres it, the same idiom
  * `.empty` uses. The insets are still added as padding: centred content
  * clears a status bar on a phone-shaped viewport by construction, but a short
@@ -500,16 +1090,23 @@ button:disabled { opacity: .45; cursor: default; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: .4rem;
+  gap: var(--space-2);
   text-align: center;
-  padding: calc(var(--inset-top) + 1rem) calc(var(--inset-right) + 1.25rem)
-           calc(var(--inset-bottom) + 1rem) calc(var(--inset-left) + 1.25rem);
+  padding: calc(var(--inset-top) + var(--space-5)) calc(var(--inset-right) + var(--space-5))
+           calc(var(--inset-bottom) + var(--space-5)) calc(var(--inset-left) + var(--space-5));
 }
-.boot-mark { margin: 0; font-size: 1.4rem; font-weight: 600; color: var(--ink); }
-.boot-note { margin: 0; font-size: .9rem; color: var(--soft); }
+.boot-mark {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  letter-spacing: -.015em;
+  color: var(--ink);
+}
+.boot-note { margin: 0; font-size: var(--text-md); color: var(--soft); }
 /* The failure notice boot-guard.js reveals. `[hidden]` is spelled out for the
    same reason `.screen[hidden]` and `.setting-error[hidden]` are: an author
    `display` declaration beats the user agent's, and this repository has twice
    shipped an element that ignored `hidden` because of one. */
-.boot-failed { margin: .4rem 0 0; max-width: 22rem; font-size: .9rem; color: var(--bad); }
+.boot-failed { margin: var(--space-2) 0 0; max-width: 22rem; font-size: var(--text-md); color: var(--bad); }
 .boot-note[hidden], .boot-failed[hidden] { display: none; }

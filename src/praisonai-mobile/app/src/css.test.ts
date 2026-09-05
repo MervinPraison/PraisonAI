@@ -222,7 +222,93 @@ test("the empty state keeps clear of the safe area", () => {
   for (const name of ["--inset-left", "--inset-right"]) {
     assert.ok(value.includes(name), `.empty-state ignores ${name}: ${value}`);
   }
-  assert.match(value, /\+\s*[\d.]+rem/, `the gutter must survive a zero inset: ${value}`);
+  // RESOLVED, not matched as text. This read `/\+\s*[\d.]+rem/` -- a literal
+  // rem after the plus -- which was true only while every gutter in the file
+  // was a hardcoded number. The moment they became scale tokens the assertion
+  // failed, and the tempting repair (allow `var(...)` too) would have passed
+  // over `+ var(--nonexistent)` and over `+ var(--space-0)` if that were 0.
+  // So the token is looked up on `:root` and the NUMBER it resolves to is what
+  // is checked.
+  const gutter = addendOf(value);
+  assert.ok(gutter > 0, `the gutter must survive a zero inset, and it is ${gutter}rem: ${value}`);
+});
+
+/** Every custom property declared on `:root`, for resolving one token to the
+ *  number it stands for. Only `:root` -- a token redefined for dark mode is a
+ *  colour, and no geometry in this file is theme-dependent. */
+const ROOT_TOKENS = new Map(
+  declarationsOf(ruleFor(":root").body).filter(([prop]) => prop.startsWith("--")),
+);
+
+/**
+ * A token's value in rem, following `var()` indirection as far as it goes.
+ *
+ * `--gutter: var(--space-4)` and `--space-4: .75rem` is two hops, and the
+ * point of the scale is that a rule names the role rather than the number --
+ * so a test that cannot follow the indirection cannot check the number.
+ * Anything that does not end at a rem literal returns NaN, which fails every
+ * comparison below rather than passing one.
+ */
+function remOf(token: string, seen = new Set<string>()): number {
+  if (seen.has(token)) return Number.NaN;
+  seen.add(token);
+  const raw = ROOT_TOKENS.get(token);
+  if (raw === undefined) return Number.NaN;
+  const indirect = /^var\((--[a-z0-9-]+)\)$/.exec(raw.trim())?.[1];
+  if (indirect !== undefined) return remOf(indirect, seen);
+  const rem = /^([\d.]+)rem$/.exec(raw.trim())?.[1];
+  return rem === undefined ? Number.NaN : Number(rem);
+}
+
+/** The rem added to an inset inside `calc(var(--inset-x) + <addend>)`, whether
+ *  the addend is written as a literal or as a scale token. */
+function addendOf(padding: string): number {
+  const literal = /\+\s*([\d.]+)rem/.exec(padding)?.[1];
+  if (literal !== undefined) return Number(literal);
+  const token = /\+\s*var\((--[a-z0-9-]+)\)/.exec(padding)?.[1];
+  return token === undefined ? Number.NaN : remOf(token);
+}
+
+test("the stylesheet's gutter and the one main.ts writes inline are the same number", () => {
+  // The composer is the ONE element whose inline padding is written from
+  // script -- an inline style beats the stylesheet, and it has to, because the
+  // value moves with the live insets. So the gutter exists twice: as
+  // `--gutter` here and as a literal inside a template string in main.ts.
+  //
+  // Nothing connected them. Renaming or retuning the scale would have left the
+  // composer sitting a few pixels off every other screen edge in the app --
+  // the kind of drift that is invisible in a screenshot of one screen and
+  // obvious the moment you tab between two.
+  const scripted = /padding-inline-start",\s*`([^`]*)`/.exec(main)?.[1] ?? "";
+  const inline = addendOf(scripted);
+  assert.ok(inline > 0, `main.ts writes no gutter at all: ${scripted}`);
+
+  const token = remOf("--gutter");
+  assert.ok(Number.isFinite(token), "--gutter must resolve to a rem through :root");
+  assert.equal(
+    token,
+    inline,
+    `app.css lays out on a ${token}rem gutter and main.ts writes ${inline}rem inline`,
+  );
+
+  // And the stylesheet's own screen edges use that token rather than a number
+  // of their own, which is what makes the check above worth making.
+  // BOTH inline sides, separately. The first version of this loop asked for
+  // `--inset-(right|left)` in one alternation, which is satisfied by either --
+  // so replacing the right-hand gutter with a bare `.5rem` left the left-hand
+  // one matching and the mutation survived. A screen inset correctly on one
+  // edge and wrongly on the other is precisely the defect worth catching.
+  for (const selector of [".screen-settings,\n.screen-chats", ".transcript", ".topbar"]) {
+    const rule = RULES.find((r) => r.selector.replace(/\s+/g, " ") === selector.replace(/\s+/g, " "));
+    assert.ok(rule !== undefined, `app.css must still declare "${selector}"`);
+    for (const side of ["right", "left"] as const) {
+      assert.match(
+        rule.body,
+        new RegExp(`calc\\(var\\(--inset-${side}\\)\\s*\\+\\s*var\\(--gutter\\)\\)`),
+        `${selector} must build its ${side} padding from --gutter`,
+      );
+    }
+  }
 });
 
 /**

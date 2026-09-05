@@ -125,16 +125,29 @@ test("the boot indicator takes its colours from the theme tokens, so a dark devi
     [],
     `the boot indicator must not name a colour; use the :root tokens:\n${rules}`,
   );
+  const colourTokens = new Set<string>();
   for (const decl of rules.matchAll(/(?:^|[;{])\s*(?:color|background(?:-color)?)\s*:([^;}]*)/g)) {
-    assert.match(decl[1] ?? "", /var\(--/, `a boot colour must come from a token: ${decl[0]}`);
+    const value = decl[1] ?? "";
+    assert.match(value, /var\(--/, `a boot colour must come from a token: ${decl[0]}`);
+    for (const use of value.matchAll(/var\((--[\w-]+)/g)) colourTokens.add(use[1] ?? "");
   }
 
   // And the tokens it uses must actually be the ones the dark theme moves. A
   // token that only ever has one value would pass the check above while
   // painting the same colour in both themes.
+  //
+  // Only the tokens named in a COLOUR declaration, which is the whole of what
+  // this test is about. It used to walk every `var()` in these rules and skip
+  // the two inset families by prefix, which held only while colour and the
+  // insets were the only tokens in the file. The boot indicator now takes its
+  // size and its spacing from the type and space scales as well -- --text-xl,
+  // --space-2 -- and a scale step has no business having a dark value, so the
+  // skip-list would have had to grow a name every time the design system did.
+  // Collecting the tokens out of the colour declarations this loop already
+  // inspects states what was meant instead of listing what was not.
   const dark = /@media \(prefers-color-scheme: dark\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-  for (const token of [...rules.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1] ?? "")) {
-    if (token.startsWith("--inset") || token.startsWith("--safe-area")) continue;
+  assert.ok(colourTokens.size > 0, "no colour token was collected, so nothing below is checked");
+  for (const token of colourTokens) {
     assert.match(dark, new RegExp(`${token}\\s*:`), `${token} is not redefined for dark mode`);
   }
 });
