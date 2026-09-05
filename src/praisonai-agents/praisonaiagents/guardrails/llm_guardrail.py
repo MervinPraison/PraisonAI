@@ -194,7 +194,26 @@ Your response:"""
         
         is_valid, result = self._llm_validate(tool_text, tool_description)
         return is_valid, arguments  # Return original arguments (LLM doesn't modify them)
-    
+
+    def validate_tool_result(self, tool_name: str, result: Any, **kwargs) -> Tuple[bool, Any]:
+        """
+        Validate a tool's result using LLM reasoning before it re-enters context.
+
+        Args:
+            tool_name: Name of the tool that produced the result
+            result: Tool result to validate
+            **kwargs: Additional context
+
+        Returns:
+            Tuple of (is_valid: bool, processed_result: Any)
+        """
+        # Convert tool result to text for LLM validation
+        result_text = f"Tool: {tool_name}, Result: {result}"
+        result_description = f"Validate this tool result: {self.description}"
+
+        is_valid, _ = self._llm_validate(result_text, result_description)
+        return is_valid, result  # Return original result (LLM doesn't modify it)
+
     def _llm_validate(self, content: str, description: str) -> Tuple[bool, str]:
         """
         Internal method to perform LLM validation with custom description.
