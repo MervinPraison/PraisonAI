@@ -411,14 +411,15 @@ class ModalSandbox:
 
         This used to log a warning and `return True`, while writing nothing.
         SandboxProtocol documents the return as "True if successful", so every
-        caller was told a write had happened. daytona.py:252 and novita.py:227
-        both branch on `if not await self.write_file(...)`, so the false True
-        was the difference between a handled failure and a silent one -- and
-        execute_file(), which is built on read_file(), then failed with
-        "File not found" for a file the caller had been told was written.
+        caller was told a write had happened. Callers that branch on the result
+        (`if not await sandbox.write_file(...)`) were handed the wrong answer,
+        turning a recoverable failure into a silent one -- and execute_file(),
+        which is built on read_file(), then failed with "File not found" for a
+        file the caller had been told was written.
 
         Persisting here needs Modal Volumes; until that exists, False is the
-        truthful answer.
+        truthful answer, and callers that check the return value already handle
+        it.
         """
         logger.warning(
             "Modal sandbox cannot persist files: write_file(%s) stored nothing. "

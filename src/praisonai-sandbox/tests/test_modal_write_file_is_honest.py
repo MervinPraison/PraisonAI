@@ -6,10 +6,9 @@ The whole body was:
     return True
 
 SandboxProtocol documents the return as "True if successful", so every caller
-was told the write had happened. Two backends branch on it --
-daytona.py:252 and novita.py:227 both do `if not await self.write_file(...)`
--- so the false True was the difference between a handled failure and a
-silent one.
+was told the write had happened. Callers that branch on the result
+(`if not await sandbox.write_file(...)`) were handed the wrong answer, so the
+false True was the difference between a handled failure and a silent one.
 
 The knock-on: execute_file() is built on read_file(), which always returns
 None, so it then failed with "File not found: <path>" for a file the caller
@@ -55,9 +54,19 @@ class TestWriteFileTellsTheTruth:
                         and node.value.value is True), "still returns True"
 
     def test_the_message_names_a_way_forward(self):
-        """A refusal that does not say what to do instead is half a bug report."""
-        src = inspect.getsource(ModalSandbox.write_file)
-        assert "execute()" in src
+        """A refusal that does not say what to do instead is half a bug report.
+
+        Assert on the warning users actually receive, not the method source --
+        the docstring quotes "execute()" too, so a source search would keep
+        passing even if the recommendation vanished from the log message.
+        """
+        from unittest.mock import patch
+
+        with patch("praisonai_sandbox.modal.logger.warning") as warn:
+            asyncio.run(ModalSandbox.write_file(_bare(), "/tmp/x.py", "print(1)"))
+        assert warn.call_count == 1
+        emitted = " ".join(str(a) for a in warn.call_args.args)
+        assert "execute()" in emitted
 
 
 class TestReadAndExecuteAgreeWithIt:

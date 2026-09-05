@@ -213,7 +213,7 @@ class TestModalSandbox:
             
             # This asserted `result` -- pinning a True return from a call that
             # wrote nothing. Modal has no file storage here, so False is the
-            # honest answer and callers (daytona.py:252, novita.py:227) already
+            # honest answer and callers that check the return value already
             # branch on it.
             assert result is False
             mock_warning.assert_called_once()
