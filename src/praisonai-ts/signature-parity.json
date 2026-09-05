@@ -1692,7 +1692,7 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3338",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3344",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -6434,8 +6434,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/types.ts:322",
-        "location": "src/praisonai-ts/src/agent/types.ts:64"
+        "ctor_location": "src/praisonai-ts/src/agent/types.ts:379",
+        "location": "src/praisonai-ts/src/agent/types.ts:115"
       }
     },
     "ToolsetRegistry.register_toolset": {
