@@ -65,11 +65,14 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
         
         # Resolve v0.4 through the owning registry so an entry-point-registered
-        # v0.4 replacement is honoured instead of the built-in stub.
+        # v0.4 replacement is honoured instead of the built-in stub. Only an
+        # *unregistered* name falls back to the built-in stub — if a v0.4
+        # adapter is registered but its loader/constructor/validation raises,
+        # that error is actionable and must surface, not be masked as "absent".
         registry = _owning_registry(self)
-        try:
+        if "autogen_v4" in registry.list_names():
             v4_adapter = registry.create("autogen_v4")
-        except (ValueError, TypeError, ImportError):
+        else:
             v4_adapter = AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
