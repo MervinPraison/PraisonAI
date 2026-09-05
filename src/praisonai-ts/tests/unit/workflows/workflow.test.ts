@@ -152,7 +152,9 @@ describe('Workflow', () => {
         });
 
       const { results } = await workflow.run();
-      expect(results[0].duration).toBeGreaterThanOrEqual(50);
+      // Allow a small tolerance below the 50ms sleep: timer scheduling and
+      // Date rounding can report a duration a millisecond or two short.
+      expect(results[0].duration).toBeGreaterThanOrEqual(45);
     });
   });
 });

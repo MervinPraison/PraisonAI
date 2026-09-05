@@ -4,6 +4,35 @@ import { OpenAIService } from '../llm/openai';
 import { Logger } from '../utils/logger';
 import { randomUUID } from '../utils/uuid';
 import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
+import {
+    continuesOnDependencyFailure,
+    needsRun,
+    retryDelaySeconds,
+    sleepSeconds,
+} from './engine/task-retry';
+import { buildTaskContext, type PreviousOutput } from './engine/task-context';
+import {
+    evaluateTaskWhen,
+    hasWhenRouting,
+    resolveNextTask,
+    type RouteDecision,
+    type RoutingContext,
+} from './engine/task-routing';
+import { inputFileTaskConfigs, type FileReader } from './engine/task-input-file';
+import { loopTaskConfigs } from './engine/task-loop';
+import { buildMultimodalContent, type ImageFileSystem, type MessageContentPart } from './engine/task-messages';
+import { buildTaskOutput, resolveOutputConfig } from './engine/task-output';
+import { runTaskHandler, type HandlerContext, type HandlerResult } from './engine/task-handler';
+import { resolveTaskAgent, type ResolveAgentOptions } from './engine/task-agent';
+import {
+    buildMemoryContext,
+    initializeTaskMemory,
+    storeTaskOutput,
+    type MemoryFactory,
+    type TaskMemoryStore,
+} from './engine/task-memory';
+import { buildKnowledgeContext, resolveTaskCache, resolveTaskHooks } from './engine/task-features';
+import type { ResponseCache, TaskHooks } from './engine/types';
 
 /**
  * Result of running a task. Mirrors Python `praisonaiagents.output.models.TaskOutput`.
@@ -29,8 +58,30 @@ export interface TaskOutput {
     nonFatalErrors?: string[];
 }
 
-/** A task completion callback; sync or async. */
-export type TaskCallback = (output: TaskOutput) => unknown | Promise<unknown>;
+/**
+ * Python parity: the metadata dict `Task._execute_callback_with_metadata`
+ * hands to a callback that declares a second parameter. It is the only place
+ * `loopState`, `inputFile`, `taskType` and `asyncExecution` reach user code.
+ */
+export interface TaskCallbackMetadata {
+    taskId: number | string;
+    taskName?: string;
+    agentName?: string;
+    taskType: string;
+    taskStatus: string;
+    taskDescription: string;
+    expectedOutput: string;
+    inputFile?: string;
+    loopState: Record<string, string | number>;
+    retryCount: number;
+    asyncExecution: boolean;
+}
+
+/**
+ * A task completion callback; sync or async. A callback that declares a second
+ * parameter also receives {@link TaskCallbackMetadata}, as in Python.
+ */
+export type TaskCallback = (output: TaskOutput, metadata?: TaskCallbackMetadata) => unknown | Promise<unknown>;
 
 /**
  * A guardrail: either a validator returning `[ok, payload]` (sync or async)
@@ -318,6 +369,12 @@ export class Task {
     nonFatalErrors: string[];
     /** Python parity: validation_feedback — last guardrail failure, fed back on retry. */
     validationFeedback?: unknown;
+    /** Python parity: previous_tasks — names of the tasks whose `nextTasks` lead here. */
+    previousTasks: string[];
+    /** `hooks` resolved to the callbacks fired around this task, when it named any. */
+    resolvedHooks?: TaskHooks;
+    /** `caching` resolved to a per-task response cache, when it is enabled. */
+    cache?: ResponseCache;
 
     constructor(config: TaskConfig) {
         // `action` is the user-friendly alias for `description` (Python does the same).
@@ -394,8 +451,21 @@ export class Task {
         this.failOnCallbackError = config.failOnCallbackError ?? false;
         this.failOnMemoryError = config.failOnMemoryError ?? false;
         this.nonFatalErrors = [];
+        this.previousTasks = [];
+        this.resolvedHooks = resolveTaskHooks(config.hooks);
+        this.cache = resolveTaskCache(config.caching);
 
         this.resolveExecutionConfig(config);
+        // `outputConfig` fills the same fields as the unified `output` param but
+        // only where the individual param was not supplied; `output` is applied
+        // afterwards and wins over both (Python's stated precedence).
+        const fromOutputConfig = resolveOutputConfig(config.outputConfig);
+        if (fromOutputConfig) {
+            if (fromOutputConfig.file !== undefined && config.outputFile === undefined) this.outputFile = fromOutputConfig.file;
+            if (fromOutputConfig.json !== undefined && config.outputJson === undefined) this.outputJson = fromOutputConfig.json;
+            if (fromOutputConfig.pydantic !== undefined && config.outputPydantic === undefined) this.outputPydantic = fromOutputConfig.pydantic;
+            if (fromOutputConfig.variable !== undefined && config.outputVariable === undefined) this.outputVariable = fromOutputConfig.variable;
+        }
         this.resolveUnifiedOutput(config);
 
         if (this.outputJson !== undefined && this.outputPydantic !== undefined) {
@@ -512,6 +582,183 @@ export class Task {
         return this.retryCount;
     }
 
+    /**
+     * Python parity: `retry_delay`. Seconds to wait before retry `attempt`
+     * (0-based), doubling each time and capped at five minutes. A task with the
+     * default `retryDelay` of 0 never waits.
+     */
+    retryDelayFor(attempt: number): number {
+        return retryDelaySeconds(this, attempt);
+    }
+
+    /** Sleep `retryDelayFor(attempt)` seconds. `timer` is injectable for tests. */
+    async waitBeforeRetry(attempt: number, timer?: (fn: () => void, ms: number) => unknown): Promise<number> {
+        const seconds = this.retryDelayFor(attempt);
+        await sleepSeconds(seconds, timer);
+        return seconds;
+    }
+
+    /**
+     * Python parity: `skip_on_failure` / `on_error`
+     * (`Agents._should_continue_on_dep_failure`). True when this task still runs,
+     * in degraded mode, after an upstream dependency failed.
+     */
+    continuesOnDependencyFailure(): boolean {
+        return continuesOnDependencyFailure(this);
+    }
+
+    /**
+     * Python parity: `rerun`. Whether the runner should execute this task now —
+     * false for a task that already completed unless `rerun` was requested.
+     */
+    needsRun(): boolean {
+        return needsRun(this);
+    }
+
+    // ------------------------------------------------------------ context
+
+    /**
+     * Python parity: `retain_full_context` (`Process._build_task_context`).
+     * Assemble the upstream context block for this task: every previous result
+     * when `retainFullContext` is set, only the most recent one otherwise.
+     * Consumes `validationFeedback`, so it is injected exactly once.
+     */
+    buildContext(previous: readonly PreviousOutput[] = []): string {
+        return buildTaskContext(this, previous);
+    }
+
+    // ------------------------------------------------------------ routing
+
+    /** True when this task uses the unified `when`/`thenTask`/`elseTask` routing. */
+    hasRouting(): boolean {
+        return hasWhenRouting(this) || this.nextTasks.length > 0 || Object.keys(this.condition).length > 0;
+    }
+
+    /** Python parity: `evaluate_when`. A task without a `when` always passes. */
+    evaluateWhen(context: RoutingContext = {}): boolean {
+        return evaluateTaskWhen(this, context);
+    }
+
+    /**
+     * Python parity: `get_next_task` plus the `condition`/`routing` and
+     * `nextTasks` fallbacks the workflow engine applies. Returns the routing
+     * decision: a named task, `exit`, or nothing.
+     */
+    routeAfter(context: RoutingContext = {}): RouteDecision {
+        return resolveNextTask(this, context);
+    }
+
+    /** The name of the task to run next, or `undefined` for exit / no route. */
+    nextTaskFor(context: RoutingContext = {}): string | undefined {
+        const route = this.routeAfter(context);
+        return route.kind === 'task' ? route.name : undefined;
+    }
+
+    // ------------------------------------------------------------ fan-out
+
+    /**
+     * Python parity: `loop_over` / `loop_var` / `loop_state`
+     * (`Workflows._run_step_loop`). One child task per item of the named
+     * variable, with `loopVar` bound in the child's `variables` and the
+     * position recorded on its `loopState`. `[]` when there is no loop.
+     */
+    expandLoop(variables: Record<string, unknown> = {}): Task[] {
+        return loopTaskConfigs(this, variables).map((config) => new Task(config));
+    }
+
+    /**
+     * Python parity: `input_file` (`Process._create_loop_subtasks`). One child
+     * task per CSV row or text line, chained with `nextTasks`, the first flagged
+     * `isStart` and the last inheriting this task's `nextTasks`. `[]` when the
+     * task has no `inputFile`.
+     */
+    expandFromInputFile(options: { decisionMode?: boolean; readFile?: FileReader } = {}): Task[] {
+        return inputFileTaskConfigs(this, options).map((config) => new Task(config));
+    }
+
+    // ------------------------------------------------------------ execution
+
+    /**
+     * Python parity: `handler` (`Workflows._run_step`). Run the task's own
+     * function instead of an agent. `undefined` when there is no handler, so the
+     * caller falls through to the agent path.
+     */
+    runHandler(context: HandlerContext): Promise<HandlerResult | undefined> {
+        return runTaskHandler(this, context);
+    }
+
+    /**
+     * Python parity: `agent_config` (`Agents._create_agent_from_config`). The
+     * agent that executes this task; a constructed one is assigned to `agent`.
+     */
+    resolveAgent(options: ResolveAgentOptions = {}): unknown | undefined {
+        return resolveTaskAgent(this, options);
+    }
+
+    /**
+     * Python parity: `images` (`get_multimodal_message`). The message content for
+     * `prompt`: plain text without images, a content list with one `image_url`
+     * part per image with them.
+     */
+    buildMessageContent(prompt: string, fileSystem?: ImageFileSystem): string | MessageContentPart[] {
+        if (this.images.length === 0) return prompt;
+        return buildMultimodalContent(prompt, this.images, fileSystem);
+    }
+
+    /**
+     * Python parity: `_process_task_result`. Wrap `raw` in a TaskOutput, parsing
+     * it when the task asked for `outputJson` or `outputPydantic`.
+     */
+    buildOutput(raw: string, agentName = 'Agent'): TaskOutput {
+        return buildTaskOutput(this, raw, agentName);
+    }
+
+    // ------------------------------------------------------------ features
+
+    /** Python parity: `config` — the verbosity level a `config.verbose` requested. */
+    get verboseLevel(): number {
+        const value = this.config.verbose;
+        return typeof value === 'number' ? value : 0;
+    }
+
+    /**
+     * Python parity: `memory` plus `config.memory_config` (`initialize_memory`).
+     * The task's store, created from `config.memory_config` on first use.
+     */
+    initializeMemory(factory?: MemoryFactory): TaskMemoryStore | undefined {
+        return initializeTaskMemory(this, factory);
+    }
+
+    /**
+     * Python parity: `store_in_memory`. Store `content` in the task's memory.
+     * A failure lands on `nonFatalErrors` and is swallowed unless
+     * `failOnMemoryError` is set. Returns whether anything was stored.
+     */
+    storeInMemory(content: string, agentName = 'Agent', factory?: MemoryFactory): Promise<boolean> {
+        return storeTaskOutput(this, content, agentName, factory);
+    }
+
+    /** Python parity: `memory` — recall related entries for the next prompt. */
+    memoryContext(query: string, maxItems = 5, factory?: MemoryFactory): Promise<string> {
+        return buildMemoryContext(this, query, maxItems, factory);
+    }
+
+    /** Python parity: `knowledge` — the knowledge block for this task's prompt. */
+    knowledgeContext(query: string, limit = 5): Promise<string> {
+        return buildKnowledgeContext(this, query, limit);
+    }
+
+    /**
+     * Python parity: `hooks` — fire this task's `onTaskStart` hook. A task
+     * without hooks does nothing.
+     */
+    async notifyStart(index = 0): Promise<void> {
+        // Idempotent: a runner that already called markStarted() does not get a
+        // spurious "invalid transition" warning for calling this too.
+        if (this.status !== TASK_STATUS.IN_PROGRESS) this.markStarted();
+        if (this.resolvedHooks?.onTaskStart) await this.resolvedHooks.onTaskStart(this, index);
+    }
+
     // ------------------------------------------------------------ output
 
     /** The workflow variable this task's output is stored under: `outputVariable`, else `name`. */
@@ -564,10 +811,15 @@ export class Task {
      * `failOnCallbackError` is set.
      */
     async notifyComplete(output: TaskOutput): Promise<TaskOutput> {
+        const metadata = this.callbackMetadata();
         for (const cb of [this.callback, this.onTaskComplete]) {
             if (!cb) continue;
             try {
-                await cb(output);
+                // Metadata is always passed as a second argument; JavaScript
+                // callbacks declaring fewer parameters (including a defaulted
+                // `metadata = {}`) safely ignore the extra argument, so a
+                // one-parameter callback still works.
+                await cb(output, metadata);
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 this.nonFatalErrors.push(`callback: ${message}`);
@@ -579,10 +831,46 @@ export class Task {
                 }
             }
         }
+        // Python parity: `hooks` — the per-task completion hook fires after the
+        // user callbacks, with the same non-fatal error policy.
+        const hook = this.resolvedHooks?.onTaskComplete;
+        if (hook) {
+            try {
+                await hook(this, output);
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                this.nonFatalErrors.push(`hooks.onTaskComplete: ${message}`);
+                Logger.error(`Task ${this.id}: Failed to execute onTaskComplete hook: ${message}`);
+                if (this.failOnCallbackError) {
+                    output.nonFatalErrors = [...this.nonFatalErrors];
+                    throw err;
+                }
+            }
+        }
         if (this.nonFatalErrors.length > 0 && output.nonFatalErrors === undefined) {
             output.nonFatalErrors = [...this.nonFatalErrors];
         }
         return output;
+    }
+
+    /**
+     * Python parity: the metadata dict handed to a two-parameter callback
+     * (`_execute_callback_with_metadata`).
+     */
+    callbackMetadata(): TaskCallbackMetadata {
+        return {
+            taskId: this.id,
+            taskName: this.name,
+            agentName: this.agent?.name,
+            taskType: this.taskType,
+            taskStatus: this.status,
+            taskDescription: this.description,
+            expectedOutput: this.expected_output,
+            inputFile: this.inputFile,
+            loopState: this.loopState,
+            retryCount: this.retryCount,
+            asyncExecution: this.asyncExecution,
+        };
     }
 
     toString(): string {

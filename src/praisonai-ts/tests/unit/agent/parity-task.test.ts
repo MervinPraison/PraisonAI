@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Task, TASK_STATUS } from '../../../src/agent/types';
 import type { TaskConfig, TaskOutput } from '../../../src/agent/types';
-import { resetParityNotices, unhonouredOptions } from '../../../src/utils/parity-notice';
+import { resetParityNotices, unhonouredFor, unhonouredOptions } from '../../../src/utils/parity-notice';
 
 function makeOutput(overrides: Partial<TaskOutput> = {}): TaskOutput {
   return { description: 'd', raw: 'r', agent: 'a', ...overrides };
@@ -505,15 +505,16 @@ describe('Task parity: engine-level options are not silently ignored', () => {
       taskType: 'loop',
       guardrails: 'llm judged',
     });
-    expect(unhonouredOptions()).toEqual([
-      'Task.agentConfig', 'Task.asyncExecution', 'Task.autonomy', 'Task.caching', 'Task.condition',
-      'Task.config', 'Task.elseTask', 'Task.execution', 'Task.failOnMemoryError', 'Task.guardrails',
-      'Task.handler', 'Task.hooks', 'Task.images', 'Task.inputFile', 'Task.isStart', 'Task.knowledge',
-      'Task.loopOver', 'Task.loopState', 'Task.loopVar', 'Task.memory', 'Task.nextTasks',
-      'Task.outputConfig', 'Task.outputPydantic', 'Task.planning', 'Task.reflection', 'Task.rerun',
-      'Task.retainFullContext', 'Task.retryDelay', 'Task.routing', 'Task.skipOnFailure',
-      'Task.taskType', 'Task.thenTask', 'Task.web', 'Task.when',
-    ]);
+    // Derived from the ledger rather than hard-coded: the assertion is that the
+    // constructor reports EVERY option still listed as unhonoured (plus the two
+    // locally-detected ones), so closing an option shrinks both together and
+    // this test cannot drift from utils/parity-notice.ts.
+    const expected = [
+      ...unhonouredFor('Task.__init__').map((option) => `Task.${option}`),
+      'Task.taskType',
+      'Task.guardrails',
+    ].sort();
+    expect(unhonouredOptions()).toEqual(expected);
   });
 
   it('does not register locally-honoured options', () => {
