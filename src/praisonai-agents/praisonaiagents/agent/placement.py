@@ -113,11 +113,20 @@ def resolve_placement(
         TypeError: on any combination that names two different places for the
             same thing, or a place that cannot do the job asked of it.
     """
-    managed = managed_runtimes()
-    places = tool_places()
-
     # ── a place that cannot do the job asked of it ───────────────────────────
     run_on_name = _name_of(run_on)
+    tools_name = _name_of(tools_run_on)
+
+    # The two lookups below feed only the branches guarded on run_on_name /
+    # tools_name being set; the entry-point scan in tool_places() is the
+    # dominant cost of Agent() construction, so skip both on the default
+    # (no-placement) path rather than compute results that get discarded.
+    if run_on_name is not None or tools_name is not None:
+        managed = managed_runtimes()
+        places = tool_places()
+    else:
+        managed = places = ()
+
     if run_on_name is not None and run_on_name not in managed:
         if run_on_name in places:
             raise TypeError(
@@ -135,7 +144,6 @@ def resolve_placement(
             f"(pass those as tools_run_on=)"
         )
 
-    tools_name = _name_of(tools_run_on)
     if tools_name is not None and tools_name in managed and tools_name not in places:
         raise TypeError(
             f"{owner}(tools_run_on={tools_run_on!r}) is not valid: {tools_name!r} "
