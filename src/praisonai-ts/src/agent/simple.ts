@@ -3644,9 +3644,21 @@ export class Agent {
   }
 }
 
-// AgentTeam and its aliases live in ./team; re-exported here so every existing
-// import path (the `./simple` and `./agent/simple` specifiers) keeps working unchanged.
-export { AgentTeam, PraisonAIAgents, Agents } from './team';
+// AgentTeam and its aliases live in ./team, and are re-exported from
+// `./index` (`praisonai`, `praisonai/agent`) -- NOT from here.
+//
+// They used to be re-exported from this file too, for the `./simple` and
+// `./agent/simple` specifiers. That cost 19.7kB on every phone. `src/mobile.ts`
+// -- the webview allowlist -- takes `Agent` from THIS module, and a value
+// re-export is a static import: it put ./team and its four helpers
+// (team-manager, team-options, team-memory, team-planning) on the graph of a
+// bundle that deliberately does not export AgentTeam and has no path that can
+// construct one. esbuild cannot drop it: the two modules formed a cycle, and
+// the re-export is a side-effect import of a module it cannot prove pure.
+//
+// TYPES still come from here, because `export type` is erased and costs
+// nothing. Only the three classes moved, and only one specifier deep --
+// `praisonai/agent` serves them, as does `praisonai` itself.
 export type {
   AgentTeamProcess,
   AgentTeamConfig,
