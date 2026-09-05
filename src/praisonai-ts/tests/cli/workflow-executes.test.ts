@@ -116,4 +116,41 @@ describe('workflow command actually executes', () => {
       `name: Two\nsteps:\n  - name: a\n    agent: w\n    task: first\n  - name: b\n    agent: w\n    task: second\n`));
     expect(startMock).toHaveBeenCalledTimes(1);
   });
+
+  it('builds the agent from its declared definition', async () => {
+    startMock.mockResolvedValue('ok');
+    await run(writeWorkflow(
+      `name: Demo\nagents:\n  writer:\n    instructions: You write haiku\n    llm: gpt-4o\nsteps:\n  - name: step_one\n    agent: writer\n    task: Write something\n`));
+    expect((Agent as unknown as jest.Mock).mock.calls[0][0]).toMatchObject({
+      instructions: 'You write haiku',
+      llm: 'gpt-4o',
+    });
+  });
+
+  it('rejects a step that references an undeclared agent', async () => {
+    startMock.mockResolvedValue('ok');
+    const code = await run(writeWorkflow(
+      `name: Demo\nagents:\n  writer:\n    instructions: hi\nsteps:\n  - name: step_one\n    agent: typo\n    task: Write something\n`));
+    expect(code).not.toBe(0);
+    expect(Agent).not.toHaveBeenCalled();
+  });
+
+  it('rejects a scalar steps value instead of throwing map errors', async () => {
+    const code = await run(writeWorkflow('name: X\nsteps: not-a-list\n'));
+    expect(code).not.toBe(0);
+    expect(Agent).not.toHaveBeenCalled();
+  });
+
+  it('feeds only declared dependencies as context', async () => {
+    startMock
+      .mockResolvedValueOnce('A-out')
+      .mockResolvedValueOnce('B-out')
+      .mockResolvedValueOnce('C-out');
+    await run(writeWorkflow(
+      `name: Deps\nsteps:\n  - name: a\n    agent: w\n    task: first\n  - name: b\n    agent: w\n    task: second\n  - name: c\n    agent: w\n    task: third\n    depends_on: [a]\n`));
+    expect(startMock).toHaveBeenCalledTimes(3);
+    const cPrompt = startMock.mock.calls[2][0] as string;
+    expect(cPrompt).toContain('A-out');
+    expect(cPrompt).not.toContain('B-out');
+  });
 });
