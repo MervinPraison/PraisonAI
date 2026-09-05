@@ -20,7 +20,7 @@ import { Guardrail } from '../../../src/guardrails';
 import { HooksManager } from '../../../src/hooks/manager';
 import { ContextManager } from '../../../src/context/manager';
 import { RulesManager } from '../../../src/memory/rules-manager';
-import { resetParityNotices, unhonouredOptions } from '../../../src/utils/parity-notice';
+import { resetParityNotices, unhonouredFor, unhonouredOptions } from '../../../src/utils/parity-notice';
 
 // Recording double for the OpenAI-compatible service: every call is captured
 // with its positional arguments, and queued responses/errors drive tool loops
@@ -111,46 +111,67 @@ beforeEach(() => {
 });
 
 describe('Agent.__init__ parity: acceptance and notices', () => {
-  it('accepts every accepted-with-notice option, stores it, and reports it', () => {
+  it('stores every Python-parity option so `to_dict()`-style reads match', () => {
+    // Placement options answer the same question in different words, so a
+    // valid agent names at most one of them; each is covered on its own in
+    // tests/unit/agent/features/agent-execution-features.test.ts.
+    const backend = { execute: async () => 'x' };
     const agent = new Agent({
       instructions: 'x',
       ...quiet,
-      auth: 'claude-code',
       toolsets: ['web'],
       reflection: true,
-      autonomy: 'full',
-      templates: { greeting: 'hi' },
+      autonomy: 'full_auto',
+      templates: { system: 'S: {instructions}' },
       selfImprove: true,
       toolConfig: { timeout: 5 },
       learn: true,
-      backend: { kind: 'managed' },
-      runOn: 'anthropic',
-      toolsRunOn: 'docker',
-      runtime: { model: 'x' },
+      backend,
       toolSearch: true,
       messageSteering: true,
       sandbox: true,
     });
-    expect(agent.auth).toBe('claude-code');
     expect(agent.toolsets).toEqual(['web']);
     expect(agent.reflection).toBe(true);
-    expect(agent.autonomy).toBe('full');
-    expect(agent.templates).toEqual({ greeting: 'hi' });
+    expect(agent.autonomy).toBe('full_auto');
+    expect(agent.templates).toEqual({ system: 'S: {instructions}' });
     expect(agent.selfImprove).toBe(true);
     expect(agent.toolConfig).toEqual({ timeout: 5 });
     expect(agent.learn).toBe(true);
-    expect(agent.backend).toEqual({ kind: 'managed' });
-    expect(agent.runOn).toBe('anthropic');
-    expect(agent.toolsRunOn).toBe('docker');
-    expect(agent.runtime).toEqual({ model: 'x' });
+    expect(agent.backend).toBe(backend);
     expect(agent.toolSearch).toBe(true);
     expect(agent.messageSteering).toBe(true);
     expect(agent.sandbox).toBe(true);
-    expect(unhonouredOptions()).toEqual([
-      'Agent.auth', 'Agent.autonomy', 'Agent.backend', 'Agent.learn', 'Agent.messageSteering',
-      'Agent.reflection', 'Agent.runOn', 'Agent.runtime', 'Agent.sandbox', 'Agent.selfImprove',
-      'Agent.toolConfig', 'Agent.toolSearch', 'Agent.toolsRunOn', 'Agent.toolsets', 'Agent.templates',
-    ].sort());
+    expect(new Agent({ instructions: 'x', ...quiet, toolsRunOn: 'local' }).toolsRunOn).toBe('local');
+  });
+
+  it('never reports a notice for an option outside the ledger', () => {
+    // The ledger in utils/parity-notice.ts is the single list of options that
+    // are accepted and not yet acted on. A notice for anything else would mean
+    // a surface warning about an option nothing is tracking.
+    new Agent({
+      instructions: 'x',
+      ...quiet,
+      toolsets: ['web'],
+      reflection: true,
+      autonomy: 'full_auto',
+      templates: { system: 'S: {instructions}' },
+      selfImprove: true,
+      toolConfig: { timeout: 5 },
+      learn: true,
+      toolSearch: true,
+      messageSteering: true,
+      sandbox: true,
+    });
+    const ledger = new Set([
+      ...unhonouredFor('Agent.__init__'),
+      // Options that are honoured for some inputs and announce themselves for
+      // the rest (the "Partial" table of BEHAVIOUR_PARITY.md).
+      'context', 'guardrails', 'knowledge', 'memory', 'reasoningEffort', 'web', 'toolConfig',
+    ]);
+    for (const reported of unhonouredOptions()) {
+      expect(ledger).toContain(reported.replace(/^Agent\./, ''));
+    }
   });
 
   it('applies the Python defaults and raises no notice when nothing is supplied', () => {
@@ -477,7 +498,10 @@ describe('Agent.chat parity: per-call options', () => {
     expect(lastCall().args[1]).toBe(0.3);
   });
 
-  it('accepted-with-notice call options are reported, never dropped silently', async () => {
+  it('call options that are honoured do not report themselves as ignored', async () => {
+    // These six were accepted-and-ignored until they were implemented. The
+    // expectation is derived from the ledger rather than written out, so it
+    // cannot drift the next time an option is closed.
     const agent = new Agent({ instructions: 'x', ...quiet });
     await agent.chat('hi', undefined, undefined, {
       reasoningSteps: true,
@@ -488,10 +512,13 @@ describe('Agent.chat parity: per-call options', () => {
       attachments: ['a.png'],
       forceRetrieval: true,
     });
-    expect(unhonouredOptions()).toEqual([
-      'Agent.chat.attachments', 'Agent.chat.config', 'Agent.chat.reasoningSteps',
-      'Agent.chat.taskDescription', 'Agent.chat.taskId', 'Agent.chat.taskName',
-    ]);
+    const ledgered = new Set(unhonouredFor('Agent.chat'));
+    for (const reported of unhonouredOptions()) {
+      const option = reported.replace(/^Agent\.chat\./, '');
+      expect(ledgered.has(option)).toBe(true);
+    }
+    // Control: the ledger no longer lists any of them, so nothing is reported.
+    expect(unhonouredOptions().filter((k) => k.startsWith('Agent.chat.'))).toEqual([]);
   });
 
   it('seed is reported on the AI SDK path', async () => {

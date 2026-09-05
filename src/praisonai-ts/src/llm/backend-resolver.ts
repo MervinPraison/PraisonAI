@@ -151,15 +151,18 @@ export async function resolveBackend(
       try {
         // The AI-SDK backend keys credentials by provider id
         // (config.providers[providerId]), while ProviderConfig is flat
-        // (apiKey/baseUrl). Map the flat per-agent key onto the resolved
-        // provider so a programmatic apiKey authenticates here too -- not
-        // only via a provider env var.
+        // (apiKey/baseUrl/fetch). Map the flat per-agent values onto the
+        // resolved provider so a programmatic apiKey authenticates here too --
+        // not only via a provider env var. `fetch` carries any subscription
+        // `auth` headers wrapped onto it, so it must reach the AI SDK provider
+        // or a subscription route would drop the headers the provider requires.
         const providers =
-          options.config?.apiKey || options.config?.baseUrl
+          options.config?.apiKey || options.config?.baseUrl || options.config?.fetch
             ? {
                 [providerId]: {
                   ...(options.config.apiKey ? { apiKey: options.config.apiKey } : {}),
                   ...(options.config.baseUrl ? { baseURL: options.config.baseUrl } : {}),
+                  ...(options.config.fetch ? { fetch: options.config.fetch } : {}),
                 },
               }
             : undefined;
