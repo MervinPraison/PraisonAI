@@ -1421,10 +1421,27 @@ Write the complete compiled report:"""
                 )
                 if _verdict.get("stuck"):
                     if _verdict.get("level") == "critical":
-                        return {
-                            "error": _verdict.get("message", "loop detected"),
-                            "loop_blocked": True,
-                        }
+                        # Async parity with the sync path in tool_execution.py:
+                        # route the critical verdict through the unified approval
+                        # pipeline (human override / per-project policy) instead
+                        # of an unconditional hard stop. ``_doom_loop_approved``
+                        # is pure decision logic but ``approve_sync`` inside it
+                        # may block on an interactive backend, so offload it to a
+                        # worker thread to keep the event loop responsive.
+                        import asyncio as _asyncio
+                        _approved = await _asyncio.to_thread(
+                            self._doom_loop_approved,
+                            function_name, arguments, _verdict,
+                        )
+                        if _approved:
+                            _loop_detection.reset_matching_history(
+                                _ld_history, function_name, arguments
+                            )
+                        else:
+                            return {
+                                "error": _verdict.get("message", "loop detected"),
+                                "loop_blocked": True,
+                            }
                     elif not getattr(self, '_loop_warned_this_turn', False):
                         self._loop_warned_this_turn = True
                         self._pending_self_correction = (
