@@ -22,6 +22,22 @@
 interface FakeNode {
   tagName: string;
   className: string;
+  /**
+   * REFLECTED onto the `id` attribute, both ways, as the real DOM reflects it.
+   *
+   * The app writes an id both ways -- `note.id = helpId(key)` for a settings
+   * help note, `emptyTitle.setAttribute("id", EMPTY_TITLE_ID)` for the empty
+   * panel's heading -- and the pointers that make either one worth having,
+   * `aria-describedby` and `aria-labelledby`, are read back through
+   * `getAttribute`. A fake that stored the two independently would let a test
+   * assert a description pointing at an id no element answers to.
+   *
+   * It was missing entirely, and the property assignment landed on the object
+   * anyway because a plain JS object takes any key. So `main.test.ts` read
+   * `n.id` at runtime and got the right answer, while `tsc` rejected the same
+   * line: `npm run typecheck` exited 2 on `main` from #4847 until here.
+   */
+  id: string;
   dataset: Record<string, string>;
   hidden: boolean;
   disabled: boolean;
@@ -157,6 +173,15 @@ export function createFakeDom(): FakeDom {
     Object.defineProperty(el, "innerHTML", {
       get: () => el._html,
       set: (v: string) => { el._html = v; },
+    });
+    // Backed by `attrs`, so `el.id = x` and `setAttribute("id", x)` are the
+    // same write and `getAttribute("id")` sees both -- which is what makes an
+    // `aria-describedby`/`aria-labelledby` assertion mean anything. `""` for an
+    // element with no id, exactly as `HTMLElement.id` reports it, so a test can
+    // tell "no id" from "an id" without reaching for null.
+    Object.defineProperty(el, "id", {
+      get: () => el.attrs["id"] ?? "",
+      set: (v: string) => { el.attrs["id"] = String(v); },
     });
 
     el.setAttribute = (n: string, v: string): void => { el.attrs[n] = v; };
