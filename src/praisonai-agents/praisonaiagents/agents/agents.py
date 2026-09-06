@@ -3915,29 +3915,38 @@ class AgentTeam(SpawnAnnounceProtocol):
                 # thread (synchronous EventBus publish).
                 loop.call_soon_threadsafe(completion_event.set)
         
-        # Check initial state
-        check_completions()
-        
-        if not completion_event.is_set():
-            # Subscribe to completion events temporarily
-            def completion_handler(event):
-                if event.data.get("parent_id") == self._team_id:
-                    check_completions()
-            
-            subscriber_id = self._event_bus.subscribe(
-                completion_handler,
-                [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
-            ) if self._event_bus else None
-            
-            try:
-                # Wait for completion or timeout
-                await asyncio.wait_for(completion_event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                pass
-            finally:
-                # Unsubscribe
-                if subscriber_id and self._event_bus:
-                    self._event_bus.unsubscribe(subscriber_id)
+        # Subscribe BEFORE the initial state check. If we checked first and then
+        # subscribed, a sub-agent finishing on its background thread in that gap
+        # would append its completion event AND publish it with no subscriber
+        # attached — and the event bus does not replay past events, so the signal
+        # would be lost and the awaiter would hang until timeout (or forever when
+        # timeout is None). completion_handler re-snapshots the full completion
+        # list under the lock, and Event.set() is idempotent, so subscribing
+        # first is safe and simply re-checks state on every published completion.
+        def completion_handler(event):
+            if event.data.get("parent_id") == self._team_id:
+                check_completions()
+
+        subscriber_id = self._event_bus.subscribe(
+            completion_handler,
+            [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+        ) if self._event_bus else None
+
+        try:
+            # Check initial state (covers completions that landed before we
+            # subscribed); the subscription covers everything after.
+            check_completions()
+
+            if not completion_event.is_set():
+                try:
+                    # Wait for completion or timeout
+                    await asyncio.wait_for(completion_event.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            # Unsubscribe
+            if subscriber_id and self._event_bus:
+                self._event_bus.unsubscribe(subscriber_id)
         
         # Return completed events
         with self._spawn_lock:
