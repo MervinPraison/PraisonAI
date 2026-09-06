@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 # ============================================================================
@@ -95,6 +95,19 @@ class AsyncTUIConfig:
     plan_mode: bool = False  # Read-only PLAN mode: deny writes/edits/shell until confirmed
     enable_acp: bool = True  # Load ACP tools + start the ACP runtime (disable via --no-acp)
     enable_lsp: bool = True  # Load LSP tools + start the LSP runtime (disable via --no-lsp)
+    # Consolidated Agent capability params threaded from `chat`/`code` CLI flags
+    # so an interactive session honours --knowledge/--guardrails/--web/etc.
+    # exactly as `run`/YAML/Python do. Each is None when the flag was not
+    # supplied (Agent default preserved); otherwise a value the Agent
+    # constructor already accepts (bool, preset str, or list of sources).
+    knowledge: Optional[Any] = None
+    guardrails: Optional[Any] = None
+    web: Optional[Any] = None
+    reflection: Optional[Any] = None
+    planning: Optional[Any] = None
+    context: Optional[Any] = None
+    execution: Optional[Any] = None
+    caching: Optional[Any] = None
 
 
 # ============================================================================
@@ -152,6 +165,64 @@ def _is_empty_agent_response(response) -> bool:
     plain ``not response`` check is insufficient (issue #2568).
     """
     return _extract_response_output(response) is None
+
+
+# ============================================================================
+# Consolidated capability options (issue #4890)
+# ============================================================================
+
+# CLI flag value -> Agent constructor param. Each option maps 1:1 onto the
+# consolidated capability param the core Agent already accepts (bool | preset
+# str | list of sources), so an interactive session reaches the same runtime
+# capability as `run`/YAML/Python. ``hooks`` is threaded separately below since
+# it is a file path, not a bool/preset value.
+_CAPABILITY_OPTION_NAMES = (
+    "knowledge",
+    "guardrails",
+    "web",
+    "reflection",
+    "planning",
+    "context",
+    "execution",
+    "caching",
+)
+
+
+def _coerce_capability_value(raw: Any) -> Any:
+    """Turn a raw CLI flag value into an Agent-ready capability value.
+
+    The consolidated flags arrive as ``"true"`` (bare flag), ``"false"``, a
+    preset string (e.g. ``strict``/``thorough``), or a comma-separated source
+    list (e.g. ``docs/,notes.md`` for ``--knowledge``). Map the booleans to real
+    bools, split a comma list into a list of sources, and pass any other string
+    through unchanged so it reaches the Agent's own preset/source handling.
+    """
+    if raw is None or isinstance(raw, bool):
+        return raw
+    if not isinstance(raw, str):
+        return raw
+    lowered = raw.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if "," in raw:
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        return parts or raw
+    return raw
+
+
+def _apply_capability_options(agent_config: dict, config: "AsyncTUIConfig") -> None:
+    """Apply supplied capability options onto ``agent_config`` in place.
+
+    Only options actually supplied (non-None on the config) are set, so an unset
+    flag leaves the Agent's own default untouched.
+    """
+    for name in _CAPABILITY_OPTION_NAMES:
+        raw = getattr(config, name, None)
+        if raw is None:
+            continue
+        agent_config[name] = _coerce_capability_value(raw)
 
 
 class _LogCapture(logging.Handler):
@@ -513,6 +584,15 @@ class AsyncTUI:
                 except ImportError:
                     if not read_only:
                         self._interrupt_controller = None
+
+                # Thread consolidated capability options (--knowledge/--guardrails/
+                # --web/--reflection/--planning/--context/--execution/--hooks/
+                # --caching) onto the same Agent params `run`/YAML/Python use, so an
+                # interactive session honours them instead of silently dropping them.
+                # Only options actually supplied are applied; unset ones keep the
+                # Agent's own defaults. Hooks are additive so the read-only review
+                # agent's cancellation wiring (set above) is preserved.
+                _apply_capability_options(agent_config, self.config)
 
                 logger.debug(f"Agent config: model={self.config.model}, tools={len(tools) if tools else 0}")
                 agent = Agent(**agent_config)

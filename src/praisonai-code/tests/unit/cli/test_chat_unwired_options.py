@@ -22,12 +22,17 @@ import praisonai_code.cli.commands.chat as chat_module
 
 
 class _StubTUI:
-    """Stand-in for AsyncTUI: constructs cleanly and never runs a real chat."""
+    """Stand-in for AsyncTUI: constructs cleanly and never runs a real chat.
+
+    Captures the config it was constructed with so parity tests can assert the
+    high-value capability options were threaded through to the runtime.
+    """
 
     execution_failed = False
+    last_config = None
 
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(self, config=None, *args, **kwargs):
+        type(self).last_config = config
 
     def run_single(self, prompt):
         return ""
@@ -63,19 +68,19 @@ def _run(monkeypatch, *args):
 class TestUnwiredChatOptions:
 
     def test_a_supplied_unwired_option_is_reported(self, monkeypatch):
-        out = _run(monkeypatch, "--planning", "auto").output
+        out = _run(monkeypatch, "--theme", "dark").output
         assert "does not implement" in out
-        assert "--planning" in out
+        assert "--theme" in out
 
     def test_only_the_supplied_ones_are_named(self, monkeypatch):
-        out = _run(monkeypatch, "--planning", "auto").output
-        assert "--planning" in out
-        assert "--guardrails" not in out, "named an option the user never passed"
+        out = _run(monkeypatch, "--theme", "dark").output
+        assert "--theme" in out
+        assert "--ui-backend" not in out, "named an option the user never passed"
 
     def test_several_are_listed_together(self, monkeypatch):
-        out = _run(monkeypatch, "--planning", "auto", "--guardrails", "strict",
-                   "--theme", "dark").output
-        for flag in ("--planning", "--guardrails", "--theme"):
+        out = _run(monkeypatch, "--theme", "dark", "--no-color",
+                   "--ui-backend", "plain").output
+        for flag in ("--theme", "--no-color", "--ui-backend"):
             assert flag in out, flag
 
     def test_nothing_is_said_when_none_are_supplied(self, monkeypatch):
@@ -86,9 +91,14 @@ class TestUnwiredChatOptions:
         out = _run(monkeypatch, "--model", "gpt-4o-mini", "--continue").output
         assert "does not implement" not in out
 
+    def test_a_wired_capability_option_never_triggers_the_warning(self, monkeypatch):
+        """The now-wired capability options must not warn (issue #4890)."""
+        out = _run(monkeypatch, "--guardrails", "strict", "--planning", "auto").output
+        assert "does not implement" not in out
+
     def test_the_command_still_succeeds(self, monkeypatch):
         """A warning must not become a failure."""
-        assert _run(monkeypatch, "--planning", "auto").exit_code == 0
+        assert _run(monkeypatch, "--theme", "dark").exit_code == 0
 
     def test_every_listed_option_really_is_unread(self, monkeypatch):
         """Guards the list itself against drifting as options get wired up.
@@ -112,3 +122,62 @@ class TestUnwiredChatOptions:
                 f"{name} is now read by chat_main; remove it from "
                 f"_UNWIRED_CHAT_OPTIONS so the warning stops lying"
             )
+
+
+class TestWiredCapabilityOptions:
+    """`chat` must honour the high-value capability options (issue #4890).
+
+    These reach the same consolidated Agent params `run`/YAML/Python use. The
+    stub TUI records the AsyncTUIConfig it is built with, so we can assert a
+    supplied flag lands on the config, and that the config -> Agent mapping
+    (_apply_capability_options) produces the expected constructor kwargs.
+    """
+
+    def test_supplied_capability_options_reach_the_tui_config(self, monkeypatch):
+        _StubTUI.last_config = None
+        _run(monkeypatch, "--guardrails", "strict", "--knowledge", "docs/",
+             "--web", "true", "--planning", "auto")
+        cfg = _StubTUI.last_config
+        assert cfg is not None
+        assert cfg.guardrails == "strict"
+        assert cfg.knowledge == "docs/"
+        assert cfg.web == "true"
+        assert cfg.planning == "auto"
+
+    def test_unset_capability_options_stay_none(self, monkeypatch):
+        _StubTUI.last_config = None
+        _run(monkeypatch)
+        cfg = _StubTUI.last_config
+        assert cfg is not None
+        for name in ("guardrails", "knowledge", "web", "planning",
+                     "reflection", "context", "execution", "caching"):
+            assert getattr(cfg, name) is None, name
+
+    def test_config_maps_onto_agent_constructor_kwargs(self):
+        from praisonai_code.cli.interactive.async_tui import (
+            AsyncTUIConfig,
+            _apply_capability_options,
+        )
+
+        cfg = AsyncTUIConfig(
+            guardrails="strict", knowledge="docs/,notes.md", web="true",
+            planning="false",
+        )
+        agent_config = {}
+        _apply_capability_options(agent_config, cfg)
+        assert agent_config["guardrails"] == "strict"
+        assert agent_config["knowledge"] == ["docs/", "notes.md"]
+        assert agent_config["web"] is True
+        assert agent_config["planning"] is False
+
+    def test_unset_options_are_not_added_to_agent_kwargs(self):
+        from praisonai_code.cli.interactive.async_tui import (
+            AsyncTUIConfig,
+            _apply_capability_options,
+        )
+
+        agent_config = {}
+        _apply_capability_options(agent_config, AsyncTUIConfig())
+        for name in ("guardrails", "knowledge", "web", "planning",
+                     "reflection", "context", "execution", "caching"):
+            assert name not in agent_config, name
