@@ -4316,6 +4316,146 @@ RateLimitPolicy = RateLimitPolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway cost-aware spend-budget admission (Issue #4894)
+#
+# Rate limiting gates on *request count*; a public multi-user gateway also
+# needs to gate on *cumulative cost per identity*. This mirrors
+# :class:`RateLimitPolicyProtocol` exactly — a pure, import-free decision over
+# typed facts (an identity, a scope, the amount already ``spent_usd`` in the
+# window and a timestamp) returning the same closed :class:`RateLimitDecision`.
+# The wrapper supplies ``spent_usd`` from a durable
+# :class:`~praisonaiagents.telemetry.protocols.TokenUsageSinkProtocol`
+# (e.g. :class:`~praisonaiagents.telemetry.durable_sink.SqliteTokenUsageSink`)
+# and consults this policy at the same admit decision as concurrency /
+# rate-limit, *before* the LLM call. Concrete state and storage live outside
+# the decision, keeping it injectable and testable in isolation.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class SpendBudgetPolicyProtocol(Protocol):
+    """Protocol for gateway cumulative-spend admission decisions.
+
+    Pure, import-free decision contract symmetric with
+    :class:`RateLimitPolicyProtocol`. The wrapper supplies typed facts — the
+    caller ``identity``, the ``scope`` (channel / tenant token), the amount
+    already ``spent_usd`` for that identity+scope in the current window, and
+    the current ``now`` timestamp — and the policy decides whether the turn is
+    allowed or rejected/throttled with a ``retry_after_seconds`` hint. Storage
+    of the spend ledger lives in a
+    :class:`~praisonaiagents.telemetry.protocols.TokenUsageSinkProtocol`; this
+    contract keeps only the *decision* injectable and provable in isolation.
+
+    A config-driven default (:class:`WindowedSpendBudgetPolicy`) is provided
+    for the common "cap $X per identity per rolling window" case.
+    """
+
+    def check(
+        self,
+        *,
+        identity: str,
+        scope: str,
+        spent_usd: float,
+        now: float,
+    ) -> RateLimitDecision:
+        """Return a :class:`RateLimitDecision` for the supplied facts."""
+        ...
+
+
+class WindowedSpendBudgetPolicy:
+    """Config-driven cumulative per-identity spend-budget policy.
+
+    The default referenced by ``gateway.budget`` in ``gateway.yaml`` and the
+    Python ``WebSocketGateway(..., spend_budget_policy=...)`` surface. It is
+    intentionally minimal and dependency-free so the decision lives in core and
+    is provable in isolation, exactly like :class:`SlidingWindowRateLimitPolicy`.
+
+    The decision, given the amount ``spent_usd`` already accumulated for the
+    identity+scope in the current window:
+
+    * ``allowed`` while ``spent_usd`` is below ``limit_usd``.
+    * Once ``spent_usd`` reaches ``limit_usd`` the turn is denied with a
+      ``retry_after_seconds`` hint equal to the remaining time in the window.
+
+    A ``limit_usd`` of ``0`` (or negative) disables the budget entirely (every
+    turn is allowed) — the legacy default when no budget is configured.
+
+    Unlike :class:`SlidingWindowRateLimitPolicy` this policy is *stateless*: the
+    cumulative spend is owned by a durable
+    :class:`~praisonaiagents.telemetry.protocols.TokenUsageSinkProtocol`, so the
+    same budget survives restarts and is shared across processes.
+
+    Example::
+
+        WindowedSpendBudgetPolicy(limit_usd=2.00, window_seconds=86_400)
+    """
+
+    def __init__(
+        self,
+        *,
+        limit_usd: float = 0.0,
+        window_seconds: float = 86_400.0,
+    ):
+        try:
+            limit = float(limit_usd)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"limit_usd must be a number, got {limit_usd!r}"
+            ) from err
+        try:
+            window = float(window_seconds)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"window_seconds must be a number, got {window_seconds!r}"
+            ) from err
+        if window <= 0:
+            raise ValueError(
+                f"window_seconds must be > 0, got {window_seconds!r}"
+            )
+        self.limit_usd = limit
+        self.window_seconds = window
+
+    @property
+    def enabled(self) -> bool:
+        """Whether budgeting is active (a positive limit is set)."""
+        return self.limit_usd > 0
+
+    def window_start(self, now: float) -> float:
+        """Start timestamp of the current window for a ``now`` timestamp.
+
+        Helper for the wrapper so it can query the durable sink for
+        ``spent_usd`` over the same window the policy enforces.
+        """
+        return float(now) - self.window_seconds
+
+    def check(
+        self,
+        *,
+        identity: str,
+        scope: str,
+        spent_usd: float,
+        now: float,
+    ) -> RateLimitDecision:
+        # Disabled: preserve legacy always-allow behaviour.
+        if self.limit_usd <= 0:
+            return RateLimitDecision(allowed=True)
+        try:
+            spent = float(spent_usd)
+        except (TypeError, ValueError):
+            spent = 0.0
+        if spent < self.limit_usd:
+            return RateLimitDecision(allowed=True)
+        return RateLimitDecision(
+            allowed=False,
+            retry_after_seconds=self.window_seconds,
+        )
+
+
+# Backward-compatible alias following the repo's ``*Protocol`` convention.
+SpendBudgetPolicy = SpendBudgetPolicyProtocol
+
+
+# ---------------------------------------------------------------------------
 # Durable-queue dead-letter decision (Issue #3519)
 #
 # The gateway's durable inbound journal and outbound queue must decide when a
