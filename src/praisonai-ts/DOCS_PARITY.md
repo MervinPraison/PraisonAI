@@ -93,7 +93,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Vision | 4 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
 | ✅ Web | 6 | 1 | 150 |
-| ✅ Workflows | 8 | 3 | 774 |
+| ✅ Workflows | 8 | 3 | 910 |
 
 ## Undocumented Categories (Need Documentation)
 
