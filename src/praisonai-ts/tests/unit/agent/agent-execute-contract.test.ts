@@ -360,3 +360,49 @@ describe('Agent.chat error contract', () => {
     expect(agent.getResult()).toBe(good);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. Cache key includes the chained context (Greptile P1)
+// ---------------------------------------------------------------------------
+//
+// execute() now routes through chat(), which caches on the prompt. But the
+// context (previousResult) is substituted into the prompt only AFTER the cache
+// is consulted, so a task template run with two different dependency results
+// shared one cache entry -- the second run returned the first run's answer,
+// computed from a context it never saw. The key must include previousResult.
+
+describe('Agent chat cache is keyed by chained context, not just the prompt', () => {
+  it('the same task template with a different context is a cache MISS', async () => {
+    const agent = new Agent({ instructions: 'ignored', ...quiet, cache: true });
+
+    await agent.execute('Summarise: {{previous}}', 'dependency result A');
+    const promptForA = promptSent();
+    const callsAfterFirst = mockLlm.calls.length;
+
+    await agent.execute('Summarise: {{previous}}', 'dependency result B');
+
+    // Context B reached the model on its own call: the raw prompts are
+    // identical, so the old prompt-only key would have served A's cached
+    // reply and made no second call at all.
+    expect(promptForA).toBe('Summarise: dependency result A');
+    expect(promptSent()).toBe('Summarise: dependency result B');
+    expect(mockLlm.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('control: the same task template with the same context is a cache HIT', async () => {
+    const agent = new Agent({ instructions: 'ignored', ...quiet, cache: true });
+
+    mockLlm.chatQueue.push('the-one-answer');
+    const first = await agent.execute('Summarise: {{previous}}', 'dependency result A');
+    const callsAfterFirst = mockLlm.calls.length;
+
+    // A queued value that must NOT be consumed if the cache serves the reply.
+    mockLlm.chatQueue.push('should-not-be-used');
+    const second = await agent.execute('Summarise: {{previous}}', 'dependency result A');
+
+    expect(first).toBe('the-one-answer');
+    expect(second).toBe('the-one-answer');
+    // No second model call: the identical (prompt, context) hit the cache.
+    expect(mockLlm.calls.length).toBe(callsAfterFirst);
+  });
+});

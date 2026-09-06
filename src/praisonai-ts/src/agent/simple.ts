@@ -2005,12 +2005,23 @@ export class Agent {
   }
 
   /**
+   * The cache key for one turn. `previousResult` is part of it because it is
+   * substituted for `{{previous}}` in the prompt before the model sees it, so
+   * the same raw prompt with a different chained context is a DIFFERENT model
+   * input and must not share a cache entry. Omitting it let `execute(task,
+   * contextA)` return the response computed for `execute(task, contextB)`.
+   */
+  private cacheKeyFor(prompt: string, previousResult?: string): string {
+    return `${this.sessionId}:${previousResult ?? ''}:${prompt}`;
+  }
+
+  /**
    * Get cached response if available and not expired
    */
-  private getCachedResponse(prompt: string): string | null {
+  private getCachedResponse(prompt: string, previousResult?: string): string | null {
     if (!this.cache) return null;
     
-    const cacheKey = `${this.sessionId}:${prompt}`;
+    const cacheKey = this.cacheKeyFor(prompt, previousResult);
     const cached = this.responseCache.get(cacheKey);
     
     if (cached) {
@@ -2028,10 +2039,10 @@ export class Agent {
   /**
    * Cache a response
    */
-  private cacheResponse(prompt: string, response: string): void {
+  private cacheResponse(prompt: string, response: string, previousResult?: string): void {
     if (!this.cache) return;
     
-    const cacheKey = `${this.sessionId}:${prompt}`;
+    const cacheKey = this.cacheKeyFor(prompt, previousResult);
     this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
   }
 
@@ -3472,18 +3483,36 @@ export class Agent {
    *   arguments (temperature, tools, outputJson, stream, toolChoice, seed, ...),
    *   plus the chat-only `errorsAsNull`.
    */
+  // The default overload is declared first for two reasons that happen to
+  // align. TypeScript resolves overloads top-down, so an existing caller keeps
+  // `Promise<string>`; a call whose object literal carries `errorsAsNull: true`
+  // fails this overload's excess-property check and falls through to the null
+  // one below. The signature-parity extractor also reads the FIRST overload
+  // (ts_extract.mjs, matches[0]) and flattens a param typed as a plain,
+  // same-file interface -- so `options` must name `AgentChatOptions` directly
+  // here, not `AgentChatCallOptions` and not an intersection, or Python's chat
+  // keywords (temperature, tools, seed, ...) stop being seen and the gate fails.
+  async chat(
+    prompt: string,
+    previousResult?: string,
+    signal?: AbortSignal,
+    options?: AgentChatOptions,
+  ): Promise<string>;
+  // `errorsAsNull: false` is the default contract spelled out -- still a
+  // rejection, still `Promise<string>`. It needs its own overload because the
+  // one above types `options` as AgentChatOptions, which does not know the key.
+  async chat(
+    prompt: string,
+    previousResult: string | undefined,
+    signal: AbortSignal | undefined,
+    options: AgentChatCallOptions & { errorsAsNull: false },
+  ): Promise<string>;
   async chat(
     prompt: string,
     previousResult: string | undefined,
     signal: AbortSignal | undefined,
     options: AgentChatCallOptions & { errorsAsNull: true },
   ): Promise<string | null>;
-  async chat(
-    prompt: string,
-    previousResult?: string,
-    signal?: AbortSignal,
-    options?: AgentChatCallOptions,
-  ): Promise<string>;
   async chat(
     prompt: string,
     previousResult?: string,
@@ -3514,8 +3543,10 @@ export class Agent {
     // Lazy init: restore history on first chat (like Python SDK)
     await this.initDbSession();
     
-    // Check cache first
-    const cached = this.getCachedResponse(prompt);
+    // Check cache first. previousResult is part of the key: it is substituted
+    // into the prompt before the model sees it, so a different chained context
+    // is a different call and must miss the cache.
+    const cached = this.getCachedResponse(prompt, previousResult);
     if (cached) {
       return cached;
     }
@@ -3539,8 +3570,8 @@ export class Agent {
       await this.persistMessage('assistant', response);
     }
     
-    // Cache the response
-    this.cacheResponse(prompt, response);
+    // Cache the response under the same previousResult-aware key.
+    this.cacheResponse(prompt, response, previousResult);
     
     return response;
   }
