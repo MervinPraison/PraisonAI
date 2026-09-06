@@ -94,6 +94,46 @@ test("praisonai reaches no eager chunk -- the split is real", () => {
   assert.ok(lazyWithEngine.length > 0, "and praisonai IS in the bundle, in a lazy chunk");
 });
 
+test("the phone's graph carries no multi-agent team machinery", () => {
+  // `praisonai/mobile` exports one class, `Agent`. It does NOT export
+  // AgentTeam, and no mobile path can construct one -- there is no team
+  // screen, no team engine, no way in.
+  //
+  // It arrived anyway, and invisibly: `agent/simple.ts` -- the module the
+  // allowlist takes `Agent` from -- ended a 3600-line file with
+  // `export { AgentTeam, ... } from './team'`. A value re-export is a static
+  // import, so ./team and its four helpers rode along, 19.7kB of a phone's
+  // download for code it cannot reach. esbuild could not drop it: the two
+  // modules were a cycle, and an unused re-export is a side-effect import of a
+  // module it cannot prove pure. Nothing failed until the lazy budget did, at
+  // which point the cheapest-looking fix is to raise the budget.
+  //
+  // So the shape is asserted, not just the total. A barrel re-export costs
+  // whatever sits behind it, and the next one will not announce itself either.
+  // Every segment after `team`, not just one lowercase word: `team-manager`
+  // and `team-options` are today's helpers, but `team-task-runner` is the
+  // shape #4872 is heading for and a one-segment matcher would wave it
+  // through. Widened by praisonai-triage-agent[bot] on this branch; kept
+  // because it is strictly stricter and still rejects simple.js/handoff.js.
+  const onGraph = report.chunks
+    .flatMap((c) => inputsOf(c.name))
+    .filter(isUpstream)
+    .filter((input) => /\/agent\/team(?:-[^/]+)*\.js$/.test(input));
+  assert.deepEqual(
+    onGraph,
+    [],
+    `the team subsystem is on the webview graph: ${onGraph.join(", ")}\n` +
+    `    Something the allowlist reaches re-exports it. Take the classes from\n` +
+    `    ./team where they live, not through a module a phone must load.`,
+  );
+  // Non-vacuous: the matcher must be looking at real upstream inputs in the
+  // shape it expects, or an empty list proves nothing. agent/simple IS there.
+  const simple = report.chunks
+    .flatMap((c) => inputsOf(c.name))
+    .filter((input) => isUpstream(input) && /\/agent\/simple\.js$/.test(input));
+  assert.ok(simple.length > 0, "agent/simple.js must be on the graph -- it is where Agent lives");
+});
+
 test("the CLI-only packages are reached lazily, and only lazily", () => {
   // They are external (bundle.mjs says why), and external is safe only behind
   // an import(). This pins the upstream fact that makes that true: no static

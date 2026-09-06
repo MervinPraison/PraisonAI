@@ -8,7 +8,7 @@
  */
 process.env.PRAISONAI_PARITY_SILENT = '1';
 
-import { Agent, AgentTeam } from '../../../src/agent/simple';
+import { Agent, AgentTeam } from '../../../src/agent';
 import { resetParityNotices } from '../../../src/utils/parity-notice';
 
 /**

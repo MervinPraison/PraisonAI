@@ -3,7 +3,7 @@
  */
 process.env.PRAISONAI_PARITY_SILENT = '1';
 
-import { Agent, AgentTeam } from '../../../src/agent/simple';
+import { Agent, AgentTeam } from '../../../src/agent';
 import { Task } from '../../../src/agent/types';
 import { resetParityNotices, unhonouredOptions } from '../../../src/utils/parity-notice';
 

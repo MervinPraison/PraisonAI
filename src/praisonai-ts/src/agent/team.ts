@@ -1,7 +1,11 @@
 import { Logger } from '../utils/logger';
 import { getEnv } from '../llm/openaiClientOptions';
 import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
-import { Agent, type AgentChatOptions } from './simple';
+// Type-only on purpose: every use of `Agent` in this file is a type
+// position, and the runtime class is reached through the dynamic
+// `import('./simple')` in ./team-manager. A value import here would put
+// the two modules back in a cycle, which is what hid the cost below.
+import type { Agent, AgentChatOptions } from './simple';
 import type { Task, TaskOutput } from './types';
 import type { ContextManager } from '../context/manager';
 import type { Plan, TodoList } from '../planning';

@@ -1,4 +1,4 @@
-import { Agent, PraisonAIAgents } from '../../../src/agent/simple';
+import { Agent, PraisonAIAgents } from '../../../src/agent';
 
 // Create recipe agent
 const recipeAgent = new Agent({
