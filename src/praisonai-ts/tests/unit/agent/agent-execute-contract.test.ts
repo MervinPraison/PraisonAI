@@ -277,6 +277,27 @@ describe('Agent.getResult returns what the agent produced', () => {
     expect(a.getResult()).toBe('answer-a');
     expect(b.getResult()).toBeNull();
   });
+
+  it('reflects a cache hit, not the earlier turn that filled the cache', async () => {
+    const agent = new Agent({ instructions: 'x', ...quiet, cache: true });
+
+    mockLlm.chatQueue.push({ content: 'cached-answer', role: 'assistant' });
+    await agent.chat('same prompt');
+    expect(agent.getResult()).toBe('cached-answer');
+
+    // A different prompt runs and becomes the last recorded result...
+    mockLlm.chatQueue.push({ content: 'other-answer', role: 'assistant' });
+    await agent.chat('other prompt');
+    expect(agent.getResult()).toBe('other-answer');
+
+    // ...then the first prompt is served from cache (no model call). getResult()
+    // must track the served turn, not stay on 'other-answer'.
+    const callsBefore = mockLlm.calls.length;
+    const served = await agent.chat('same prompt');
+    expect(served).toBe('cached-answer');
+    expect(mockLlm.calls.length).toBe(callsBefore);
+    expect(agent.getResult()).toBe('cached-answer');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -3548,6 +3548,10 @@ export class Agent {
     // is a different call and must miss the cache.
     const cached = this.getCachedResponse(prompt, previousResult);
     if (cached) {
+      // A served cache hit is still what the agent produced this turn, so
+      // getResult() must reflect it -- runTurn (which records _lastResult) is
+      // skipped on this path, so record it here.
+      this._lastResult = cached;
       return cached;
     }
     
