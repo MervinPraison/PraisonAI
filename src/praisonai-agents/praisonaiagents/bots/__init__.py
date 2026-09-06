@@ -76,6 +76,9 @@ from .interactive import (
     unregister_handler,
     make_reply_handler,
     REPLY_NAMESPACE,
+    PollResult,
+    make_poll_result_handler,
+    POLL_NAMESPACE,
 )
 from .agent_reply import (
     AgentReply,
@@ -185,6 +188,9 @@ __all__ = [
     "unregister_handler",
     "make_reply_handler",
     "REPLY_NAMESPACE",
+    "PollResult",
+    "make_poll_result_handler",
+    "POLL_NAMESPACE",
     "AgentReply",
     "TurnCompletion",
     "extract_presentation",

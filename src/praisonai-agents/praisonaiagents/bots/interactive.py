@@ -135,6 +135,101 @@ def make_reply_handler(
     return _handler
 
 
+POLL_NAMESPACE = "poll"
+
+
+@dataclass
+class PollResult:
+    """Aggregated result of a group poll, portable across channels.
+
+    The inbound counterpart of a :class:`PollPresentation`. A channel adapter
+    normalises a native poll-answer/close event (Telegram ``poll``, Discord,
+    Slack) into this shape and routes it through the interactive registry so a
+    workflow can branch on the outcome without knowing the transport.
+
+    Attributes:
+        poll_id: Correlates the result back to the authored poll (the poll's
+            ``action_id`` when set, else the channel's native poll id).
+        counts: Mapping of option label -> vote count.
+        total_voters: Number of distinct voters.
+        closed: Whether the poll is closed (final tally).
+    """
+
+    poll_id: str
+    counts: Dict[str, int]
+    total_voters: int = 0
+    closed: bool = False
+
+    def winner(self) -> Optional[str]:
+        """Return the option with the most votes, or ``None`` when empty/tied.
+
+        Ties (more than one option sharing the top count) return ``None`` so a
+        caller never silently picks an arbitrary winner.
+        """
+        if not self.counts:
+            return None
+        top = max(self.counts.values())
+        leaders = [opt for opt, c in self.counts.items() if c == top]
+        return leaders[0] if len(leaders) == 1 else None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "poll_id": self.poll_id,
+            "counts": dict(self.counts),
+            "total_voters": self.total_voters,
+            "closed": self.closed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PollResult":
+        """Create from dictionary."""
+        return cls(
+            poll_id=data.get("poll_id", ""),
+            counts=dict(data.get("counts", {})),
+            total_voters=data.get("total_voters", 0),
+            closed=data.get("closed", False),
+        )
+
+
+def make_poll_result_handler(
+    on_result: Callable[["PollResult", "InteractiveContext"], Awaitable[Optional[str]]],
+) -> InteractiveHandler:
+    """Build a handler for inbound poll results routed to the ``poll`` namespace.
+
+    A channel adapter that receives a native poll-answer/close event normalises
+    it into a :class:`PollResult` and places it on
+    ``context.platform_data["poll_result"]`` before dispatching a ``poll:``
+    callback. This handler extracts that result (accepting either a
+    :class:`PollResult` or its ``dict`` form) and forwards it to *on_result*, so
+    a workflow can tally the vote and continue the turn.
+
+    Args:
+        on_result: Async callable ``(result, context) -> Optional[str]`` invoked
+            with the aggregated tally.
+
+    Returns:
+        An ``InteractiveHandler`` to register under the ``poll`` namespace.
+    """
+
+    async def _handler(context: "InteractiveContext") -> Optional[str]:
+        raw = context.platform_data.get("poll_result")
+        if raw is None:
+            payload = context.platform_data.get("decoded_payload") or {}
+            raw = payload.get("poll_result")
+        if raw is None:
+            return None
+        if isinstance(raw, PollResult):
+            result = raw
+        elif isinstance(raw, dict):
+            result = PollResult.from_dict(raw)
+        else:
+            return None
+        return await on_result(result, context)
+
+    return _handler
+
+
 def encode_action(namespace: str, action: "PresentationAction") -> str:
     """Encode an action with namespace for callback data.
     
