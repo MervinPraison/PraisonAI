@@ -3,16 +3,16 @@
   "surfaces": {
     "Agent.__init__": {
       "counts": {
-        "alias": 3,
+        "alias": 2,
         "camelCase": 8,
         "exact": 29,
-        "flattened": 2,
-        "mismatches": 6,
+        "flattened": 3,
+        "mismatches": 8,
         "missing": 0,
         "params": 42,
-        "ts_only": 14,
+        "ts_only": 13,
         "ts_total": 59,
-        "waived": 6
+        "waived": 8
       },
       "params": [
         {
@@ -37,6 +37,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -65,6 +66,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "role",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -93,6 +95,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "goal",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -121,6 +124,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "backstory",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -131,7 +135,10 @@
           "canonical": "instructions",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=unknown (TS `instructions`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "instructions",
@@ -139,17 +146,18 @@
           "ts": {
             "canonical": "instructions",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "instructions",
             "required": false,
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "instructions",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": null,
+          "waived": "Agent.__init__.instructions",
           "warnings": []
         },
         {
@@ -171,6 +179,7 @@
             "type_class": "union",
             "type_text": "string | LLMConfig"
           },
+          "ts_members": null,
           "ts_name": "llm",
           "type_class": "union",
           "type_text": "Optional[Union[str, Any]]",
@@ -199,6 +208,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "model",
           "type_class": "union",
           "type_text": "Optional[Union[str, Any]]",
@@ -226,6 +236,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "baseURL",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -251,6 +262,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "apiKey",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -276,6 +288,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "auth",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -301,6 +314,7 @@
             "type_class": "array",
             "type_text": "any[] | Function[]"
           },
+          "ts_members": null,
           "ts_name": "tools",
           "type_class": "array",
           "type_text": "Optional[List[Any]]",
@@ -326,6 +340,7 @@
             "type_class": "array",
             "type_text": "string[]"
           },
+          "ts_members": null,
           "ts_name": "toolsets",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -351,6 +366,7 @@
             "type_class": "array",
             "type_text": "(Agent | Handoff)[]"
           },
+          "ts_members": null,
           "ts_name": "handoffs",
           "type_class": "array",
           "type_text": "Optional[List[Union['Agent', 'Handoff']]]",
@@ -376,6 +392,7 @@
             "type_class": "union",
             "type_text": "boolean | string | MemoryConfig | AgentMemoryStore"
           },
+          "ts_members": null,
           "ts_name": "memory",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, 'MemoryConfig', Any]]",
@@ -401,6 +418,7 @@
             "type_class": "union",
             "type_text": "boolean | string | string[] | KnowledgeBaseConfig | KnowledgeBase"
           },
+          "ts_members": null,
           "ts_name": "knowledge",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']]",
@@ -426,6 +444,7 @@
             "type_class": "union",
             "type_text": "boolean | string | PlanningAgentConfig"
           },
+          "ts_members": null,
           "ts_name": "planning",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, 'PlanningConfig']]",
@@ -451,6 +470,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "reflection",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, 'ReflectionConfig']]",
@@ -476,6 +496,7 @@
             "type_class": "union",
             "type_text": "boolean | Rule[] | RulesManagerConfig | RulesManager"
           },
+          "ts_members": null,
           "ts_name": "rules",
           "type_class": "union",
           "type_text": "Optional[Union[bool, 'RulesConfig']]",
@@ -501,6 +522,7 @@
             "type_class": "object",
             "type_text": "AgentGuardrailInput"
           },
+          "ts_members": null,
           "ts_name": "guardrails",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Callable, 'GuardrailConfig']]",
@@ -528,6 +550,7 @@
             "type_class": "union",
             "type_text": "boolean | string | AgentWebConfig"
           },
+          "ts_members": null,
           "ts_name": "web",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, 'WebConfig']]",
@@ -553,6 +576,7 @@
             "type_class": "union",
             "type_text": "boolean | string | ContextManagerConfig | ContextManager"
           },
+          "ts_members": null,
           "ts_name": "context",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]",
@@ -578,6 +602,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "autonomy",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]",
@@ -588,16 +613,51 @@
           "canonical": "output",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "is flattened to TS [verbose, markdown, stream] and `verbose` default differs: python verbose=false typescript=`getEnv('PRAISON_VERBOSE') !== 'false'`; `markdown` default differs: python markdown=false typescript=true; `stream` default differs: python stream=false typescript=true",
+            "kind": "default"
+          },
           "kind": "keyword",
           "match": "flattened",
           "name": "output",
           "required": false,
           "ts": null,
+          "ts_members": [
+            {
+              "canonical": "verbose",
+              "default": "getEnv('PRAISON_VERBOSE') !== 'false'",
+              "default_kind": "expr",
+              "kind": "property",
+              "name": "verbose",
+              "required": false,
+              "type_class": "boolean",
+              "type_text": "boolean"
+            },
+            {
+              "canonical": "markdown",
+              "default": true,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "markdown",
+              "required": false,
+              "type_class": "boolean",
+              "type_text": "boolean"
+            },
+            {
+              "canonical": "stream",
+              "default": true,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "stream",
+              "required": false,
+              "type_class": "boolean",
+              "type_text": "boolean"
+            }
+          ],
           "ts_name": "verbose, markdown, stream",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']]",
-          "waived": null,
+          "waived": "Agent.__init__.output",
           "warnings": []
         },
         {
@@ -610,6 +670,28 @@
           "name": "execution",
           "required": false,
           "ts": null,
+          "ts_members": [
+            {
+              "canonical": "maxIterations",
+              "default": 20,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "maxIterations",
+              "required": false,
+              "type_class": "number",
+              "type_text": "number"
+            },
+            {
+              "canonical": "maxToolCallsPerTurn",
+              "default": 10,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "maxToolCallsPerTurn",
+              "required": false,
+              "type_class": "number",
+              "type_text": "number"
+            }
+          ],
           "ts_name": "maxIterations, maxToolCallsPerTurn",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']]",
@@ -635,6 +717,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "templates",
           "type_class": "object",
           "type_text": "Optional[Union[Dict[str, Any], 'TemplateConfig']]",
@@ -646,30 +729,41 @@
           "default": null,
           "default_kind": "literal",
           "gap": {
-            "detail": "default differs: python=null typescript=false (TS `cache`)",
+            "detail": "is flattened to TS [cache, cacheTTL] and `cache` default differs: python enabled=true typescript=false",
             "kind": "default"
           },
           "kind": "keyword",
-          "match": "alias",
+          "match": "flattened",
           "name": "caching",
           "required": false,
-          "ts": {
-            "canonical": "cache",
-            "default": false,
-            "default_kind": "literal",
-            "kind": "property",
-            "name": "cache",
-            "required": false,
-            "type_class": "boolean",
-            "type_text": "boolean"
-          },
-          "ts_name": "cache",
+          "ts": null,
+          "ts_members": [
+            {
+              "canonical": "cache",
+              "default": false,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "cache",
+              "required": false,
+              "type_class": "boolean",
+              "type_text": "boolean"
+            },
+            {
+              "canonical": "cacheTTL",
+              "default": 3600,
+              "default_kind": "literal",
+              "kind": "property",
+              "name": "cacheTTL",
+              "required": false,
+              "type_class": "number",
+              "type_text": "number"
+            }
+          ],
+          "ts_name": "cache, cacheTTL",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]",
           "waived": "Agent.__init__.caching",
-          "warnings": [
-            "type differs: python union (Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]) vs typescript boolean (boolean)"
-          ]
+          "warnings": []
         },
         {
           "canonical": "hooks",
@@ -690,6 +784,7 @@
             "type_class": "object",
             "type_text": "AgentHooksInput"
           },
+          "ts_members": null,
           "ts_name": "hooks",
           "type_class": "union",
           "type_text": "Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]",
@@ -717,6 +812,7 @@
             "type_class": "union",
             "type_text": "string | string[] | SkillDiscoveryOptions | SkillManager"
           },
+          "ts_members": null,
           "ts_name": "skills",
           "type_class": "union",
           "type_text": "Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]",
@@ -742,6 +838,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "selfImprove",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, 'SkillReviewProtocol']]",
@@ -767,6 +864,7 @@
             "type_class": "union",
             "type_text": "boolean | ApprovalManager"
           },
+          "ts_members": null,
           "ts_name": "approval",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']]",
@@ -792,6 +890,7 @@
             "type_class": "union",
             "type_text": "boolean | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "toolConfig",
           "type_class": "union",
           "type_text": "Optional[Union[bool, 'ToolConfig']]",
@@ -817,6 +916,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "learn",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]",
@@ -842,6 +942,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "backend",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -867,6 +968,7 @@
             "type_class": "union",
             "type_text": "string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "runOn",
           "type_class": "union",
           "type_text": "Optional[Union['ManagedRuntime', str]]",
@@ -892,6 +994,7 @@
             "type_class": "union",
             "type_text": "string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "toolsRunOn",
           "type_class": "union",
           "type_text": "Optional[Union['ToolPlace', str, Any]]",
@@ -917,6 +1020,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "runtime",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]",
@@ -942,6 +1046,7 @@
             "type_class": "object",
             "type_text": "AbortSignal"
           },
+          "ts_members": null,
           "ts_name": "signal",
           "type_class": "object",
           "type_text": "Optional['InterruptController']",
@@ -967,6 +1072,7 @@
             "type_class": "union",
             "type_text": "boolean | string | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "toolSearch",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]",
@@ -992,6 +1098,7 @@
             "type_class": "union",
             "type_text": "boolean | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "messageSteering",
           "type_class": "union",
           "type_text": "Optional[Union[bool, 'MessageSteeringProtocol']]",
@@ -1017,6 +1124,7 @@
             "type_class": "union",
             "type_text": "boolean | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "sandbox",
           "type_class": "union",
           "type_text": "Optional[Union[bool, 'SandboxConfig']]",
@@ -1042,6 +1150,7 @@
             "type_class": "union",
             "type_text": "boolean | AgentRetryConfig"
           },
+          "ts_members": null,
           "ts_name": "retry",
           "type_class": "union",
           "type_text": "Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]",
@@ -1067,6 +1176,7 @@
             "type_class": "string",
             "type_text": "'off' | 'minimal' | 'low' | 'medium' | 'high' | string"
           },
+          "ts_members": null,
           "ts_name": "reasoningEffort",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1200,16 +1310,6 @@
           "type_text": "boolean"
         },
         {
-          "canonical": "cacheTTL",
-          "default": 3600,
-          "default_kind": "literal",
-          "kind": "property",
-          "name": "cacheTTL",
-          "required": false,
-          "type_class": "number",
-          "type_text": "number"
-        },
-        {
           "canonical": "telemetry",
           "default": false,
           "default_kind": "literal",
@@ -1220,9 +1320,13 @@
           "type_text": "boolean"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/agent/simple.ts:900",
-        "location": "src/praisonai-ts/src/agent/simple.ts:196"
+        "location": "src/praisonai-ts/src/agent/simple.ts:196",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "Agent.chat": {
@@ -1258,6 +1362,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "prompt",
           "type_class": "string",
           "type_text": "str",
@@ -1283,6 +1388,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "temperature",
           "type_class": "number",
           "type_text": "Optional[float]",
@@ -1308,6 +1414,7 @@
             "type_class": "array",
             "type_text": "any[]"
           },
+          "ts_members": null,
           "ts_name": "tools",
           "type_class": "array",
           "type_text": "Optional[List[Any]]",
@@ -1333,6 +1440,7 @@
             "type_class": "object",
             "type_text": "Record<string, any>"
           },
+          "ts_members": null,
           "ts_name": "outputJson",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -1358,6 +1466,7 @@
             "type_class": "object",
             "type_text": "Record<string, any>"
           },
+          "ts_members": null,
           "ts_name": "outputPydantic",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -1383,6 +1492,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "reasoningSteps",
           "type_class": "boolean",
           "type_text": "bool",
@@ -1408,6 +1518,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "stream",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -1433,6 +1544,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "taskName",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1458,6 +1570,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "taskDescription",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1483,6 +1596,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "taskId",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1508,6 +1622,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -1533,6 +1648,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "forceRetrieval",
           "type_class": "boolean",
           "type_text": "bool",
@@ -1558,6 +1674,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "skipRetrieval",
           "type_class": "boolean",
           "type_text": "bool",
@@ -1583,6 +1700,7 @@
             "type_class": "array",
             "type_text": "string[]"
           },
+          "ts_members": null,
           "ts_name": "attachments",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -1608,6 +1726,7 @@
             "type_class": "string",
             "type_text": "'auto' | 'none' | 'required' | string"
           },
+          "ts_members": null,
           "ts_name": "toolChoice",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1633,6 +1752,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "seed",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -1658,6 +1778,7 @@
             "type_class": "object",
             "type_text": "AbortSignal"
           },
+          "ts_members": null,
           "ts_name": "signal",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -1691,10 +1812,14 @@
           "type_text": "AgentChatOptions"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/agent/simple.ts:3344",
         "options_interfaces": [
           "options: AgentChatOptions"
+        ],
+        "options_parameters": [
+          "options"
         ],
         "resolved_class": "Agent"
       }
@@ -1732,6 +1857,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "prompt",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -1945,10 +2071,14 @@
           "type_text": "number"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/agent/simple.ts:2305",
         "options_interfaces": [
           "options: AgentChatOptions"
+        ],
+        "options_parameters": [
+          "options"
         ],
         "resolved_class": "Agent"
       }
@@ -1986,6 +2116,7 @@
             "type_class": "array",
             "type_text": "Agent[]"
           },
+          "ts_members": null,
           "ts_name": "agents",
           "type_class": "unknown",
           "type_text": "",
@@ -2011,6 +2142,7 @@
             "type_class": "array",
             "type_text": "(string | Task)[]"
           },
+          "ts_members": null,
           "ts_name": "tasks",
           "type_class": "unknown",
           "type_text": "",
@@ -2039,6 +2171,7 @@
             "type_class": "object",
             "type_text": "AgentTeamProcess"
           },
+          "ts_members": null,
           "ts_name": "process",
           "type_class": "unknown",
           "type_text": "",
@@ -2064,6 +2197,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "managerLlm",
           "type_class": "unknown",
           "type_text": "",
@@ -2089,6 +2223,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -2114,6 +2249,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "variables",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -2139,6 +2275,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "llm",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -2164,6 +2301,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "model",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -2189,6 +2327,7 @@
             "type_class": "object",
             "type_text": "TeamMemoryInput"
           },
+          "ts_members": null,
           "ts_name": "memory",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2214,6 +2353,7 @@
             "type_class": "object",
             "type_text": "TeamPlanningInput"
           },
+          "ts_members": null,
           "ts_name": "planning",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2239,6 +2379,7 @@
             "type_class": "object",
             "type_text": "TeamContextInput"
           },
+          "ts_members": null,
           "ts_name": "context",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2264,6 +2405,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "output",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2289,6 +2431,7 @@
             "type_class": "object",
             "type_text": "TeamExecutionInput"
           },
+          "ts_members": null,
           "ts_name": "execution",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2314,6 +2457,7 @@
             "type_class": "object",
             "type_text": "TeamHooksInput"
           },
+          "ts_members": null,
           "ts_name": "hooks",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2339,6 +2483,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "autonomy",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2364,6 +2509,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "knowledge",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2389,6 +2535,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "guardrails",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2414,6 +2561,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "web",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2439,6 +2587,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "reflection",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2464,6 +2613,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "caching",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2489,6 +2639,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "learn",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2514,6 +2665,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "toolsRunOn",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2539,6 +2691,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "runOn",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2586,9 +2739,13 @@
           "type_text": "boolean"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/agent/team.ts:342",
-        "location": "src/praisonai-ts/src/agent/team.ts:78"
+        "location": "src/praisonai-ts/src/agent/team.ts:78",
+        "options_parameters": [
+          "configOrAgents"
+        ]
       }
     },
     "AgentTeam.start": {
@@ -2624,6 +2781,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "content",
           "type_class": "unknown",
           "type_text": "",
@@ -2649,6 +2807,7 @@
             "type_class": "boolean",
             "type_text": "false"
           },
+          "ts_members": null,
           "ts_name": "returnDict",
           "type_class": "unknown",
           "type_text": "",
@@ -2674,6 +2833,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "output",
           "type_class": "unknown",
           "type_text": "",
@@ -2697,10 +2857,14 @@
           "type_text": "AgentTeamStartOptions"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/agent/team.ts:770",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
+        ],
+        "options_parameters": [
+          "options"
         ],
         "resolved_class": "AgentTeam"
       }
@@ -2738,6 +2902,7 @@
             "type_class": "object",
             "type_text": "DoomLoopConfig | DoomLoopConfigOptions | null"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[DoomLoopConfig]",
@@ -2901,9 +3066,13 @@
           "type_text": "number"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/escalation/doom-loop.ts:250",
-        "location": "src/praisonai-ts/src/escalation/doom-loop.ts:51"
+        "location": "src/praisonai-ts/src/escalation/doom-loop.ts:51",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "EscalationPipeline.__init__": {
@@ -2939,6 +3108,7 @@
             "type_class": "object",
             "type_text": "EscalationConfig | EscalationConfigOptions | null"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[EscalationConfig]",
@@ -2964,6 +3134,7 @@
             "type_class": "object",
             "type_text": "EscalationAgent | null"
           },
+          "ts_members": null,
           "ts_name": "agent",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -2989,6 +3160,7 @@
             "type_class": "array",
             "type_text": "unknown[] | null"
           },
+          "ts_members": null,
           "ts_name": "tools",
           "type_class": "array",
           "type_text": "Optional[List[Any]]",
@@ -3014,6 +3186,7 @@
             "type_class": "object",
             "type_text": "CheckpointServiceLike | null"
           },
+          "ts_members": null,
           "ts_name": "checkpointService",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -3039,6 +3212,7 @@
             "type_class": "object",
             "type_text": "StageChangeCallback | null"
           },
+          "ts_members": null,
           "ts_name": "onStageChange",
           "type_class": "callable",
           "type_text": "Optional[Callable[[EscalationStage, EscalationStage], None]]",
@@ -3094,9 +3268,13 @@
           "type_text": "DoomLoopConfig | DoomLoopConfigOptions | null"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/escalation/pipeline.ts:103",
-        "location": "src/praisonai-ts/src/escalation/pipeline.ts:51"
+        "location": "src/praisonai-ts/src/escalation/pipeline.ts:51",
+        "options_parameters": [
+          "options"
+        ]
       }
     },
     "FileTracker.__init__": {
@@ -3132,6 +3310,7 @@
             "type_class": "string",
             "type_text": "string | null"
           },
+          "ts_members": null,
           "ts_name": "stateFile",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -3144,6 +3323,7 @@
         "resolved_class": "FileTracker"
       },
       "ts_only": [],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/knowledge/indexing.ts:552",
         "resolved_class": "FileTracker"
@@ -3155,19 +3335,22 @@
         "camelCase": 2,
         "exact": 4,
         "flattened": 0,
-        "mismatches": 0,
+        "mismatches": 5,
         "missing": 0,
         "params": 6,
         "ts_only": 2,
         "ts_total": 8,
-        "waived": 0
+        "waived": 5
       },
       "params": [
         {
           "canonical": "model",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=unknown (TS `model`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "model",
@@ -3175,24 +3358,28 @@
           "ts": {
             "canonical": "model",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "model",
             "required": false,
             "type_class": "string",
             "type_text": "string | null"
           },
+          "ts_members": null,
           "ts_name": "model",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": null,
+          "waived": "GoalEngineer.__init__.model",
           "warnings": []
         },
         {
           "canonical": "maxCriteria",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=unknown (TS `maxCriteria`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "camelCase",
           "name": "max_criteria",
@@ -3200,24 +3387,28 @@
           "ts": {
             "canonical": "maxCriteria",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "maxCriteria",
             "required": false,
             "type_class": "number",
             "type_text": "number | null"
           },
+          "ts_members": null,
           "ts_name": "maxCriteria",
           "type_class": "number",
           "type_text": "Optional[int]",
-          "waived": null,
+          "waived": "GoalEngineer.__init__.max_criteria",
           "warnings": []
         },
         {
           "canonical": "threshold",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=unknown (TS `threshold`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "threshold",
@@ -3225,24 +3416,28 @@
           "ts": {
             "canonical": "threshold",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "threshold",
             "required": false,
             "type_class": "number",
             "type_text": "number | null"
           },
+          "ts_members": null,
           "ts_name": "threshold",
           "type_class": "number",
           "type_text": "Optional[float]",
-          "waived": null,
+          "waived": "GoalEngineer.__init__.threshold",
           "warnings": []
         },
         {
           "canonical": "autoDecompose",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=unknown (TS `autoDecompose`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "camelCase",
           "name": "auto_decompose",
@@ -3250,17 +3445,18 @@
           "ts": {
             "canonical": "autoDecompose",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "autoDecompose",
             "required": false,
             "type_class": "boolean",
             "type_text": "boolean | null"
           },
+          "ts_members": null,
           "ts_name": "autoDecompose",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
-          "waived": null,
+          "waived": "GoalEngineer.__init__.auto_decompose",
           "warnings": []
         },
         {
@@ -3282,6 +3478,7 @@
             "type_class": "object",
             "type_text": "GoalConfig | GoalConfigOptions | null"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[GoalConfig]",
@@ -3292,7 +3489,10 @@
           "canonical": "verbose",
           "default": false,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=false typescript=unknown (TS `verbose`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "verbose",
@@ -3300,17 +3500,18 @@
           "ts": {
             "canonical": "verbose",
             "default": null,
-            "default_kind": null,
+            "default_kind": "unknown",
             "kind": "property",
             "name": "verbose",
             "required": false,
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "verbose",
           "type_class": "boolean",
           "type_text": "bool",
-          "waived": null,
+          "waived": "GoalEngineer.__init__.verbose",
           "warnings": []
         }
       ],
@@ -3340,9 +3541,13 @@
           "type_text": "GoalLLM"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/goal/engineer.ts:74",
-        "location": "src/praisonai-ts/src/goal/engineer.ts:42"
+        "location": "src/praisonai-ts/src/goal/engineer.ts:42",
+        "options_parameters": [
+          "options"
+        ]
       }
     },
     "Handoff.__init__": {
@@ -3378,6 +3583,7 @@
             "type_class": "object",
             "type_text": "EnhancedAgent"
           },
+          "ts_members": null,
           "ts_name": "agent",
           "type_class": "object",
           "type_text": "'Agent'",
@@ -3406,6 +3612,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -3434,6 +3641,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "description",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -3459,6 +3667,7 @@
             "type_class": "callable",
             "type_text": "(context: HandoffContext) => void | Promise<void>"
           },
+          "ts_members": null,
           "ts_name": "onHandoff",
           "type_class": "callable",
           "type_text": "Optional[Callable]",
@@ -3484,6 +3693,7 @@
             "type_class": "object",
             "type_text": "HandoffInputType"
           },
+          "ts_members": null,
           "ts_name": "inputType",
           "type_class": "unknown",
           "type_text": "Optional[type]",
@@ -3509,6 +3719,7 @@
             "type_class": "callable",
             "type_text": "(messages: any[]) => any[]"
           },
+          "ts_members": null,
           "ts_name": "transformContext",
           "type_class": "union",
           "type_text": "Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]]",
@@ -3536,6 +3747,7 @@
             "type_class": "object",
             "type_text": "Partial<HandoffConfig>"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[HandoffConfig]",
@@ -3679,9 +3891,13 @@
           "type_text": "(error: Error) => void | Promise<void>"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:721",
-        "location": "src/praisonai-ts/src/agent/handoff.ts:485"
+        "location": "src/praisonai-ts/src/agent/handoff.ts:485",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "Knowledge.__init__": {
@@ -3717,6 +3933,7 @@
             "type_class": "object",
             "type_text": "KnowledgeStoreConfig | null"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "unknown",
           "type_text": "",
@@ -3742,6 +3959,7 @@
             "type_class": "union",
             "type_text": "number | boolean | null"
           },
+          "ts_members": null,
           "ts_name": "verbose",
           "type_class": "unknown",
           "type_text": "",
@@ -3754,6 +3972,7 @@
         "resolved_class": "Knowledge"
       },
       "ts_only": [],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/knowledge/knowledge.ts:166",
         "resolved_class": "Knowledge"
@@ -3792,6 +4011,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "model",
           "type_class": "string",
           "type_text": "str",
@@ -3817,6 +4037,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "timeout",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -3842,6 +4063,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "temperature",
           "type_class": "number",
           "type_text": "Optional[float]",
@@ -3867,6 +4089,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "topP",
           "type_class": "number",
           "type_text": "Optional[float]",
@@ -3892,6 +4115,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "n",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -3917,6 +4141,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "maxTokens",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -3942,6 +4167,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "presencePenalty",
           "type_class": "number",
           "type_text": "Optional[float]",
@@ -3967,6 +4193,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "frequencyPenalty",
           "type_class": "number",
           "type_text": "Optional[float]",
@@ -3992,6 +4219,7 @@
             "type_class": "object",
             "type_text": "Record<number, number>"
           },
+          "ts_members": null,
           "ts_name": "logitBias",
           "type_class": "object",
           "type_text": "Optional[Dict[int, float]]",
@@ -4017,6 +4245,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "responseFormat",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -4042,6 +4271,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "seed",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -4067,6 +4297,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "logprobs",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -4092,6 +4323,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "topLogprobs",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -4117,6 +4349,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "apiVersion",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4142,6 +4375,7 @@
             "type_class": "union",
             "type_text": "string | string[]"
           },
+          "ts_members": null,
           "ts_name": "stopPhrases",
           "type_class": "union",
           "type_text": "Optional[Union[str, List[str]]]",
@@ -4167,6 +4401,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "apiKey",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4192,6 +4427,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "baseURL",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4217,6 +4453,7 @@
             "type_class": "array",
             "type_text": "LLMEventListener[]"
           },
+          "ts_members": null,
           "ts_name": "events",
           "type_class": "array",
           "type_text": "List[Any]",
@@ -4242,6 +4479,7 @@
             "type_class": "union",
             "type_text": "boolean | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "webSearch",
           "type_class": "union",
           "type_text": "Optional[Union[bool, Dict[str, Any]]]",
@@ -4267,6 +4505,7 @@
             "type_class": "union",
             "type_text": "boolean | Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "webFetch",
           "type_class": "union",
           "type_text": "Optional[Union[bool, Dict[str, Any]]]",
@@ -4292,6 +4531,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "promptCaching",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -4317,6 +4557,7 @@
             "type_class": "union",
             "type_text": "boolean | ClaudeMemoryBackend"
           },
+          "ts_members": null,
           "ts_name": "claudeMemory",
           "type_class": "union",
           "type_text": "Optional[Union[bool, Any]]",
@@ -4342,6 +4583,7 @@
             "type_class": "object",
             "type_text": "LLMFailoverManager"
           },
+          "ts_members": null,
           "ts_name": "failoverManager",
           "type_class": "object",
           "type_text": "Optional[FailoverManagerProtocol]",
@@ -4367,6 +4609,7 @@
             "type_class": "object",
             "type_text": "LLMAuthSource"
           },
+          "ts_members": null,
           "ts_name": "auth",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4394,6 +4637,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "maxIter",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -4417,9 +4661,13 @@
           "type_text": "LLMConfig"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/llm/index.ts:466",
-        "location": "src/praisonai-ts/src/llm/index.ts:286"
+        "ctor_location": "src/praisonai-ts/src/llm/index.ts:416",
+        "location": "src/praisonai-ts/src/llm/index.ts:236",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "PraisonAIError.__init__": {
@@ -4455,6 +4703,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "message",
           "type_class": "string",
           "type_text": "str",
@@ -4480,6 +4729,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "agentId",
           "type_class": "string",
           "type_text": "str",
@@ -4508,6 +4758,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "runId",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4533,6 +4784,7 @@
             "type_class": "union",
             "type_text": "AgentErrorKind | LegacyErrorCategory | string"
           },
+          "ts_members": null,
           "ts_name": "errorCategory",
           "type_class": "object",
           "type_text": "Optional[AgentErrorKind]",
@@ -4560,6 +4812,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "isRetryable",
           "type_class": "boolean",
           "type_text": "bool",
@@ -4585,6 +4838,7 @@
             "type_class": "object",
             "type_text": "Record<string, any>"
           },
+          "ts_members": null,
           "ts_name": "context",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -4608,9 +4862,13 @@
           "type_text": "PraisonAIErrorOptions"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/errors-base.ts:169",
-        "location": "src/praisonai-ts/src/errors-base.ts:142"
+        "location": "src/praisonai-ts/src/errors-base.ts:142",
+        "options_parameters": [
+          "options"
+        ]
       }
     },
     "Session.__init__": {
@@ -4646,6 +4904,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "sessionId",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4674,6 +4933,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "userId",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4699,6 +4959,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "agentUrl",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4724,6 +4985,7 @@
             "type_class": "object",
             "type_text": "Record<string, any>"
           },
+          "ts_members": null,
           "ts_name": "memoryConfig",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -4749,6 +5011,7 @@
             "type_class": "object",
             "type_text": "Record<string, any>"
           },
+          "ts_members": null,
           "ts_name": "knowledgeConfig",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -4774,6 +5037,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "timeout",
           "type_class": "number",
           "type_text": "int",
@@ -4799,6 +5063,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "sessionTtl",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -4862,9 +5127,13 @@
           "type_text": "number"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/session/session.ts:132",
-        "location": "src/praisonai-ts/src/session/session.ts:29"
+        "location": "src/praisonai-ts/src/session/session.ts:29",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "Task.__init__": {
@@ -4903,6 +5172,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "description",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4931,6 +5201,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "expected_output",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -4956,6 +5227,7 @@
             "type_class": "unknown",
             "type_text": "any"
           },
+          "ts_members": null,
           "ts_name": "agent",
           "type_class": "object",
           "type_text": "Optional[Agent]",
@@ -4981,6 +5253,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -5006,6 +5279,7 @@
             "type_class": "array",
             "type_text": "any[]"
           },
+          "ts_members": null,
           "ts_name": "tools",
           "type_class": "array",
           "type_text": "Optional[List[Any]]",
@@ -5031,6 +5305,7 @@
             "type_class": "array",
             "type_text": "(string | Task)[]"
           },
+          "ts_members": null,
           "ts_name": "context",
           "type_class": "array",
           "type_text": "Optional[List[Union[str, List, 'Task']]]",
@@ -5059,6 +5334,7 @@
             "type_class": "array",
             "type_text": "Task[]"
           },
+          "ts_members": null,
           "ts_name": "dependsOn",
           "type_class": "array",
           "type_text": "Optional[List[Union[str, List, 'Task']]]",
@@ -5084,6 +5360,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "asyncExecution",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -5109,6 +5386,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "config",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -5134,6 +5412,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "outputFile",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -5159,6 +5438,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "outputJson",
           "type_class": "object",
           "type_text": "Optional[Type[BaseModel]]",
@@ -5184,6 +5464,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "outputPydantic",
           "type_class": "object",
           "type_text": "Optional[Type[BaseModel]]",
@@ -5209,6 +5490,7 @@
             "type_class": "object",
             "type_text": "TaskCallback"
           },
+          "ts_members": null,
           "ts_name": "callback",
           "type_class": "callable",
           "type_text": "Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]",
@@ -5236,6 +5518,7 @@
             "type_class": "object",
             "type_text": "TaskCallback"
           },
+          "ts_members": null,
           "ts_name": "onTaskComplete",
           "type_class": "callable",
           "type_text": "Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]",
@@ -5263,6 +5546,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "status",
           "type_class": "string",
           "type_text": "str",
@@ -5288,6 +5572,7 @@
             "type_class": "union",
             "type_text": "TaskOutput | string | null"
           },
+          "ts_members": null,
           "ts_name": "result",
           "type_class": "object",
           "type_text": "Optional[TaskOutput]",
@@ -5315,6 +5600,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "createDirectory",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -5343,6 +5629,7 @@
             "type_class": "union",
             "type_text": "number | string"
           },
+          "ts_members": null,
           "ts_name": "id",
           "type_class": "number",
           "type_text": "Optional[int]",
@@ -5370,6 +5657,7 @@
             "type_class": "array",
             "type_text": "string[]"
           },
+          "ts_members": null,
           "ts_name": "images",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -5395,6 +5683,7 @@
             "type_class": "array",
             "type_text": "string[]"
           },
+          "ts_members": null,
           "ts_name": "nextTasks",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -5420,6 +5709,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "taskType",
           "type_class": "string",
           "type_text": "str",
@@ -5445,6 +5735,7 @@
             "type_class": "object",
             "type_text": "Record<string, string[]>"
           },
+          "ts_members": null,
           "ts_name": "condition",
           "type_class": "object",
           "type_text": "Optional[Dict[str, List[str]]]",
@@ -5470,6 +5761,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "isStart",
           "type_class": "boolean",
           "type_text": "bool",
@@ -5495,6 +5787,7 @@
             "type_class": "object",
             "type_text": "Record<string, string | number>"
           },
+          "ts_members": null,
           "ts_name": "loopState",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Union[str, int]]]",
@@ -5520,6 +5813,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "memory",
           "type_class": "unknown",
           "type_text": "",
@@ -5545,6 +5839,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "qualityCheck",
           "type_class": "unknown",
           "type_text": "",
@@ -5570,6 +5865,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "inputFile",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -5595,6 +5891,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "rerun",
           "type_class": "boolean",
           "type_text": "bool",
@@ -5620,6 +5917,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "retainFullContext",
           "type_class": "boolean",
           "type_text": "bool",
@@ -5645,6 +5943,7 @@
             "type_class": "object",
             "type_text": "TaskGuardrail"
           },
+          "ts_members": null,
           "ts_name": "guardrail",
           "type_class": "union",
           "type_text": "Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]",
@@ -5675,6 +5974,7 @@
             "type_class": "object",
             "type_text": "TaskGuardrail"
           },
+          "ts_members": null,
           "ts_name": "guardrails",
           "type_class": "union",
           "type_text": "Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]",
@@ -5702,6 +6002,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "maxRetries",
           "type_class": "number",
           "type_text": "int",
@@ -5727,6 +6028,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "retryCount",
           "type_class": "number",
           "type_text": "int",
@@ -5752,6 +6054,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "agentConfig",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -5777,6 +6080,7 @@
             "type_class": "object",
             "type_text": "Record<string, unknown>"
           },
+          "ts_members": null,
           "ts_name": "variables",
           "type_class": "object",
           "type_text": "Optional[Dict[str, Any]]",
@@ -5802,6 +6106,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "skipOnFailure",
           "type_class": "boolean",
           "type_text": "bool",
@@ -5827,6 +6132,7 @@
             "type_class": "number",
             "type_text": "number"
           },
+          "ts_members": null,
           "ts_name": "retryDelay",
           "type_class": "number",
           "type_text": "float",
@@ -5852,6 +6158,7 @@
             "type_class": "object",
             "type_text": "TaskOnError"
           },
+          "ts_members": null,
           "ts_name": "onError",
           "type_class": "string",
           "type_text": "str",
@@ -5882,6 +6189,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "action",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -5907,6 +6215,7 @@
             "type_class": "callable",
             "type_text": "(...args: unknown[]) => unknown"
           },
+          "ts_members": null,
           "ts_name": "handler",
           "type_class": "callable",
           "type_text": "Optional[Callable]",
@@ -5932,6 +6241,7 @@
             "type_class": "callable",
             "type_text": "() => boolean | Promise<boolean>"
           },
+          "ts_members": null,
           "ts_name": "shouldRun",
           "type_class": "callable",
           "type_text": "Optional[Callable]",
@@ -5957,6 +6267,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "loopOver",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -5982,6 +6293,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "loopVar",
           "type_class": "string",
           "type_text": "str",
@@ -6007,6 +6319,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "execution",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6035,6 +6348,7 @@
             "type_class": "object",
             "type_text": "Record<string, string[]>"
           },
+          "ts_members": null,
           "ts_name": "routing",
           "type_class": "object",
           "type_text": "Optional[Dict[str, List[str]]]",
@@ -6060,6 +6374,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "outputConfig",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6085,6 +6400,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "output",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6110,6 +6426,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "when",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6135,6 +6452,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "thenTask",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6160,6 +6478,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "elseTask",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6185,6 +6504,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "autonomy",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6210,6 +6530,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "knowledge",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6235,6 +6556,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "web",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6260,6 +6582,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "reflection",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6285,6 +6608,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "planning",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6310,6 +6634,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "hooks",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6335,6 +6660,7 @@
             "type_class": "unknown",
             "type_text": "unknown"
           },
+          "ts_members": null,
           "ts_name": "caching",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6360,6 +6686,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "outputVariable",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6385,6 +6712,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "failOnCallbackError",
           "type_class": "boolean",
           "type_text": "bool",
@@ -6410,6 +6738,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "failOnMemoryError",
           "type_class": "boolean",
           "type_text": "bool",
@@ -6433,9 +6762,13 @@
           "type_text": "Task[]"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/agent/types.ts:379",
-        "location": "src/praisonai-ts/src/agent/types.ts:115"
+        "location": "src/praisonai-ts/src/agent/types.ts:115",
+        "options_parameters": [
+          "config"
+        ]
       }
     },
     "ToolsetRegistry.register_toolset": {
@@ -6471,6 +6804,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "str",
@@ -6496,6 +6830,7 @@
             "type_class": "array",
             "type_text": "string[] | null"
           },
+          "ts_members": null,
           "ts_name": "tools",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -6521,6 +6856,7 @@
             "type_class": "array",
             "type_text": "string[] | null"
           },
+          "ts_members": null,
           "ts_name": "includes",
           "type_class": "array",
           "type_text": "Optional[List[str]]",
@@ -6546,6 +6882,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "description",
           "type_class": "string",
           "type_text": "str",
@@ -6571,6 +6908,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "overwrite",
           "type_class": "boolean",
           "type_text": "bool",
@@ -6583,6 +6921,7 @@
         "resolved_class": "ToolsetRegistry"
       },
       "ts_only": [],
+      "ts_only_required": [],
       "typescript": {
         "location": "src/praisonai-ts/src/toolsets.ts:115",
         "resolved_class": "ToolsetRegistry"
@@ -6624,6 +6963,7 @@
             "type_class": "callable",
             "type_text": "(params: TParams, context?: ToolContext) => Promise<TResult> | TResult"
           },
+          "ts_members": null,
           "ts_name": "execute",
           "type_class": "callable",
           "type_text": "Optional[Callable]",
@@ -6652,6 +6992,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "name",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6680,6 +7021,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "description",
           "type_class": "string",
           "type_text": "Optional[str]",
@@ -6705,6 +7047,7 @@
             "type_class": "string",
             "type_text": "string"
           },
+          "ts_members": null,
           "ts_name": "version",
           "type_class": "string",
           "type_text": "str",
@@ -6730,6 +7073,7 @@
             "type_class": "callable",
             "type_text": "() => [boolean, string]"
           },
+          "ts_members": null,
           "ts_name": "availability",
           "type_class": "callable",
           "type_text": "Optional[Callable[[], tuple[bool, str]]]",
@@ -6755,6 +7099,7 @@
             "type_class": "callable",
             "type_text": "(schema: ToolParameters) => ToolParameters"
           },
+          "ts_members": null,
           "ts_name": "dynamicSchemaOverrides",
           "type_class": "callable",
           "type_text": "Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]",
@@ -6780,6 +7125,7 @@
             "type_class": "object",
             "type_text": "RetryPolicy"
           },
+          "ts_members": null,
           "ts_name": "retryPolicy",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
@@ -6805,6 +7151,7 @@
             "type_class": "union",
             "type_text": "boolean | RiskLevel | string"
           },
+          "ts_members": null,
           "ts_name": "approval",
           "type_class": "union",
           "type_text": "Optional[Union[bool, str]]",
@@ -6830,6 +7177,7 @@
             "type_class": "union",
             "type_text": "boolean | RiskLevel | string"
           },
+          "ts_members": null,
           "ts_name": "requiresApproval",
           "type_class": "union",
           "type_text": "Union[bool, str]",
@@ -6855,6 +7203,7 @@
             "type_class": "callable",
             "type_text": "(result: TResult) => unknown"
           },
+          "ts_members": null,
           "ts_name": "toModelOutput",
           "type_class": "callable",
           "type_text": "Optional[Callable[[Any], Any]]",
@@ -6880,6 +7229,7 @@
             "type_class": "boolean",
             "type_text": "boolean"
           },
+          "ts_members": null,
           "ts_name": "restartSafe",
           "type_class": "boolean",
           "type_text": "Optional[bool]",
@@ -6922,24 +7272,28 @@
           "type_text": "string"
         }
       ],
+      "ts_only_required": [],
       "typescript": {
         "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:213",
-        "location": "src/praisonai-ts/src/tools/decorator.ts:48"
+        "location": "src/praisonai-ts/src/tools/decorator.ts:48",
+        "options_parameters": [
+          "config"
+        ]
       }
     }
   },
   "totals": {
-    "alias": 9,
+    "alias": 8,
     "camelCase": 88,
     "exact": 123,
-    "flattened": 2,
-    "mismatches": 21,
+    "flattened": 3,
+    "mismatches": 28,
     "missing": 0,
     "params": 222,
     "surfaces": 17,
-    "ts_only": 85,
+    "ts_only": 84,
     "ts_total": 312,
-    "waived": 21
+    "waived": 28
   },
   "waivers": [
     {
@@ -6966,6 +7320,13 @@
     {
       "expires": null,
       "issue": null,
+      "key": "Agent.__init__.instructions",
+      "owner": "praisonai-ts",
+      "reason": "TypeScript computes it across three branches -- the given value, else role/goal/backstory joined, else a fallback sentence -- so the extractor reports no single default rather than guessing. Python's None resolves the same way in its body."
+    },
+    {
+      "expires": null,
+      "issue": null,
       "key": "Agent.__init__.model",
       "owner": "praisonai-ts",
       "reason": "Same resolution, run eagerly. TS now calls `resolveDefaultModel()` (src/llm/default-model.ts), a byte-for-byte port of Python's `Agent._PROVIDER_DEFAULT_MODELS` / `_resolve_default_model`, so the same environment yields the same model on both sides. What still differs is only the moment: TS resolves in the constructor, Python inside the body, and TS additionally honours `PRAISONAI_MODEL` (a TypeScript-only alias)."
@@ -6980,6 +7341,13 @@
     {
       "expires": null,
       "issue": null,
+      "key": "Agent.__init__.output",
+      "owner": "praisonai-ts",
+      "reason": "Genuine divergence, newly visible: Python's output=None resolves the silent preset (verbose, markdown and stream all false) while TypeScript defaults markdown and stream to true and verbose to PRAISON_VERBOSE. Aligning them changes default behaviour for every existing caller, so it needs a product decision, not a quiet edit. Flattened rows were never compared until the comparator was fixed, which is why this sat unseen."
+    },
+    {
+      "expires": null,
+      "issue": null,
       "key": "Agent.__init__.role",
       "owner": "praisonai-ts",
       "reason": "Same value, resolved at a different moment. TS now stores `config.role || 'Assistant'` in the constructor, matching Python's `self.role = role or \"Assistant\"`, so `agent.role` reads back the same string on both sides. The system-prompt TEXT built from role/goal/ backstory still differs between the two SDKs -- that is a separate, untracked gap, not covered by this waiver."
@@ -6990,6 +7358,41 @@
       "key": "AgentTeam.__init__.process",
       "owner": "praisonai-ts",
       "reason": "TS treats an undefined process as sequential, the Python default. NOTE (verified, out of scope for this key): the accepted DOMAIN differs -- TS implements `process: \"parallel\"` with Promise.all, which Python rejects with a ValueError, and TS validates nothing, so a typo runs sequentially instead of raising."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "GoalEngineer.__init__.auto_decompose",
+      "owner": "praisonai-ts",
+      "reason": "The constructor only overrides `autoDecompose` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "GoalEngineer.__init__.max_criteria",
+      "owner": "praisonai-ts",
+      "reason": "The constructor only overrides `maxCriteria` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "GoalEngineer.__init__.model",
+      "owner": "praisonai-ts",
+      "reason": "A real divergence, of the same shape already waived for Agent.__init__.model: TypeScript calls resolveDefaultModel() eagerly while Python leaves model None and resolves it later. The other four GoalEngineer options genuinely agree -- maxCriteria 5, threshold 8.0, autoDecompose true, verbose false on both sides -- they are only 'unknown' because the constructor forwards non-null options into GoalConfig, which the extractor rightly will not constant-fold across files."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "GoalEngineer.__init__.threshold",
+      "owner": "praisonai-ts",
+      "reason": "The constructor only overrides `threshold` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "GoalEngineer.__init__.verbose",
+      "owner": "praisonai-ts",
+      "reason": "The constructor only overrides `verbose` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading."
     },
     {
       "expires": null,

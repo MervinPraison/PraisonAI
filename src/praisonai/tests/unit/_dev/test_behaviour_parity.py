@@ -24,12 +24,27 @@ LEDGER = textwrap.dedent('''
 ''')
 
 
-def _repo(tmp_path: Path, ledger: str = LEDGER, extra: str = '') -> Path:
+# The surfaces the TypeScript code iterates. read_ledger cross-checks the parse
+# against these, so every fixture repo carries them.
+CALL_SITES = (
+    "const a = unhonouredFor('Agent.__init__');\n"
+    "const t = unhonouredFor('Task.__init__');\n"
+)
+
+
+def _repo(
+    tmp_path: Path,
+    ledger: str = LEDGER,
+    extra: str = '',
+    call_sites: str = CALL_SITES,
+) -> Path:
     src = tmp_path / 'src' / 'praisonai-ts' / 'src' / 'utils'
     src.mkdir(parents=True)
     (src / 'parity-notice.ts').write_text(ledger)
     if extra:
         (src.parent / 'agent.ts').write_text(extra)
+    if call_sites:
+        (src.parent / 'call-sites.ts').write_text(call_sites)
     return tmp_path
 
 
@@ -102,3 +117,237 @@ class TestRatchet:
         data = json.loads((repo / B.JSON_OUTPUT).read_text())
         assert data['total'] == 3
         assert data['surfaces']['Agent.__init__'] == ['auth', 'sandbox']
+
+
+# ---------------------------------------------------------------------------
+# A partial parse failure must never read as progress.
+#
+# The first version matched entries with a line-anchored regex that required a
+# trailing comma after the closing bracket. Putting one entry on a single line
+# without that comma dropped the whole surface: 48 -> 40, reported as "8
+# option(s) closed", and --write made it the new floor with the TypeScript
+# unchanged. A surface disappearing is a parse error, never a win.
+# ---------------------------------------------------------------------------
+
+ONE_LINE_LEDGER = textwrap.dedent('''
+    export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+      'Agent.__init__': ['auth', 'sandbox'],
+      'Task.__init__': ['images']
+    } as const;
+''')
+
+
+class TestReformatCannotCloseOptions:
+    def test_a_one_line_entry_without_a_trailing_comma_is_still_counted(self, tmp_path):
+        b = B.read_ledger(_repo(tmp_path, ledger=ONE_LINE_LEDGER))
+        assert b.surfaces == {'Agent.__init__': ['auth', 'sandbox'], 'Task.__init__': ['images']}
+        assert b.total == 3, 'whitespace changed; the number of ignored options did not'
+
+    def test_reformatting_does_not_lower_the_total(self, tmp_path, capsys):
+        repo = _repo(tmp_path)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        (repo / 'src/praisonai-ts/src/utils/parity-notice.ts').write_text(ONE_LINE_LEDGER)
+        assert B.main(['--check', '--repo-root', str(repo)]) == 0
+        out = capsys.readouterr().out
+        assert 'closed since the last commit' not in out
+
+    def test_trailing_commas_and_comments_are_both_tolerated(self, tmp_path):
+        ledger = textwrap.dedent('''
+            export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+              // 'Ghost': ['notAKey'],
+              /* 'AlsoGhost': ['notAKey'] */
+              'Agent.__init__': [
+                'auth',   // still ignored
+                'sandbox',
+              ],
+              'Task.__init__': ['images'],
+            } as const;
+        ''')
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger))
+        assert sorted(b.surfaces) == ['Agent.__init__', 'Task.__init__']
+        assert b.total == 3
+
+    def test_a_surface_the_code_iterates_but_the_parse_lost_is_an_error(self):
+        """The guard itself: a key in the ledger text, gone from the parse."""
+        body = "'Agent.__init__': ['auth'],\n'Handoff': ['maxDepth'],\n"
+        with pytest.raises(B.LedgerError, match='Handoff'):
+            B._verify_parse(body, {'Agent.__init__': ['auth']}, ['Agent.__init__', 'Handoff'])
+
+    def test_a_surface_absent_from_the_ledger_is_closed_not_lost(self, tmp_path):
+        """Control: code may iterate a surface whose entry was legitimately deleted."""
+        b = B.read_ledger(_repo(
+            tmp_path,
+            call_sites=CALL_SITES + "const h = unhonouredFor('Handoff');\n",
+        ))
+        assert 'Handoff' not in b.surfaces
+        assert b.total == 3
+
+    def test_the_independent_key_count_must_agree_with_the_parse(self):
+        body = "'Agent.__init__': ['auth'],\n'Task.__init__': ['images'],\n"
+        with pytest.raises(B.LedgerError, match='Task.__init__'):
+            B._verify_parse(body, {'Agent.__init__': ['auth']}, [])
+
+    def test_an_entry_whose_value_is_not_a_list_is_an_error(self, tmp_path):
+        ledger = LEDGER.replace("'Task.__init__': [\n    'images',\n  ],", "'Task.__init__': someExpr,")
+        assert 'someExpr' in ledger
+        with pytest.raises(B.LedgerError, match='not a list'):
+            B.read_ledger(_repo(tmp_path, ledger=ledger))
+
+    def test_a_duplicate_surface_key_is_an_error(self, tmp_path):
+        ledger = LEDGER.replace("'Task.__init__'", "'Agent.__init__'")
+        with pytest.raises(B.LedgerError, match='twice'):
+            B.read_ledger(_repo(tmp_path, ledger=ledger))
+
+
+# ---------------------------------------------------------------------------
+# --write must not launder a ratchet rise.
+# ---------------------------------------------------------------------------
+
+class TestWriteRespectsTheRatchet:
+    @staticmethod
+    def _grow(repo: Path) -> None:
+        (repo / 'src/praisonai-ts/src/utils/parity-notice.ts').write_text(
+            LEDGER.replace("'auth', 'sandbox',", "'auth', 'sandbox', 'newlyIgnored',")
+        )
+
+    def test_write_refuses_to_raise_the_committed_total(self, tmp_path, capsys):
+        repo = _repo(tmp_path)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        self._grow(repo)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 1
+        assert B.committed_total(repo) == 3, 'the committed floor must not have moved'
+        assert '--allow-growth' in capsys.readouterr().err
+
+    def test_allow_growth_banks_the_rise(self, tmp_path):
+        repo = _repo(tmp_path)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        self._grow(repo)
+        assert B.main(['--write', '--allow-growth', '--repo-root', str(repo)]) == 0
+        assert B.committed_total(repo) == 4
+
+    def test_write_may_always_lower_the_total(self, tmp_path):
+        """Control: closing an option needs no flag."""
+        repo = _repo(tmp_path)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        (repo / 'src/praisonai-ts/src/utils/parity-notice.ts').write_text(
+            LEDGER.replace("'auth', 'sandbox',", "'auth',")
+        )
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        assert B.committed_total(repo) == 2
+
+    def test_the_first_write_has_no_floor_to_break(self, tmp_path):
+        """Control: no committed report yet is not growth."""
+        assert B.main(['--write', '--repo-root', str(_repo(tmp_path))]) == 0
+
+    def test_write_names_the_options_it_claims_closed(self, tmp_path, capsys):
+        repo = _repo(tmp_path)
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        (repo / 'src/praisonai-ts/src/utils/parity-notice.ts').write_text(
+            LEDGER.replace("'auth', 'sandbox',", "'auth',")
+        )
+        assert B.main(['--write', '--repo-root', str(repo)]) == 0
+        out = capsys.readouterr().out
+        assert 'Agent.__init__.sandbox' in out
+
+
+# ---------------------------------------------------------------------------
+# The gate must run on the files that carry the baseline.
+# ---------------------------------------------------------------------------
+
+def _real_repo_root():
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'src' / 'praisonai-ts').is_dir() and (parent / '.github').is_dir():
+            return parent
+    return None
+
+
+class TestGateWatchesTheReport:
+    def test_the_pull_request_filter_covers_the_behaviour_baseline(self):
+        root = _real_repo_root()
+        if root is None:
+            pytest.skip('not running inside a checkout with .github/workflows')
+        yaml = pytest.importorskip('yaml')
+        data = yaml.safe_load((root / '.github/workflows/parity-gate.yml').read_text())
+        # PyYAML reads the bare key `on` as the boolean True (YAML 1.1).
+        triggers = data.get('on', data.get(True))
+        paths = triggers['pull_request']['paths']
+        for required in (
+            'src/praisonai-ts/BEHAVIOUR_PARITY.md',
+            'src/praisonai-ts/behaviour-parity.json',
+            'src/praisonai/scripts/**',
+        ):
+            assert required in paths, f'{required} can change without the gate running'
+
+
+class TestQuotingCannotHideASurface:
+    """JavaScript takes ' " and `; a style the parser missed dropped a surface."""
+
+    def test_a_double_quoted_key_is_still_a_surface(self, tmp_path):
+        ledger = LEDGER.replace("'Task.__init__':", '"Task.__init__":')
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger))
+        assert b.surfaces['Task.__init__'] == ['images']
+        assert b.total == 3
+
+    def test_a_double_quoted_option_is_still_counted(self, tmp_path):
+        ledger = LEDGER.replace("'sandbox',", '"sandbox",')
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger))
+        assert b.surfaces['Agent.__init__'] == ['auth', 'sandbox']
+
+    def test_an_option_name_that_is_not_an_identifier_is_an_error(self, tmp_path):
+        """Control: a name the option regex cannot read must not vanish quietly."""
+        ledger = LEDGER.replace("'images',", "'output-file',")
+        with pytest.raises(B.LedgerError, match='not a plain identifier'):
+            B.read_ledger(_repo(tmp_path, ledger=ledger))
+
+    def test_a_bare_identifier_key_is_still_a_surface(self, tmp_path):
+        """A valid unquoted key like `Handoff: [...]` must be counted, not dropped.
+
+        JavaScript accepts a bare identifier as an object key. The first scanner
+        only opened an entry on a quote, so an unquoted key fell out of the parse
+        -- which LOWERS the total and reads as options closed while the
+        TypeScript is untouched.
+        """
+        ledger = textwrap.dedent('''
+            export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+              'Agent.__init__': [
+                'auth', 'sandbox',
+              ],
+              Handoff: [
+                'maxDepth', 'detectCycles',
+              ],
+            } as const;
+        ''')
+        call_sites = (
+            "const a = unhonouredFor('Agent.__init__');\n"
+            "const h = unhonouredFor('Handoff');\n"
+        )
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger, call_sites=call_sites))
+        assert b.surfaces['Handoff'] == ['maxDepth', 'detectCycles']
+        assert b.total == 4
+
+    def test_bare_key_surface_that_the_ts_iterates_cannot_be_lost(self, tmp_path):
+        """Control: even if the parse missed a bare key, the unhonouredFor guard
+        must catch it rather than let the options read as closed.
+
+        Simulated by naming a surface at a call site that the parser does not
+        return; the cross-check must refuse rather than count it closed.
+        """
+        # A well-formed bare-key ledger, but the call site iterates a surface the
+        # ledger declares with a bare key -- proving the guard now sees bare keys.
+        ledger = textwrap.dedent('''
+            export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+              'Agent.__init__': [
+                'auth',
+              ],
+              Handoff: [
+                'maxDepth',
+              ],
+            } as const;
+        ''')
+        call_sites = (
+            "const a = unhonouredFor('Agent.__init__');\n"
+            "const h = unhonouredFor('Handoff');\n"
+        )
+        # Sanity: with the fix, this parses cleanly and the guard is satisfied.
+        b = B.read_ledger(_repo(tmp_path, ledger=ledger, call_sites=call_sites))
+        assert 'Handoff' in b.surfaces

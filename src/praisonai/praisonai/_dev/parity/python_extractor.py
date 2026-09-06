@@ -53,11 +53,23 @@ class PythonFeatureExtractor:
     Extracts features from praisonaiagents package using AST analysis.
     
     This extractor parses the __init__.py file to find:
-    - _LAZY_IMPORTS dictionary entries
-    - __all__ exports
-    - Direct imports
-    
+    - ``_LAZY_IMPORTS`` dictionary entries, including later
+      ``_LAZY_IMPORTS.update({...})`` calls
+    - ``__all__`` exports
+    - direct top-level imports -- ``from . import X``,
+      ``from .module import Y as Z``, ``from praisonaiagents.m import Y``
+
+    A direct import is skipped when the bound name is private (``_x``) or when
+    it comes from a private submodule (``from ._lazy import ..``): those are
+    internal plumbing, not public surface. Imports of stdlib or third-party
+    modules are not part of this SDK's surface and are skipped too.
+
     It categorizes exports into modules based on their import paths.
+
+    Every mechanism named above is implemented. Anything that looks like one
+    but cannot be read -- a ``_LAZY_IMPORTS.update`` whose argument is not a
+    literal dict, for instance -- raises instead of silently contributing
+    nothing, because a partial loss here shows up downstream as parity.
     """
     
     # Category mapping based on module paths
@@ -122,19 +134,22 @@ class PythonFeatureExtractor:
         if init_file.exists():
             lazy_imports = self._extract_lazy_imports(init_file)
             all_exports = self._extract_all_exports(init_file)
-            
-            # Combine lazy imports and __all__ exports
-            all_names = set(lazy_imports.keys()) | all_exports
-            
+            direct_imports = self._extract_direct_imports(init_file)
+
+            # Combine lazy imports, direct imports and __all__ exports
+            all_names = set(lazy_imports) | set(direct_imports) | all_exports
+
             for name in sorted(all_names):
                 if name in lazy_imports:
                     module_path, _ = lazy_imports[name]
                     category = self._categorize(module_path)
-                    kind = self._infer_kind(name)
+                elif name in direct_imports:
+                    module_path = direct_imports[name]
+                    category = self._categorize(module_path)
                 else:
                     module_path = 'praisonaiagents'
                     category = 'other'
-                    kind = self._infer_kind(name)
+                kind = self._infer_kind(name)
                 
                 features.exports.append(PythonExport(
                     name=name,
@@ -169,18 +184,100 @@ class PythonFeatureExtractor:
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == '_LAZY_IMPORTS':
                         if isinstance(node.value, ast.Dict):
-                            for k, v in zip(node.value.keys, node.value.values):
-                                if k and isinstance(k, ast.Constant) and isinstance(k.value, str):
-                                    if isinstance(v, ast.Tuple) and len(v.elts) >= 2:
-                                        module_elt = v.elts[0]
-                                        attr_elt = v.elts[1]
-                                        if (isinstance(module_elt, ast.Constant) and 
-                                            isinstance(module_elt.value, str) and
-                                            isinstance(attr_elt, ast.Constant) and 
-                                            isinstance(attr_elt.value, str)):
-                                            lazy_imports[k.value] = (module_elt.value, attr_elt.value)
-        
+                            entries = self._read_lazy_dict(node.value)
+                            if entries is not None:
+                                lazy_imports.update(entries)
+            elif self._is_lazy_update(node):
+                # `_LAZY_IMPORTS.update({...})` adds public names just like the
+                # literal above; ignoring it lost them silently.
+                entries = (
+                    self._read_lazy_dict(node.args[0])
+                    if len(node.args) == 1 and not node.keywords
+                    and isinstance(node.args[0], ast.Dict)
+                    else None
+                )
+                if entries is None:
+                    raise RuntimeError(
+                        f"{init_file}:{getattr(node, 'lineno', '?')}: cannot read "
+                        f"this _LAZY_IMPORTS.update(...) call. Only a literal dict "
+                        f"of 'Name': ('module', 'attr') entries is supported. "
+                        f"Refusing to report parity for a public surface this "
+                        f"extractor cannot see."
+                    )
+                lazy_imports.update(entries)
+
         return lazy_imports
+
+    @staticmethod
+    def _is_lazy_update(node: ast.AST) -> bool:
+        """True for a ``_LAZY_IMPORTS.update(..)`` call node."""
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'update'
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == '_LAZY_IMPORTS'
+        )
+
+    @staticmethod
+    def _read_lazy_dict(node: ast.Dict) -> Optional[Dict[str, Tuple[str, str]]]:
+        """Read a ``{'Name': ('module', 'attr')}`` literal, or None if it is not one."""
+        entries: Dict[str, Tuple[str, str]] = {}
+        for key, value in zip(node.keys, node.values):
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                return None
+            if not (isinstance(value, ast.Tuple) and len(value.elts) >= 2):
+                return None
+            module_elt, attr_elt = value.elts[0], value.elts[1]
+            if not (isinstance(module_elt, ast.Constant)
+                    and isinstance(module_elt.value, str)
+                    and isinstance(attr_elt, ast.Constant)
+                    and isinstance(attr_elt.value, str)):
+                return None
+            entries[key.value] = (module_elt.value, attr_elt.value)
+        return entries
+
+    def _extract_direct_imports(self, init_file: Path) -> Dict[str, str]:
+        """Extract top-level ``from ... import ...`` bindings from __init__.py.
+
+        These are public exports added the ordinary way -- ``praisonaiagents.X``
+        resolves to them with no ``__getattr__`` involved -- and they were
+        invisible to this extractor, so adding one closed no gap and raised no
+        alarm.
+
+        Returns a mapping of bound name -> module path it came from.
+        """
+        direct: Dict[str, str] = {}
+
+        try:
+            with open(init_file, 'r', encoding='utf-8') as f:
+                source = f.read()
+            tree = ast.parse(source)
+        except (SyntaxError, UnicodeDecodeError):
+            return direct
+
+        for node in tree.body:
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = node.module or ''
+            if node.level:
+                # relative: `from . import X` / `from .agent.agent import Y`
+                base = f"praisonaiagents.{module}" if module else "praisonaiagents"
+            elif module == 'praisonaiagents' or module.startswith('praisonaiagents.'):
+                base = module
+            else:
+                continue  # stdlib / third-party: not this SDK's surface
+            if any(part.startswith('_') for part in base.split('.')[1:]):
+                continue  # private submodule -> internal plumbing
+
+            for alias in node.names:
+                name = alias.asname or alias.name
+                if alias.name == '*' or name.startswith('_') or alias.name.startswith('_'):
+                    continue
+                # `from . import workflows` binds the submodule itself
+                direct[name] = base if module else f"praisonaiagents.{alias.name}"
+
+        return direct
     
     def _extract_all_exports(self, init_file: Path) -> Set[str]:
         """Extract __all__ list from __init__.py."""
