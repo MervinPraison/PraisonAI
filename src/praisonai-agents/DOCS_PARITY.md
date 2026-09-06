@@ -21,13 +21,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 57 | 18046 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 7 | 3531 |
+| ✅ Approval | 1 | 7 | 3616 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3755 |
-| ✅ Autonomy | 3 | 7 | 2790 |
+| ✅ Autonomy | 3 | 7 | 2794 |
 | ✅ Bots | 7 | 33 | 13925 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 123 | 38195 |
+| ✅ CLI | 5 | 123 | 38199 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 18 | 5558 |
 | ✅ LLM | 3 | 15 | 5859 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14436 |
+| ✅ MCP | 1 | 62 | 14489 |
 | ✅ Memory | 6 | 19 | 7588 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
@@ -68,8 +68,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 732 |
 | ✅ Retrieval | 2 | 5 | 1042 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3556 |
-| ✅ Security | 1 | 3 | 3529 |
+| ✅ Sandbox | 5 | 7 | 3670 |
+| ✅ Security | 1 | 3 | 3531 |
 | ✅ Sessions | 4 | 20 | 7898 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 6 | 2897 |
