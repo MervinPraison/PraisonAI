@@ -121,6 +121,24 @@ class ToolOverrideLoader:
         """
         return [Path(d).expanduser() for d in self.DEFAULT_TOOL_DIRS]
     
+    @staticmethod
+    def _extract_callables(module) -> Dict[str, Callable]:
+        """Extract public callable members (tools) from a loaded module.
+
+        Single owner of the "which members count as a tool" rule: skip
+        underscore-prefixed names and accept callables that are not classes.
+        Shared by ``load_from_file`` and ``load_from_module`` so the filter
+        cannot silently diverge between the two load paths.
+        """
+        tools = {}
+        for name in dir(module):
+            if name.startswith("_"):
+                continue
+            obj = getattr(module, name)
+            if callable(obj) and not isinstance(obj, type):
+                tools[name] = obj
+        return tools
+    
     def load_from_file(self, file_path: str) -> Dict[str, Callable]:
         """
         Load tools from a Python file.
@@ -159,13 +177,7 @@ class ToolOverrideLoader:
             raise ImportError(f"Could not load module from: {path}")
         
         # Extract callable functions (tools)
-        tools = {}
-        for name in dir(module):
-            if name.startswith("_"):
-                continue
-            obj = getattr(module, name)
-            if callable(obj) and not isinstance(obj, type):
-                tools[name] = obj
+        tools = self._extract_callables(module)
         
         self._loaded_tools.update(tools)
         return tools
@@ -186,13 +198,7 @@ class ToolOverrideLoader:
             raise ImportError(f"Could not import module: {module_path}") from e
         
         # Extract callable functions (tools)
-        tools = {}
-        for name in dir(module):
-            if name.startswith("_"):
-                continue
-            obj = getattr(module, name)
-            if callable(obj) and not isinstance(obj, type):
-                tools[name] = obj
+        tools = self._extract_callables(module)
         
         self._loaded_tools.update(tools)
         return tools
