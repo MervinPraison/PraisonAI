@@ -33,6 +33,17 @@ from .py_extract import (
     extract_python_surface,
     normalise_default,
 )
+from .export_identity import (
+    BARREL_FILE,
+    STATUS_MATCH,
+    ExportIdentityFinding,
+    check_export_identity,
+)
+from .method_inventory import (
+    ClassInventory,
+    MemberToolingError,
+    check_method_inventory,
+)
 from .schema import Param, SurfaceSignature, snake_to_camel
 
 HERE = Path(__file__).resolve().parent
@@ -55,6 +66,11 @@ BASELINE_OWNER = 'praisonai-ts'
 # `alias` first the flattening never fired at all.
 MATCH_ORDER = ('exact', 'camelCase', 'flattened', 'alias', 'missing')
 
+# How many missing methods to name per class in the failure text. The inventory
+# opened with 162 findings across 7 classes; printing all of them buried the
+# other gates, and printing only a count gave a reader nothing to act on.
+TOP_MISSING_PER_CLASS = 5
+
 EXIT_OK = 0
 EXIT_PARITY = 1
 EXIT_TOOLING = 2
@@ -72,6 +88,14 @@ class Surface:
     key: str
     python: Dict[str, Any]
     typescript: Dict[str, Any]
+    # Optional, and deliberately not a waiver file: an explicit record of why
+    # the TypeScript symbol this surface validates is NOT the one the package
+    # barrel exports under the Python name. Requires a `reason` and an `owner`,
+    # so the mismatch is a decision somebody signed rather than a silent one.
+    export_identity: Optional[Dict[str, Any]] = None
+    # Public methods of the class that Python has and TypeScript does not, which
+    # somebody has looked at and accepted. Same shape: reason plus owner.
+    method_waivers: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def ts_target(self) -> Dict[str, Any]:
         target = {'surface': self.key}
@@ -227,6 +251,24 @@ class Waiver:
         return self.expires is not None and today > self.expires
 
 
+def _require_reason_and_owner(item: Dict[str, Any], field_name: str) -> Optional[Dict[str, Any]]:
+    """An explanatory field is only accepted with a `reason` and an `owner`.
+
+    An unsigned "why not" is how a mismatch becomes invisible again: the first
+    version of the waiver file allowed bare keys and four of them turned out to
+    be hiding real gaps.
+    """
+    entry = item.get(field_name)
+    if entry is None:
+        return None
+    if not isinstance(entry, dict) or not entry.get('reason') or not entry.get('owner'):
+        raise ToolingError(
+            f'surface.yaml: {item.get("key", "?")}.{field_name} needs both a "reason" '
+            f'and an "owner"; got {entry!r}'
+        )
+    return dict(entry)
+
+
 def load_surfaces(path: Optional[Path] = None) -> SurfaceCatalogue:
     path = path or DEFAULT_SURFACE_FILE
     data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
@@ -234,8 +276,16 @@ def load_surfaces(path: Optional[Path] = None) -> SurfaceCatalogue:
     for item in data.get('surfaces') or []:
         if not item.get('key') or not item.get('python') or not item.get('typescript'):
             raise ToolingError(f'surface.yaml entry is missing key/python/typescript: {item}')
-        surfaces.append(Surface(key=item['key'], python=dict(item['python']),
-                                typescript=dict(item['typescript'])))
+        surfaces.append(Surface(
+            key=item['key'],
+            python=dict(item['python']),
+            typescript=dict(item['typescript']),
+            export_identity=_require_reason_and_owner(item, 'export_identity'),
+            method_waivers={
+                name: _require_reason_and_owner({'w': entry}, 'w')
+                for name, entry in (item.get('method_waivers') or {}).items()
+            },
+        ))
     return SurfaceCatalogue(
         surfaces=surfaces,
         python_root=data.get('python_root', DEFAULT_PYTHON_ROOT),
@@ -693,6 +743,173 @@ def evaluate(
     return result
 
 
+# ------------------------------------------------- export identity & inventory
+
+# ---------------------------------------------------------------------------
+# Baseline ratchet for the two inventory checks.
+#
+# Turning 165 pre-existing divergences into hard failures would redden main and
+# block every unrelated change, and a gate everyone learns to route around stops
+# being a gate. So the same shape that already works for the behaviour ledger is
+# used here: the known set is recorded, and the gate fails when it GROWS.
+# Closing one lowers the baseline; introducing one is a red build with a name on
+# it. The findings stay listed in full either way -- nothing is hidden, and
+# nothing needs a per-item waiver written before this can land.
+# ---------------------------------------------------------------------------
+INVENTORY_BASELINE = 'src/praisonai/praisonai/_dev/parity/signatures/inventory-baseline.json'
+
+
+def _baseline_path(repo_root: Path) -> Path:
+    return repo_root / INVENTORY_BASELINE
+
+
+def load_inventory_baseline(repo_root: Path) -> Dict[str, List[str]]:
+    """The recorded divergences, as {'identity': [...], 'methods': [...]}."""
+    path = _baseline_path(repo_root)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except ValueError:
+        return {}
+    return {k: sorted(str(x) for x in v) for k, v in data.items() if isinstance(v, list)}
+
+
+def write_inventory_baseline(
+    repo_root: Path, identity_keys: Iterable[str], method_keys: Iterable[str]
+) -> None:
+    payload = {'identity': sorted(set(identity_keys)), 'methods': sorted(set(method_keys))}
+    _baseline_path(repo_root).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+    )
+
+
+def ratchet_against_baseline(
+    baseline: Dict[str, List[str]], kind: str, current: List[str], evaluation: Evaluation
+) -> None:
+    """Fail only on keys absent from the baseline; note the ones that closed."""
+    known = set(baseline.get(kind, []))
+    new = [k for k in current if k not in known]
+    closed = known - set(current)
+    for key in new:
+        evaluation.failures.append(
+            f'{key}: a new {kind} divergence, not in the recorded baseline. '
+            f'Fix it, or run --write to record it and say in the pull request why it had to grow.'
+        )
+    if closed:
+        evaluation.warnings.append(
+            f'{len(closed)} {kind} divergence(s) closed since the baseline '
+            f'({", ".join(sorted(closed)[:5])}{"..." if len(closed) > 5 else ""}) -- '
+            f'run --write to bank it'
+        )
+
+
+def evaluate_export_identity(
+    findings: List[ExportIdentityFinding], evaluation: Evaluation
+) -> Evaluation:
+    """
+    Fail the gate for any surface that validates a symbol the barrel does not
+    export under the Python name.
+
+    This is the check that would have caught ``Task.__init__``: 60 of 60
+    parameters matched against ``agent/types.ts``'s ``Task`` while
+    ``import { Task } from 'praisonai'`` hands out ``workflows``' ``Task``. The
+    parameters agreed; the class did not exist for any caller.
+
+    A surface may record ``export_identity: {reason, owner}`` in surface.yaml to
+    say why the divergence is intended. That downgrades the failure to a warning
+    and prints the reason -- it never hides it.
+    """
+    for finding in findings:
+        if finding.status == STATUS_MATCH:
+            continue
+        if finding.note:
+            evaluation.warnings.append(
+                f'{finding.surface}: export identity differs on purpose -- {finding.detail()} '
+                f'[{finding.note}]'
+            )
+            continue
+        evaluation.failures.append(
+            f'{finding.surface}: {finding.detail()} -- point the surface at the exported symbol, '
+            f'export the one it validates, or record why not under '
+            f'`export_identity: {{reason, owner}}` in surface.yaml'
+        )
+    return evaluation
+
+
+def evaluate_method_inventory(
+    inventories: List[ClassInventory], evaluation: Evaluation
+) -> Evaluation:
+    """
+    Fail the gate for every Python public method with no TypeScript counterpart.
+
+    NAME PRESENCE ONLY -- the same measure, and the same caveat, as PARITY.md.
+    ``Agent.execute`` counts as present here and still runs the agent's own
+    instructions instead of the task it was handed. This check sees the methods
+    the signature layer never looks at, not what they do.
+    """
+    for inventory in inventories:
+        if inventory.skipped or not inventory.unwaived:
+            continue
+        missing = inventory.unwaived
+        shown = missing[:TOP_MISSING_PER_CLASS]
+        rest = len(missing) - len(shown)
+        listed = '; '.join(
+            f'`{m.name}` -> `{m.expected_ts}` ({m.location})' for m in shown
+        )
+        more = f'; and {rest} more' if rest else ''
+        where = inventory.typescript.location if inventory.typescript else '?'
+        evaluation.failures.append(
+            f'{inventory.key}: {len(missing)} public Python method(s) have no TypeScript '
+            f'counterpart on {inventory.key} ({where}) -- {listed}{more} '
+            f'-- port them, or waive each under `method_waivers` on a surface in surface.yaml '
+            f'(surfaces: {", ".join(inventory.surfaces)})'
+        )
+    return evaluation
+
+
+def print_export_identity(findings: List[ExportIdentityFinding], out=None) -> None:
+    out = out or sys.stdout
+    bad = [f for f in findings if f.status != STATUS_MATCH]
+    print(
+        f'Export identity ({BARREL_FILE}): {len(findings) - len(bad)}/{len(findings)} surfaces '
+        f'validate the symbol the package exports under the Python name.', file=out,
+    )
+    for finding in bad:
+        marker = 'noted' if finding.note else 'FAILS'
+        print(f'  - [{marker}] {finding.surface}: {finding.detail()}', file=out)
+
+
+def print_method_inventory(inventories: List[ClassInventory], out=None) -> None:
+    out = out or sys.stdout
+    total = sum(len(i.unwaived) for i in inventories)
+    waived = sum(len(i.missing) - len(i.unwaived) for i in inventories)
+    compared = [i for i in inventories if i.skipped is None]
+    print(
+        f'Public method inventory: {total} Python public method(s) with no TypeScript '
+        f'counterpart across {len(compared)} class(es) ({waived} waived). '
+        f'This compares NAMES ONLY -- a method present on both sides may still do '
+        f'something different (Agent.execute does).', file=out,
+    )
+    for inventory in inventories:
+        if inventory.skipped:
+            print(f'  - {inventory.key}: skipped -- {inventory.skipped}', file=out)
+            continue
+        py_total = len(inventory.python.methods) if inventory.python else 0
+        ts_total = len(inventory.typescript.member_names()) if inventory.typescript else 0
+        print(
+            f'  - {inventory.key}: {len(inventory.unwaived)} missing '
+            f'({py_total} python public methods, {ts_total} typescript public members)', file=out,
+        )
+        for note in inventory.notes:
+            print(f'      note: {note}', file=out)
+        for method in inventory.unwaived[:TOP_MISSING_PER_CLASS]:
+            print(f'      - {method.name} -> {method.expected_ts}  '
+                  f'[{method.location}, declared by {method.owner}]', file=out)
+        if len(inventory.unwaived) > TOP_MISSING_PER_CLASS:
+            print(f'      ... and {len(inventory.unwaived) - TOP_MISSING_PER_CLASS} more', file=out)
+
+
 # -------------------------------------------------------------------- rendering
 
 def _md_escape(text: str) -> str:
@@ -1027,6 +1244,33 @@ def extract_all(
     return python, typescript
 
 
+def run_export_identity(repo_root: Path, catalogue: SurfaceCatalogue) -> List[ExportIdentityFinding]:
+    """Export identity, with an unreadable barrel raised as a tooling error.
+
+    "Nothing was checked" must never be reported as parity, so a barrel that
+    does not exist or exports nothing is exit 2, not a clean run.
+    """
+    try:
+        return check_export_identity(repo_root, catalogue)
+    except (FileNotFoundError, OSError) as exc:
+        raise ToolingError(f'export identity: {exc}')
+
+
+def run_method_inventory(repo_root: Path, catalogue: SurfaceCatalogue) -> List[ClassInventory]:
+    """Method inventory, with a missing node/typescript raised as a tooling error."""
+    try:
+        return check_method_inventory(repo_root, catalogue)
+    except MemberToolingError as exc:
+        raise ToolingError(f'method inventory: {exc}')
+
+
+def run_extra_checks(
+    repo_root: Path, catalogue: SurfaceCatalogue,
+) -> Tuple[List[ExportIdentityFinding], List[ClassInventory]]:
+    """Both checks that read the class rather than the parameter list."""
+    return run_export_identity(repo_root, catalogue), run_method_inventory(repo_root, catalogue)
+
+
 def baseline_waivers(comparisons: List[SurfaceComparison], existing: List[Waiver],
                      reason: str = BASELINE_REASON, owner: str = BASELINE_OWNER) -> List[Waiver]:
     """Existing waivers plus one for every currently un-waived gap (never overwrites)."""
@@ -1089,6 +1333,10 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument('--diff', metavar='SURFACE', help='print one surface table to stdout')
     mode.add_argument('--baseline', action='store_true', help='add waivers for every current un-waived gap')
     mode.add_argument('--prune', action='store_true', help='delete waivers whose gap no longer exists (stale)')
+    mode.add_argument('--identity', action='store_true',
+                      help='report only: does each surface validate the symbol index.ts exports?')
+    mode.add_argument('--methods', action='store_true',
+                      help='report only: which public Python methods have no TypeScript counterpart?')
     parser.add_argument('--repo-root', type=Path, default=None)
     parser.add_argument('--today', type=date.fromisoformat, default=None, help=argparse.SUPPRESS)
     return parser
@@ -1154,6 +1402,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(render_surface_markdown(comparison))
             return EXIT_OK
 
+        if args.identity or args.methods:
+            # One check only: `--identity` is pure Python, and making it shell
+            # out to node for the inventory it was not asked for meant it could
+            # not run at all on a machine without node.
+            report = Evaluation()
+            if args.identity:
+                findings = run_export_identity(repo_root, catalogue)
+                print_export_identity(findings)
+                evaluate_export_identity(findings, report)
+            else:
+                inventories = run_method_inventory(repo_root, catalogue)
+                print_method_inventory(inventories)
+                evaluate_method_inventory(inventories, report)
+            # The section above already names every finding; re-printing the
+            # failure text under it just doubled the output.
+            return EXIT_PARITY if report.failures else EXIT_OK
+
         python, typescript = extract_all(repo_root, catalogue)
         _raise_on_rules_problems(validate_rules(rules, python, typescript))
         comparisons = compare_all(python, typescript, rules, keys=[s.key for s in catalogue.surfaces])
@@ -1173,6 +1438,46 @@ def main(argv: Optional[List[str]] = None) -> int:
             return EXIT_OK
 
         evaluation = evaluate(comparisons, waivers, args.today)
+        # The class-level checks, which the parameter comparison cannot see. They
+        # report to stdout rather than into SIGNATURE_PARITY.md: the generated
+        # report is regenerated and committed by main on every push, and a number
+        # that moves there is the noise this tooling exists to remove.
+        #
+        # They run for the gate, not for `--write`. `--write` exists to refresh
+        # files these checks do not touch, and update-parity-tracker.yml runs it
+        # on main to commit them; failing that job over a gap it cannot write
+        # away would stop the reports being refreshed at all.
+        findings: List[ExportIdentityFinding] = []
+        inventories: List[ClassInventory] = []
+        if not args.write:
+            findings, inventories = run_extra_checks(repo_root, catalogue)
+            # Report everything, then ratchet: only a divergence absent from the
+            # recorded baseline fails the build. See the note above the helpers.
+            identity_report = Evaluation()
+            method_report = Evaluation()
+            evaluate_export_identity(findings, identity_report)
+            evaluate_method_inventory(inventories, method_report)
+            evaluation.warnings.extend(identity_report.warnings)
+            evaluation.warnings.extend(method_report.warnings)
+            baseline = load_inventory_baseline(repo_root)
+            identity_keys = [f.surface for f in findings if f.status != STATUS_MATCH and not f.note]
+            method_keys = [
+                f'{inv.key}.{m.name}'
+                for inv in inventories
+                if not inv.skipped
+                for m in inv.unwaived
+            ]
+            if not baseline:
+                # No baseline recorded yet: report in full, and say how to bank it
+                # rather than failing over debt nobody has had a chance to record.
+                evaluation.warnings.append(
+                    f'{len(identity_keys)} export-identity and {len(method_keys)} method divergences '
+                    f'are unrecorded -- run --write to bank them as the baseline, after which only '
+                    f'growth fails the build'
+                )
+            else:
+                ratchet_against_baseline(baseline, 'identity', identity_keys, evaluation)
+                ratchet_against_baseline(baseline, 'methods', method_keys, evaluation)
         md = render_markdown(comparisons, waivers)
         js = render_json(comparisons, waivers)
         md_path = repo_root / MD_OUTPUT
@@ -1182,10 +1487,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             md_path.write_text(md, encoding='utf-8')
             json_path.write_text(js, encoding='utf-8')
             print(f'wrote {MD_OUTPUT} and {JSON_OUTPUT}')
+            # Record the class-level divergences too, so the ratchet has a floor.
+            wf, wi = run_extra_checks(repo_root, catalogue)
+            write_inventory_baseline(
+                repo_root,
+                [f.surface for f in wf if f.status != STATUS_MATCH and not f.note],
+                [f'{inv.key}.{m.name}' for inv in wi if not inv.skipped for m in inv.unwaived],
+            )
+            print(f'wrote {INVENTORY_BASELINE}')
         else:
             for path, content in ((md_path, md), (json_path, js)):
                 classify_report_freshness(evaluation, path, path.relative_to(repo_root), content)
 
+        if not args.write:
+            print_export_identity(findings)
+            print_method_inventory(inventories)
         _print_report(evaluation, comparisons)
         if evaluation.ok:
             print('signature parity: OK')
