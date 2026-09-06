@@ -222,7 +222,93 @@ test("the empty state keeps clear of the safe area", () => {
   for (const name of ["--inset-left", "--inset-right"]) {
     assert.ok(value.includes(name), `.empty-state ignores ${name}: ${value}`);
   }
-  assert.match(value, /\+\s*[\d.]+rem/, `the gutter must survive a zero inset: ${value}`);
+  // RESOLVED, not matched as text. This read `/\+\s*[\d.]+rem/` -- a literal
+  // rem after the plus -- which was true only while every gutter in the file
+  // was a hardcoded number. The moment they became scale tokens the assertion
+  // failed, and the tempting repair (allow `var(...)` too) would have passed
+  // over `+ var(--nonexistent)` and over `+ var(--space-0)` if that were 0.
+  // So the token is looked up on `:root` and the NUMBER it resolves to is what
+  // is checked.
+  const gutter = addendOf(value);
+  assert.ok(gutter > 0, `the gutter must survive a zero inset, and it is ${gutter}rem: ${value}`);
+});
+
+/** Every custom property declared on `:root`, for resolving one token to the
+ *  number it stands for. Only `:root` -- a token redefined for dark mode is a
+ *  colour, and no geometry in this file is theme-dependent. */
+const ROOT_TOKENS = new Map(
+  declarationsOf(ruleFor(":root").body).filter(([prop]) => prop.startsWith("--")),
+);
+
+/**
+ * A token's value in rem, following `var()` indirection as far as it goes.
+ *
+ * `--gutter: var(--space-4)` and `--space-4: .75rem` is two hops, and the
+ * point of the scale is that a rule names the role rather than the number --
+ * so a test that cannot follow the indirection cannot check the number.
+ * Anything that does not end at a rem literal returns NaN, which fails every
+ * comparison below rather than passing one.
+ */
+function remOf(token: string, seen = new Set<string>()): number {
+  if (seen.has(token)) return Number.NaN;
+  seen.add(token);
+  const raw = ROOT_TOKENS.get(token);
+  if (raw === undefined) return Number.NaN;
+  const indirect = /^var\((--[a-z0-9-]+)\)$/.exec(raw.trim())?.[1];
+  if (indirect !== undefined) return remOf(indirect, seen);
+  const rem = /^([\d.]+)rem$/.exec(raw.trim())?.[1];
+  return rem === undefined ? Number.NaN : Number(rem);
+}
+
+/** The rem added to an inset inside `calc(var(--inset-x) + <addend>)`, whether
+ *  the addend is written as a literal or as a scale token. */
+function addendOf(padding: string): number {
+  const literal = /\+\s*([\d.]+)rem/.exec(padding)?.[1];
+  if (literal !== undefined) return Number(literal);
+  const token = /\+\s*var\((--[a-z0-9-]+)\)/.exec(padding)?.[1];
+  return token === undefined ? Number.NaN : remOf(token);
+}
+
+test("the stylesheet's gutter and the one main.ts writes inline are the same number", () => {
+  // The composer is the ONE element whose inline padding is written from
+  // script -- an inline style beats the stylesheet, and it has to, because the
+  // value moves with the live insets. So the gutter exists twice: as
+  // `--gutter` here and as a literal inside a template string in main.ts.
+  //
+  // Nothing connected them. Renaming or retuning the scale would have left the
+  // composer sitting a few pixels off every other screen edge in the app --
+  // the kind of drift that is invisible in a screenshot of one screen and
+  // obvious the moment you tab between two.
+  const scripted = /padding-inline-start",\s*`([^`]*)`/.exec(main)?.[1] ?? "";
+  const inline = addendOf(scripted);
+  assert.ok(inline > 0, `main.ts writes no gutter at all: ${scripted}`);
+
+  const token = remOf("--gutter");
+  assert.ok(Number.isFinite(token), "--gutter must resolve to a rem through :root");
+  assert.equal(
+    token,
+    inline,
+    `app.css lays out on a ${token}rem gutter and main.ts writes ${inline}rem inline`,
+  );
+
+  // And the stylesheet's own screen edges use that token rather than a number
+  // of their own, which is what makes the check above worth making.
+  // BOTH inline sides, separately. The first version of this loop asked for
+  // `--inset-(right|left)` in one alternation, which is satisfied by either --
+  // so replacing the right-hand gutter with a bare `.5rem` left the left-hand
+  // one matching and the mutation survived. A screen inset correctly on one
+  // edge and wrongly on the other is precisely the defect worth catching.
+  for (const selector of [".screen-settings,\n.screen-chats", ".transcript", ".topbar"]) {
+    const rule = RULES.find((r) => r.selector.replace(/\s+/g, " ") === selector.replace(/\s+/g, " "));
+    assert.ok(rule !== undefined, `app.css must still declare "${selector}"`);
+    for (const side of ["right", "left"] as const) {
+      assert.match(
+        rule.body,
+        new RegExp(`calc\\(var\\(--inset-${side}\\)\\s*\\+\\s*var\\(--gutter\\)\\)`),
+        `${selector} must build its ${side} padding from --gutter`,
+      );
+    }
+  }
 });
 
 /**
@@ -310,4 +396,58 @@ test("the settings sections are styled on the class the app actually emits", () 
   assert.ok(main.includes('dataset["lead"]'), "main.ts must mark the lead section");
   const lead = rulesFor('.screen-settings .settings-section[data-lead]');
   assert.match(lead.map((r) => r.body).join(" "), /color\s*:\s*var\(--ink\)/);
+});
+
+test("nothing removes the focus ring from a keyboard focus", () => {
+  /*
+   * This branch introduced `.screen-heading:focus { outline: none }` and a
+   * comment claiming "a real keyboard focus still gets one, from
+   * `:focus-visible` below". The comment was wrong, and specificity is why:
+   * `.screen-heading:focus` is (0,2,0) and the global `:focus-visible` rule is
+   * (0,1,0), so the suppression won for BOTH kinds of focus and route
+   * navigation to a heading left a keyboard user with no visible focus at all.
+   * `praisonai-triage-agent[bot]` caught it and scoped the rule to
+   * `:focus:not(:focus-visible)`, which is the correct idiom.
+   *
+   * None of the gates on this branch saw it -- they measure colour, size and
+   * weight, and this is a rule that removes something. So the invariant is
+   * stated directly: a rule may quieten a programmatic focus, but no rule may
+   * take the outline off an element that is `:focus-visible`.
+   *
+   * Text-level rather than computed, deliberately: `:focus-visible` depends on
+   * the heuristics of the last input modality, which a headless browser cannot
+   * be made to assert both ways reliably. The cascade, however, is decidable
+   * from the selector alone.
+   */
+  const killers = RULES.filter((rule) =>
+    declarationsOf(rule.body).some(
+      ([prop, value]) => prop === "outline" && /^(none|0)\b/.test(value.trim()),
+    ),
+  );
+  assert.ok(
+    killers.length > 0,
+    "no rule suppresses an outline -- if that is now true, delete this test rather than letting it pass vacuously",
+  );
+  for (const rule of killers) {
+    for (const selector of rule.selector.split(",").map((s) => s.trim())) {
+      if (!/:focus\b/.test(selector)) continue;
+      assert.match(
+        selector,
+        /:not\(\s*:focus-visible\s*\)/,
+        `"${selector}" removes the outline from every focus, keyboard included; ` +
+          "scope it with :focus:not(:focus-visible)",
+      );
+    }
+  }
+
+  // And the ring it must not remove has to exist in the first place.
+  const ring = RULES.filter((r) => r.selector.split(",").some((s) => s.trim() === ":focus-visible"));
+  assert.equal(ring.length, 1, "app.css must declare the :focus-visible ring exactly once");
+  // Destructured and re-guarded rather than indexed: `assert.equal` on the
+  // length narrows nothing for tsc, and `npm test` strips types without
+  // checking them -- so an indexed read passes every run here and fails
+  // `npm run typecheck`, which is the first thing `npm run check` does.
+  const [only] = ring;
+  assert.ok(only !== undefined, "the :focus-visible rule must have been parsed");
+  assert.match(only.body, /outline:\s*\d/, "the ring must actually draw an outline");
 });
