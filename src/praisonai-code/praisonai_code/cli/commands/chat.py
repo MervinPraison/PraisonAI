@@ -284,6 +284,18 @@ def chat_main(
         debug=debug,
         autonomy_mode=autonomy,
         no_rules=no_rules,
+        # Consolidated capability options: thread the supplied flags onto the
+        # same Agent params `run`/YAML/Python use so interactive sessions honour
+        # them instead of dropping them (issue #4890). Unset flags stay None so
+        # the Agent's own default is preserved.
+        knowledge=knowledge,
+        guardrails=guardrails,
+        web=web,
+        reflection=reflection,
+        planning=planning,
+        context=context,
+        execution=execution,
+        caching=caching,
     )
     
     tui = AsyncTUI(config=tui_config)
@@ -380,23 +392,18 @@ def _run_profiled_chat(
         raise typer.Exit(1)
 
 
-# Options `chat` declares but never passes to the runtime. chat_main dispatches to
-# AsyncTUI via AsyncTUIConfig, which consumes only a subset of its parameters; these
-# twelve reach neither that config nor any other path in the body, so `praisonai chat
-# --planning --guardrails strict` looked like it had configured something and had not.
-# Wiring them up is twelve separate features; saying so is one line, and stops the CLI
-# making a promise it does not keep. test_every_listed_option_really_is_unread pins
-# this list against the body so it cannot rot once an option is genuinely wired.
+# Options `chat` declares but never passes to the runtime. The high-value
+# capability options (--knowledge/--guardrails/--web/--reflection/--planning/
+# --context/--execution/--caching) are now threaded onto the AsyncTUIConfig and
+# reach the same Agent params `run`/YAML/Python use (issue #4890), so they are no
+# longer listed here. What remains is genuinely unwired: --hooks needs a hooks
+# loader that does not exist, and the presentational options (--ui-backend,
+# --no-color, --theme) are not honoured by the async TUI. Saying so is one line,
+# and stops the CLI making a promise it does not keep.
+# test_every_listed_option_really_is_unread pins this list against the body so it
+# cannot rot once an option is genuinely wired.
 _UNWIRED_CHAT_OPTIONS = {
-    "knowledge": "--knowledge",
-    "guardrails": "--guardrails",
-    "web": "--web",
-    "reflection": "--reflection",
-    "planning": "--planning",
-    "context": "--context",
-    "execution": "--execution",
     "hooks": "--hooks",
-    "caching": "--caching",
     "ui_backend": "--ui-backend",
     "no_color": "--no-color",
     "theme": "--theme",
