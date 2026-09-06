@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from praisonaiagents.bots import (
     MessagePresentation,
     PresentationBlock,
@@ -49,11 +51,36 @@ def test_poll_roundtrips_through_dict():
     assert restored.duration_seconds == block.duration_seconds
 
 
-def test_poll_preserved_on_native_channel():
+def test_make_poll_rejects_fewer_than_two_options():
+    with pytest.raises(ValueError):
+        PresentationBlock.make_poll("Yes?", ["only-one"])
+    with pytest.raises(ValueError):
+        PresentationBlock.make_poll("Yes?", [])
+
+
+def test_poll_preserved_when_channel_supports_native_poll():
+    # A channel adapter that implements native poll delivery opts in via the
+    # capability flag; the poll block is then preserved untouched.
+    limits = PresentationLimits(supports_native_poll=True)
     p = MessagePresentation([_poll()])
-    adapted = adapt_presentation(p, PresentationLimits.telegram())
+    adapted = adapt_presentation(p, limits)
     assert adapted.blocks[0].type == BlockType.POLL
     assert adapted.blocks[0].poll_options == ["09:00", "13:00", "16:00"]
+
+
+def test_poll_degrades_on_builtin_channels_without_native_renderer():
+    # Telegram/Slack/Discord renderers have no POLL branch yet, so their limits
+    # must NOT advertise native poll support (else the block is silently
+    # dropped). Verify each degrades to the question+buttons fallback.
+    for limits in (
+        PresentationLimits.telegram(),
+        PresentationLimits.slack(),
+        PresentationLimits.discord(),
+    ):
+        assert limits.supports_native_poll is False
+        adapted = adapt_presentation(MessagePresentation([_poll()]), limits)
+        assert adapted.blocks[0].type == BlockType.TEXT
+        assert any(b.type == BlockType.BUTTONS for b in adapted.blocks)
 
 
 def test_poll_degrades_to_buttons_when_unsupported():
@@ -81,9 +108,10 @@ def test_poll_degradation_reported():
     assert "poll_rendered_as_buttons" in report.reasons
 
 
-def test_no_report_on_native_channel():
+def test_no_report_when_channel_supports_native_poll():
     p = MessagePresentation([_poll()])
-    _, report = adapt_presentation_with_report(p, PresentationLimits.telegram())
+    limits = PresentationLimits(supports_native_poll=True)
+    _, report = adapt_presentation_with_report(p, limits)
     assert report is None
 
 

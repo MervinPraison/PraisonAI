@@ -365,13 +365,22 @@ class PresentationBlock:
             action_id: Optional stable id correlating the inbound
                 :class:`PollResult` back to this poll.
 
-        Channels with a native poll API (Telegram ``sendPoll``, Discord polls,
-        Slack) render the vote natively — voting, tallying and closing are
-        handled by the platform. Elsewhere it degrades to a ``BUTTONS`` grid of
-        reply options via :func:`adapt_presentation`, and the loss is surfaced
-        through :class:`DegradedDelivery` (never silently).
+        A channel adapter that implements native poll delivery (e.g. Telegram
+        ``sendPoll``, Discord polls) can opt in via
+        ``PresentationLimits.supports_native_poll``; the vote is then rendered
+        natively and voting/tallying/closing are handled by the platform.
+        Everywhere else — including channels whose renderer has no poll branch —
+        it degrades to a ``BUTTONS`` grid of reply options via
+        :func:`adapt_presentation`, and the loss is surfaced through
+        :class:`DegradedDelivery` (never silently).
+
+        Raises:
+            ValueError: If fewer than two options are supplied — a poll needs at
+                least two choices to represent a vote.
         """
         opts = [str(o) for o in options]
+        if len(opts) < 2:
+            raise ValueError("A poll requires at least two options")
         return PresentationBlock(
             type=BlockType.POLL,
             text=question,
@@ -681,7 +690,12 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=False,
             supports_web_apps=True,
-            supports_native_poll=True,  # Telegram sendPoll
+            # Native poll delivery (Telegram sendPoll) is not yet implemented in
+            # the praisonai-bot renderer, so keep it disabled: adapt_presentation
+            # degrades polls to the supported question+buttons fallback instead
+            # of the renderer silently dropping an unhandled POLL block. Flip to
+            # True in the same change that adds the renderer's sendPoll branch.
+            supports_native_poll=False,
         )
     
     @staticmethod
@@ -697,7 +711,10 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=True,
             supports_web_apps=False,
-            supports_native_poll=True,  # Slack native polls
+            # Slack's Block Kit has no native poll element, and the renderer has
+            # no POLL branch — keep disabled so polls degrade to question+buttons
+            # rather than being dropped.
+            supports_native_poll=False,
         )
     
     @staticmethod
@@ -713,7 +730,11 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=True,
             supports_web_apps=False,
-            supports_native_poll=True,  # Discord polls
+            # Discord native poll delivery is not yet implemented in the
+            # praisonai-bot renderer — keep disabled so polls degrade to
+            # question+buttons instead of being dropped. Flip to True in the
+            # same change that adds the renderer's native-poll branch.
+            supports_native_poll=False,
         )
 
     @staticmethod
