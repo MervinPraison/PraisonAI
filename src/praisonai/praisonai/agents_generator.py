@@ -1389,19 +1389,26 @@ class AgentsGenerator:
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
         # paired for every adapter (the CM finalizes on success and error alike).
+        from ._async_bridge import scoped_bridge
         with observability_session(prep['adapter'].name):
             # Run setup INSIDE the session so setup events and any setup/import
             # failure are recorded and finalized, not dropped outside observability.
             self._run_adapter_setup(prep['adapter'])
-            return prep['adapter'].run(
-                prep['config'],
-                self.config_list,
-                prep['topic'],
-                tools_dict=prep['tools_dict'],
-                agent_callback=getattr(self, 'agent_callback', None),
-                task_callback=getattr(self, 'task_callback', None),
-                cli_config=getattr(self, 'cli_config', None),
-            )
+            # Isolate this sync run's sync→async work (adapter internals call
+            # run_sync) onto its own loop+thread so a stuck coroutine in one
+            # agent/tenant does not park the shared default loop for the rest.
+            # Async callers use agenerate_crew_and_kickoff (awaits arun directly)
+            # and are intentionally not wrapped here.
+            with scoped_bridge():
+                return prep['adapter'].run(
+                    prep['config'],
+                    self.config_list,
+                    prep['topic'],
+                    tools_dict=prep['tools_dict'],
+                    agent_callback=getattr(self, 'agent_callback', None),
+                    task_callback=getattr(self, 'task_callback', None),
+                    cli_config=getattr(self, 'cli_config', None),
+                )
 
     async def _aload_config(self):
         """Async-safe config loading (blocking file I/O off the event loop)."""
