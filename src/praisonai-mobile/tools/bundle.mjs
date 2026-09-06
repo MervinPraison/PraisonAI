@@ -154,24 +154,67 @@ export function praisonaiRoot() {
  * (zod 426kB, `ai` 276kB, @ai-sdk/openai 166kB, @ai-sdk/google 142kB, openai
  * 102kB, praisonai itself 79kB) plus ~100kB of lowering, because async
  * functions and classes become generators and prototypes below Chrome 55-72.
- * The ceiling sits ~10% above that on purpose: one more provider is 100-170kB
- * (measured), so adding one is a decision, not a drift.
+ * The ceiling was set ~10% above that on purpose: one more provider is
+ * 100-170kB (measured), so adding one is a decision, not a drift. That ratio,
+ * not the digits it produced, is the rule this constant is governed by.
  *
- * That decision was taken: the parity work that filled the accepted-and-ignored
- * option gaps -- the Task engine, the AgentTeam settings, and the Handoff
- * context/limits engine -- landed the real behaviour those options always
- * advertised, and the engine grew from 1459.6kB to ~1610kB across them. Not a
- * drift (no provider was added) and not one PR's doing (each is ~10-50kB of
- * honoured settings); the sum is the honest cost of the options finally working.
- * The ceiling moves once, deliberately, to 1700kB: it clears the measured
- * ~1610kB and leaves the ~90kB that a next provider would need to be its own
- * decision rather than being pre-spent here.
+ * That decision was taken, and then it was undone. The parity work that filled
+ * the accepted-and-ignored option gaps -- the Task engine, the AgentTeam
+ * settings, the Handoff context/limits engine -- grew the engine from 1459.6kB
+ * to ~1610kB, and the ceiling was moved to 1700kB to clear it. But #4874 and
+ * #4882 had already taken three AI SDK provider packages and the team subsystem
+ * off the phone's graph, and against the tree the raise actually landed on the
+ * bundle was ~900kB, not ~1610kB. The raising PR's own commit message reports
+ * "1528.0kB of its 1600kB budget" -- 72kB UNDER the ceiling it then raised. So
+ * 1700kB was never a decision about this bundle; it was a decision about a
+ * branch that no longer existed, and it left 787kB of slack, enough to nearly
+ * double the engine before the gate could say anything.
+ *
+ * The number below is re-derived from the bundle that exists, not restored to
+ * the last one that had an argument -- 1600kB was ~10% over 1459.6kB, and that
+ * relationship is what carried the argument, not the digits. Measured on
+ * main at 9f591344cb, npm ci with praisonai-ts's now-tracked lockfile
+ * (ai 6.0.277, @ai-sdk/openai 3.0.109, @ai-sdk/google 3.0.121): 934,472 bytes,
+ * 912.6kB across 17 lazy chunks, byte-identical across repeated builds.
+ *
+ * The ceiling has to sit inside a window with a floor and a lid:
+ *
+ *   floor  912.6 + 30 = 942.6kB. #4883 recorded the same commit measuring
+ *          1576.4 -> 1607.1 -> 1587.4kB in a day, because praisonai-ts
+ *          gitignored package-lock.json while CI built it with npm, so every
+ *          run re-resolved every `^` range. #4884 fixed that -- the lockfile
+ *          is tracked and `npm install` honours it -- so the +-30kB band is no
+ *          longer expected day to day. It is still budgeted for, because a
+ *          lockfile refresh moves the number in one step and a gate that goes
+ *          red on its own is a gate people widen instead of read.
+ *
+ *   lid    912.6 + 100 = 1012.6kB. 100kB is the SMALLEST provider on the
+ *          measured list above (openai; @ai-sdk/openai is 166kB). A ceiling at
+ *          or above the lid cannot trip on a new provider, which is the one
+ *          thing this constant was created to force. 1700kB was 687kB above
+ *          the lid.
+ *
+ * 1000kB. Two independent derivations land there: 912.6 + 30 (drift) + ~57
+ * (growth) = ~1000, and the original "~10% over measured" rule gives 1003.9.
+ * It sits 57kB clear of the floor and 12kB under the lid.
+ *
+ * Of the 87.4kB of headroom, 30kB is for drift and 57.4kB is for growth. 57.4kB
+ * is more than any single honoured-behaviour PR has cost (10-50kB each, across
+ * the Task engine, AgentTeam and Handoff work), so ordinary parity work lands
+ * without touching this line; it is less than 100kB, so a provider cannot.
+ *
+ * If you are here to raise it: say what you measured, on which tree, and which
+ * of the two bounds you are choosing to break. Widening past 1012.6kB is
+ * choosing that a new provider no longer needs a decision. That has now been
+ * attempted twice in two days -- praisonai-triage-agent[bot] pushed 1600 ->
+ * 1750 onto an unrelated open PR in reaction to a red check (reverted, see
+ * #4873), and the 1700 above -- so the bar is a measurement, not a round number.
  *
  * `tools/depgraph.test.mjs` pins both values; `bundle.test.mjs` proves each
  * can fail, and that neither is the other in disguise.
  */
 export const SHELL_BUDGET_BYTES = 400 * 1024;
-export const LAZY_BUDGET_BYTES = 1700 * 1024;
+export const LAZY_BUDGET_BYTES = 1000 * 1024;
 
 /**
  * Every bare (non-relative) import esbuild could not resolve.
