@@ -22,9 +22,8 @@ needs a test proving the option changes what the code does.
 | Surface | Options not yet acted on |
 |---|---|
 | `AgentTeam.__init__` | 8 |
-| `Handoff` | 8 |
 | `Task.__init__` | 32 |
-| **Total** | **48** |
+| **Total** | **40** |
 
 Plus 17 options that work for some inputs and announce themselves for the rest.
 
@@ -43,17 +42,6 @@ add a test proving the option changes what the code does, and regenerate.
 - `caching`
 - `learn`
 - `toolsRunOn`
-
-### `Handoff` (8)
-
-- `contextPolicy`
-- `maxContextTokens`
-- `maxContextMessages`
-- `preserveSystem`
-- `timeoutSeconds`
-- `maxConcurrent`
-- `detectCycles`
-- `maxDepth`
 
 ### `Task.__init__` (32)
 

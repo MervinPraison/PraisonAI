@@ -10,13 +10,33 @@
  * - Handoff class with safety checks
  * - parallelHandoffs (fan-out with a concurrency semaphore)
  * - RECOMMENDED_PROMPT_PREFIX, promptWithHandoffInstructions
+ *
+ * The context filtering (`contextPolicy`, `maxContextMessages`,
+ * `maxContextTokens`, `preserveSystem`), the invocation-scoped history seeding
+ * and the handoff chain that `detectCycles`/`maxDepth` read live in
+ * `./handoff-context`.
  */
 
 import type { EnhancedAgent } from './enhanced';
 import { ToolRegistry, FunctionTool } from '../tools/decorator';
-import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
+import {
+  currentHandoffChain,
+  runWithHandoffChain,
+  selectHandoffMessages,
+  withSeededHistory,
+} from './handoff-context';
 // Import the base module, not the barrel: see the note at the top of errors-base.ts.
 import { PraisonAIError, type AgentErrorKind, type LegacyErrorCategory } from '../errors-base';
+
+// The chain a handoff runs under is part of the handoff surface, so it is
+// re-exported here rather than making callers know which file holds it.
+export {
+  currentHandoffChain,
+  currentHandoffDepth,
+  runWithHandoffChain,
+  selectHandoffMessages,
+  resetHandoffChain,
+} from './handoff-context';
 
 // ============================================================================
 // Constants (Python Parity)
@@ -553,6 +573,19 @@ export interface HandoffContext {
    * intersection is empty and the target runs with no tools at all.
    */
   sourceAgent?: HandoffAgentLike;
+  /**
+   * The agents already traversed to reach this handoff, oldest first
+   * (Python's `_handoff_chain_var`). `detectCycles` refuses a target that
+   * appears in it and `maxDepth` refuses a chain longer than the limit.
+   *
+   * Leave it unset and the chain in force for the current execution is used,
+   * which is what nested handoffs want: `execute()` runs the target inside a
+   * scope carrying the extended chain. Set it to resume a chain that crossed
+   * a process boundary (a queued handoff, a rehydrated request) or to start
+   * one deliberately deep. `execute()` writes the extended chain back onto the
+   * result's context, so passing `result.context` onward threads it by hand.
+   */
+  handoffChain?: readonly string[];
 }
 
 /**
@@ -626,10 +659,9 @@ function schemaToJsonSchema(schema: HandoffInputType): Record<string, any> {
 }
 
 /**
- * Python `HandoffConfig` dataclass defaults for the settings execute() does
- * not consult yet. `toolPolicy` and `allowParallel` are honoured (by
- * `execute()` and `parallelHandoffs()` respectively) and so live outside
- * this table.
+ * Python `HandoffConfig` dataclass defaults. `toolPolicy` and `allowParallel`
+ * carry their defaults where they are resolved (`resolveHandoffToolPolicy`
+ * and `parallelHandoffs`) and so live outside this table.
  */
 const HANDOFF_DEFAULTS: Omit<ResolvedHandoffConfig, 'toolPolicy' | 'allowParallel' | 'onHandoff' | 'onComplete' | 'onError'> = {
   contextPolicy: ContextPolicy.SUMMARY,
@@ -717,6 +749,12 @@ export class Handoff {
   readonly inputType?: HandoffInputType;
   /** Effective settings after merging the nested `config` block (top-level keys win). */
   readonly config: ResolvedHandoffConfig;
+  /**
+   * This handoff's own concurrency gate, created on first use. Per instance,
+   * as in Python: one process-wide semaphore would let whichever handoff ran
+   * first impose its `maxConcurrent` on every other.
+   */
+  private semaphore: Semaphore | null = null;
 
   constructor(config: HandoffConfig) {
     // Nested `config` values sit beneath the top-level ones: a key given at
@@ -746,25 +784,6 @@ export class Handoff {
       onComplete: pick('onComplete'),
       onError: pick('onError'),
     };
-    this.reportUnhonoured();
-  }
-
-  private reportUnhonoured(): void {
-    // Settings that Handoff.execute() does not consult yet. They are exposed on
-    // `this.config` for callers that drive the handoff themselves; a
-    // non-default value is reported so it is never silently ignored.
-    //
-    // The set of option names is read from the single `UNHONOURED_OPTIONS`
-    // ledger (surface `Handoff`), the same source the behaviour-parity gate
-    // counts, so the runtime notices and the published total cannot drift.
-    // `HANDOFF_DEFAULTS` supplies only the default *value* each name is
-    // compared against.
-    for (const option of unhonouredFor('Handoff')) {
-      const key = option as keyof typeof HANDOFF_DEFAULTS;
-      if (key in HANDOFF_DEFAULTS && this.config[key] !== HANDOFF_DEFAULTS[key]) {
-        notYetHonoured('Handoff', option);
-      }
-    }
   }
 
   /**
@@ -874,29 +893,159 @@ export class Handoff {
   }
 
   /**
+   * Refuse the handoff if it would close a loop or run too deep. Python
+   * parity with `Handoff._check_safety`, including the order: a cycle is
+   * reported before a depth overrun, and both are checked before anything is
+   * pushed onto the chain.
+   *
+   * @param chain      The agents already traversed, oldest first.
+   * @param sourceName The agent performing this handoff.
+   * @throws {HandoffCycleError} when `detectCycles` is on and the target is
+   *   already in the chain.
+   * @throws {HandoffDepthError} when the chain is already `maxDepth` long.
+   */
+  private checkSafety(chain: readonly string[], sourceName: string): void {
+    const targetName = this.targetAgent.name;
+
+    if (this.config.detectCycles && chain.includes(targetName)) {
+      const cyclePath = [...chain, targetName];
+      throw new HandoffCycleError(`Handoff cycle detected: ${cyclePath.join(' -> ')}`, {
+        cyclePath,
+        sourceAgent: sourceName,
+        targetAgent: targetName,
+        agentId: sourceName,
+      });
+    }
+
+    const currentDepth = chain.length;
+    if (currentDepth >= this.config.maxDepth) {
+      throw new HandoffDepthError(
+        `Max handoff depth exceeded: ${currentDepth + 1} > ${this.config.maxDepth}`,
+        {
+          maxDepth: this.config.maxDepth,
+          currentDepth: currentDepth + 1,
+          sourceAgent: sourceName,
+          targetAgent: targetName,
+          agentId: sourceName,
+        }
+      );
+    }
+  }
+
+  /**
+   * Run `fn` under this handoff's `maxConcurrent` limit. `0` (or less) means
+   * unlimited, as in Python, where `_get_semaphore()` returns `None`.
+   *
+   * The wait for a slot is deliberately outside the timeout, matching
+   * Python's `async with semaphore: await asyncio.wait_for(...)`: a handoff
+   * queued behind five others must not be failed for the queue's length.
+   */
+  private runWithinConcurrencyLimit<T>(fn: () => Promise<T>): Promise<T> {
+    const limit = this.config.maxConcurrent;
+    if (!(limit > 0)) return fn();
+    if (!this.semaphore) this.semaphore = new Semaphore(limit);
+    return this.semaphore.run(fn);
+  }
+
+  /**
+   * Run `fn` under this handoff's `timeoutSeconds`, which `0` (or less)
+   * disables. Python parity with the `asyncio.wait_for` in `execute_async`,
+   * including the error: `HandoffTimeoutError`, always retryable.
+   *
+   * JavaScript cannot cancel the target's in-flight promise the way
+   * `wait_for` cancels a task, so the abandoned call is left with a no-op
+   * rejection handler: it must not surface later as an unhandled rejection
+   * that takes the process down long after the handoff was reported failed.
+   */
+  private async runWithinTimeout<T>(fn: () => Promise<T>, sourceName: string): Promise<T> {
+    const seconds = this.config.timeoutSeconds;
+    if (!(seconds > 0)) return fn();
+
+    const targetName = this.targetAgent.name;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new HandoffTimeoutError(`Handoff to ${targetName} timed out after ${seconds}s`, {
+            timeoutSeconds: seconds,
+            sourceAgent: sourceName,
+            targetAgent: targetName,
+            agentId: sourceName,
+          })
+        );
+      }, seconds * 1000);
+      // A pending handoff timer must not keep a Node process alive on its own.
+      (timer as unknown as { unref?: () => void }).unref?.();
+    });
+
+    const work = fn();
+    work.catch(() => { /* the race already reported the timeout */ });
+    try {
+      return await Promise.race([work, expiry]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * Execute the handoff.
+   *
+   * What the target sees is decided by the context settings: `contextPolicy`
+   * (with `maxContextMessages`, `maxContextTokens` and `preserveSystem`)
+   * selects messages from `context.messages`, `transformContext` may reshape
+   * the selection, and the result is seeded onto the target's conversation for
+   * the duration of the call. Python parity with `_prepare_context` +
+   * `_seed_target_history`.
    *
    * The target's tools are filtered by `config.toolPolicy` before it runs.
    * In the default `intersect` mode the filter needs to know the source
    * agent's tools: pass it as `context.sourceAgent`.
+   *
+   * Safety and execution limits apply around that: `detectCycles`/`maxDepth`
+   * are checked before the target is touched, `maxConcurrent` bounds how many
+   * of this handoff's executions run at once, and `timeoutSeconds` bounds the
+   * target's turn.
+   *
+   * @throws {HandoffCycleError} the target is already in the handoff chain.
+   * @throws {HandoffDepthError} the chain is already `maxDepth` long.
+   * @throws {HandoffTimeoutError} the target exceeded `timeoutSeconds`.
    */
   async execute(context: HandoffContext): Promise<HandoffResult> {
-    let messages = context.messages;
-
-    if (this.transformContext) {
-      messages = this.transformContext(messages);
-    }
-
-    const input = context.input !== undefined ? this.validateInput(context.input) : context.input;
-
-    if (this.config.onHandoff) {
-      await this.config.onHandoff({ ...context, messages, input });
-    }
+    const sourceName = context.sourceAgent?.name ?? 'unknown';
+    const chain = [...(context.handoffChain ?? currentHandoffChain())];
 
     try {
-      // Transfer context to target agent, inside the tool boundary
+      this.checkSafety(chain, sourceName);
+
+      // Python applies the context policy first and the input filter after it;
+      // `transformContext` is this SDK's input filter.
+      let messages = selectHandoffMessages(context.messages, this.config);
+      if (this.transformContext) {
+        messages = this.transformContext(messages);
+      }
+
+      const input = context.input !== undefined ? this.validateInput(context.input) : context.input;
+
+      if (this.config.onHandoff) {
+        await this.config.onHandoff({ ...context, messages, input });
+      }
+
+      // The chain the target runs under: this handoff's source, pushed on top
+      // of what was already there (Python's `_push_handoff(source.name)`).
+      const nextChain = [...chain, sourceName];
       const effectiveTools = this.computeEffectiveTools(context.sourceAgent);
-      const reply = await this.chatWithTools(context.lastMessage, effectiveTools);
+
+      const reply = await this.runWithinConcurrencyLimit(() =>
+        runWithHandoffChain(nextChain, () =>
+          this.runWithinTimeout(
+            () =>
+              withSeededHistory(this.targetAgent, messages, () =>
+                this.chatWithTools(context.lastMessage, effectiveTools)
+              ),
+            sourceName
+          )
+        )
+      );
 
       const result: HandoffResult = {
         handedOffTo: this.targetAgent.name,
@@ -904,6 +1053,7 @@ export class Handoff {
         context: {
           ...context,
           messages,
+          handoffChain: nextChain,
           ...(input !== undefined ? { input } : {}),
         },
       };
@@ -1140,12 +1290,17 @@ export async function parallelHandoffs(
   const sourceLike = source as unknown as HandoffAgentLike & { getHistory?: () => any[] };
   const sourceName = sourceLike.name ?? String(source);
   const resolved = targets.map(normaliseTarget);
+  // Snapshot the chain once, before the fan-out, and give every sibling its
+  // own copy. Python does the same (`_handoff_chain_var.set(list(...))` at the
+  // top of each gathered task) so concurrent siblings cannot corrupt each
+  // other's cycle/depth tracking when the fan-out itself sits inside a handoff.
+  const parentChain = [...currentHandoffChain()];
 
   const runOne = async ({ agent, prompt }: { agent: HandoffAgentLike; prompt: string }): Promise<ParallelHandoffResult> => {
     // Each target reads the source's history afresh so a sibling cannot
     // hand it a mutated array.
     const messages = typeof sourceLike.getHistory === 'function' ? [...(sourceLike.getHistory() ?? [])] : [];
-    const context: HandoffContext = { messages, lastMessage: prompt, sourceAgent: sourceLike };
+    const context: HandoffContext = { messages, lastMessage: prompt, sourceAgent: sourceLike, handoffChain: [...parentChain] };
     const startedAt = Date.now();
     try {
       const h = new Handoff({ ...(config as Partial<HandoffConfig>), agent: agent as unknown as EnhancedAgent });

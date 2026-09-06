@@ -97,16 +97,6 @@
       "toolsRunOn",
       "web"
     ],
-    "Handoff": [
-      "contextPolicy",
-      "detectCycles",
-      "maxConcurrent",
-      "maxContextMessages",
-      "maxContextTokens",
-      "maxDepth",
-      "preserveSystem",
-      "timeoutSeconds"
-    ],
     "Task.__init__": [
       "agentConfig",
       "asyncExecution",
@@ -142,5 +132,5 @@
       "when"
     ]
   },
-  "total": 48
+  "total": 40
 }
