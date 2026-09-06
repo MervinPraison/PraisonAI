@@ -1167,9 +1167,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             for path, content in ((md_path, md), (json_path, js)):
                 rel = path.relative_to(repo_root)
                 if not path.is_file():
+                    # Missing is still a failure: there is no baseline to compare against.
                     evaluation.failures.append(f'{rel} does not exist -- run --write and commit it')
                 elif strip_source_lines(path.read_text(encoding='utf-8')) != strip_source_lines(content):
-                    evaluation.failures.append(f'{rel} is out of date -- run --write and commit the result')
+                    # Stale is a warning, not a failure. update-parity-tracker.yml
+                    # regenerates and commits this file on every push to main, so a
+                    # pull request never has to carry it -- and while every branch
+                    # regenerated the same file, every branch conflicted with every
+                    # other one on it. The substantive checks above still fail; only
+                    # the freshness of a file main rewrites by itself is downgraded.
+                    evaluation.warnings.append(
+                        f'{rel} is out of date -- main regenerates it on push; '
+                        'run --write if you want it in this change'
+                    )
 
         _print_report(evaluation, comparisons)
         if evaluation.ok:
