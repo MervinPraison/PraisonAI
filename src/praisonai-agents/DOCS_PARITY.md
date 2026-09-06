@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 57 | 18046 |
+| ✅ Agent | 22 | 57 | 18173 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 7 | 3616 |
