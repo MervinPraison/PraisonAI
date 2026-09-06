@@ -2191,12 +2191,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # configured agent pays nothing. Resolved here into a concrete
         # provider/model so the normal LLM path handles it unchanged.
         if isinstance(llm, str) and (llm == "local" or llm.startswith("local:")):
+            from ..local import LocalEngine as _LocalEngine
             from ..local import resolve as _resolve_local
             _spec = llm[len("local:"):] if llm.startswith("local:") else None
             _target = _resolve_local(_spec or None)
             llm = _target.litellm_model
             if base_url is None:
-                base_url = _target.base_url
+                # Ollama's litellm provider builds its own /api paths from the
+                # server root, so it takes base_url. Every other local engine
+                # speaks OpenAI and serves under /v1 -- handing it the bare root
+                # sent chat to /chat/completions, which a real LM Studio, vLLM
+                # or llama-server answers with 404.
+                base_url = (_target.base_url
+                            if _target.engine is _LocalEngine.OLLAMA
+                            else _target.openai_base_url)
             if api_key is None:
                 api_key = _target.api_key
             self._local_target = _target
