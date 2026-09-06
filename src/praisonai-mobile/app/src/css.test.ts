@@ -397,3 +397,57 @@ test("the settings sections are styled on the class the app actually emits", () 
   const lead = rulesFor('.screen-settings .settings-section[data-lead]');
   assert.match(lead.map((r) => r.body).join(" "), /color\s*:\s*var\(--ink\)/);
 });
+
+test("nothing removes the focus ring from a keyboard focus", () => {
+  /*
+   * This branch introduced `.screen-heading:focus { outline: none }` and a
+   * comment claiming "a real keyboard focus still gets one, from
+   * `:focus-visible` below". The comment was wrong, and specificity is why:
+   * `.screen-heading:focus` is (0,2,0) and the global `:focus-visible` rule is
+   * (0,1,0), so the suppression won for BOTH kinds of focus and route
+   * navigation to a heading left a keyboard user with no visible focus at all.
+   * `praisonai-triage-agent[bot]` caught it and scoped the rule to
+   * `:focus:not(:focus-visible)`, which is the correct idiom.
+   *
+   * None of the gates on this branch saw it -- they measure colour, size and
+   * weight, and this is a rule that removes something. So the invariant is
+   * stated directly: a rule may quieten a programmatic focus, but no rule may
+   * take the outline off an element that is `:focus-visible`.
+   *
+   * Text-level rather than computed, deliberately: `:focus-visible` depends on
+   * the heuristics of the last input modality, which a headless browser cannot
+   * be made to assert both ways reliably. The cascade, however, is decidable
+   * from the selector alone.
+   */
+  const killers = RULES.filter((rule) =>
+    declarationsOf(rule.body).some(
+      ([prop, value]) => prop === "outline" && /^(none|0)\b/.test(value.trim()),
+    ),
+  );
+  assert.ok(
+    killers.length > 0,
+    "no rule suppresses an outline -- if that is now true, delete this test rather than letting it pass vacuously",
+  );
+  for (const rule of killers) {
+    for (const selector of rule.selector.split(",").map((s) => s.trim())) {
+      if (!/:focus\b/.test(selector)) continue;
+      assert.match(
+        selector,
+        /:not\(\s*:focus-visible\s*\)/,
+        `"${selector}" removes the outline from every focus, keyboard included; ` +
+          "scope it with :focus:not(:focus-visible)",
+      );
+    }
+  }
+
+  // And the ring it must not remove has to exist in the first place.
+  const ring = RULES.filter((r) => r.selector.split(",").some((s) => s.trim() === ":focus-visible"));
+  assert.equal(ring.length, 1, "app.css must declare the :focus-visible ring exactly once");
+  // Destructured and re-guarded rather than indexed: `assert.equal` on the
+  // length narrows nothing for tsc, and `npm test` strips types without
+  // checking them -- so an indexed read passes every run here and fails
+  // `npm run typecheck`, which is the first thing `npm run check` does.
+  const [only] = ring;
+  assert.ok(only !== undefined, "the :focus-visible rule must have been parsed");
+  assert.match(only.body, /outline:\s*\d/, "the ring must actually draw an outline");
+});

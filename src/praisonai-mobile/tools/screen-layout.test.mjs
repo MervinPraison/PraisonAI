@@ -367,7 +367,6 @@ const TRANSCRIPT_FIXTURE = `
   <div class="row row-approval" data-state="pending"><p>Allow search?</p>
     <button type="button" data-choice="allow">Allow</button>
     <button type="button" data-choice="deny">Deny</button></div>
-  <div class="row row-error" data-tone="failure" data-recovery="retry">The engine is rate limited.</div>
   <div class="row row-notice" data-tone="warning">Stopped</div>
   <div class="row row-notice" data-tone="neutral">Reconnected</div>
   <div class="row row-dropped">2 events were dropped</div>
@@ -425,6 +424,28 @@ const COLOUR_HELPERS = `
     return o;
   }
 `;
+
+/**
+ * A REAL error row, rendered by the app rather than pasted in by the test.
+ *
+ * `.row-error` is the one row kind this file can provoke honestly. The web
+ * build's default engine is `remote-http` at `ENGINE`, and `openApp` already
+ * routes that address to `connectionrefused` -- so sending a message drives
+ * the actual failure path: the engine adapter, `classify.ts`, the view model's
+ * `errorKind`, and `dom.ts`'s title-plus-prose renderer.
+ *
+ * Worth the round trip because a fixture cannot check the thing that matters
+ * here. #4873 added `.error-title` and `.error-message` as two spans inside
+ * one row, and the CSS that separates them is a single `display: block`; a
+ * hand-written fixture of an error row is a copy of that markup which agrees
+ * with itself no matter what `dom.ts` later does. This asks the app.
+ */
+async function provokeRealError(page) {
+  await page.locator('textarea[aria-label="Message"]').fill("Hello");
+  await page.locator('button[data-action="send"]').click();
+  await page.locator(".row-error").waitFor({ timeout: 30_000 });
+  return page;
+}
 
 /** Open the app, put a full transcript in it, and set the colour scheme. */
 async function openTranscript(t, scheme, options = {}) {
@@ -498,9 +519,18 @@ for (const scheme of ["light", "dark"]) {
     // reach Chats, and a loop that tried timed out on a button `mount.ts` had
     // correctly hidden. Going back is the OS gesture, which is not a control
     // on the page at all.
-    for (const route of ["chat", "settings", "chats"]) {
-      const page = await openTranscript(t, scheme, { seedChats: true });
-      if (route !== "chat") {
+    // "error" is the chat screen again, with a row the APP produced rather than
+    // one the fixture pasted in -- see `provokeRealError`. The fixture covers
+    // the kinds no refused connection can make (tool, approval, dropped); this
+    // covers the one it can, and covers it as `dom.ts` actually renders it.
+    for (const route of ["chat", "error", "settings", "chats"]) {
+      const page = route === "error"
+        ? await provokeRealError(await openApp(t)).then(async (p) => {
+            await p.emulateMedia({ colorScheme: scheme });
+            return p;
+          })
+        : await openTranscript(t, scheme, { seedChats: true });
+      if (route !== "chat" && route !== "error") {
         await page.locator(`button[data-action="navigate"][data-route="${route}"]`).click();
         await page.locator(`.screen-${route}`).waitFor({ timeout: 10_000 });
       }
@@ -742,4 +772,51 @@ test("every size and weight in the app is a step on the type scale", async (t) =
       offWeight.map(([w, what]) => `  ${w} on ${what}`).join("\n"),
   );
   assert.ok(weights.size >= 2, `only ${weights.size} distinct weights: the hierarchy is not being used`);
+});
+
+test("the error row still shows its title above the provider's prose", async (t) => {
+  /*
+   * #4873 landed `.error-title` / `.error-message` into `.row-error` while this
+   * branch was rewriting every rule in the stylesheet, so the two changes met
+   * for the first time in a rebase. The whole of the separation between the two
+   * spans is one `display: block`; lose it and the row reads
+   * "Sign-in problemThe OPENAI_API_KEY environment variable is missing..." with
+   * nothing failing anywhere.
+   *
+   * Driven through the real failure path rather than a fixture, so it also
+   * proves the title is still CHOSEN -- `classify.ts` -> `errorKind` ->
+   * `strings.errorTitle` -- and not just markup this test wrote itself.
+   */
+  const page = await provokeRealError(await openApp(t));
+
+  const seen = await page.evaluate(() => {
+    const row = document.querySelector(".row-error");
+    const title = row.querySelector(".error-title");
+    const message = row.querySelector(".error-message");
+    const box = (el) => (el ? el.getBoundingClientRect() : null);
+    return {
+      title: title?.textContent ?? null,
+      message: message?.textContent ?? null,
+      display: title ? getComputedStyle(title).display : null,
+      weight: title ? parseInt(getComputedStyle(title).fontWeight, 10) : null,
+      titleBottom: box(title)?.bottom ?? null,
+      messageTop: box(message)?.top ?? null,
+      rowRecovery: row.dataset.recovery,
+    };
+  });
+
+  assert.ok(seen.title !== null && seen.title.trim() !== "", "the error row must render a title");
+  assert.ok(seen.message !== null && seen.message.trim() !== "", "and keep the provider's prose under it");
+  assert.notEqual(seen.title, seen.message, "the title is chosen by kind, not a copy of the message");
+  assert.equal(seen.display, "block", "without display:block the two spans run into one sentence");
+  // The geometry, not just the declaration: the title's box must END at or
+  // above where the message's box STARTS, which is what "on its own line"
+  // means and what a `display: inline` regression would break.
+  assert.ok(
+    seen.titleBottom <= seen.messageTop + 0.5,
+    `the title ends at y=${seen.titleBottom} and the message starts at y=${seen.messageTop}: same line`,
+  );
+  // The weight has to be a step this branch's scale admits, or the type gate
+  // and this one disagree about the same element.
+  assert.ok([400, 500, 700].includes(seen.weight), `the title's weight is ${seen.weight}`);
 });
