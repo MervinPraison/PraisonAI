@@ -18,6 +18,38 @@ from typing import Awaitable, Iterator, Optional, TypeVar
 T = TypeVar("T")
 
 
+class _Unset:
+    """Sentinel for an *omitted* timeout argument.
+
+    Distinguishes "caller did not pass a timeout" (resolve the configured
+    default via :func:`_default_timeout`) from an explicit ``timeout=None``
+    (an intentional request for an *unbounded* wait). The scheduler bridges
+    (``integration/bridges/schedules_runner.py``, ``cli/commands/schedule.py``)
+    rely on the latter so a long-running claimed job is never cancelled after
+    the 300s default.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
+def _resolve_timeout(timeout: "float | None | _Unset") -> Optional[float]:
+    """Map an omitted timeout to the configured default, preserving explicit None.
+
+    - ``_UNSET`` (argument omitted) → :func:`_default_timeout` (e.g. 300s).
+    - explicit ``None`` → ``None`` (unbounded wait; caller opted in).
+    - a number → itself.
+    """
+    if isinstance(timeout, _Unset):
+        return _default_timeout()
+    return timeout
+
+
 def _default_timeout() -> float:
     """Resolve the default run_sync timeout lazily, per call.
 
@@ -117,9 +149,11 @@ class AsyncBridge:
             finally:
                 self._lock_owner = None
 
-    def run_sync(self, coro: Awaitable[T], *, timeout: float | None = None) -> T:
-        if timeout is None:
-            timeout = _default_timeout()
+    def run_sync(
+        self, coro: Awaitable[T], *, timeout: "float | None | _Unset" = _UNSET
+    ) -> T:
+        # Omitted → configured default; explicit ``None`` → unbounded wait.
+        timeout = _resolve_timeout(timeout)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -281,7 +315,7 @@ def _shutdown_default() -> None:
     _BG.shutdown()
 
 
-def run_sync(coro: Awaitable[T], *, timeout: float | None = None) -> T:
+def run_sync(coro: Awaitable[T], *, timeout: "float | None | _Unset" = _UNSET) -> T:
     """
     Run a coroutine synchronously using the background loop.
     
@@ -306,7 +340,7 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = None) -> T:
 def run_sync_or_offload(
     coro: Awaitable[T],
     *,
-    timeout: float | None = None,
+    timeout: "float | None | _Unset" = _UNSET,
     thread_name: str = "praisonai-sync-offload",
 ) -> T:
     """Run ``coro`` to completion from *any* calling context.
@@ -327,8 +361,8 @@ def run_sync_or_offload(
     (it fails loudly inside a loop). Async callers should ``await``
     :func:`arun_sync_or_offload`, which never blocks the loop.
     """
-    if timeout is None:
-        timeout = _default_timeout()
+    # Omitted → configured default; explicit ``None`` → unbounded wait.
+    timeout = _resolve_timeout(timeout)
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -409,7 +443,7 @@ def run_sync_or_offload(
 async def arun_sync_or_offload(
     coro: Awaitable[T],
     *,
-    timeout: float | None = None,
+    timeout: "float | None | _Unset" = _UNSET,
 ) -> T:
     """Awaitable sibling of :func:`run_sync_or_offload` for async callers.
 
@@ -423,8 +457,9 @@ async def arun_sync_or_offload(
     ``asyncio.new_event_loop()``), so a caller-installed :func:`scoped_bridge`
     binding still wins and per-loop connection pools are preserved.
     """
-    if timeout is None:
-        timeout = _default_timeout()
+    # Omitted → configured default; explicit ``None`` → unbounded wait
+    # (``asyncio.wait_for(..., timeout=None)`` waits indefinitely).
+    timeout = _resolve_timeout(timeout)
     fut = _default_bridge().submit(coro)
     wrapped = asyncio.wrap_future(fut)
     try:

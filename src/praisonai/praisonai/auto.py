@@ -106,22 +106,48 @@ def _atomic_write_text(path, content_writer):
 
 
 def _backup_unparseable_file(path):
-    """Copy ``path`` to a sibling ``.bak`` before aborting a merge.
+    """Copy ``path`` to a collision-safe sibling ``.bak`` before aborting a merge.
 
     Preserves the user's original (un-parseable) file so a refused merge never
-    risks the content. Returns the backup path. Best-effort: if the copy itself
-    fails the original is still untouched (the merge aborts either way), so we
-    surface the source path.
+    risks the content. The backup name embeds a timestamp
+    (``<file>.<YYYYmmddHHMMSS>.bak``) so a second refused merge never silently
+    overwrites an earlier preserved copy.
+
+    Returns the backup path on success, or ``None`` if the copy itself failed.
+    The original is untouched either way (the merge aborts regardless); a
+    ``None`` return lets the caller report accurately that no backup was made
+    rather than falsely claiming the original was preserved at its own path.
     """
     import shutil
+    from datetime import datetime
 
-    backup = f"{path}.bak"
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    backup = f"{path}.{stamp}.bak"
     try:
         shutil.copy2(path, backup)
     except OSError as exc:
         logger.warning("Could not write backup %s: %s", backup, exc)
-        return path
+        return None
     return backup
+
+
+def _merge_conflict_message(path, error):
+    """Build a ``MergeConflictError`` message, backing up ``path`` first.
+
+    Reports the backup location only when one was actually created; otherwise
+    it states the original is untouched in place so the user is never told a
+    backup exists when the copy failed.
+    """
+    backup = _backup_unparseable_file(path)
+    if backup is not None:
+        preserved = f"Original preserved at {backup}. "
+    else:
+        preserved = f"Backup failed; original left untouched at {path}. "
+    return (
+        f"Refusing to overwrite un-parseable {path}: {error}. "
+        f"{preserved}"
+        f"Fix the file or re-run without --merge."
+    )
 
 
 # OpenAI client creation removed - create per-call instead of global cache
@@ -1195,11 +1221,8 @@ class AutoGenerator(BaseAutoGenerator):
         except yaml.YAMLError as e:
             # Refuse to overwrite an un-parseable target: preserve the original
             # and abort rather than silently clobbering the user's work.
-            backup = _backup_unparseable_file(self.agent_file)
             raise MergeConflictError(
-                f"Refusing to overwrite un-parseable {self.agent_file}: {e}. "
-                f"Original preserved at {backup}. "
-                f"Fix the file or re-run without --merge."
+                _merge_conflict_message(self.agent_file, e)
             ) from e
         # OS-level errors (PermissionError, OSError, etc.) propagate unchanged.
         
@@ -1690,11 +1713,8 @@ Respond with:
         except yaml.YAMLError as e:
             # Refuse to overwrite an un-parseable target: preserve the original
             # and abort rather than silently clobbering the user's work.
-            backup = _backup_unparseable_file(self.workflow_file)
             raise MergeConflictError(
-                f"Refusing to overwrite un-parseable {self.workflow_file}: {e}. "
-                f"Original preserved at {backup}. "
-                f"Fix the file or re-run without --merge."
+                _merge_conflict_message(self.workflow_file, e)
             ) from e
         # OS-level errors (PermissionError, OSError, etc.) propagate unchanged.
         
