@@ -245,7 +245,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2011`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1076`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -260,7 +260,7 @@ TS-only members: `options`?
 ### `Handoff.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:320`
-- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:485` (ctor `src/praisonai-ts/src/agent/handoff.ts:721`)
+- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:505` (ctor `src/praisonai-ts/src/agent/handoff.ts:759`)
 - Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
