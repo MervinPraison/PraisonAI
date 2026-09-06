@@ -31,7 +31,7 @@ async def main():
     agent = Agent(
         name="Research Assistant",
         instructions="You are a helpful research assistant. Provide concise answers.",
-        verbose=True
+        output='verbose'
     )
     
     # Create background runner

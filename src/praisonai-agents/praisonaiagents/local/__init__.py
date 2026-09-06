@@ -32,12 +32,22 @@ from .quirktable import (NOTES, Quirk, QuirkNote, Severity, all_notes, note,
 from .errors import (EngineUnreachableError, HostHeaderRejectedError,
                      InvalidLocalSpecError, LocalError, ModelNotAvailableError,
                      NoLocalEngineError)
+from .embed import (
+    ENV_EMBED_MODEL,
+    PREFERRED_EMBED_MODELS,
+    local_embedder_config,
+    select_embedding_model,
+)
 from .target import (DEFAULT_API_KEY, ENV_BASE_URL, ENV_ENGINE, ENV_MODEL,
                      LocalTarget, build_target, litellm_model_for,
                      parse_ollama_host, parse_spec, select_model)
 from .resolve import cache_info, clear_cache, resolve, resolve_or_none
 
 __all__ = [
+    "ENV_EMBED_MODEL",
+    "PREFERRED_EMBED_MODELS",
+    "local_embedder_config",
+    "select_embedding_model",
     "LocalEngine", "ApiStyle", "Cap", "Evidence", "Severity", "Quirk",
     "DEFAULT_CAPS", "default_caps", "parse_ollama_capabilities",
     "parse_llama_cpp_props", "parse_lm_studio_models", "parse_openai_models",
