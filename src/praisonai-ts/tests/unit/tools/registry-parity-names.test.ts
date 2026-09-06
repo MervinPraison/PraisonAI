@@ -121,6 +121,73 @@ describe('Python-named tool helpers route to the Python-shaped registry', () => 
   });
 });
 
+describe('model definitions advertise the registration name, so dispatch resolves', () => {
+  beforeEach(() => get_registry().clear());
+
+  it('a renamed tool is advertised under the name the agent will dispatch on', () => {
+    const t = tool({ name: 'original', description: 'd', execute: async () => 'x' });
+    register_tool(t, { name: 'renamed' });
+
+    // The model is offered 'renamed'…
+    const defs = get_registry().getDefinitions();
+    expect(defs.map(d => d.name)).toContain('renamed');
+    expect(defs.map(d => d.name)).not.toContain('original');
+    // …and the OpenAI payload agrees…
+    expect(get_registry().toOpenAITools().map(t => t.function.name)).toContain('renamed');
+    // …and that is exactly the key get() (the agent's lookup) resolves.
+    expect(get_registry().get('renamed')).toBe(t);
+    expect(get_registry().get('original')).toBeUndefined();
+  });
+
+  it('an un-renamed tool is still advertised under its own name (control)', () => {
+    register_tool(tool({ name: 'plain', description: 'd', execute: async () => 'x' }));
+    expect(get_registry().getDefinitions().map(d => d.name)).toEqual(['plain']);
+  });
+});
+
+describe('inferred schema of a plain function marks defaulted params optional', () => {
+  beforeEach(() => get_registry().clear());
+
+  it('a parameter with a default is not required', () => {
+    function paginate(query: string, limit = 10) {
+      return `${query}:${limit}`;
+    }
+    register_tool(paginate);
+    const params = get_tool('paginate')!.getParameters();
+    expect(params.properties).toHaveProperty('query');
+    expect(params.properties).toHaveProperty('limit');
+    expect(params.required).toEqual(['query']);
+    expect(params.required).not.toContain('limit');
+  });
+
+  it('every parameter is required when none has a default (control)', () => {
+    function pair(a: string, b: string) { return a + b; }
+    register_tool(pair);
+    expect(get_tool('pair')!.getParameters().required).toEqual(['a', 'b']);
+  });
+});
+
+describe('deprecated tools/registry subpath aliases still resolve (backward compat)', () => {
+  beforeEach(() => resetToolsRegistry());
+
+  it('the removed factory-registry names remain importable and bound to the factory registry', () => {
+    // These are re-exported as deprecated aliases from tools/registry so that
+    // `import { registerTool, getRegistry, validateTool } from 'praisonai/tools/registry'`
+    // keeps compiling after the rename.
+    const mod = require('../../../src/tools/registry');
+    expect(typeof mod.getRegistry).toBe('function');
+    expect(typeof mod.get_registry).toBe('function');
+    expect(typeof mod.registerTool).toBe('function');
+    expect(typeof mod.register_tool).toBe('function');
+    expect(typeof mod.validateTool).toBe('function');
+    expect(typeof mod.validate_tool).toBe('function');
+    expect(typeof mod.get_tool).toBe('function');
+    // They point at the factory registry (their historical target), not the
+    // name-keyed one.
+    expect(mod.getRegistry()).toBe(getToolsRegistry());
+  });
+});
+
 describe('factory registry keeps its own, unambiguous names', () => {
   beforeEach(() => resetToolsRegistry());
 

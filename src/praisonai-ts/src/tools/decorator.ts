@@ -568,7 +568,13 @@ interface ToolEntry {
  * parameter (`({ city })`), a rest parameter, or a signature this cannot
  * parse. Guessing there would be worse than not mapping.
  */
-function paramNamesOf(fn: Function): string[] {
+interface ParsedParam {
+  name: string;
+  /** True when the parameter declares a default value (`x = 1`) — it is optional. */
+  optional: boolean;
+}
+
+function paramNamesOf(fn: Function): ParsedParam[] {
   const source = fn.toString();
   const parenthesised = source.match(/\(([^)]*)\)/);
   let raw: string;
@@ -584,8 +590,14 @@ function paramNamesOf(fn: Function): string[] {
   if (/[{}\[\]]/.test(raw) || raw.includes('...')) return [];
   return raw
     .split(',')
-    .map(part => part.split(/[:=]/)[0].trim())
-    .filter(part => part.length > 0);
+    .map(part => part.trim())
+    .filter(part => part.length > 0)
+    .map(part => ({
+      // Strip the type annotation and default so the name is clean.
+      name: part.split(/[:=]/)[0].trim(),
+      optional: part.includes('='),
+    }))
+    .filter(param => param.name.length > 0);
 }
 
 /**
@@ -602,13 +614,16 @@ export function functionToTool(
   fn: (...args: any[]) => any,
   options?: { name?: string; description?: string; parameters?: ToolParameters }
 ): FunctionTool {
-  const names = paramNamesOf(fn);
+  const parsed = paramNamesOf(fn);
+  const names = parsed.map(p => p.name);
   const parameters: ToolParameters = options?.parameters ?? {
     type: 'object',
     properties: Object.fromEntries(
       names.map(n => [n, { type: 'string', description: `Parameter ${n}` }])
     ),
-    required: [...names],
+    // A parameter with a default is optional; leaving it out of `required`
+    // lets the model omit it and the function's default take over.
+    required: parsed.filter(p => !p.optional).map(p => p.name),
   };
   return new FunctionTool({
     name: options?.name || fn.name || 'anonymous_tool',
@@ -775,14 +790,23 @@ export class ToolRegistry {
     }
   }
 
-  private availableEntries(): ToolEntry[] {
-    return Array.from(this.tools.values()).filter(entry => entry.tool.isAvailable());
+  /**
+   * Available entries paired with the NAME they are registered under.
+   *
+   * A tool registered with `{ name: 'renamed' }` is keyed as `'renamed'` even
+   * though its own `.name` is unchanged. Model definitions must advertise the
+   * registration key, because that is the name the agent dispatches on — see
+   * {@link get}, which looks up by key. Advertising `entry.tool.name` would
+   * offer a name the registry cannot resolve.
+   */
+  private availableNamedEntries(): Array<[string, ToolEntry]> {
+    return Array.from(this.tools.entries()).filter(([, entry]) => entry.tool.isAvailable());
   }
 
   /** Definitions offered to a model: unavailable tools are excluded. */
   getDefinitions(): ToolDefinition[] {
-    return this.availableEntries().map(entry => ({
-      name: entry.tool.name,
+    return this.availableNamedEntries().map(([name, entry]) => ({
+      name,
       description: entry.tool.description,
       parameters: this.entryParameters(entry),
       category: entry.tool.category,
@@ -791,10 +815,10 @@ export class ToolRegistry {
 
   /** OpenAI tool payloads offered to a model: unavailable tools are excluded. */
   toOpenAITools(): Array<{ type: 'function'; function: any }> {
-    return this.availableEntries().map(entry => ({
+    return this.availableNamedEntries().map(([name, entry]) => ({
       type: 'function' as const,
       function: {
-        name: entry.tool.name,
+        name,
         description: entry.tool.description,
         parameters: this.entryParameters(entry),
       },
