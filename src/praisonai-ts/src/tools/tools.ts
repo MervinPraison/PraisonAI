@@ -34,6 +34,11 @@ import {
 } from './builtins/bedrock-agentcore';
 import { airweaveSearch, AIRWEAVE_METADATA, createAirweaveSearchTool } from './builtins/airweave';
 import { codeMode, CODE_MODE_METADATA, createCodeModeTool } from './builtins/code-mode';
+import {
+  anyapiSearchApis, anyapiGetApi, anyapiRunApi,
+  ANYAPI_METADATA,
+  createAnyapiSearchApisTool, createAnyapiGetApiTool, createAnyapiRunApiTool
+} from './builtins/anyapi';
 import { registerCustomTool, createCustomTool, registerNpmTool, registerLocalTool } from './builtins/custom';
 
 // Type imports
@@ -49,6 +54,7 @@ import type { ValyuSearchConfig } from './builtins/valyu';
 import type { CodeInterpreterConfig, BrowserConfig } from './builtins/bedrock-agentcore';
 import type { AirweaveSearchConfig } from './builtins/airweave';
 import type { CodeModeConfig } from './builtins/code-mode';
+import type { AnyapiSearchApisConfig, AnyapiRunApiConfig } from './builtins/anyapi';
 import type { CustomToolConfig } from './builtins/custom';
 
 /**
@@ -109,6 +115,12 @@ export function registerBuiltinTools(): void {
 
   // Code Mode
   registry.register(CODE_MODE_METADATA, createCodeModeTool as ToolFactory);
+
+  // AnyAPI - register with both base ID and specific IDs
+  registry.register(ANYAPI_METADATA, createAnyapiSearchApisTool as ToolFactory);
+  registry.register({ ...ANYAPI_METADATA, id: 'anyapi-search-apis' }, createAnyapiSearchApisTool as ToolFactory);
+  registry.register({ ...ANYAPI_METADATA, id: 'anyapi-get-api' }, createAnyapiGetApiTool as ToolFactory);
+  registry.register({ ...ANYAPI_METADATA, id: 'anyapi-run-api' }, createAnyapiRunApiTool as ToolFactory);
 }
 
 /**
@@ -177,6 +189,12 @@ export const tools = {
 
   // Code Mode
   codeMode: (config?: CodeModeConfig) => codeMode(config),
+
+  // AnyAPI (discover then run)
+  anyapi: (config?: AnyapiSearchApisConfig) => anyapiSearchApis(config),
+  anyapiSearchApis: (config?: AnyapiSearchApisConfig) => anyapiSearchApis(config),
+  anyapiGetApi: () => anyapiGetApi(),
+  anyapiRunApi: (config?: AnyapiRunApiConfig) => anyapiRunApi(config),
 
   // Custom Tools
   custom: <TInput = unknown, TOutput = unknown>(config: CustomToolConfig<TInput, TOutput>) => 
