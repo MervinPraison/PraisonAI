@@ -4056,18 +4056,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self._ensure_knowledge_processed()
             
             if not skip_retrieval and self.knowledge:
-                # Knowledge.search is synchronous (Mem0 embedding + vector-store
-                # I/O). Offload to a thread so it never blocks the event loop for
-                # other coroutines sharing the loop.
-                search_results = await asyncio.to_thread(
-                    self.knowledge.search, prompt, agent_id=self.agent_id
+                # Use the unified, already-correct normalization helper (handles
+                # the SearchResult dataclass, dict, and list shapes). It is
+                # synchronous (Mem0 embedding + vector-store I/O), so offload it
+                # to a thread to avoid blocking the event loop for coroutines
+                # sharing the loop.
+                knowledge_context, _ = await asyncio.to_thread(
+                    self._get_knowledge_context,
+                    prompt if isinstance(prompt, str) else str(prompt),
+                    True
                 )
-                if search_results:
-                    if isinstance(search_results, dict) and 'results' in search_results:
-                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                    else:
-                        knowledge_content = "\n".join(search_results)
-                    prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                if knowledge_context:
+                    prompt = f"{prompt}\n\nKnowledge: {knowledge_context}"
 
             if self._using_custom_llm:
                 # Store chat history length for potential rollback
@@ -4934,13 +4934,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._ensure_knowledge_processed()
                 
                 if self.knowledge:
-                    search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
-                    if search_results:
-                        if isinstance(search_results, dict) and 'results' in search_results:
-                            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                        else:
-                            knowledge_content = "\n".join(search_results)
-                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                    knowledge_context, _ = self._get_knowledge_context(
+                        prompt if isinstance(prompt, str) else str(prompt),
+                        use_rag=True
+                    )
+                    if knowledge_context:
+                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_context}"
 
                 if attachments:
                     actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
@@ -5069,13 +5068,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._ensure_knowledge_processed()
                 
                 if self.knowledge:
-                    search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
-                    if search_results:
-                        if isinstance(search_results, dict) and 'results' in search_results:
-                            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                        else:
-                            knowledge_content = "\n".join(search_results)
-                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                    knowledge_context, _ = self._get_knowledge_context(
+                        prompt if isinstance(prompt, str) else str(prompt),
+                        use_rag=True
+                    )
+                    if knowledge_context:
+                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_context}"
 
                 if attachments:
                     actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
