@@ -64,7 +64,10 @@ class does is outside the signature layer's field of view. `Session` has
 Python and none of them in TypeScript; `FunctionTool` has `run` in Python and
 neither `run` nor a callable form in TypeScript. The check lists public methods
 on both sides, following Python base classes through the package (`Agent` takes
-its methods from twelve mixins) and matching `save_state` to `saveState`.
+its methods from twelve mixins) and matching `save_state` to `saveState`. A
+Python method is only matched to a TypeScript **method** (or a function-valued
+property): a `get getState()` accessor is not `session.getState()`, so it does
+not satisfy a Python method and the method is still reported missing.
 
 **It compares NAMES ONLY** -- the same measure, and the same caveat, `PARITY.md`
 prints. `Agent.execute` counts as present here and still does the wrong thing:

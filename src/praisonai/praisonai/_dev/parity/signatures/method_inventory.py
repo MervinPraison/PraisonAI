@@ -141,11 +141,19 @@ class PythonClassIndex:
         return list(self._build().get(name, []))
 
     def find(self, name: str, prefer: Optional[Path] = None) -> Optional[Tuple[Path, ast.ClassDef]]:
-        """Locate ``class name``. ``prefer`` wins when several files declare it."""
+        """Locate ``class name``. ``prefer`` wins when several files declare it.
+
+        ``prefer`` is matched on the resolved path so a caller may pass a hint
+        assembled from config (``python_root / file``) that is not byte-identical
+        to the rglob'd path this index stores.
+        """
         files = self.files_declaring(name)
         if not files:
             return None
-        chosen = prefer if prefer in files else files[0]
+        chosen = files[0]
+        if prefer is not None:
+            target = prefer.resolve()
+            chosen = next((f for f in files if f.resolve() == target), files[0])
         for node in self._tree(chosen).body:
             if isinstance(node, ast.ClassDef) and node.name == name:
                 return chosen, node
@@ -216,6 +224,13 @@ class TsClass:
 
     def member_names(self) -> Set[str]:
         return {m['name'] for m in self.members}
+
+    def callable_member_names(self) -> Set[str]:
+        """Names of members a caller can invoke -- methods and function-valued
+        properties, but NOT get/set accessors. A Python method matched to an
+        accessor reads as present while ``obj.thing()`` fails at runtime, so the
+        two are compared against callables only."""
+        return {m['name'] for m in self.members if m.get('kind') == 'method'}
 
 
 def run_ts_members(repo_root: Path, targets: List[Dict[str, str]],
@@ -307,7 +322,7 @@ def compare_class(inventory: ClassInventory, waivers: Dict[str, Dict[str, Any]])
             f'{py.name} declares no public methods in Python ({py.location}), '
             'so this class passes vacuously'
         )
-    available = ts.member_names()
+    available = ts.callable_member_names()
     for method in py.methods:
         if _ts_candidates(method.name) & available:
             inventory.present.append(method.name)
@@ -377,9 +392,15 @@ def check_method_inventory(repo_root: Path, catalogue) -> List[ClassInventory]:
         ts_file, _, ts_class = key.partition('::')
         inventory.typescript = ts_classes.get(key)
         py_class = None
-        tried = _python_class_candidates(_first_surface(catalogue, inventory.surfaces[0]))
+        surface = _first_surface(catalogue, inventory.surfaces[0])
+        tried = _python_class_candidates(surface)
+        # The surface names the exact file its class lives in; use it to
+        # disambiguate. Without this, a class name declared in several files
+        # (e.g. duplicate `Task`/`DoomLoopDetector`) would silently resolve to
+        # the alphabetically first file and compare an unrelated class.
+        prefer = _configured_python_file(index, surface)
         for candidate in tried:
-            py_class = index.public_methods(candidate)
+            py_class = index.public_methods(candidate, prefer=prefer)
             if py_class is not None:
                 break
         if py_class is None:
@@ -403,3 +424,16 @@ def _first_surface(catalogue, key: str):
         if surface.key == key:
             return surface
     raise KeyError(key)
+
+
+def _configured_python_file(index: PythonClassIndex, surface) -> Optional[Path]:
+    """The absolute path of the surface's ``python.file`` under ``python_root``.
+
+    Returned as the ``prefer`` hint so a class name declared in several files is
+    matched to the one the surface actually points at. ``None`` when no file is
+    configured, leaving the previous first-declaration behaviour untouched.
+    """
+    rel = (surface.python or {}).get('file')
+    if not rel:
+        return None
+    return (index.root / rel).resolve()

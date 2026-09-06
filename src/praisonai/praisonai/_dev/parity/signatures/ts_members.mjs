@@ -113,8 +113,11 @@ function isPublic(ts, member, name) {
   return !name.startsWith('_');
 }
 
-// A callable member: a method, a getter/setter (a Python method may legitimately
-// be a TypeScript accessor), or a property initialised to a function.
+// A member worth listing: a method, a get/set accessor, or a property
+// initialised to a function. The `kind` is reported so the Python comparison can
+// tell callables (`method`) from accessors: a Python method matched to a
+// `get foo()` reads as present while `obj.foo()` fails at runtime, so only
+// `method` counts as a callable counterpart on the Python side.
 function memberKind(ts, member) {
   if (ts.isMethodDeclaration(member)) return 'method';
   if (ts.isGetAccessorDeclaration(member)) return 'getter';

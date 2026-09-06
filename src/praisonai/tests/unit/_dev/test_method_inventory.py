@@ -163,7 +163,12 @@ class TestMissingMethodIsAFinding:
         assert sorted(m.name for m in inventory.unwaived) == ['get_state', 'save_state']
         assert any('absent' in note for note in inventory.notes)
 
-    def test_a_getter_counts_as_a_counterpart(self, tmp_path):
+    def test_an_accessor_does_not_count_as_a_method_counterpart(self, tmp_path):
+        # `get getState()` is not callable as `session.getState()`; a Python
+        # *method* matched to it would read as present while the call fails at
+        # runtime. So the accessor must not satisfy the method, and `get_state`
+        # is still reported missing. `save_state` -> `saveState()` (a real
+        # method) matches, proving only the accessor is excluded.
         mini_repo(tmp_path, '''
 export interface SessionConfig { sessionId?: string }
 export class Session {
@@ -172,7 +177,7 @@ export class Session {
 }
 ''')
         inventory, = M.check_method_inventory(tmp_path, catalogue(surface()))
-        assert inventory.unwaived == []
+        assert [m.name for m in inventory.unwaived] == ['get_state']
 
     def test_an_arrow_function_property_counts_as_a_counterpart(self, tmp_path):
         mini_repo(tmp_path, '''
@@ -292,6 +297,29 @@ class PraisonAIError(Exception):
     def test_a_missing_class_is_none(self, tmp_path):
         index = self.index(tmp_path, 'class Widget: pass\n')
         assert index.public_methods('Nope') is None
+
+    def test_prefer_disambiguates_a_class_name_declared_in_two_files(self, tmp_path):
+        # `Task` (and `DoomLoopDetector`) is declared in more than one file with
+        # different methods. Without the surface's `python.file` hint the lookup
+        # takes the alphabetically first declaration and compares an unrelated
+        # class -- a silent false pass or failure. `prefer` must pin the right one.
+        write(tmp_path, f'{PY_ROOT}/a_other.py', 'class Task:\n    def wrong(self): pass\n')
+        write(tmp_path, f'{PY_ROOT}/task/task.py', 'class Task:\n    def right(self): pass\n')
+        index = M.PythonClassIndex(tmp_path, PY_ROOT)
+        # Alphabetically first (a_other.py) is what the old code picked.
+        assert [m.name for m in index.public_methods('Task').methods] == ['wrong']
+        prefer = tmp_path / PY_ROOT / 'task/task.py'
+        picked = index.public_methods('Task', prefer=prefer)
+        assert [m.name for m in picked.methods] == ['right']
+        assert picked.location.endswith('task/task.py:1')
+
+    def test_configured_python_file_builds_the_hint_from_the_surface(self, tmp_path):
+        write(tmp_path, f'{PY_ROOT}/task/task.py', 'class Task: pass\n')
+        index = M.PythonClassIndex(tmp_path, PY_ROOT)
+        s = surface(key='Task.__init__', py_file='task/task.py', py_class='Task')
+        assert M._configured_python_file(index, s) == (tmp_path / PY_ROOT / 'task/task.py').resolve()
+        s_no_file = C.Surface(key='x', python={}, typescript={})
+        assert M._configured_python_file(index, s_no_file) is None
 
 
 class TestNameMatching:

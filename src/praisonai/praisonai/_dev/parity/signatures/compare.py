@@ -763,16 +763,45 @@ def _baseline_path(repo_root: Path) -> Path:
     return repo_root / INVENTORY_BASELINE
 
 
+class BaselineError(ToolingError):
+    """The committed baseline is present but unreadable: a tooling error, not a
+    missing baseline. Treating a truncated or conflicted file as "no baseline"
+    would silently drop the ratchet to a first-run warning and let a fresh
+    divergence pass CI, so a corrupt file fails the gate (exit 2) instead."""
+
+
 def load_inventory_baseline(repo_root: Path) -> Dict[str, List[str]]:
-    """The recorded divergences, as {'identity': [...], 'methods': [...]}."""
+    """The recorded divergences, as {'identity': [...], 'methods': [...]}.
+
+    A missing file returns ``{}`` (a genuine first run). A file that exists but
+    cannot be parsed, or whose shape is wrong, raises ``BaselineError`` -- a
+    corrupt baseline must not be read as "nothing recorded yet".
+    """
     path = _baseline_path(repo_root)
     if not path.is_file():
         return {}
+    text = path.read_text(encoding='utf-8')
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-    except ValueError:
-        return {}
-    return {k: sorted(str(x) for x in v) for k, v in data.items() if isinstance(v, list)}
+        data = json.loads(text)
+    except ValueError as exc:
+        raise BaselineError(
+            f'{INVENTORY_BASELINE} exists but is not valid JSON ({exc}); it may be '
+            f'truncated or hold merge-conflict markers -- restore it or run --write to rewrite it'
+        ) from exc
+    if not isinstance(data, dict):
+        raise BaselineError(
+            f'{INVENTORY_BASELINE} must be a JSON object of {{kind: [keys]}}, got {type(data).__name__} '
+            f'-- restore it or run --write to rewrite it'
+        )
+    out: Dict[str, List[str]] = {}
+    for k, v in data.items():
+        if not isinstance(v, list):
+            raise BaselineError(
+                f'{INVENTORY_BASELINE} entry "{k}" must be a list of keys, got {type(v).__name__} '
+                f'-- restore it or run --write to rewrite it'
+            )
+        out[k] = sorted(str(x) for x in v)
+    return out
 
 
 def write_inventory_baseline(

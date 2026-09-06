@@ -340,3 +340,30 @@ class TestBaselineRatchet:
     def test_a_missing_baseline_reads_as_empty_not_as_clean(self, tmp_path):
         """Control: no file must not silently mean 'nothing outstanding'."""
         assert C.load_inventory_baseline(tmp_path) == {}
+
+    def _write_baseline(self, tmp_path: Path, text: str) -> None:
+        path = tmp_path / C.INVENTORY_BASELINE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding='utf-8')
+
+    def test_a_truncated_baseline_is_a_tooling_error_not_a_first_run(self, tmp_path):
+        # A conflicted or half-written file must not read as "nothing recorded",
+        # which would drop the ratchet to a first-run warning and let a fresh
+        # divergence pass CI. It must fail loudly instead.
+        self._write_baseline(tmp_path, '{"methods": ["Agent.run"')
+        with pytest.raises(C.BaselineError):
+            C.load_inventory_baseline(tmp_path)
+
+    def test_a_baseline_that_is_not_an_object_is_a_tooling_error(self, tmp_path):
+        self._write_baseline(tmp_path, '["Agent.run"]')
+        with pytest.raises(C.BaselineError):
+            C.load_inventory_baseline(tmp_path)
+
+    def test_a_baseline_entry_that_is_not_a_list_is_a_tooling_error(self, tmp_path):
+        self._write_baseline(tmp_path, '{"methods": "Agent.run"}')
+        with pytest.raises(C.BaselineError):
+            C.load_inventory_baseline(tmp_path)
+
+    def test_baseline_error_is_a_tooling_error_so_the_cli_exits_two(self):
+        # It maps to EXIT_TOOLING via the ToolingError handler, not EXIT_PARITY.
+        assert issubclass(C.BaselineError, C.ToolingError)
