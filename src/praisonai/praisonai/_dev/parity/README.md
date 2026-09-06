@@ -16,6 +16,75 @@ parameter is missing. A parameter can exist while the option is ignored. Only th
 third layer sees the last case, and it was added after 76 ignored options had
 accumulated without any number moving.
 
+All three layers ask about a symbol somebody named in `surface.yaml`, and about
+one function of it. Two further checks, run by the `signatures` gate, ask the
+questions that sit either side of that:
+
+| Check | Question | Where | Run it |
+|---|---|---|---|
+| **Export identity** (`signatures/export_identity.py`) | Is the TypeScript symbol being validated the one `src/index.ts` exports under the Python name? | stdout of `--check` | `--identity` |
+| **Method inventory** (`signatures/method_inventory.py`, `signatures/ts_members.mjs`) | Does the TypeScript class offer the public methods the Python class offers? | stdout of `--check` | `--methods` |
+
+Neither writes into `SIGNATURE_PARITY.md`, and neither runs under `--write`:
+`--write` refreshes files these checks do not touch, and main regenerates and
+commits those on every push.
+
+### Export identity
+
+`surface.yaml` mapped `Task.__init__` to `agent/types.ts` and the gate reported
+60 of 60 parameters matched. `src/index.ts` exports a *different* `Task`, from
+`./workflows`. `import { Task } from 'praisonai'` hands the caller
+`{ name, execute, condition }`; the checker was validating
+`{ description, expectedOutput, agent }`. Five `Task`/`TaskConfig` declarations
+exist in the tree, and the gate was green over a symbol no caller could obtain.
+
+The check resolves what the barrel really leads to -- through
+`export { X as Y } from`, `export *`, local export lists and re-exported
+imports -- and compares the *identity* (declaring file plus declared name) with
+what the surface validates. When a divergence is intended, record it on the
+surface rather than re-pointing the surface at whatever is quiet:
+
+```yaml
+  - key: Task.__init__
+    python: {...}
+    typescript: {...}
+    export_identity:
+      reason: why the validated symbol is not the exported one
+      owner: praisonai-ts
+```
+
+A reason without an owner is a tooling error (exit 2). A signed reason
+downgrades the failure to a warning and prints the reason; it never hides it.
+
+### Method inventory
+
+Thirteen of the seventeen surfaces compare `__init__`, so everything else a
+class does is outside the signature layer's field of view. `Session` has
+`save_state`, `restore_state`, `add_memory`, `search_memory` and `chat` in
+Python and none of them in TypeScript; `FunctionTool` has `run` in Python and
+neither `run` nor a callable form in TypeScript. The check lists public methods
+on both sides, following Python base classes through the package (`Agent` takes
+its methods from twelve mixins) and matching `save_state` to `saveState`. A
+Python method is only matched to a TypeScript **method** (or a function-valued
+property): a `get getState()` accessor is not `session.getState()`, so it does
+not satisfy a Python method and the method is still reported missing.
+
+**It compares NAMES ONLY** -- the same measure, and the same caveat, `PARITY.md`
+prints. `Agent.execute` counts as present here and still does the wrong thing:
+Python `execute(task, context=None)` runs the task it is handed, TypeScript
+`execute(previousResult?)` runs the agent's own instructions. Signature parity
+is the layer that would see that; behaviour parity is the layer above it.
+
+A method that will not be ported is waived on a surface, with the same two
+required fields:
+
+```yaml
+    method_waivers:
+      save_state:
+        reason: browser sessions have no state file
+        owner: praisonai-ts
+```
+
 ## One number to watch
 
 ```bash
@@ -23,9 +92,16 @@ PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.behaviour
 # behaviour parity: 76 options not yet acted on, across 5 surfaces; 10 partial
 ```
 
-Names and signatures are at zero and are gated so they stay there. Behaviour is the
-number that still moves, and `BEHAVIOUR_PARITY.md` is the work queue: one row per
-option, grouped by surface.
+Names and signature *parameters* are at zero and are gated so they stay there.
+Behaviour is the number that still moves, and `BEHAVIOUR_PARITY.md` is the work
+queue: one row per option, grouped by surface.
+
+The `signatures` gate is currently RED, and truthfully so: the two checks
+described below opened with 3 surfaces validating a symbol the package does not
+export under the Python name, and 162 public Python methods with no TypeScript
+counterpart across 7 classes. Neither number existed before the checks did, and
+neither is a regression -- both were always true and invisible. Triage them; do
+not silence them by re-pointing `surface.yaml`.
 
 ## Commands
 
@@ -41,6 +117,8 @@ python3 -m praisonai._dev.parity.signatures --write
 python3 -m praisonai._dev.parity.signatures --check
 python3 -m praisonai._dev.parity.signatures --diff Agent.__init__  # one surface, side by side
 python3 -m praisonai._dev.parity.signatures --prune                # drop waivers whose gap is closed
+python3 -m praisonai._dev.parity.signatures --identity             # export identity only
+python3 -m praisonai._dev.parity.signatures --methods              # method inventory only
 
 # Behaviour
 python3 -m praisonai._dev.parity.behaviour                         # the count, and the queue
