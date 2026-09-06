@@ -17,7 +17,8 @@ export { AgentTeam, PraisonAIAgents, Agents } from './team';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './simple';
 // Python-parity surfaces (see src/praisonai-ts/SIGNATURE_PARITY.md)
 export type {
-  AgentChatOptions, AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
+  AgentChatOptions, AgentChatCallOptions, AgentExecuteTask, AgentTaskLike,
+  AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
   AgentGuardrailInput, AgentHooksInput, AgentWebConfig, AgentTeamProcess, AgentTeamStartOptions,
   AgentTeamStartDictOptions, AgentTeamStartOptionsInput,
 } from './simple';

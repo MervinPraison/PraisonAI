@@ -46,7 +46,8 @@
 export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from './agent';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './agent';
 export type {
-  AgentChatOptions, AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
+  AgentChatOptions, AgentChatCallOptions, AgentExecuteTask, AgentTaskLike,
+  AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
   AgentGuardrailInput, AgentHooksInput, AgentWebConfig, AgentTeamProcess, AgentTeamStartOptions,
   AgentTeamStartDictOptions, AgentTeamStartOptionsInput, TaskCallback, TaskGuardrail, TaskOnError,
 } from './agent';
