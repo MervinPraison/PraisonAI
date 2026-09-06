@@ -181,3 +181,39 @@ class TestWiredCapabilityOptions:
         for name in ("guardrails", "knowledge", "web", "planning",
                      "reflection", "context", "execution", "caching"):
             assert name not in agent_config, name
+
+    def test_comma_in_single_value_capability_is_not_split(self):
+        """A comma-containing guardrail prompt is one string, not a list.
+
+        `Agent(guardrails=...)` takes a single validator prompt, so a valid
+        `--guardrails="Be accurate, cite sources"` must survive intact -- only
+        `--knowledge` (a source list) may split on commas. Splitting it would
+        pass a list where Agent expects a str and break session startup.
+        """
+        from praisonai_code.cli.interactive.async_tui import (
+            AsyncTUIConfig,
+            _apply_capability_options,
+        )
+
+        cfg = AsyncTUIConfig(guardrails="Be accurate, cite sources")
+        agent_config = {}
+        _apply_capability_options(agent_config, cfg)
+        assert agent_config["guardrails"] == "Be accurate, cite sources"
+
+    def test_only_knowledge_splits_on_commas(self):
+        """Comma-splitting is scoped to source-list capabilities (knowledge)."""
+        from praisonai_code.cli.interactive.async_tui import (
+            AsyncTUIConfig,
+            _apply_capability_options,
+        )
+
+        cfg = AsyncTUIConfig(
+            knowledge="docs/,notes.md",
+            web="a,b",
+            execution="fast,slow",
+        )
+        agent_config = {}
+        _apply_capability_options(agent_config, cfg)
+        assert agent_config["knowledge"] == ["docs/", "notes.md"]
+        assert agent_config["web"] == "a,b"
+        assert agent_config["execution"] == "fast,slow"

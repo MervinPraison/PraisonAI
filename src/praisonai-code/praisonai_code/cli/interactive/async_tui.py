@@ -188,14 +188,25 @@ _CAPABILITY_OPTION_NAMES = (
 )
 
 
-def _coerce_capability_value(raw: Any) -> Any:
+# Capabilities whose Agent param accepts a list of sources, so a comma-separated
+# flag value splits into a list (e.g. ``--knowledge=docs/,notes.md``). Every
+# other capability takes a single bool/preset string: ``--guardrails="Be
+# accurate, cite sources"`` is one validator prompt, NOT a list, so it must pass
+# through untouched or Agent construction fails (issue #4890).
+_SOURCE_LIST_CAPABILITIES = frozenset({"knowledge"})
+
+
+def _coerce_capability_value(raw: Any, name: str) -> Any:
     """Turn a raw CLI flag value into an Agent-ready capability value.
 
     The consolidated flags arrive as ``"true"`` (bare flag), ``"false"``, a
-    preset string (e.g. ``strict``/``thorough``), or a comma-separated source
-    list (e.g. ``docs/,notes.md`` for ``--knowledge``). Map the booleans to real
-    bools, split a comma list into a list of sources, and pass any other string
-    through unchanged so it reaches the Agent's own preset/source handling.
+    preset string (e.g. ``strict``/``thorough``), or -- only for a source-list
+    capability like ``knowledge`` -- a comma-separated source list (e.g.
+    ``docs/,notes.md``). Map the booleans to real bools; split a comma list into
+    a list of sources only for source-list capabilities; and pass any other
+    string through unchanged so it reaches the Agent's own preset handling. A
+    single-value capability (``guardrails``, ``web``, ...) keeps its comma-
+    containing string intact, since its Agent param is a scalar not a list.
     """
     if raw is None or isinstance(raw, bool):
         return raw
@@ -206,7 +217,7 @@ def _coerce_capability_value(raw: Any) -> Any:
         return True
     if lowered == "false":
         return False
-    if "," in raw:
+    if name in _SOURCE_LIST_CAPABILITIES and "," in raw:
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         return parts or raw
     return raw
@@ -222,7 +233,7 @@ def _apply_capability_options(agent_config: dict, config: "AsyncTUIConfig") -> N
         raw = getattr(config, name, None)
         if raw is None:
             continue
-        agent_config[name] = _coerce_capability_value(raw)
+        agent_config[name] = _coerce_capability_value(raw, name)
 
 
 class _LogCapture(logging.Handler):
