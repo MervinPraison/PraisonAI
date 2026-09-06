@@ -17,7 +17,20 @@ from typing import Awaitable, Iterator, Optional, TypeVar
 
 T = TypeVar("T")
 
-_DEFAULT_TIMEOUT = float(os.environ.get("PRAISONAI_RUN_SYNC_TIMEOUT", "300"))
+
+def _default_timeout() -> float:
+    """Resolve the default run_sync timeout lazily, per call.
+
+    Read at call time (not import time) so a malformed ``PRAISONAI_RUN_SYNC_TIMEOUT``
+    cannot crash ``import praisonai`` with an unrelated ``ValueError``, and so a
+    value set after import (dotenv loaded late, per-request reconfig) is honoured.
+    Falls back to 300s on a malformed value.
+    """
+    raw = os.environ.get("PRAISONAI_RUN_SYNC_TIMEOUT", "300")
+    try:
+        return float(raw)
+    except ValueError:
+        return 300.0
 
 class AsyncBridge:
     """Per-instance async runner. The module-level `run_sync()` keeps the
@@ -38,6 +51,9 @@ class AsyncBridge:
         # lock by ``get()``/``submit()`` so ``_spawn_locked()`` can verify the
         # *caller* (not merely *someone*) owns the lock.
         self._lock_owner: int | None = None
+        # The shared default registers its atexit teardown lazily, on first use,
+        # so a bare ``import praisonai`` installs no process-wide hook.
+        self._atexit_registered = False
 
     def _spawn_locked(self) -> asyncio.AbstractEventLoop:
         """Create the loop+thread; caller must hold ``self._lock``.
@@ -74,6 +90,13 @@ class AsyncBridge:
                 daemon=True,
             )
             self._thread.start()
+            # Register the process-exit teardown lazily and only for the shared
+            # default. Doing it here (first real use) rather than at import keeps
+            # ``import praisonai`` free of an unrequested atexit hook that would
+            # compete with hosts like Django/Airflow/Streamlit for shutdown order.
+            if not self._atexit_registered and self is globals().get("_BG"):
+                atexit.register(self.shutdown)
+                self._atexit_registered = True
         return self._loop
 
     def get(self) -> asyncio.AbstractEventLoop:
@@ -94,7 +117,9 @@ class AsyncBridge:
             finally:
                 self._lock_owner = None
 
-    def run_sync(self, coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
+    def run_sync(self, coro: Awaitable[T], *, timeout: float | None = None) -> T:
+        if timeout is None:
+            timeout = _default_timeout()
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -245,19 +270,18 @@ def scoped_bridge(bridge: Optional[AsyncBridge] = None) -> Iterator[AsyncBridge]
 def _shutdown_default() -> None:
     """Private process-exit hook: tear down the shared default bridge.
 
-    Registered with :mod:`atexit`. This is the ONLY sanctioned way the shared
-    default is shut down; it is deliberately absent from the public module
-    surface so a single caller cannot terminate async work for the whole
-    process. Embedders needing explicit lifecycle control own their own
-    :class:`AsyncBridge` instance.
+    Registered with :mod:`atexit` lazily (on the shared default's first real use
+    in :meth:`AsyncBridge._spawn_locked`), not at import, so a bare
+    ``import praisonai`` installs no process-wide hook. This is the ONLY
+    sanctioned way the shared default is shut down; it is deliberately absent
+    from the public module surface so a single caller cannot terminate async
+    work for the whole process. Embedders needing explicit lifecycle control own
+    their own :class:`AsyncBridge` instance.
     """
     _BG.shutdown()
 
 
-atexit.register(_shutdown_default)
-
-
-def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
+def run_sync(coro: Awaitable[T], *, timeout: float | None = None) -> T:
     """
     Run a coroutine synchronously using the background loop.
     
@@ -282,7 +306,7 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
 def run_sync_or_offload(
     coro: Awaitable[T],
     *,
-    timeout: float | None = _DEFAULT_TIMEOUT,
+    timeout: float | None = None,
     thread_name: str = "praisonai-sync-offload",
 ) -> T:
     """Run ``coro`` to completion from *any* calling context.
@@ -303,6 +327,8 @@ def run_sync_or_offload(
     (it fails loudly inside a loop). Async callers should ``await``
     :func:`arun_sync_or_offload`, which never blocks the loop.
     """
+    if timeout is None:
+        timeout = _default_timeout()
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -383,7 +409,7 @@ def run_sync_or_offload(
 async def arun_sync_or_offload(
     coro: Awaitable[T],
     *,
-    timeout: float | None = _DEFAULT_TIMEOUT,
+    timeout: float | None = None,
 ) -> T:
     """Awaitable sibling of :func:`run_sync_or_offload` for async callers.
 
@@ -397,6 +423,8 @@ async def arun_sync_or_offload(
     ``asyncio.new_event_loop()``), so a caller-installed :func:`scoped_bridge`
     binding still wins and per-loop connection pools are preserved.
     """
+    if timeout is None:
+        timeout = _default_timeout()
     fut = _default_bridge().submit(coro)
     wrapped = asyncio.wrap_future(fut)
     try:

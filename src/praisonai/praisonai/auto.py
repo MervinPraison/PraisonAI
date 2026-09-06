@@ -20,6 +20,16 @@ from praisonai._logging import get_logger
 # Type variable for Pydantic models - will be bound at runtime
 T = TypeVar('T')
 
+
+class MergeConflictError(Exception):
+    """Raised when ``--merge`` targets an existing but un-parseable YAML file.
+
+    Merging cannot proceed without a readable target, so instead of silently
+    overwriting the user's work with a freshly generated file we preserve the
+    original (a ``.bak`` copy) and abort. The CLI surfaces the message so the
+    user can fix the file or re-run without ``--merge``.
+    """
+
 # =============================================================================
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
@@ -93,6 +103,25 @@ def _atomic_write_text(path, content_writer):
         except OSError:
             pass
         raise
+
+
+def _backup_unparseable_file(path):
+    """Copy ``path`` to a sibling ``.bak`` before aborting a merge.
+
+    Preserves the user's original (un-parseable) file so a refused merge never
+    risks the content. Returns the backup path. Best-effort: if the copy itself
+    fails the original is still untouched (the merge aborts either way), so we
+    surface the source path.
+    """
+    import shutil
+
+    backup = f"{path}.bak"
+    try:
+        shutil.copy2(path, backup)
+    except OSError as exc:
+        logger.warning("Could not write backup %s: %s", backup, exc)
+        return path
+    return backup
 
 
 # OpenAI client creation removed - create per-call instead of global cache
@@ -532,13 +561,11 @@ class BaseAutoGenerator:
         # PraisonAIModel._is_registered_provider() so both hot paths agree on
         # which providers are "registered" (a custom "openai"/"anthropic"
         # registration must not hijack the built-in path here).
-        try:
-            from praisonai.inc.models import _BUILTIN_MODEL_PREFIXES
-        except ImportError:
-            _BUILTIN_MODEL_PREFIXES = frozenset(
-                {"openai", "groq", "cohere", "ollama",
-                 "anthropic", "google", "openrouter"}
-            )
+        # Import the canonical set directly (no local fallback copy) so this
+        # hot path can never drift from PraisonAIModel._is_registered_provider().
+        # If praisonai.inc.models is not importable that is a hard install
+        # problem the caller must surface, not a silent behavioural divergence.
+        from praisonai.inc.models import _BUILTIN_MODEL_PREFIXES
         if provider_id in _BUILTIN_MODEL_PREFIXES:
             return None
         try:
@@ -1152,11 +1179,12 @@ class AutoGenerator(BaseAutoGenerator):
         Returns:
             dict: The merged YAML data structure.
         """
+        import yaml
         try:
             # Load existing agents.yaml
             with open(self.agent_file, 'r') as f:
                 existing_data = _yaml_safe_load(f)
-            
+
             if not existing_data:
                 # If existing file is empty, treat as new file
                 existing_data = {"roles": {}, "dependencies": []}
@@ -1164,15 +1192,16 @@ class AutoGenerator(BaseAutoGenerator):
             logger.warning(f"Could not load existing agents file {self.agent_file}: {e}")
             logger.warning("Creating new file instead of merging")
             existing_data = {"roles": {}, "dependencies": []}
-        except Exception as e:
-            # Only catch YAML parsing errors, not OS-level errors
-            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
-                logger.warning(f"Could not parse existing agents file {self.agent_file}: {e}")
-                logger.warning("Creating new file instead of merging")
-            else:
-                # Re-raise OS-level errors like PermissionError, OSError, etc.
-                raise
-            existing_data = {"roles": {}, "dependencies": []}
+        except yaml.YAMLError as e:
+            # Refuse to overwrite an un-parseable target: preserve the original
+            # and abort rather than silently clobbering the user's work.
+            backup = _backup_unparseable_file(self.agent_file)
+            raise MergeConflictError(
+                f"Refusing to overwrite un-parseable {self.agent_file}: {e}. "
+                f"Original preserved at {backup}. "
+                f"Fix the file or re-run without --merge."
+            ) from e
+        # OS-level errors (PermissionError, OSError, etc.) propagate unchanged.
         
         # Start with existing data structure
         merged_data = existing_data.copy()
@@ -1648,23 +1677,26 @@ Respond with:
         Returns:
             Dict: Merged workflow data
         """
+        import yaml
         try:
             with open(self.workflow_file, 'r') as f:
                 existing_data = _yaml_safe_load(f)
-            
+
             if not existing_data:
                 return new_data
         except FileNotFoundError as e:
             logger.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
             return new_data
-        except Exception as e:
-            # Only catch YAML parsing errors, not OS-level errors  
-            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
-                logger.warning(f"Could not parse existing workflow file {self.workflow_file}: {e}")
-                return new_data
-            else:
-                # Re-raise OS-level errors like PermissionError, OSError, etc.
-                raise
+        except yaml.YAMLError as e:
+            # Refuse to overwrite an un-parseable target: preserve the original
+            # and abort rather than silently clobbering the user's work.
+            backup = _backup_unparseable_file(self.workflow_file)
+            raise MergeConflictError(
+                f"Refusing to overwrite un-parseable {self.workflow_file}: {e}. "
+                f"Original preserved at {backup}. "
+                f"Fix the file or re-run without --merge."
+            ) from e
+        # OS-level errors (PermissionError, OSError, etc.) propagate unchanged.
         
         # Merge agents (avoid duplicates), tracking renames so step
         # references to the new agents can be rewritten below.
@@ -2054,6 +2086,9 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
     def _get_prompt(self, include_judge: bool, include_approve: bool) -> str:
         """Generate the prompt for job workflow generation."""
         tools_list = ", ".join(self.get_available_tools())
+        # Use the workspace's configured model rather than a hard-coded OpenAI
+        # name so Anthropic/Bedrock/Ollama users get a runnable workflow.
+        default_model = self.config_list[0].get("model", "") if self.config_list else ""
         
         prompt = f"""Generate a job workflow structure for: "{self.topic}"
 
@@ -2074,11 +2109,13 @@ REQUIREMENTS:
 Available tools for agent steps: {tools_list}
 
 STEP CONFIG FORMATS:
-- agent: {{"role": "...", "instructions": "...", "prompt": "...", "model": "gpt-4o-mini", "tools": [], "output_file": "..."}}
+- agent: {{"role": "...", "instructions": "...", "prompt": "...", "model": "{default_model}", "tools": [], "output_file": "..."}}
 - judge: {{"input_file": "...", "criteria": "...", "threshold": 7.0, "on_fail": "stop"}}
 - approve: {{"description": "...", "risk_level": "medium", "auto_approve": false}}
 - run: {{"command": "..."}}
 - action: {{"name": "bump-version", "strategy": "patch"}}
+
+Do NOT invent model names. If unsure, omit the "model" key entirely and it will inherit the workspace default.
 
 Generate a workflow for: {self.topic}
 """
@@ -2099,12 +2136,18 @@ Generate a workflow for: {self.topic}
             step_dict = {'name': step.name}
             
             if step.step_type == 'agent':
-                step_dict['agent'] = {
+                agent = {
                     'role': step.config.get('role', 'Assistant'),
                     'instructions': step.config.get('instructions', ''),
                     'prompt': step.config.get('prompt', step.config.get('instructions', '')),
-                    'model': step.config.get('model', 'gpt-4o-mini'),
                 }
+                # Only pin a model when the generator supplied a real one;
+                # otherwise the step inherits the workspace default rather than
+                # a hard-coded OpenAI name that Anthropic/Ollama users can't run.
+                model = step.config.get('model')
+                if model:
+                    agent['model'] = model
+                step_dict['agent'] = agent
                 if step.config.get('tools'):
                     step_dict['agent']['tools'] = step.config['tools']
                 if step.config.get('output_file'):
