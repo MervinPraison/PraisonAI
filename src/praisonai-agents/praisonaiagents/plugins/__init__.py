@@ -418,106 +418,37 @@ def get_plugin_registry() -> list:
     return entries
 
 
-def __getattr__(name: str):
-    """Lazy load module components."""
+from .._lazy import create_lazy_getattr
+
+_LAZY_IMPORTS = {
     # Core classes
-    if name == "PluginManager":
-        from .manager import PluginManager
-        return PluginManager
-    
-    if name == "get_plugin_manager":
-        from .manager import get_plugin_manager
-        return get_plugin_manager
-    
-    if name == "Plugin":
-        from .plugin import Plugin
-        return Plugin
-    
-    if name == "PluginHook":
-        from .plugin import PluginHook
-        return PluginHook
-    
-    if name == "PluginInfo":
-        from .plugin import PluginInfo
-        return PluginInfo
-    
-    if name == "FunctionPlugin":
-        from .plugin import FunctionPlugin
-        return FunctionPlugin
-    
-    if name == "PluginType":
-        from .plugin import PluginType
-        return PluginType
-
-    if name == "PluginDecision":
-        from .plugin import PluginDecision
-        return PluginDecision
-
-    if name == "GuardrailBlocked":
-        from .plugin import GuardrailBlocked
-        return GuardrailBlocked
-    
+    "PluginManager": (f"{__name__}.manager", "PluginManager"),
+    "get_plugin_manager": (f"{__name__}.manager", "get_plugin_manager"),
+    "Plugin": (f"{__name__}.plugin", "Plugin"),
+    "PluginHook": (f"{__name__}.plugin", "PluginHook"),
+    "PluginInfo": (f"{__name__}.plugin", "PluginInfo"),
+    "FunctionPlugin": (f"{__name__}.plugin", "FunctionPlugin"),
+    "PluginType": (f"{__name__}.plugin", "PluginType"),
+    "PluginDecision": (f"{__name__}.plugin", "PluginDecision"),
+    "GuardrailBlocked": (f"{__name__}.plugin", "GuardrailBlocked"),
     # Protocols
-    if name == "PluginProtocol":
-        from .protocols import PluginProtocol
-        return PluginProtocol
-    
-    if name == "ToolPluginProtocol":
-        from .protocols import ToolPluginProtocol
-        return ToolPluginProtocol
-    
-    if name == "HookPluginProtocol":
-        from .protocols import HookPluginProtocol
-        return HookPluginProtocol
-    
-    if name == "AgentPluginProtocol":
-        from .protocols import AgentPluginProtocol
-        return AgentPluginProtocol
-    
-    if name == "LLMPluginProtocol":
-        from .protocols import LLMPluginProtocol
-        return LLMPluginProtocol
-    
+    "PluginProtocol": (f"{__name__}.protocols", "PluginProtocol"),
+    "ToolPluginProtocol": (f"{__name__}.protocols", "ToolPluginProtocol"),
+    "HookPluginProtocol": (f"{__name__}.protocols", "HookPluginProtocol"),
+    "AgentPluginProtocol": (f"{__name__}.protocols", "AgentPluginProtocol"),
+    "LLMPluginProtocol": (f"{__name__}.protocols", "LLMPluginProtocol"),
     # Single-file plugin support - parser
-    if name == "PluginMetadata":
-        from .parser import PluginMetadata
-        return PluginMetadata
-    
-    if name == "PluginParseError":
-        from .parser import PluginParseError
-        return PluginParseError
-    
-    if name == "parse_plugin_header":
-        from .parser import parse_plugin_header
-        return parse_plugin_header
-    
-    if name == "parse_plugin_header_from_file":
-        from .parser import parse_plugin_header_from_file
-        return parse_plugin_header_from_file
-    
+    "PluginMetadata": (f"{__name__}.parser", "PluginMetadata"),
+    "PluginParseError": (f"{__name__}.parser", "PluginParseError"),
+    "parse_plugin_header": (f"{__name__}.parser", "parse_plugin_header"),
+    "parse_plugin_header_from_file": (f"{__name__}.parser", "parse_plugin_header_from_file"),
     # Single-file plugin support - discovery
-    if name == "discover_plugins":
-        from .discovery import discover_plugins
-        return discover_plugins
-    
-    if name == "load_plugin":
-        from .discovery import load_plugin
-        return load_plugin
-    
-    if name == "discover_and_load_plugins":
-        from .discovery import discover_and_load_plugins
-        return discover_and_load_plugins
-    
-    if name == "get_default_plugin_dirs":
-        from .discovery import get_default_plugin_dirs
-        return get_default_plugin_dirs
-    
-    if name == "get_plugin_template":
-        from .discovery import get_plugin_template
-        return get_plugin_template
-    
-    if name == "ensure_plugin_dir":
-        from .discovery import ensure_plugin_dir
-        return ensure_plugin_dir
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    "discover_plugins": (f"{__name__}.discovery", "discover_plugins"),
+    "load_plugin": (f"{__name__}.discovery", "load_plugin"),
+    "discover_and_load_plugins": (f"{__name__}.discovery", "discover_and_load_plugins"),
+    "get_default_plugin_dirs": (f"{__name__}.discovery", "get_default_plugin_dirs"),
+    "get_plugin_template": (f"{__name__}.discovery", "get_plugin_template"),
+    "ensure_plugin_dir": (f"{__name__}.discovery", "ensure_plugin_dir"),
+}
+
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)

@@ -196,11 +196,11 @@ _MODULE_MAP = {
 }
 
 
-def __getattr__(name: str):
-    """Lazy load config classes and utilities."""
-    if name in _MODULE_MAP:
-        module_name = _MODULE_MAP[name]
-        import importlib
-        module = importlib.import_module(f".{module_name}", __name__)
-        return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from .._lazy import create_lazy_getattr
+
+_LAZY_IMPORTS = {
+    name: (f"{__name__}.{submodule}", name)
+    for name, submodule in _MODULE_MAP.items()
+}
+
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
