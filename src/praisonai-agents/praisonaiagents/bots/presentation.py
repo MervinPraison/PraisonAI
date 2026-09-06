@@ -87,6 +87,7 @@ class BlockType(str, Enum):
     CONTEXT = "context"      # Contextual info (smaller text)
     TABLE = "table"          # Tabular data (columns + rows)
     CHART = "chart"          # Chart/visualisation (kind + series)
+    POLL = "poll"            # Group poll/vote (question + options)
 
 
 @dataclass
@@ -262,6 +263,11 @@ class PresentationBlock:
     # Chart data (CHART blocks)
     chart_kind: Optional[str] = None
     series: Optional[List[Dict[str, Any]]] = None
+    # Poll data (POLL blocks)
+    poll_options: Optional[List[str]] = None
+    multiple_choice: bool = False
+    anonymous: bool = True
+    duration_seconds: Optional[int] = None
     
     @staticmethod
     def make_text(content: str, markdown: bool = True) -> "PresentationBlock":
@@ -339,6 +345,44 @@ class PresentationBlock:
         )
 
     @staticmethod
+    def make_poll(
+        question: str,
+        options: List[str],
+        *,
+        multiple_choice: bool = False,
+        anonymous: bool = True,
+        duration_seconds: Optional[int] = None,
+        action_id: Optional[str] = None,
+    ) -> "PresentationBlock":
+        """Create a poll block for a channel-neutral group vote.
+
+        Args:
+            question: The poll question.
+            options: 2..N answer options.
+            multiple_choice: Allow selecting more than one option.
+            anonymous: Hide who voted for what (native default on most channels).
+            duration_seconds: Optional auto-close duration in seconds.
+            action_id: Optional stable id correlating the inbound
+                :class:`PollResult` back to this poll.
+
+        Channels with a native poll API (Telegram ``sendPoll``, Discord polls,
+        Slack) render the vote natively — voting, tallying and closing are
+        handled by the platform. Elsewhere it degrades to a ``BUTTONS`` grid of
+        reply options via :func:`adapt_presentation`, and the loss is surfaced
+        through :class:`DegradedDelivery` (never silently).
+        """
+        opts = [str(o) for o in options]
+        return PresentationBlock(
+            type=BlockType.POLL,
+            text=question,
+            poll_options=opts,
+            multiple_choice=multiple_choice,
+            anonymous=anonymous,
+            duration_seconds=duration_seconds,
+            action_id=action_id,
+        )
+
+    @staticmethod
     def quick_replies(
         choices: List[Any],
         priority_base: int = 0,
@@ -386,6 +430,12 @@ class PresentationBlock:
             data["chart_kind"] = self.chart_kind
         if self.series is not None:
             data["series"] = self.series
+        if self.poll_options is not None:
+            data["poll_options"] = self.poll_options
+            data["multiple_choice"] = self.multiple_choice
+            data["anonymous"] = self.anonymous
+            if self.duration_seconds is not None:
+                data["duration_seconds"] = self.duration_seconds
         return data
     
     @classmethod
@@ -408,6 +458,10 @@ class PresentationBlock:
             rows=data.get("rows"),
             chart_kind=data.get("chart_kind"),
             series=data.get("series"),
+            poll_options=data.get("poll_options"),
+            multiple_choice=data.get("multiple_choice", False),
+            anonymous=data.get("anonymous", True),
+            duration_seconds=data.get("duration_seconds"),
         )
 
 
@@ -556,6 +610,7 @@ class PresentationLimits:
         supports_web_apps: Whether channel supports web apps
         supports_tables: Whether channel has a native table widget
         supports_charts: Whether channel has native chart/visualisation
+        supports_native_poll: Whether channel has a native poll/vote API
         max_table_rows: Maximum rows in a table block
         max_table_cols: Maximum columns in a table block
     """
@@ -571,6 +626,7 @@ class PresentationLimits:
     supports_web_apps: bool = False
     supports_tables: bool = False
     supports_charts: bool = False
+    supports_native_poll: bool = False
     max_table_rows: int = 50
     max_table_cols: int = 10
     
@@ -588,6 +644,7 @@ class PresentationLimits:
             "supports_web_apps": self.supports_web_apps,
             "supports_tables": self.supports_tables,
             "supports_charts": self.supports_charts,
+            "supports_native_poll": self.supports_native_poll,
             "max_table_rows": self.max_table_rows,
             "max_table_cols": self.max_table_cols,
         }
@@ -607,6 +664,7 @@ class PresentationLimits:
             supports_web_apps=data.get("supports_web_apps", False),
             supports_tables=data.get("supports_tables", False),
             supports_charts=data.get("supports_charts", False),
+            supports_native_poll=data.get("supports_native_poll", False),
             max_table_rows=data.get("max_table_rows", 50),
             max_table_cols=data.get("max_table_cols", 10),
         )
@@ -623,6 +681,7 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=False,
             supports_web_apps=True,
+            supports_native_poll=True,  # Telegram sendPoll
         )
     
     @staticmethod
@@ -638,6 +697,7 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=True,
             supports_web_apps=False,
+            supports_native_poll=True,  # Slack native polls
         )
     
     @staticmethod
@@ -653,6 +713,7 @@ class PresentationLimits:
             supports_markdown=True,
             supports_select=True,
             supports_web_apps=False,
+            supports_native_poll=True,  # Discord polls
         )
 
     @staticmethod
@@ -844,6 +905,32 @@ def _select_to_buttons(
     return PresentationBlock(type=BlockType.BUTTONS, buttons=buttons)
 
 
+POLL_NAMESPACE = "poll"
+
+
+def _poll_to_buttons(
+    block: PresentationBlock,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> PresentationBlock:
+    """Convert a POLL block into an equivalent BUTTONS block.
+
+    Used when a channel has no native poll API. Each option becomes a
+    ``reply``-action button so a tap feeds the chosen option back into the next
+    agent turn (reusing the existing reply routing and byte-safe callback
+    encoding). The poll question is not part of the button row; renderers emit
+    it as leading text (see :func:`adapt_presentation`).
+    """
+    buttons: List[PresentationButton] = []
+    for option in (block.poll_options or []):
+        buttons.append(
+            PresentationButton(
+                label=str(option),
+                action=PresentationAction.reply(str(option)),
+            )
+        )
+    return PresentationBlock(type=BlockType.BUTTONS, buttons=buttons)
+
+
 def _clamp_table(
     block: PresentationBlock,
     limits: PresentationLimits,
@@ -959,6 +1046,26 @@ def adapt_presentation(
 
     for block in presentation.blocks:
         block_type = block.type.value if isinstance(block.type, BlockType) else block.type
+
+        if block_type == BlockType.POLL.value:
+            if limits.supports_native_poll:
+                adapted_blocks.append(block)
+                continue
+            # Degrade poll -> question text + reply buttons, then let the
+            # buttons flow through the normal button adaptation below.
+            question = block.text
+            if (
+                question is not None
+                and limits.max_text_length
+                and len(question) > limits.max_text_length
+            ):
+                question = question[: limits.max_text_length]
+            if question:
+                adapted_blocks.append(
+                    PresentationBlock(type=BlockType.TEXT, text=question)
+                )
+            block = _poll_to_buttons(block, callback_store)
+            block_type = BlockType.BUTTONS.value
 
         if block_type == BlockType.SELECT.value and not limits.supports_select:
             # Degrade select -> buttons, then adapt the resulting buttons block
@@ -1083,6 +1190,7 @@ DEGRADE_BUTTONS_TRUNCATED = "buttons_truncated"
 DEGRADE_OPTIONS_TRUNCATED = "options_truncated"
 DEGRADE_TABLE_AS_TEXT = "table_rendered_as_text"
 DEGRADE_CHART_AS_TEXT = "chart_rendered_as_text"
+DEGRADE_POLL_AS_BUTTONS = "poll_rendered_as_buttons"
 DEGRADE_CALLBACK_DATA_TOO_LONG = "callback_data_too_long"
 
 
@@ -1157,6 +1265,16 @@ def _presentation_degradation(
 
     for block in presentation.blocks:
         block_type = block.type.value if isinstance(block.type, BlockType) else block.type
+
+        if block_type == BlockType.POLL.value:
+            if limits.supports_native_poll:
+                continue
+            # Follow the adapter: poll -> question text + reply buttons.
+            n = len(block.poll_options or [])
+            dropped.append(f"poll ({n} options) rendered as buttons")
+            reasons.append(DEGRADE_POLL_AS_BUTTONS)
+            block = _poll_to_buttons(block, callback_store)
+            block_type = BlockType.BUTTONS.value
 
         if block_type == BlockType.SELECT.value and not limits.supports_select:
             # Follow the adapter: select -> buttons (encoding option callbacks
