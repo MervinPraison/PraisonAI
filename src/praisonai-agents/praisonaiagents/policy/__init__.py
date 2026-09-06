@@ -52,26 +52,18 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name == "PolicyEngine":
-        from .engine import PolicyEngine
-        return PolicyEngine
-    
-    if name in ("Policy", "PolicyRule"):
-        from .policy import Policy, PolicyRule
-        return locals()[name]
-    
-    if name in ("PolicyResult", "PolicyAction"):
-        from .types import PolicyResult, PolicyAction
-        return locals()[name]
-    
-    if name == "PolicyConfig":
-        from .config import PolicyConfig
-        return PolicyConfig
-    
-    if name in ("create_deny_tools_policy", "create_allow_tools_policy", "create_read_only_policy"):
-        from .engine import create_deny_tools_policy, create_allow_tools_policy, create_read_only_policy
-        return locals()[name]
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from .._lazy import create_lazy_getattr
+
+_LAZY_IMPORTS = {
+    "PolicyEngine": (f"{__name__}.engine", "PolicyEngine"),
+    "Policy": (f"{__name__}.policy", "Policy"),
+    "PolicyRule": (f"{__name__}.policy", "PolicyRule"),
+    "PolicyResult": (f"{__name__}.types", "PolicyResult"),
+    "PolicyAction": (f"{__name__}.types", "PolicyAction"),
+    "PolicyConfig": (f"{__name__}.config", "PolicyConfig"),
+    "create_deny_tools_policy": (f"{__name__}.engine", "create_deny_tools_policy"),
+    "create_allow_tools_policy": (f"{__name__}.engine", "create_allow_tools_policy"),
+    "create_read_only_policy": (f"{__name__}.engine", "create_read_only_policy"),
+}
+
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
