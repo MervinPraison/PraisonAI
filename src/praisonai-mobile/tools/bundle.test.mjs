@@ -337,10 +337,10 @@ test("no AI SDK provider package is bundled into the shipping app", async () => 
   // The headroom this asserts was reclaimed, not granted. `llm/embeddings.ts`
   // named `@ai-sdk/openai`, `@ai-sdk/google` and `@ai-sdk/cohere` in three
   // LITERAL `import()` calls, so esbuild emitted all three as chunks: 326.7kB
-  // of the 1600kB lazy budget, for an embedding path no mobile screen calls and
-  // that could not have loaded a provider anyway -- every OTHER provider goes
-  // through provider-map.ts's computed `import(providerInfo.package)`, which a
-  // webview has no resolver for.
+  // of the then-1600kB lazy budget, for an embedding path no mobile screen
+  // calls and that could not have loaded a provider anyway -- every OTHER
+  // provider goes through provider-map.ts's computed
+  // `import(providerInfo.package)`, which a webview has no resolver for.
   //
   // Without this test the next literal `import('@ai-sdk/anything')` upstream
   // costs 100-170kB in silence until the budget trips, at which point the
