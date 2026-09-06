@@ -27,20 +27,22 @@ export type {
 // Errors
 export { MissingDependencyError, MissingEnvVarError, BudgetExceededError } from './types';
 
-// Registry
+// Registry — factory-registry names. The snake_case Python parity names
+// (get_registry / register_tool / get_tool / validate_tool) belong to the
+// name-keyed registry in ../decorator and ../base, not to this module.
 export {
   ToolsRegistry,
   getToolsRegistry,
   createToolsRegistry,
   resetToolsRegistry,
-  get_registry,
-  getRegistry,
-  get_tool,
+  registerToolFactory,
+  createToolInstance,
+  tryCreateToolInstance,
+  validateToolInstall,
+  ToolNotRegisteredError,
+  ToolConstructionError,
+  /** @deprecated use tryCreateToolInstance */
   getTool,
-  register_tool,
-  registerTool,
-  validate_tool,
-  validateTool,
 } from './registry';
 
 // Middleware

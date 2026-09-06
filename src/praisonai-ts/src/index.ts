@@ -84,12 +84,21 @@ export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from './db';
 // ============================================================================
 // TOOLS - Function tools and tool registry
 // ============================================================================
+// The Python-named exports resolve HERE, to the registry that holds tools by
+// name -- the analogue of praisonaiagents/tools/registry.py. They used to point
+// at the factory registry below, where `register_tool(myFn)` was a type error
+// and `get_tool` built an instance rather than looking one up.
 export {
-  BaseTool, ToolResult, ToolValidationError, validateTool, createTool,
-  FunctionTool, tool, ToolRegistry, getRegistry, registerTool, getTool,
+  BaseTool, ToolResult, ToolValidationError, validateTool, validate_tool, createTool,
+  FunctionTool, tool, ToolRegistry,
+  getRegistry, registerTool, getTool, hasTool, removeTool, listTools, getToolDefinitions,
+  get_registry, register_tool, get_tool, has_tool, remove_tool, list_tools,
+  get_tool_definitions, add_tool,
+  TOOL_TRUST_LEVELS,
   // Subagent Tool (agent-as-tool pattern)
   SubagentTool, createSubagentTool, createSubagentTools, createDelegator,
   type ToolConfig, type ToolContext, type ToolParameters,
+  type RegisterableTool, type RegisterToolOptions, type ToolTrustLevel,
   type SubagentToolConfig, type DelegatorConfig
 } from './tools';
 export * from './tools/arxivTools';
@@ -102,7 +111,13 @@ export { MCP, type TransportType as MCPToolTransportType } from './tools/mcp';
 
 // AI SDK Tools Registry
 export { tools, registerBuiltinTools } from './tools/tools';
-export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry, get_registry, get_tool, register_tool, validate_tool } from './tools/registry';
+// The factory registry keeps its own names: it builds instances from metadata,
+// which is a different job from looking a tool up by name.
+export {
+  getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry,
+  registerToolFactory, createToolInstance, tryCreateToolInstance, validateToolInstall,
+  ToolNotRegisteredError, ToolConstructionError
+} from './tools/registry';
 export type {
   ToolExecutionContext, ToolLimits, RedactionHooks, ToolLogger,
   ToolCapabilities, InstallHints, ToolMetadata, ToolExecutionResult,
