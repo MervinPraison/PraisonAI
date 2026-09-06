@@ -133,14 +133,26 @@ export abstract class BaseTool<TParams = any, TResult = any> {
 }
 
 /**
- * Validate any tool-like object.
+ * Validate any tool-like object (Python `tools.base.validate_tool`).
+ *
+ * Raises {@link ToolValidationError} on an invalid tool; returns `true`
+ * otherwise. This — not the factory registry's install/env report — is the
+ * function the Python-named `validate_tool` export resolves to.
  */
 export function validateTool(tool: any): boolean {
   if (tool instanceof BaseTool) {
     return tool.validate();
   }
 
-  if (typeof tool === 'function' || (tool && typeof tool.run === 'function')) {
+  // Anything carrying its own validate() (a FunctionTool, a duck-typed
+  // BaseTool) validates itself, so a malformed tool reports WHAT is wrong
+  // instead of passing on the mere presence of a name.
+  if (tool && typeof tool.validate === 'function') {
+    return tool.validate();
+  }
+
+  if (typeof tool === 'function' || (tool && typeof tool.run === 'function') ||
+      (tool && typeof tool.execute === 'function')) {
     const name = tool.name || tool.__name__;
     if (!name) {
       throw new ToolValidationError('Tool must have a name');
@@ -150,6 +162,9 @@ export function validateTool(tool: any): boolean {
 
   throw new ToolValidationError(`Invalid tool type: ${typeof tool}`);
 }
+
+/** Python `validate_tool(tool)`. */
+export const validate_tool = validateTool;
 
 /**
  * Create a simple tool from a function (alternative to class-based approach)
