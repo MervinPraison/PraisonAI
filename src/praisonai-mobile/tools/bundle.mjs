@@ -248,6 +248,87 @@ export function chunkSizes(metafile) {
 }
 
 /**
+ * Every npm package whose source esbuild actually pulled INTO the bundle,
+ * by package name.
+ *
+ * Read off `metafile.inputs` -- the files that were compiled in -- so it says
+ * what SHIPPED rather than what was imported somewhere. An import esbuild left
+ * external is not here; `classifyBareImports` is the function for those.
+ *
+ * Exported so a test can ask "is package X in the bundle?" by calling this
+ * rather than re-deriving the node_modules path arithmetic inline, which is
+ * the sort of predicate that keeps passing after the thing it checked moved.
+ */
+export function bundledPackages(metafile) {
+  const found = new Set();
+  for (const path of Object.keys(metafile.inputs ?? {})) {
+    const at = path.lastIndexOf("node_modules/");
+    if (at === -1) continue;
+    const parts = path.slice(at + "node_modules/".length).split("/");
+    found.add(parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]);
+  }
+  return [...found].sort();
+}
+
+/**
+ * AI SDK PROVIDER packages a phone can never load, and must therefore never be
+ * charged for.
+ *
+ * praisonai-ts reaches every chat provider through the registry in
+ * `llm/providers/ai-sdk/provider-map.ts`, which does
+ * `await import(providerInfo.package)` -- a computed specifier no bundler can
+ * follow, so the package is the HOST's to supply at runtime. A webview has no
+ * host resolver and no import map, so that import cannot succeed whatever the
+ * bundle contains.
+ *
+ * `praisonai-ts`'s `llm/embeddings.ts` used to be the exception: three LITERAL
+ * `import()` calls naming `@ai-sdk/openai`, `@ai-sdk/google` and
+ * `@ai-sdk/cohere`. A literal is a BUNDLER instruction, so esbuild emitted all
+ * three as chunks -- 326.7kB, measured, charged to the lazy budget -- on a
+ * code path a phone has no way to reach and no reason to take. Routing
+ * embeddings through the same registry removed them, and this list is what
+ * stops them coming back one literal at a time.
+ *
+ * A hand-kept list of four packages was the wrong shape: praisonai-ts's
+ * registry (`llm/providers/ai-sdk/types.ts`) names ~50 `@ai-sdk/*` providers,
+ * so a literal `import('@ai-sdk/mistral')` -- or groq, deepseek, any of the
+ * others -- would sail past a gate that only looked for openai/google/cohere/
+ * anthropic and cost 100-170kB in silence until the budget tripped. So the
+ * gate is a NAMESPACE rule now: every `@ai-sdk/*` package is host-loaded and
+ * must not ship, and a new provider is covered the day it is added upstream,
+ * with no second edit here.
+ *
+ * The exceptions are the packages `ai` is BUILT FROM, not providers it can
+ * load: `ai` statically imports `@ai-sdk/provider`, `@ai-sdk/provider-utils`
+ * and `@ai-sdk/gateway`, so they belong in the bundle for exactly as long as
+ * `ai` does. They are named individually -- an allowlist, not a prefix -- so a
+ * provider that happened to share a prefix could never hide behind them.
+ */
+export const AI_INTERNAL_AI_SDK_PACKAGES = [
+  "@ai-sdk/provider", "@ai-sdk/provider-utils", "@ai-sdk/gateway",
+];
+
+/**
+ * Whether `pkg` is an AI SDK PROVIDER a phone can never load (as opposed to one
+ * of `ai`'s own internals). The `@ai-sdk/` namespace minus {@link
+ * AI_INTERNAL_AI_SDK_PACKAGES}. Kept as a predicate, not a fixed list, so the
+ * whole provider registry is covered without enumerating it here.
+ */
+export function isHostLoadedAISDKProvider(pkg) {
+  return pkg.startsWith("@ai-sdk/") && !AI_INTERNAL_AI_SDK_PACKAGES.includes(pkg);
+}
+
+/**
+ * The host-loaded providers actually present in a shipped bundle: every
+ * `@ai-sdk/*` package `bundledPackages` found that is not one of `ai`'s
+ * internals. Empty is the healthy state; anything here is pure weight on a code
+ * path a webview cannot take.
+ */
+export function bundledHostLoadedProviders(metafile) {
+  return bundledPackages(metafile).filter(isHostLoadedAISDKProvider);
+}
+
+/**
  * The chunks a browser fetches BEFORE the entry's body runs: the entry itself
  * plus the transitive closure of its STATIC imports.
  *

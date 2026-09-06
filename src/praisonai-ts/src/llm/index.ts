@@ -174,77 +174,27 @@ export function classifyLLMError(error: unknown): LLMErrorKind {
 // Auth (Python parity: `auth: Optional[str]` -> praisonaiagents.auth)
 // ============================================================================
 
-/** Resolved credentials, mirroring Python's `SubscriptionCredentials`. */
-export interface LLMAuth {
-  apiKey?: string;
-  baseURL?: string;
-  headers?: Record<string, string>;
-}
+// The implementation moved to `./auth`, a LEAF module, and is re-exported here
+// unchanged. This file is a barrel: it imports `openai` and `./embeddings` at
+// the top level, so anything reaching auth THROUGH it paid for both. The one
+// in-tree consumer, `agent/features/auth.ts`, wants three dependency-free
+// symbols -- and buying them here put 326.7kB of `@ai-sdk/*` on
+// praisonai-mobile's webview bundle, which no phone can call. See ./auth.ts.
+//
+// Re-exported rather than moved-and-forgotten: `resolveAuth`,
+// `registerAuthProvider`, `listAuthProviders`, `resetAuthProviders` and the
+// three types are public API from both 'praisonai' and 'praisonai/llm'.
+// `authProviders` stays a single Map because ./auth is a single module.
+export {
+  registerAuthProvider,
+  listAuthProviders,
+  resetAuthProviders,
+  resolveAuth,
+} from './auth';
+export type { LLMAuth, LLMAuthResolver, LLMAuthSource } from './auth';
 
-export type LLMAuthResolver = () => LLMAuth | Promise<LLMAuth>;
-
-/**
- * What `LLMConfig.auth` accepts: resolved credentials, a function returning
- * them, or the name of a provider registered with {@link registerAuthProvider}
- * (Python's `register_subscription_provider`).
- */
-export type LLMAuthSource = string | LLMAuth | LLMAuthResolver;
-
-const authProviders = new Map<string, LLMAuthResolver>();
-
-/** Python parity: `register_subscription_provider(name, factory)`. */
-export function registerAuthProvider(name: string, resolver: LLMAuthResolver): void {
-  authProviders.set(name, resolver);
-}
-
-/** Python parity: `list_subscription_providers()`. */
-export function listAuthProviders(): string[] {
-  return Array.from(authProviders.keys()).sort();
-}
-
-/** Test helper: forget every registered provider. */
-export function resetAuthProviders(): void {
-  authProviders.clear();
-}
-
-function validateAuth(auth: unknown, source: string): LLMAuth {
-  if (!auth || typeof auth !== 'object') {
-    throw new Error(`LLM auth (${source}) must resolve to an object { apiKey?, baseURL?, headers? }; got ${typeof auth}`);
-  }
-  const a = auth as LLMAuth;
-  if (a.apiKey !== undefined && typeof a.apiKey !== 'string') throw new Error(`LLM auth (${source}): apiKey must be a string`);
-  if (a.baseURL !== undefined && typeof a.baseURL !== 'string') throw new Error(`LLM auth (${source}): baseURL must be a string`);
-  if (a.headers !== undefined && (typeof a.headers !== 'object' || a.headers === null)) {
-    throw new Error(`LLM auth (${source}): headers must be a string map`);
-  }
-  return a;
-}
-
-/**
- * Resolve an {@link LLMAuthSource} to credentials. Python's built-in named
- * OAuth stores (`claude-code`, `codex`, `gemini-cli`, `qwen-cli`) read local
- * CLI keychains and are not ported; a name resolves only when registered via
- * {@link registerAuthProvider}. An unknown name throws rather than silently
- * billing the plain API key.
- */
-export async function resolveAuth(auth: LLMAuthSource): Promise<LLMAuth> {
-  if (typeof auth === 'function') return validateAuth(await auth(), 'function');
-  if (typeof auth === 'string') {
-    const resolver = authProviders.get(auth);
-    if (!resolver) {
-      const known = listAuthProviders();
-      throw new Error(
-        `LLM auth "${auth}" is not a registered credential source` +
-          (known.length ? ` (registered: ${known.join(', ')})` : '') +
-          `. Python's named OAuth stores (claude-code, codex, gemini-cli, qwen-cli) are not ported to TypeScript; ` +
-          `register one with registerAuthProvider("${auth}", () => ({ apiKey, baseURL, headers })) or pass ` +
-          `{ apiKey, baseURL, headers } directly.`
-      );
-    }
-    return validateAuth(await resolver(), `provider "${auth}"`);
-  }
-  return validateAuth(auth, 'object');
-}
+import { resolveAuth } from './auth';
+import type { LLMAuth, LLMAuthSource } from './auth';
 
 // ============================================================================
 // Config

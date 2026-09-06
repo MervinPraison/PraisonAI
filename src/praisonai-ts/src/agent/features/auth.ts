@@ -20,7 +20,13 @@
  * `register_subscription_provider` is.
  */
 
-import { listAuthProviders, resolveAuth, type LLMAuth } from '../../llm';
+// From `../../llm/auth`, the leaf, NOT from the `../../llm` barrel. The barrel
+// re-exports these same three symbols, but it also imports `openai` and
+// `../../llm/embeddings` at the top level -- and this file is on `Agent`'s
+// static graph, so importing it through the barrel put the OpenAI client and
+// three `@ai-sdk/*` provider packages into praisonai-mobile's webview bundle
+// (326.7kB, measured) for three functions that depend on nothing.
+import { listAuthProviders, resolveAuth, type LLMAuth } from '../../llm/auth';
 
 /**
  * Default model per subscription provider, used only when the caller gave
