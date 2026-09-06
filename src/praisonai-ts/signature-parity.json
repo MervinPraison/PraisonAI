@@ -2741,8 +2741,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/team.ts:338",
-        "location": "src/praisonai-ts/src/agent/team.ts:74",
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:342",
+        "location": "src/praisonai-ts/src/agent/team.ts:78",
         "options_parameters": [
           "configOrAgents"
         ]
@@ -2859,7 +2859,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:766",
+        "location": "src/praisonai-ts/src/agent/team.ts:770",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
@@ -4663,8 +4663,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/llm/index.ts:466",
-        "location": "src/praisonai-ts/src/llm/index.ts:286",
+        "ctor_location": "src/praisonai-ts/src/llm/index.ts:416",
+        "location": "src/praisonai-ts/src/llm/index.ts:236",
         "options_parameters": [
           "config"
         ]
