@@ -2741,8 +2741,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/team.ts:342",
-        "location": "src/praisonai-ts/src/agent/team.ts:78",
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:377",
+        "location": "src/praisonai-ts/src/agent/team.ts:91",
         "options_parameters": [
           "configOrAgents"
         ]
@@ -2859,7 +2859,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:770",
+        "location": "src/praisonai-ts/src/agent/team.ts:1076",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
