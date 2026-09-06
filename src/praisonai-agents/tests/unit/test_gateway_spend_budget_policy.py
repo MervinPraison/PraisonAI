@@ -70,6 +70,65 @@ def test_non_numeric_spent_treated_as_zero():
     assert d.allowed is True
 
 
+def test_pending_cost_reserves_budget():
+    # Prior spend is under the cap, but the pending turn's estimated cost would
+    # overshoot it: admission must reject to enforce a hard cap.
+    policy = WindowedSpendBudgetPolicy(limit_usd=2.0)
+    d = policy.check(
+        identity="u", scope="tg", spent_usd=1.99, now=0.0, pending_usd=0.5
+    )
+    assert d.allowed is False
+
+
+def test_pending_cost_allows_when_headroom():
+    policy = WindowedSpendBudgetPolicy(limit_usd=2.0)
+    d = policy.check(
+        identity="u", scope="tg", spent_usd=1.0, now=0.0, pending_usd=0.5
+    )
+    assert d.allowed is True
+
+
+def test_negative_or_non_numeric_pending_ignored():
+    policy = WindowedSpendBudgetPolicy(limit_usd=2.0)
+    assert policy.check(
+        identity="u", scope="tg", spent_usd=1.0, now=0.0, pending_usd=-5.0
+    ).allowed is True
+    assert policy.check(
+        identity="u", scope="tg", spent_usd=1.0, now=0.0, pending_usd="x"
+    ).allowed is True
+
+
+def test_retry_after_uses_oldest_spend_ts():
+    # window=3600, oldest charge at t=1000, now=1200 -> retry when the oldest
+    # charge ages out: 1000 + 3600 - 1200 = 3400.
+    policy = WindowedSpendBudgetPolicy(limit_usd=2.0, window_seconds=3600)
+    d = policy.check(
+        identity="u",
+        scope="tg",
+        spent_usd=2.0,
+        now=1200.0,
+        oldest_spend_ts=1000.0,
+    )
+    assert d.allowed is False
+    assert d.retry_after_seconds == pytest.approx(3400.0)
+
+
+def test_retry_after_clamped_and_expired():
+    policy = WindowedSpendBudgetPolicy(limit_usd=2.0, window_seconds=3600)
+    # oldest charge already older than the window -> retry immediately.
+    d = policy.check(
+        identity="u",
+        scope="tg",
+        spent_usd=2.0,
+        now=10_000.0,
+        oldest_spend_ts=1000.0,
+    )
+    assert d.retry_after_seconds == pytest.approx(0.0)
+    # No oldest ts supplied -> safe upper bound (full window).
+    d2 = policy.check(identity="u", scope="tg", spent_usd=2.0, now=0.0)
+    assert d2.retry_after_seconds == pytest.approx(3600.0)
+
+
 def test_invalid_config_rejected():
     with pytest.raises(ValueError):
         WindowedSpendBudgetPolicy(limit_usd="abc")

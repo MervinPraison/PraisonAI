@@ -4339,10 +4339,12 @@ class SpendBudgetPolicyProtocol(Protocol):
     Pure, import-free decision contract symmetric with
     :class:`RateLimitPolicyProtocol`. The wrapper supplies typed facts — the
     caller ``identity``, the ``scope`` (channel / tenant token), the amount
-    already ``spent_usd`` for that identity+scope in the current window, and
-    the current ``now`` timestamp — and the policy decides whether the turn is
-    allowed or rejected/throttled with a ``retry_after_seconds`` hint. Storage
-    of the spend ledger lives in a
+    already ``spent_usd`` for that identity+scope in the current window, the
+    current ``now`` timestamp, and (optionally) the ``pending_usd`` estimated
+    cost of the turn being admitted and the ``oldest_spend_ts`` of the spend in
+    the window — and the policy decides whether the turn is allowed or
+    rejected/throttled with a ``retry_after_seconds`` hint. Storage of the
+    spend ledger lives in a
     :class:`~praisonaiagents.telemetry.protocols.TokenUsageSinkProtocol`; this
     contract keeps only the *decision* injectable and provable in isolation.
 
@@ -4357,6 +4359,8 @@ class SpendBudgetPolicyProtocol(Protocol):
         scope: str,
         spent_usd: float,
         now: float,
+        pending_usd: float = 0.0,
+        oldest_spend_ts: Optional[float] = None,
     ) -> RateLimitDecision:
         """Return a :class:`RateLimitDecision` for the supplied facts."""
         ...
@@ -4365,17 +4369,29 @@ class SpendBudgetPolicyProtocol(Protocol):
 class WindowedSpendBudgetPolicy:
     """Config-driven cumulative per-identity spend-budget policy.
 
-    The default referenced by ``gateway.budget`` in ``gateway.yaml`` and the
-    Python ``WebSocketGateway(..., spend_budget_policy=...)`` surface. It is
-    intentionally minimal and dependency-free so the decision lives in core and
-    is provable in isolation, exactly like :class:`SlidingWindowRateLimitPolicy`.
+    Intended as the default the wrapper will wire onto a forthcoming
+    ``gateway.budget`` config block and a ``spend_budget_policy=`` gateway
+    constructor argument (neither of which exists in the repo yet — this PR
+    ships only the core decision primitive; the CLI/YAML and constructor
+    surfaces are a follow-up wrapper change). It is intentionally minimal and
+    dependency-free so the decision lives in core and is provable in isolation,
+    exactly like :class:`SlidingWindowRateLimitPolicy`.
 
     The decision, given the amount ``spent_usd`` already accumulated for the
-    identity+scope in the current window:
+    identity+scope in the current window and the ``pending_usd`` estimated cost
+    of the turn being admitted:
 
-    * ``allowed`` while ``spent_usd`` is below ``limit_usd``.
-    * Once ``spent_usd`` reaches ``limit_usd`` the turn is denied with a
-      ``retry_after_seconds`` hint equal to the remaining time in the window.
+    * ``allowed`` while ``spent_usd + pending_usd`` is below ``limit_usd``.
+    * Otherwise the turn is denied with a ``retry_after_seconds`` hint equal to
+      the time until enough spend rolls out of the window. When
+      ``oldest_spend_ts`` is supplied the hint is computed precisely
+      (``oldest_spend_ts + window_seconds - now``); without it the policy falls
+      back to the full ``window_seconds`` as a safe upper bound.
+
+    Passing ``pending_usd`` lets a caller reserve budget for the turn's
+    estimated cost *before* the LLM call so a single expensive turn cannot
+    overshoot the cap; leaving it at the default ``0.0`` preserves the simpler
+    "gate on spend so far" behaviour.
 
     A ``limit_usd`` of ``0`` (or negative) disables the budget entirely (every
     turn is allowed) — the legacy default when no budget is configured.
@@ -4435,6 +4451,8 @@ class WindowedSpendBudgetPolicy:
         scope: str,
         spent_usd: float,
         now: float,
+        pending_usd: float = 0.0,
+        oldest_spend_ts: Optional[float] = None,
     ) -> RateLimitDecision:
         # Disabled: preserve legacy always-allow behaviour.
         if self.limit_usd <= 0:
@@ -4443,12 +4461,41 @@ class WindowedSpendBudgetPolicy:
             spent = float(spent_usd)
         except (TypeError, ValueError):
             spent = 0.0
-        if spent < self.limit_usd:
+        try:
+            pending = float(pending_usd)
+        except (TypeError, ValueError):
+            pending = 0.0
+        if pending < 0:
+            pending = 0.0
+        # Reserve budget for the pending turn's estimated cost so a single
+        # expensive turn cannot overshoot the cap before its cost is recorded.
+        if spent + pending < self.limit_usd:
             return RateLimitDecision(allowed=True)
         return RateLimitDecision(
             allowed=False,
-            retry_after_seconds=self.window_seconds,
+            retry_after_seconds=self._retry_after(now, oldest_spend_ts),
         )
+
+    def _retry_after(
+        self, now: float, oldest_spend_ts: Optional[float]
+    ) -> float:
+        """Seconds until enough spend rolls out of the rolling window.
+
+        With ``oldest_spend_ts`` the earliest in-window charge expires at
+        ``oldest_spend_ts + window_seconds``; the hint is the time until then,
+        clamped to ``(0, window_seconds]``. Without it, fall back to the full
+        window as a safe upper bound.
+        """
+        if oldest_spend_ts is None:
+            return self.window_seconds
+        try:
+            remaining = (float(oldest_spend_ts) + self.window_seconds) - float(now)
+        except (TypeError, ValueError):
+            return self.window_seconds
+        if remaining <= 0:
+            # Spend has already aged out; retry effectively immediately.
+            return 0.0
+        return min(remaining, self.window_seconds)
 
 
 # Backward-compatible alias following the repo's ``*Protocol`` convention.

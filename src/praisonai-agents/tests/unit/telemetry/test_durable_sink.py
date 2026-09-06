@@ -70,6 +70,24 @@ def test_usage_aggregate():
     assert u["records"] == 2
 
 
+def test_oldest_spend_ts():
+    sink = SqliteTokenUsageSink()
+    assert sink.oldest_spend_ts(identity="u1", since=0.0) is None
+    sink.record(identity="u1", scope="tg", cost_usd=1.0, ts=30.0)
+    sink.record(identity="u1", scope="tg", cost_usd=1.0, ts=10.0)
+    sink.record(identity="u1", scope="tg", cost_usd=1.0, ts=50.0)
+    assert sink.oldest_spend_ts(identity="u1", scope="tg", since=0.0) == pytest.approx(10.0)
+    # window filtering: only charges at/after ts=20 count
+    assert sink.oldest_spend_ts(identity="u1", scope="tg", since=20.0) == pytest.approx(30.0)
+
+
+def test_oldest_spend_ts_ignores_zero_cost():
+    sink = SqliteTokenUsageSink()
+    sink.record(identity="u1", scope="tg", cost_usd=0.0, ts=5.0)
+    sink.record(identity="u1", scope="tg", cost_usd=1.0, ts=40.0)
+    assert sink.oldest_spend_ts(identity="u1", scope="tg", since=0.0) == pytest.approx(40.0)
+
+
 def test_persist_reads_identity_from_metadata():
     sink = SqliteTokenUsageSink()
     sink.persist(

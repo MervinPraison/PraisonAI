@@ -190,6 +190,35 @@ class SqliteTokenUsageSink:
             row = cur.fetchone()
         return float(row["spent"] if row is not None else 0.0)
 
+    def oldest_spend_ts(
+        self,
+        *,
+        identity: str,
+        scope: Optional[str] = None,
+        since: float = 0.0,
+    ) -> Optional[float]:
+        """Timestamp of the earliest in-window charge for ``identity``.
+
+        Feeds :class:`~praisonaiagents.gateway.protocols.WindowedSpendBudgetPolicy`
+        so a rejected caller gets an accurate ``retry_after_seconds`` hint
+        (when this earliest charge ages out of the window). Returns ``None``
+        when there is no spend in the window.
+        """
+        query = (
+            "SELECT MIN(ts) AS oldest FROM token_usage "
+            "WHERE identity = ? AND ts >= ? AND cost_usd > 0"
+        )
+        params: List[Any] = [str(identity), float(since)]
+        if scope is not None:
+            query += " AND scope = ?"
+            params.append(str(scope))
+        with self._lock:
+            cur = self._conn.execute(query, params)
+            row = cur.fetchone()
+        if row is None or row["oldest"] is None:
+            return None
+        return float(row["oldest"])
+
     def usage(
         self,
         *,
