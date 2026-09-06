@@ -545,7 +545,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         if removed:
             print(f'claimed closed: {", ".join(removed)}')
             print(_REMOVAL_NOTE)
-    failures += [f'{rel} is out of date -- run --write and commit the result' for rel in stale]
+    # A stale generated report is a warning, not a failure.
+    # update-parity-tracker.yml regenerates and commits all of these on every push to main, so a pull request never has to carry them -- and when every branch regenerated the same file, every branch conflicted with every other on it.
+    # The substantive checks below still fail; only the freshness of a file that main rewrites by itself is downgraded.
+    for rel in stale:
+        print(f'note: {rel} is out of date -- main regenerates it on push; '
+              'run --write if you want it in this change')
 
     if failures:
         print(f'\nFAILURES ({len(failures)}):')

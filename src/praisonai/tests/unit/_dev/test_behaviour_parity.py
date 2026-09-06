@@ -96,11 +96,31 @@ class TestRatchet:
         self._write(repo)
         ledger = repo / 'src/praisonai-ts/src/utils/parity-notice.ts'
         ledger.write_text(LEDGER.replace("'auth', 'sandbox',", "'auth',"))
-        # Still exit 1: the committed report must be regenerated to bank it.
-        assert B.main(['--check', '--repo-root', str(repo)]) == 1
+        # Exit 0: closing an option is progress, and a stale generated report is
+        # only a note now -- main regenerates and commits it on push, so requiring
+        # every branch to carry it made every branch conflict with every other.
+        assert B.main(['--check', '--repo-root', str(repo)]) == 0
         out = capsys.readouterr().out
         assert '1 option(s) closed' in out and '3 -> 2' in out
         assert 'up from' not in out, 'closing an option must not read as a regression'
+        assert 'out of date' in out, 'the stale report is still mentioned, just not fatal'
+
+    def test_a_stale_report_alone_does_not_fail(self, tmp_path, capsys):
+        """Control: staleness is a note; the substance is what fails."""
+        repo = _repo(tmp_path)
+        self._write(repo)
+        (repo / B.JSON_OUTPUT).write_text('{"total": 3, "surfaces": {}, "partial": []}\n')
+        assert B.main(['--check', '--repo-root', str(repo)]) == 0
+        assert 'out of date' in capsys.readouterr().out
+
+    def test_a_stale_report_does_not_hide_a_rise(self, tmp_path, capsys):
+        """Control: the ratchet still fires when the report is also stale."""
+        repo = _repo(tmp_path)
+        self._write(repo)
+        ledger = repo / 'src/praisonai-ts/src/utils/parity-notice.ts'
+        ledger.write_text(LEDGER.replace("'auth', 'sandbox',", "'auth', 'sandbox', 'newlyIgnored',"))
+        assert B.main(['--check', '--repo-root', str(repo)]) == 1
+        assert 'up from 3' in capsys.readouterr().out
 
     def test_a_missing_report_fails(self, tmp_path):
         """Control: no committed baseline is a failure, not a free pass."""

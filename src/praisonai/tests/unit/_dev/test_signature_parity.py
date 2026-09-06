@@ -894,6 +894,58 @@ class TestStalenessIgnoresLineNumbers:
         assert C.strip_source_lines(text) == text
 
 
+class TestReportFreshnessContract:
+    """The merge gate: a missing report fails, a stale one only warns.
+
+    This is the contract the CLI enforces in --check mode. update-parity-tracker.yml
+    rewrites the report on every push to main, so a stale copy on a branch is a note;
+    but a missing copy leaves nothing to compare against, so it stays fatal.
+    """
+
+    def test_a_missing_report_is_a_failure(self, tmp_path):
+        ev = C.Evaluation()
+        path = tmp_path / 'SIGNATURE_PARITY.md'
+        C.classify_report_freshness(ev, path, Path('SIGNATURE_PARITY.md'), 'content')
+        assert not ev.ok
+        assert ev.failures and 'does not exist' in ev.failures[0]
+        assert not ev.warnings
+
+    def test_a_stale_report_is_a_warning_not_a_failure(self, tmp_path):
+        """Control: staleness must not fail, or every branch conflicts again."""
+        ev = C.Evaluation()
+        path = tmp_path / 'SIGNATURE_PARITY.md'
+        path.write_text('an older rendering', encoding='utf-8')
+        C.classify_report_freshness(ev, path, Path('SIGNATURE_PARITY.md'), 'the fresh rendering')
+        assert ev.ok
+        assert ev.warnings and 'out of date' in ev.warnings[0]
+
+    def test_a_fresh_report_is_silent(self, tmp_path):
+        """Control: an up-to-date report is neither a failure nor a warning."""
+        ev = C.Evaluation()
+        path = tmp_path / 'SIGNATURE_PARITY.md'
+        path.write_text('identical', encoding='utf-8')
+        C.classify_report_freshness(ev, path, Path('SIGNATURE_PARITY.md'), 'identical')
+        assert ev.ok and not ev.warnings and not ev.failures
+
+    def test_a_line_only_shift_is_not_staleness(self, tmp_path):
+        """Control: a report differing only in :line numbers is still fresh."""
+        ev = C.Evaluation()
+        content = 'Python: `agent.py:583`\n'
+        path = tmp_path / 'SIGNATURE_PARITY.md'
+        path.write_text('Python: `agent.py:601`\n', encoding='utf-8')
+        C.classify_report_freshness(ev, path, Path('SIGNATURE_PARITY.md'), content)
+        assert ev.ok and not ev.warnings and not ev.failures
+
+    def test_a_stale_report_does_not_mask_a_live_failure(self, tmp_path):
+        """A pre-existing substantive failure survives a stale-report warning."""
+        ev = C.Evaluation(failures=['Agent.__init__: `auth` is required in TS only'])
+        path = tmp_path / 'SIGNATURE_PARITY.md'
+        path.write_text('old', encoding='utf-8')
+        C.classify_report_freshness(ev, path, Path('SIGNATURE_PARITY.md'), 'new')
+        assert not ev.ok
+        assert ev.warnings and 'out of date' in ev.warnings[0]
+
+
 class TestWaiverScopeByGapKind:
     """A waiver is keyed by parameter, so it must not silence every KIND of gap.
 
