@@ -40,7 +40,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 17 | 2 | 469 |
 | ✅ Display | 22 | 1 | 342 |
-| ✅ Embeddings | 13 | 3 | 810 |
+| ✅ Embeddings | 13 | 3 | 841 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 6 | 1 | 159 |
@@ -67,7 +67,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Planning | 11 | 2 | 525 |
 | ✅ Plugins | 9 | 2 | 710 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 26 | 116 | 8145 |
+| ✅ Providers | 26 | 116 | 8149 |
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 7 | 2 | 246 |
 | ✅ RAG | 16 | 2 | 386 |
