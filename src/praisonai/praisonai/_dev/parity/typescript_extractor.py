@@ -58,13 +58,6 @@ class TypeScriptFeatures:
 
 # --- Regexes -----------------------------------------------------------------
 
-# Strings are captured in group 1 so comments inside string literals survive.
-_STRING_OR_COMMENT = re.compile(
-    r"""('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)"""
-    r"""|//[^\n]*|/\*.*?\*/""",
-    re.DOTALL,
-)
-
 # export { A, B as C } from './path'  (group 1 = names, group 2 = path)
 _NAMED_REEXPORT = re.compile(
     r"export\s*\{([^}]*)\}\s*from\s*['\"]([^'\"]+)['\"]"
@@ -93,13 +86,161 @@ _DECLARATION = re.compile(
     re.MULTILINE,
 )
 
+# export default class Foo / export default function bar / export default x
+_DEFAULT_EXPORT = re.compile(r"^[ \t]*export\s+default\b", re.MULTILINE)
+
 _TYPE_KEYWORDS = {'interface', 'type'}
 _MAX_STAR_DEPTH = 5
 
 
+# A `/` starts a regular expression (rather than division) only after one of
+# these. Anything else -- an identifier, a number, `)`, `]`, `.` -- means the
+# preceding expression is complete, so the slash divides.
+_REGEX_MAY_FOLLOW_CHARS = set('(,=:[!&|?{};+-*%^~<>')
+_REGEX_MAY_FOLLOW_WORDS = {
+    'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+    'throw', 'case', 'do', 'else', 'yield', 'await',
+}
+
+
+def _scan(source: str) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+    r"""Split ``source`` into ``(comment_spans, literal_spans)``.
+
+    A character-level scan rather than a regex, because the two cannot be told
+    apart by alternation: the regular expression literal
+    ``/([_*[\]()~`>#+\-=|{}.!\\])/g`` in ``src/bots/base.ts`` contains a
+    backtick, and a regex-based splitter reads it as the start of a template
+    literal that then swallows the next 6 lines -- including
+    ``export function escapeMarkdownV2``.
+
+    Literal spans cover string, template and regular-expression literals.
+    """
+    comments: List[Tuple[int, int]] = []
+    literals: List[Tuple[int, int]] = []
+    n = len(source)
+    i = 0
+    prev_char = ''   # last significant code character
+    prev_word = ''   # last identifier in code, if it ended at prev_char
+
+    while i < n:
+        ch = source[i]
+        pair = source[i:i + 2]
+
+        if pair == '//':
+            end = source.find('\n', i)
+            end = n if end < 0 else end
+            comments.append((i, end))
+            i = end
+            continue
+
+        if pair == '/*':
+            end = source.find('*/', i + 2)
+            end = n if end < 0 else end + 2
+            comments.append((i, end))
+            i = end
+            continue
+
+        if ch in '"\'':
+            j = i + 1
+            while j < n and source[j] != ch and source[j] != '\n':
+                j += 2 if source[j] == '\\' else 1
+            end = min(j + 1, n) if j < n and source[j] == ch else j
+            literals.append((i, end))
+            prev_char, prev_word = ch, ''
+            i = end
+            continue
+
+        if ch == '`':
+            j = i + 1
+            while j < n and source[j] != '`':
+                j += 2 if source[j] == '\\' else 1
+            end = min(j + 1, n)
+            literals.append((i, end))
+            prev_char, prev_word = '`', ''
+            i = end
+            continue
+
+        if ch == '/' and (
+            not prev_char
+            or prev_char in _REGEX_MAY_FOLLOW_CHARS
+            or prev_word in _REGEX_MAY_FOLLOW_WORDS
+        ):
+            j = i + 1
+            in_class = False
+            closed = False
+            while j < n and source[j] != '\n':
+                c = source[j]
+                if c == '\\':
+                    j += 2
+                    continue
+                if c == '[':
+                    in_class = True
+                elif c == ']':
+                    in_class = False
+                elif c == '/' and not in_class:
+                    closed = True
+                    break
+                j += 1
+            if closed:
+                end = j + 1
+                while end < n and source[end].isalpha():
+                    end += 1   # flags
+                literals.append((i, end))
+                prev_char, prev_word = '/', ''
+                i = end
+                continue
+
+        if ch.isalnum() or ch in '_$':
+            j = i
+            while j < n and (source[j].isalnum() or source[j] in '_$'):
+                j += 1
+            prev_word = source[i:j]
+            prev_char = source[j - 1]
+            i = j
+            continue
+
+        if not ch.isspace():
+            prev_char, prev_word = ch, ''
+        i += 1
+
+    return comments, literals
+
+
 def _strip_comments(source: str) -> str:
-    """Remove // and /* */ comments while leaving string literals intact."""
-    return _STRING_OR_COMMENT.sub(lambda m: m.group(1) or '', source)
+    """Blank out // and /* */ comments, leaving string literals intact.
+
+    Comments become whitespace of the same length rather than being deleted, so
+    character offsets survive and ``_literal_spans`` can be computed on the
+    result.
+    """
+    comments, _ = _scan(source)
+    if not comments:
+        return source
+    out = list(source)
+    for start, end in comments:
+        for k in range(start, end):
+            if out[k] != '\n':
+                out[k] = ' '
+    return ''.join(out)
+
+
+def _literal_spans(source: str) -> List[Tuple[int, int]]:
+    """``(start, end)`` of every string/template/regex literal in ``source``."""
+    return _scan(source)[1]
+
+
+def _code_matches(pattern: 're.Pattern', source: str, spans: List[Tuple[int, int]]) -> list:
+    """Matches of ``pattern`` that *begin* outside any string literal.
+
+    The export regexes must read the module path out of a string literal, so
+    literals cannot simply be deleted. Instead a statement only counts when its
+    ``export`` keyword itself sits in code -- which is what keeps a doc snippet,
+    a fixture or a codegen template from satisfying parity.
+    """
+    return [
+        m for m in pattern.finditer(source)
+        if not any(start <= m.start() < end for start, end in spans)
+    ]
 
 
 class TypeScriptFeatureExtractor:
@@ -109,10 +250,19 @@ class TypeScriptFeatureExtractor:
     This extractor parses the index.ts file to find:
     - export { Name } from './path' statements
     - export type { Name } from './path' statements
-    - export * from './path' statements — resolved by reading the target
-      module (``./x.ts``, ``./x.tsx``, ``./x/index.ts`` or ``./x/index.tsx``)
-      and collecting its exported declarations, local export lists and nested
-      re-exports (recursively, with a visited set and a depth limit).
+    - export * from './path' statements
+
+    Every re-export target is resolved to a real file (``./x.ts``, ``./x.tsx``,
+    ``./x/index.ts`` or ``./x/index.tsx``); an unresolvable path contributes
+    nothing. For ``export { .. } from`` the *source* name of each binding must
+    also appear in what the target module provides -- its exported
+    declarations, local export lists, nested re-exports and ``export default``
+    (collected recursively, with a visited set and a depth limit). A statement
+    naming a module that does not exist, or a symbol that module does not
+    export, cannot compile, so it is not parity and is dropped.
+
+    Export statements that begin inside a comment or a string literal are
+    ignored: doc snippets, fixtures and codegen templates must not count.
 
     It categorizes exports into modules based on their source paths.
 
@@ -162,6 +312,7 @@ class TypeScriptFeatureExtractor:
             repo_root = self._find_repo_root()
         self.repo_root = Path(repo_root).resolve()
         self.ts_pkg = self.repo_root / "src" / "praisonai-ts"
+        self._provides_cache: Dict[Path, Set[str]] = {}
 
     def _find_repo_root(self) -> Path:
         """Find the monorepo root (see ``_paths.find_repo_root``)."""
@@ -182,34 +333,77 @@ class TypeScriptFeatureExtractor:
             return features
 
         content = _strip_comments(content)
+        spans = _literal_spans(content)
+        base_dir = index_file.parent
 
         # Parse regular exports: export { Name1, Name2 } from './path'
-        for match in _NAMED_REEXPORT.finditer(content):
-            source = match.group(2)
-            for name, is_type in self._parse_export_entries(match.group(1)):
-                self._add_export(features, name, source, is_type)
+        for match in _code_matches(_NAMED_REEXPORT, content, spans):
+            self._add_verified_reexport(
+                features, base_dir, match.group(2), match.group(1), force_type=False)
 
         # Parse type exports: export type { Name1, Name2 } from './path'
-        for match in _TYPE_REEXPORT.finditer(content):
-            source = match.group(2)
-            for name, _ in self._parse_export_entries(match.group(1)):
-                self._add_export(features, name, source, True)
+        for match in _code_matches(_TYPE_REEXPORT, content, spans):
+            self._add_verified_reexport(
+                features, base_dir, match.group(2), match.group(1), force_type=True)
 
         # Parse namespace re-exports: export * as ns from './path'
-        for match in _STAR_AS_REEXPORT.finditer(content):
+        for match in _code_matches(_STAR_AS_REEXPORT, content, spans):
+            if self._resolve_module(base_dir, match.group(2)) is None:
+                continue
             self._add_export(features, match.group(1), match.group(2), False)
 
         # Parse star re-exports: export * from './path' — resolve the target
         # module and record everything it exports under the star path.
-        for match in _STAR_REEXPORT.finditer(content):
+        for match in _code_matches(_STAR_REEXPORT, content, spans):
             source = match.group(1)
-            resolved = self._resolve_module(index_file.parent, source)
+            resolved = self._resolve_module(base_dir, source)
             if resolved is None:
                 continue
             for name, is_type in self._collect_star_exports(resolved, set(), 0):
                 self._add_export(features, name, source, is_type)
 
         return features
+
+    def _add_verified_reexport(
+        self,
+        features: TypeScriptFeatures,
+        base_dir: Path,
+        spec: str,
+        names_str: str,
+        force_type: bool,
+    ) -> None:
+        """Record ``export { .. } from spec`` only for bindings that really exist.
+
+        An unresolvable ``spec`` contributes nothing, and a binding whose source
+        name is absent from the target module is dropped: neither can compile,
+        so neither is evidence of a TypeScript implementation.
+        """
+        resolved = self._resolve_module(base_dir, spec)
+        if resolved is None:
+            return
+        provided = self._module_provides(resolved)
+        for source_name, local_name, is_type in self._parse_export_bindings(names_str):
+            if source_name not in provided:
+                continue
+            self._add_export(features, local_name, spec, force_type or is_type)
+
+    def _module_provides(self, module_file: Path) -> Set[str]:
+        """Names ``module_file`` makes available to an importer."""
+        cached = self._provides_cache.get(module_file)
+        if cached is not None:
+            return cached
+
+        names = {name for name, _ in self._collect_star_exports(module_file, set(), 0)}
+        try:
+            with open(module_file, 'r', encoding='utf-8') as f:
+                content = _strip_comments(f.read())
+        except (IOError, UnicodeDecodeError):
+            content = ''
+        if _code_matches(_DEFAULT_EXPORT, content, _literal_spans(content)):
+            names.add('default')
+
+        self._provides_cache[module_file] = names
+        return names
 
     # --- export * resolution -------------------------------------------------
 
@@ -252,6 +446,7 @@ class TypeScriptFeatureExtractor:
         except (IOError, UnicodeDecodeError):
             return []
         content = _strip_comments(content)
+        spans = _literal_spans(content)
 
         found: List[Tuple[str, bool]] = []
         seen: Set[Tuple[str, bool]] = set()
@@ -263,28 +458,35 @@ class TypeScriptFeatureExtractor:
                 found.append(key)
 
         # Declarations: export class Foo / export function bar / export type T
-        for match in _DECLARATION.finditer(content):
+        for match in _code_matches(_DECLARATION, content, spans):
             keyword = re.sub(r'\s+', ' ', match.group(1))
             add(match.group(2), keyword in _TYPE_KEYWORDS)
 
-        # Named re-exports from other modules (names are known, no recursion)
-        for match in _NAMED_REEXPORT.finditer(content):
-            for name, is_type in self._parse_export_entries(match.group(1)):
-                add(name, is_type)
-        for match in _TYPE_REEXPORT.finditer(content):
-            for name, _ in self._parse_export_entries(match.group(1)):
-                add(name, True)
-        for match in _STAR_AS_REEXPORT.finditer(content):
-            add(match.group(1), False)
+        # Named re-exports from other modules. A binding here is only real if
+        # the module it names resolves AND provides the source symbol -- exactly
+        # the rule the root index applies. Without this, `export { Foo } from
+        # './barrel'` re-surfaced through a star would validate a phantom Foo
+        # even when the barrel re-exports it from a module that does not exist.
+        for match in _code_matches(_NAMED_REEXPORT, content, spans):
+            self._add_nested_reexport(
+                add, module_file.parent, match.group(2), match.group(1),
+                visited, depth, force_type=False)
+        for match in _code_matches(_TYPE_REEXPORT, content, spans):
+            self._add_nested_reexport(
+                add, module_file.parent, match.group(2), match.group(1),
+                visited, depth, force_type=True)
+        for match in _code_matches(_STAR_AS_REEXPORT, content, spans):
+            if self._resolve_module(module_file.parent, match.group(2)) is not None:
+                add(match.group(1), False)
 
         # Local export lists: export { a, b as c }
-        for match in _LOCAL_EXPORT_LIST.finditer(content):
+        for match in _code_matches(_LOCAL_EXPORT_LIST, content, spans):
             list_is_type = bool(match.group(1))
             for name, is_type in self._parse_export_entries(match.group(2)):
                 add(name, is_type or list_is_type)
 
         # Nested star re-exports: recurse
-        for match in _STAR_REEXPORT.finditer(content):
+        for match in _code_matches(_STAR_REEXPORT, content, spans):
             nested = self._resolve_module(module_file.parent, match.group(1))
             if nested is None:
                 continue
@@ -292,6 +494,34 @@ class TypeScriptFeatureExtractor:
                 add(name, is_type)
 
         return found
+
+    def _add_nested_reexport(
+        self,
+        add,
+        base_dir: Path,
+        spec: str,
+        names_str: str,
+        visited: Set[Path],
+        depth: int,
+        force_type: bool,
+    ) -> None:
+        """Add a nested ``export { .. } from spec`` only for bindings that exist.
+
+        The named symbols are validated against what ``spec`` provides, resolved
+        recursively so a chain of barrels is followed to the module that really
+        declares each name. An unresolvable ``spec`` or a binding the target does
+        not provide is dropped: neither can compile, so neither is parity.
+        """
+        resolved = self._resolve_module(base_dir, spec)
+        if resolved is None:
+            return
+        provided = {
+            name for name, _ in
+            self._collect_star_exports(resolved, set(visited), depth + 1)
+        }
+        for source_name, local_name, is_type in self._parse_export_bindings(names_str):
+            if source_name in provided:
+                add(local_name, force_type or is_type)
 
     # --- helpers -------------------------------------------------------------
 
@@ -310,19 +540,16 @@ class TypeScriptFeatureExtractor:
         if name not in module.exports:
             module.exports.append(name)
 
-    def _parse_export_entries(self, names_str: str) -> List[Tuple[str, bool]]:
-        """Parse an export list into (name, is_type) pairs."""
-        entries: List[Tuple[str, bool]] = []
-        for raw in self._parse_export_names(names_str):
-            if raw.startswith('type '):
-                entries.append((raw[5:].strip(), True))
-            else:
-                entries.append((raw, False))
-        return entries
+    def _parse_export_bindings(self, names_str: str) -> List[Tuple[str, str, bool]]:
+        """Parse an export list into ``(source_name, local_name, is_type)`` triples.
 
-    def _parse_export_names(self, names_str: str) -> List[str]:
-        """Parse export names from a comma-separated string."""
-        names = []
+        ``source_name`` is what the target module must provide; ``local_name``
+        is what an importer of *this* module sees, and is what parity matches
+        against Python. For ``{ A }`` the two are equal; for ``{ A as B }`` they
+        are ``A`` and ``B``; for ``{ default as B }`` they are ``default`` and
+        ``B``.
+        """
+        bindings: List[Tuple[str, str, bool]] = []
         # Remove comments from the string first
         # Handle both // and /* */ style comments
         names_str = re.sub(r'//[^\n]*', '', names_str)
@@ -335,19 +562,30 @@ class TypeScriptFeatureExtractor:
             # Skip if it looks like a comment remnant
             if part.startswith('//') or part.startswith('/*'):
                 continue
-            # Handle 'Name as Alias' syntax - take the ALIAS (right side)
-            # This is correct because we want to match what Python exports
+            is_type = False
+            if part.startswith('type '):
+                is_type = True
+                part = part[5:].strip()
+            # Handle 'Name as Alias' syntax - the ALIAS (right side) is the name
+            # importers see, so that is what parity matches against Python.
             if ' as ' in part:
-                left, alias = part.split(' as ', 1)
-                alias = alias.strip()
-                # Preserve an inline `type` prefix from the left side
-                if left.strip().startswith('type ') and not alias.startswith('type '):
-                    alias = 'type ' + alias
-                part = alias
-            if part == 'default':
+                source, local = part.split(' as ', 1)
+                source, local = source.strip(), local.strip()
+            else:
+                source = local = part
+            if not source or not local or local == 'default':
                 continue
-            names.append(part)
-        return names
+            bindings.append((source, local, is_type))
+        return bindings
+
+    def _parse_export_entries(self, names_str: str) -> List[Tuple[str, bool]]:
+        """Parse an export list into (name, is_type) pairs."""
+        return [(local, is_type)
+                for _, local, is_type in self._parse_export_bindings(names_str)]
+
+    def _parse_export_names(self, names_str: str) -> List[str]:
+        """Parse export names from a comma-separated string."""
+        return [local for _, local, _ in self._parse_export_bindings(names_str)]
 
     def _categorize(self, source_path: str) -> str:
         """Categorize an export based on its source path."""

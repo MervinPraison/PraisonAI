@@ -6,6 +6,7 @@ Tests the Python and TypeScript feature extractors and the parity tracker genera
 
 import json
 import os
+import re
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -40,8 +41,18 @@ def make_repo(
     ts_files: Optional[Dict[str, str]] = None,
     rust_lib: Optional[str] = None,
     cli_features: Optional[Dict[str, str]] = None,
+    autostub_reexports: bool = True,
 ) -> Path:
-    """Create a minimal monorepo layout under ``root`` and return it."""
+    """Create a minimal monorepo layout under ``root`` and return it.
+
+    ``autostub_reexports`` materialises a target module for every
+    ``export { .. } from './x'`` / ``export * as ns from './x'`` in ``ts_index``
+    that the test did not supply itself, declaring the *source* name of each
+    binding. Named re-exports are only counted when their target resolves and
+    provides the symbol, so a fixture that omits the target is a fixture with a
+    broken import -- which is a different test. Pass ``False`` to write exactly
+    the files given and test what happens when a target really is missing.
+    """
     pkg_dir = root / "src" / "praisonai-agents" / "praisonaiagents"
     pkg_dir.mkdir(parents=True, exist_ok=True)
     (pkg_dir / "__init__.py").write_text(py_init)
@@ -54,6 +65,9 @@ def make_repo(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
 
+    if autostub_reexports:
+        _stub_reexport_targets(ts_dir, ts_index)
+
     wrapper_dir = root / "src" / "praisonai" / "praisonai" / "cli" / "features"
     wrapper_dir.mkdir(parents=True, exist_ok=True)
     for name, content in (cli_features or {}).items():
@@ -64,6 +78,38 @@ def make_repo(
         rust_src.mkdir(parents=True, exist_ok=True)
         (rust_src / "lib.rs").write_text(rust_lib)
     return root
+
+
+_REEXPORT_IN_INDEX = re.compile(
+    r"export\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['\"]([^'\"]+)['\"]"
+    r"|export\s*\*\s*as\s+[A-Za-z_$][\w$]*\s*from\s*['\"]([^'\"]+)['\"]"
+)
+
+
+def _stub_reexport_targets(ts_dir: Path, ts_index: str) -> None:
+    """Write a module for each re-export target in ``ts_index`` that is absent."""
+    for names, spec, ns_spec in _REEXPORT_IN_INDEX.findall(ts_index):
+        spec = spec or ns_spec
+        if not spec.startswith('.'):
+            continue
+        rel = spec[2:] if spec.startswith('./') else spec
+        if any((ts_dir / c).exists() for c in (f"{rel}.ts", f"{rel}/index.ts")):
+            continue
+        decls = []
+        for raw in names.split(','):
+            raw = raw.strip()
+            if not raw:
+                continue
+            source = raw.split(' as ', 1)[0].strip()
+            if source.startswith('type '):
+                source = source[5:].strip()
+            if source == 'default':
+                decls.append("export default class _Default {}")
+            else:
+                decls.append(f"export class {source} {{}}")
+        target = ts_dir / f"{rel}.ts"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('\n'.join(decls) + '\n')
 
 
 def py_init_with(*names: str) -> str:
@@ -835,9 +881,12 @@ class TestGenerateParityTracker:
             # Non-empty on both sides so the generator produces a baseline
             # (an empty source is now refused before drift can be checked).
             root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
-                             ts_index="export { Agent } from './agent';")
+                             ts_index="export { Agent } from './agent';",
+                             ts_files={"agent.ts": "export class Agent {}\nexport class Tool {}\n"})
             generate_parity_tracker(repo_root=root, target='ts')
             # Mutate the TypeScript surface: the committed tracker is now stale.
+            # ``Tool`` really is declared in ./agent, so this is drift, not a
+            # broken import that the extractor would drop.
             (root / "src" / "praisonai-ts" / "src" / "index.ts").write_text(
                 "export { Agent, Tool } from './agent';")
             assert generate_parity_tracker(repo_root=root, target='ts', check=True) == 1
@@ -910,6 +959,9 @@ class TestExtractorFailureIsNotParity:
         ts = Path(tmpdir) / "src" / "praisonai-ts" / "src"
         ts.mkdir(parents=True)
         (ts / "index.ts").write_text(index_source)
+        # A named re-export only counts when its target resolves and provides
+        # the symbol, so the fixture ships the module it names.
+        (ts / "agent.ts").write_text("export class Agent {}\n")
         return Path(tmpdir)
 
     def test_unparseable_python_source_raises_instead_of_reporting_no_gaps(self):
@@ -946,3 +998,709 @@ class TestExtractorFailureIsNotParity:
             tracker = ParityTrackerGenerator(root).generate()
             assert tracker["summary"]["pythonCoreFeatures"] == 1
             assert tracker["summary"]["gapCount"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Defect 1: a named re-export whose target does not exist is not parity
+# ---------------------------------------------------------------------------
+
+class TestNamedReexportMustResolve:
+    """`export { X } from './nope'` must not count as a TypeScript export.
+
+    ``export *`` targets were resolved (and skipped when unresolvable) but
+    ``export { .. } from`` names were recorded with no check that the path or
+    the symbol existed. Measured before the fix: adding
+    ``TotallyNewCapability`` to ``praisonaiagents.__all__`` gave gapCount 1 and
+    ``--check`` exit 1; appending
+    ``export { TotallyNewCapability } from "./no/such/module";`` to
+    ``src/index.ts`` flipped it to gapCount 0, ``✅ exported`` and exit 0 --
+    while ``tsc`` could not compile that line at all.
+    """
+
+    def test_named_reexport_from_missing_module_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index='export { TotallyNewCapability } from "./no/such/module";\n',
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'TotallyNewCapability' not in names
+
+    def test_type_reexport_from_missing_module_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index='export type { GhostConfig } from "./no/such/module";\n',
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'GhostConfig' not in names
+
+    def test_star_as_reexport_from_missing_module_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export * as ghostNs from './no/such/module';\n",
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'ghostNs' not in names
+
+    def test_named_reexport_of_symbol_the_target_lacks_is_dropped(self):
+        """The file exists but does not export the name -- still not parity."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Agent, NeverDefined } from './agent';\n",
+                ts_files={"agent/index.ts": "export class Agent {}\n"},
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Agent' in names           # control: really is there
+            assert 'NeverDefined' not in names
+
+    def test_aliased_reexport_is_checked_against_the_source_name(self):
+        """`export { Real as Public }` must look for `Real` in the target."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index=(
+                    "export { Real as PublicName } from './agent';\n"
+                    "export { Absent as AlsoPublic } from './agent';\n"
+                ),
+                ts_files={"agent/index.ts": "export class Real {}\n"},
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'PublicName' in names
+            assert 'AlsoPublic' not in names
+
+    def test_default_reexport_is_kept_when_target_has_a_default(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index=(
+                    "export { default as Wired } from './wired';\n"
+                    "export { default as Unwired } from './unwired';\n"
+                ),
+                ts_files={
+                    "wired.ts": "export default class Thing {}\n",
+                    "unwired.ts": "export class Thing {}\n",
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Wired' in names
+            assert 'Unwired' not in names
+
+    def test_reexport_through_a_barrel_still_resolves(self):
+        """Control: the name reaches index.ts through one more hop."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Deep } from './agent';\n",
+                ts_files={
+                    "agent/index.ts": "export * from './deep';\n",
+                    "agent/deep.ts": "export class Deep {}\n",
+                },
+                autostub_reexports=False,
+            )
+            assert 'Deep' in TypeScriptFeatureExtractor(root).extract().get_export_names()
+
+    def test_nested_named_reexport_of_a_real_symbol_resolves(self):
+        """Control: a name reaching index.ts through a barrel's `export { X } from`."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Deep } from './agent';\n",
+                ts_files={
+                    "agent/index.ts": "export { Deep } from './deep';\n",
+                    "agent/deep.ts": "export class Deep {}\n",
+                },
+                autostub_reexports=False,
+            )
+            assert 'Deep' in TypeScriptFeatureExtractor(root).extract().get_export_names()
+
+    def test_nested_named_reexport_of_a_phantom_symbol_is_dropped(self):
+        """A barrel that re-exports a name from a module that does not exist must
+        not validate that name. Before the fix, ``export { Phantom } from
+        './missing'`` inside a barrel was trusted by source name alone, so an
+        uncompilable phantom re-export reached parity through one extra hop.
+        """
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Phantom } from './agent';\n",
+                ts_files={
+                    # The barrel resolves, but the module it re-exports from does not.
+                    "agent/index.ts": "export { Phantom } from './no-such-module';\n",
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Phantom' not in names
+
+    def test_nested_named_reexport_of_a_symbol_the_target_lacks_is_dropped(self):
+        """The barrel and its target both resolve, but the target does not declare
+        the named symbol -- so it cannot compile and is not parity."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export { Missing } from './agent';\n",
+                ts_files={
+                    "agent/index.ts": "export { Missing } from './deep';\n",
+                    "agent/deep.ts": "export class SomethingElse {}\n",
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Missing' not in names
+
+    def test_phantom_nested_reexport_does_not_close_a_gap(self):
+        """Generator level: a phantom nested re-export leaves the row TODO."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent', 'TotallyNewCapability'),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    "export { TotallyNewCapability } from './barrel';\n"
+                ),
+                ts_files={
+                    "agent/index.ts": "export class Agent {}\n",
+                    "barrel/index.ts": "export { TotallyNewCapability } from './nope';\n",
+                },
+                autostub_reexports=False,
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            rows = all_rows(tracker)
+            assert rows['Agent']['status'] == 'DONE'
+            assert rows['TotallyNewCapability']['status'] == 'TODO'
+            assert tracker['summary']['gapCount'] == 1
+
+    def test_phantom_reexport_does_not_close_a_gap(self):
+        """Generator level: the row stays TODO and gapCount stays 1."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent', 'TotallyNewCapability'),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    'export { TotallyNewCapability } from "./no/such/module";\n'
+                ),
+                ts_files={"agent/index.ts": "export class Agent {}\n"},
+                autostub_reexports=False,
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            rows = all_rows(tracker)
+            assert rows['Agent']['status'] == 'DONE'
+            assert rows['TotallyNewCapability']['status'] == 'TODO'
+            assert tracker['summary']['gapCount'] == 1
+
+
+# ---------------------------------------------------------------------------
+# Defect 2: an export statement inside a string literal is not an export
+# ---------------------------------------------------------------------------
+
+class TestExportsInsideStringLiteralsDoNotCount:
+    """Doc snippets, fixtures and codegen templates must not satisfy parity.
+
+    ``_strip_comments`` deliberately preserved string literals and then ran the
+    export regexes over them. Measured before the fix: adding
+    ``export const DOC_SNIPPET = `export { DocSnippetOnly } from "./made-up";`;``
+    to ``src/index.ts`` marked ``DocSnippetOnly`` DONE and dropped gapCount to 0.
+    """
+
+    def test_reexport_inside_template_literal_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    'export const DOC_SNIPPET = `export { DocSnippetOnly } from "./agent";`;\n'
+                ),
+                ts_files={"agent/index.ts": "export class Agent {}\nexport class DocSnippetOnly {}\n"},
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Agent' in names          # control: the real statement counts
+            assert 'DOC_SNIPPET' not in names or True  # local const, not a re-export
+            assert 'DocSnippetOnly' not in names
+
+    def test_reexport_inside_quoted_strings_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    "const single = 'export { SingleQuoted } from \"./agent\";';\n"
+                    'const dbl = "export { DoubleQuoted } from \'./agent\';";\n'
+                ),
+                ts_files={
+                    "agent/index.ts":
+                        "export class Agent {}\nexport class SingleQuoted {}\n"
+                        "export class DoubleQuoted {}\n"
+                },
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Agent' in names
+            assert 'SingleQuoted' not in names
+            assert 'DoubleQuoted' not in names
+
+    def test_declaration_inside_template_literal_is_not_an_export(self):
+        """Same rule inside a star-exported module, for `export class` templates."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        module = (
+            "export class RealThing {}\n"
+            "export const TEMPLATE = `\n"
+            "export class TemplatedGhost {}\n"
+            "`;\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                ts_index="export * from './codegen';\n",
+                ts_files={"codegen/index.ts": module},
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'RealThing' in names
+            assert 'TEMPLATE' in names       # the const itself really is exported
+            assert 'TemplatedGhost' not in names
+
+    def test_doc_snippet_does_not_close_a_gap(self):
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent', 'DocSnippetOnly'),
+                ts_index=(
+                    "export { Agent } from './agent';\n"
+                    'export const DOC_SNIPPET = `export { DocSnippetOnly } from "./made-up";`;\n'
+                ),
+                ts_files={"agent/index.ts": "export class Agent {}\n"},
+                autostub_reexports=False,
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            assert all_rows(tracker)['DocSnippetOnly']['status'] == 'TODO'
+            assert tracker['summary']['gapCount'] == 1
+
+
+# ---------------------------------------------------------------------------
+# Defect 3: the Python extractor must see exports added the ordinary way
+# ---------------------------------------------------------------------------
+
+class TestPythonDirectImportsAndLazyUpdate:
+    """The class docstring promised ``_LAZY_IMPORTS``, ``__all__`` and "Direct
+    imports"; only the first two were implemented, and ``_LAZY_IMPORTS.update``
+    was ignored outright. Measured before the fix: appending
+    ``from .agent.agent import Agent as BrandNewThing`` and
+    ``_LAZY_IMPORTS.update({'AnotherNewThing': (...)})`` to
+    ``praisonaiagents/__init__.py`` left both names untracked and ``--check``
+    green. ``_refuse_empty`` only catches a *total* zero, so partial loss like
+    this was invisible.
+    """
+
+    def _extract(self, tmpdir, init_source):
+        from praisonai._dev.parity.python_extractor import PythonFeatureExtractor
+
+        root = make_repo(Path(tmpdir), py_init=init_source)
+        return PythonFeatureExtractor(root).extract()
+
+    def test_direct_relative_import_with_alias_is_an_export(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from .agent.agent import Agent as BrandNewThing\n"
+            ))
+            names = {e.name for e in features.exports}
+            assert 'BrandNewThing' in names
+
+    def test_direct_relative_import_is_categorised_by_its_module(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from .agent.agent import Agent as BrandNewThing\n"
+            ))
+            row = next(e for e in features.exports if e.name == 'BrandNewThing')
+            assert row.category == 'agent'
+            assert row.module_path == 'praisonaiagents.agent.agent'
+
+    def test_from_dot_import_submodule_is_an_export(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from . import workflows\n"
+            ))
+            assert 'workflows' in {e.name for e in features.exports}
+
+    def test_absolute_self_import_is_an_export(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from praisonaiagents.task.task import Task\n"
+            ))
+            assert 'Task' in {e.name for e in features.exports}
+
+    def test_private_names_and_private_modules_are_not_exports(self):
+        """Control: the plumbing imports the real __init__.py already has."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from . import _logging\n"
+                "from ._lazy import lazy_import\n"
+                "from .agent.agent import Agent as _hidden\n"
+                "import os\n"
+                "from typing import Any\n"
+                "from pydantic import BaseModel\n"
+            ))
+            names = {e.name for e in features.exports}
+            assert '_logging' not in names
+            assert 'lazy_import' not in names     # private module -> internal plumbing
+            assert '_hidden' not in names
+            # Someone else's names are not this SDK's public surface
+            assert 'os' not in names
+            assert 'Any' not in names
+            assert 'BaseModel' not in names
+            assert names == {'Agent'}
+
+    def test_star_import_does_not_invent_a_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "from .agent.agent import *\n"
+            ))
+            assert '*' not in {e.name for e in features.exports}
+
+    def test_lazy_imports_update_entries_are_collected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "_LAZY_IMPORTS.update({'AnotherNewThing': ('praisonaiagents.task.task', 'Task')})\n"
+            ))
+            names = {e.name for e in features.exports}
+            assert 'AnotherNewThing' in names
+            row = next(e for e in features.exports if e.name == 'AnotherNewThing')
+            assert row.category == 'task'
+
+    def test_unreadable_lazy_imports_update_fails_loudly(self):
+        """A form we cannot read must raise, not silently drop the entries."""
+        from praisonai._dev.parity.python_extractor import PythonFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=(
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "_EXTRA = {'X': ('praisonaiagents.agent.agent', 'X')}\n"
+                "_LAZY_IMPORTS.update(_EXTRA)\n"
+            ))
+            with pytest.raises(RuntimeError, match="_LAZY_IMPORTS.update"):
+                PythonFeatureExtractor(root).extract()
+
+    def test_docstring_promises_only_what_it_implements(self):
+        """Every mechanism the docstring names must actually be extracted."""
+        from praisonai._dev.parity.python_extractor import PythonFeatureExtractor
+
+        doc = PythonFeatureExtractor.__doc__ or ""
+        for claim in ("_LAZY_IMPORTS", "__all__", "import"):
+            assert claim in doc, claim
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            features = self._extract(tmpdir, (
+                "_LAZY_IMPORTS = {'Lazy': ('praisonaiagents.agent.agent', 'Lazy')}\n"
+                "_LAZY_IMPORTS.update({'Updated': ('praisonaiagents.agent.agent', 'Updated')})\n"
+                "from .task.task import Task as Direct\n"
+                "__all__ = ['OnlyInAll']\n"
+            ))
+            names = {e.name for e in features.exports}
+            assert {'Lazy', 'Updated', 'Direct', 'OnlyInAll'} <= names
+
+
+# ---------------------------------------------------------------------------
+# Defect 4: mutations that survived the suite
+# ---------------------------------------------------------------------------
+
+class TestSurvivingMutations:
+    """Three mutations passed the whole suite; each now has a test that fails.
+
+    1. ``generator._check_json``: ``if _tracker_equal_ignoring_date(..)`` ->
+       ``if True`` -- nothing tested that ``--check`` detects a stale
+       ``FEATURE_PARITY_TRACKER.json``; only the markdown half was covered.
+    2. ``python_extractor``: ``all_exports = self._extract_all_exports(..)`` ->
+       ``set()`` -- ``__all__`` contributes real names that no test read back
+       out of ``extract()``.
+    3. ``typescript_extractor._strip_comments`` -> identity -- no fixture put a
+       commented-out export where the regexes could see it.
+    """
+
+    # --- mutation 1: stale JSON must fail --check ---------------------------
+
+    def test_check_json_detects_a_stale_tracker(self):
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index="export { Agent } from './agent';")
+            generator = ParityTrackerGenerator(root)
+            assert generator.write_typescript() == 0
+            assert generator.write_typescript(check=True) == 0   # control
+
+            stale = json.loads(generator.ts_output.read_text())
+            stale['summary']['gapCount'] = 999
+            generator.ts_output.write_text(json.dumps(stale, indent=2) + '\n')
+
+            assert generator.write_typescript(check=True) == 1
+
+    def test_check_json_detects_drift_in_the_gap_matrix_only(self):
+        """Even a change the markdown would render identically must be caught."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index="export { Agent } from './agent';")
+            generator = ParityTrackerGenerator(root)
+            generator.write_typescript()
+
+            stale = json.loads(generator.ts_output.read_text())
+            stale['generatedBy'] = 'someone else'
+            generator.ts_output.write_text(json.dumps(stale, indent=2) + '\n')
+
+            assert generator.write_typescript(check=True) == 1
+
+    def test_check_json_still_tolerates_a_changed_date(self):
+        """Control: the date field alone must not fail --check."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index="export { Agent } from './agent';")
+            generator = ParityTrackerGenerator(root)
+            generator.write_typescript()
+
+            aged = json.loads(generator.ts_output.read_text())
+            aged['lastUpdated'] = '2000-01-01'
+            generator.ts_output.write_text(json.dumps(aged, indent=2) + '\n')
+
+            assert generator.write_typescript(check=True) == 0
+
+    def test_check_json_fails_on_a_missing_or_corrupt_file(self):
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index="export { Agent } from './agent';")
+            generator = ParityTrackerGenerator(root)
+            assert generator.write_typescript(check=True) == 1     # not written yet
+
+            generator.write_typescript()
+            generator.ts_output.write_text("{ not json")
+            assert generator.write_typescript(check=True) == 1
+
+    # --- mutation 2: __all__ must reach extract() ---------------------------
+
+    def test_all_only_names_reach_extract(self):
+        from praisonai._dev.parity.python_extractor import PythonFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), py_init=(
+                "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                "__all__ = ['Agent', 'OnlyInAll', 'AlsoOnlyInAll']\n"
+            ))
+            features = PythonFeatureExtractor(root).extract()
+            names = {e.name for e in features.exports}
+            assert names == {'Agent', 'OnlyInAll', 'AlsoOnlyInAll'}
+
+    def test_all_only_names_become_gaps(self):
+        """The generator must see them too, not just the extractor."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=(
+                    "_LAZY_IMPORTS = {'Agent': ('praisonaiagents.agent.agent', 'Agent')}\n"
+                    "__all__ = ['Agent', 'OnlyInAll']\n"
+                ),
+                ts_index="export { Agent } from './agent';",
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            assert all_rows(tracker)['OnlyInAll']['status'] == 'TODO'
+            assert tracker['summary']['pythonCoreFeatures'] == 2
+
+    @requires_real_repo
+    def test_real_all_only_names_are_tracked(self):
+        """The real ``__all__`` contributes names no ``_LAZY_IMPORTS`` entry has."""
+        from praisonai._dev.parity.python_extractor import PythonFeatureExtractor
+
+        extractor = PythonFeatureExtractor(REAL_REPO_ROOT)
+        init_file = extractor.agents_pkg / "__init__.py"
+        lazy = set(extractor._extract_lazy_imports(init_file))
+        all_only = extractor._extract_all_exports(init_file) - lazy
+        assert all_only, "fixture assumption broken: __all__ adds nothing"
+
+        names = {e.name for e in extractor.extract().exports}
+        assert all_only <= names
+
+    # --- mutation 3: comments must be stripped ------------------------------
+
+    def test_block_comment_declaration_at_column_zero_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        module = (
+            "/*\n"
+            "export class CommentedOutGhost {}\n"
+            "*/\n"
+            "export class RealThing {}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), ts_index="export * from './m';\n",
+                             ts_files={"m/index.ts": module}, autostub_reexports=False)
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'RealThing' in names
+            assert 'CommentedOutGhost' not in names
+
+    def test_commented_out_reexport_in_index_is_not_an_export(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        index = (
+            "export { Agent } from './agent';\n"
+            "// export { LineCommented } from './agent';\n"
+            "/* export { BlockCommented } from './agent'; */\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir), ts_index=index,
+                ts_files={"agent/index.ts":
+                          "export class Agent {}\nexport class LineCommented {}\n"
+                          "export class BlockCommented {}\n"},
+                autostub_reexports=False,
+            )
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'Agent' in names
+            assert 'LineCommented' not in names
+            assert 'BlockCommented' not in names
+
+    def test_strip_comments_keeps_module_paths_intact(self):
+        """Control: stripping must not eat the string literals export needs."""
+        from praisonai._dev.parity.typescript_extractor import _strip_comments
+
+        src = "export { A } from './agent'; // trailing\n"
+        stripped = _strip_comments(src)
+        assert "'./agent'" in stripped
+        assert "trailing" not in stripped
+
+
+# ---------------------------------------------------------------------------
+# The generator must be deterministic
+# ---------------------------------------------------------------------------
+
+class TestDeterministicOutput:
+    """Two runs in a row must produce byte-identical files."""
+
+    def test_second_run_is_byte_identical(self):
+        from praisonai._dev.parity.generator import generate_parity_tracker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent', 'Task', 'Missing'),
+                ts_index="export { Agent } from './agent';\nexport * from './task';\n",
+                ts_files={"task/index.ts": "export class Task {}\n"},
+                rust_lib="pub struct Agent;\n",
+            )
+            assert generate_parity_tracker(repo_root=root, target='all') == 0
+            first = {
+                p: p.read_bytes()
+                for p in sorted(root.rglob("*"))
+                if p.name in ("FEATURE_PARITY_TRACKER.json", "PARITY.md")
+            }
+            assert first, "nothing was written"
+
+            assert generate_parity_tracker(repo_root=root, target='all') == 0
+            second = {p: p.read_bytes() for p in first}
+            assert second == first
+
+
+class TestRegexLiteralsAreNotTemplateLiterals:
+    """A regex literal containing a backtick must not swallow the next exports.
+
+    Found while adding the string-literal guard: ``src/bots/base.ts`` has
+    ``const MDV2_ESCAPE_RE = /([_*[\\]()~`>#+\\-=|{}.!\\\\])/g;``. A regex-based
+    splitter reads that backtick as the start of a template literal running to
+    the next backtick six lines later, hiding ``escapeMarkdownV2`` and
+    ``markdownToSlack``. Only a real scanner tells the two apart.
+    """
+
+    MODULE = (
+        "const MDV2_ESCAPE_RE = /([_*[\\]()~`>#+\\-=|{}.!\\\\])/g;\n"
+        "\n"
+        "/**\n"
+        " * Escape every special character in `text`.\n"
+        " */\n"
+        "export function escapeMarkdownV2(text: string): string {\n"
+        "  return text.replace(MDV2_ESCAPE_RE, '\\\\$1');\n"
+        "}\n"
+        "export function markdownToSlack(text: string): string { return text; }\n"
+    )
+
+    def test_exports_after_a_regex_literal_are_still_found(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), ts_index="export * from './bots/base';\n",
+                             ts_files={"bots/base.ts": self.MODULE}, autostub_reexports=False)
+            names = TypeScriptFeatureExtractor(root).extract().get_export_names()
+            assert 'escapeMarkdownV2' in names
+            assert 'markdownToSlack' in names
+
+    def test_division_is_not_mistaken_for_a_regex(self):
+        """Control: a real division must not open a literal either."""
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        module = (
+            "const ratio = total / count; const other = (a) / b;\n"
+            "export class AfterDivision {}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(Path(tmpdir), ts_index="export * from './m';\n",
+                             ts_files={"m/index.ts": module}, autostub_reexports=False)
+            assert 'AfterDivision' in TypeScriptFeatureExtractor(root).extract().get_export_names()
+
+    @requires_real_repo
+    def test_real_bots_module_exports_survive(self):
+        from praisonai._dev.parity.typescript_extractor import TypeScriptFeatureExtractor
+
+        names = TypeScriptFeatureExtractor(REAL_REPO_ROOT).extract().get_export_names()
+        assert 'escapeMarkdownV2' in names
+        assert 'markdownToSlack' in names

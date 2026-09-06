@@ -369,7 +369,11 @@ class ModalSandbox:
             return SandboxResult(
                 execution_id=str(uuid.uuid4()),
                 status=SandboxStatus.FAILED,
-                error=f"File not found: {file_path}",
+                error=(
+                    f"Modal sandbox has no file storage, so {file_path} cannot "
+                    "be read. write_file() cannot persist it either; pass the "
+                    "code to execute() instead."
+                ),
                 started_at=time.time(),
                 completed_at=time.time(),
             )
@@ -403,11 +407,27 @@ class ModalSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file (stored in Modal's temporary storage)."""
-        # Modal functions are stateless, so we simulate file storage
-        # In practice, you'd use Modal Volumes for persistent storage
-        logger.warning("Modal sandbox write_file is limited - files are not persistent between executions")
-        return True
+        """Not supported: Modal functions here are stateless.
+
+        This used to log a warning and `return True`, while writing nothing.
+        SandboxProtocol documents the return as "True if successful", so every
+        caller was told a write had happened. Callers that branch on the result
+        (`if not await sandbox.write_file(...)`) were handed the wrong answer,
+        turning a recoverable failure into a silent one -- and execute_file(),
+        which is built on read_file(), then failed with "File not found" for a
+        file the caller had been told was written.
+
+        Persisting here needs Modal Volumes; until that exists, False is the
+        truthful answer, and callers that check the return value already handle
+        it.
+        """
+        logger.warning(
+            "Modal sandbox cannot persist files: write_file(%s) stored nothing. "
+            "Pass the code to execute() directly, or use a sandbox backend with "
+            "file storage (docker, subprocess, ssh).",
+            path,
+        )
+        return False
     
     async def read_file(
         self,

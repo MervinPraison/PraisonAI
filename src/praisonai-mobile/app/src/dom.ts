@@ -99,18 +99,73 @@ function paint(el: HTMLElement, row: Row, strings: Strings): void {
       el.textContent = row.text;
       el.classList.toggle("streaming", row.streaming);
       return;
-    case "reasoning":
-      el.textContent = row.text;
+    case "reasoning": {
+      // A reasoning block is the model THINKING, not the model answering, and
+      // the difference reached the screen by styling alone: app.css gives
+      // `.row-reasoning` a left rule, a softer colour and a smaller font, and
+      // nothing else anywhere said which it was. `accessibleName` returns null
+      // for this kind (correctly -- rule 3: a label on prose replaces the prose),
+      // so a screen-reader user arrowing through a transcript heard the model's
+      // private working and its actual answer in one undifferentiated run.
+      //
+      // That is the same "conveyed exclusively by hue" defect a11y/names.ts was
+      // written against, and the user row already has the remedy: a
+      // visually-hidden word INSIDE the row, ahead of the text, which is
+      // content and therefore additive rather than replacing. `reasoningLabel`
+      // was written for exactly this and had no caller anywhere in the app.
+      el.textContent = "";
+      const label = el.ownerDocument.createElement("span");
+      label.className = "sr-only";
+      label.textContent = strings.reasoningLabel;
+      const said = el.ownerDocument.createElement("span");
+      said.textContent = row.text;
+      el.append(label, said);
       return;
+    }
     case "notice":
       el.textContent = row.text;
       el.dataset["tone"] = row.tone;
       return;
-    case "error":
-      el.textContent = row.message;
+    case "error": {
       el.dataset["tone"] = row.tone;
       el.dataset["recovery"] = row.recovery;
+      el.textContent = "";
+      // The kind IN WORDS, in front of the provider's prose -- the same repair
+      // the tool row below got, and for the same reason.
+      //
+      // The `aria-label` set at the top of this function has carried
+      // `errorRowName` (title + message) since a11y/names.ts was wired up, and
+      // the docstring of this file already claims the defect fixed: "an error
+      // row read as bare provider prose with no `errorTitle` in front of it".
+      // Only the ANNOUNCEMENT was repaired. What a sighted user saw was still
+      // `row.message` alone, so `strings.errorTitle` had no renderer anywhere
+      // in the application and the two audiences were told different things
+      // about the same failure.
+      //
+      // Measured on an Android 35 emulator: the first message of a fresh
+      // install with no key rendered, in full and as the entire content of the
+      // row, "The OPENAI_API_KEY environment variable is missing or empty;
+      // either provide it, or instantiate the OpenAI client with an apiKey
+      // option, like new OpenAI({ apiKey: 'My API Key' })." That is SDK prose
+      // addressed to a developer -- it names an environment variable and a
+      // JavaScript constructor, neither of which a phone has -- shown to a user
+      // who did nothing wrong. `ui/src/transcript/empty-state.ts` quotes that
+      // same sentence as the thing a user should never have had to read.
+      //
+      // The title is chosen by KIND and never by parsing the message, which is
+      // the rule strings.ts states at `errorRowName`: the prose is whatever a
+      // provider decided to say and may say anything at all, so the kind is the
+      // only dependable part. The message is kept, in full and unparsed,
+      // underneath -- it is what a support engineer searches for.
+      const title = el.ownerDocument.createElement("span");
+      title.className = "error-title";
+      title.textContent = strings.errorTitle(row.errorKind);
+      const message = el.ownerDocument.createElement("span");
+      message.className = "error-message";
+      message.textContent = row.message;
+      el.append(title, message);
       return;
+    }
     case "dropped":
       // Was a hand-rolled `event`/`events`, which is wrong in most languages --
       // Polish has three plural categories, Welsh six, Arabic a `zero`. The

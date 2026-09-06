@@ -1,4 +1,5 @@
-import { Agent as SimpleAgent, AgentTeam as SimpleAgentTeam, SimpleAgentConfig } from './simple';
+import { Agent as SimpleAgent, SimpleAgentConfig } from './simple';
+import { AgentTeam as SimpleAgentTeam } from './team';
 import { Agent as TaskAgent, TaskAgentTeam, TaskAgentConfig } from './types';
 import { Task } from './types';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';

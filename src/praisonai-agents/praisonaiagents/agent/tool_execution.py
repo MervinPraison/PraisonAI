@@ -1682,6 +1682,50 @@ class ToolExecutionMixin:
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
+                # Consult the registry's standing grants before prompting.
+                # This branch used to go straight to the backend, skipping
+                # is_env_auto_approve / is_yaml_approved / is_auto_approved /
+                # is_already_approved entirely -- and it is the DEFAULT branch,
+                # since a bare Agent() on a TTY installs a ConsoleBackend. So
+                # PRAISONAI_AUTO_APPROVE=true still prompted (measured: 3 of 3
+                # identical calls), a YAML approval was ignored, and an
+                # "approve for this session" grant was never remembered.
+                agent_name_for_registry = getattr(self, 'name', None)
+                scope_id = getattr(self, '_approval_scope_id', None) or agent_name_for_registry
+                try:
+                    standing_grant = (
+                        approval_registry.is_env_auto_approve()
+                        or approval_registry.is_yaml_approved(tool_name)
+                        or approval_registry.is_auto_approved(tool_name, scope_id)
+                        or approval_registry.is_already_approved(
+                            tool_name, tool_args, scope_id
+                        )
+                        # A "[s] this session" grant is stored by reusable
+                        # permission target, not by exact arguments, so a later
+                        # call with different args (same target, e.g. the same
+                        # ``bash:git status *`` prefix) is covered too. Without
+                        # this check the attached backend re-prompts for a call
+                        # the user already blessed for the session -- the exact
+                        # re-prompting this PR set out to stop.
+                        or approval_registry._is_session_scoped(
+                            agent_name_for_registry, tool_name, tool_args, scope_id
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - a grant lookup must never
+                    # block the call; fall through and ask, which is the safe
+                    # direction to fail in.
+                    standing_grant = False
+                if standing_grant:
+                    decision = ApprovalDecision(
+                        approved=True,
+                        reason="Approved by a standing registry grant",
+                    )
+                    if is_async:
+                        async def _granted():
+                            return decision
+                        return _granted()
+                    return decision
+
                 # Attach a rendered unified diff for file-mutating tools so the
                 # reviewer approves the actual change rather than a truncated
                 # argument dump. Non-edit tools get no diff (``None``) and keep
@@ -1699,19 +1743,46 @@ class ToolExecutionMixin:
                     context={"diff": diff_preview} if diff_preview else {},
                 )
                 
+                # Record a backend decision back into the registry so a
+                # "[s] this session" (or "always") grant the user gives at the
+                # prompt is remembered -- exactly as the no-backend
+                # registry.approve_* path does via _persist_scoped_decision.
+                # Without this, the fast-path _is_session_scoped check above can
+                # never match, and the user is re-prompted on every matching
+                # call for the rest of the run. Best-effort: a bookkeeping error
+                # must never change or block the returned decision.
+                def _remember(decision):
+                    try:
+                        if getattr(decision, "approved", False):
+                            approval_registry.mark_approved(
+                                tool_name, tool_args, agent_name_for_registry, scope_id
+                            )
+                        approval_registry._persist_scoped_decision(
+                            agent_name_for_registry, tool_name, tool_args,
+                            decision, scope_id,
+                        )
+                    except Exception:  # noqa: BLE001 - bookkeeping only
+                        pass
+                    return decision
+
                 if is_async:
                     # Async path - return the coroutine for caller to await
                     cfg_timeout = getattr(self, '_approval_timeout', 0)
-                    if cfg_timeout is None:
-                        return backend.request_approval(request)
-                    elif cfg_timeout > 0:
-                        import asyncio
-                        return asyncio.wait_for(
-                            backend.request_approval(request),
-                            timeout=cfg_timeout,
-                        )
-                    else:
-                        return backend.request_approval(request)
+
+                    async def _ask_backend_async():
+                        if cfg_timeout is None:
+                            decision = await backend.request_approval(request)
+                        elif cfg_timeout > 0:
+                            import asyncio
+                            decision = await asyncio.wait_for(
+                                backend.request_approval(request),
+                                timeout=cfg_timeout,
+                            )
+                        else:
+                            decision = await backend.request_approval(request)
+                        return _remember(decision)
+
+                    return _ask_backend_async()
                 else:
                     # Sync path - handle timeout and sync/async backend compatibility
                     cfg_timeout = getattr(self, '_approval_timeout', 0)
@@ -1727,7 +1798,7 @@ class ToolExecutionMixin:
                     
                     try:
                         if hasattr(backend, 'request_approval_sync'):
-                            return backend.request_approval_sync(request)
+                            return _remember(backend.request_approval_sync(request))
                         else:
                             # Use the shared utility to avoid code duplication and handle timeout correctly
                             from ..approval.utils import run_coroutine_safely
@@ -1741,10 +1812,10 @@ class ToolExecutionMixin:
                                 # cfg_timeout == 0: use backend default or fallback
                                 effective_timeout = getattr(backend, '_timeout', 60)
                             
-                            return run_coroutine_safely(
+                            return _remember(run_coroutine_safely(
                                 backend.request_approval(request),
                                 timeout=effective_timeout
-                            )
+                            ))
                     finally:
                         if orig_timeout is not None and hasattr(backend, '_timeout'):
                             backend._timeout = orig_timeout

@@ -9,7 +9,11 @@
  */
 
 // Core exports - the main API surface
-export { Agent, AgentTeam, PraisonAIAgents, Agents } from './simple';
+export { Agent } from './simple';
+// From './team', not './simple'. Re-exporting them through ./simple put the
+// whole team subsystem on the webview graph that takes `Agent` from there;
+// see the note at the bottom of ./simple.
+export { AgentTeam, PraisonAIAgents, Agents } from './team';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './simple';
 // Python-parity surfaces (see src/praisonai-ts/SIGNATURE_PARITY.md)
 export type {

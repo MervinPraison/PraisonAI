@@ -475,6 +475,18 @@ wheels = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/57/2e2a65aee2a70483cb28e2b7e15a072d00a523207593b44400d4717bb100/croniter-6.2.4.tar.gz", hash = "sha256:fc124f751b1b04805c2a04b061898b436b45ab2320b045e1e052ea895de65189", size = 166267, upload-time = "2026-07-10T09:52:59.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/ba/d678e5bd329646ca51d3c92addbc77804e86d21f4b6b6a027218e6abb010/croniter-6.2.4-py3-none-any.whl", hash = "sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d", size = 46677, upload-time = "2026-07-10T09:52:58.425Z" },
+]
+
+[[package]]
 name = "cryptography"
 version = "49.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2594,7 +2606,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-train"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -2684,10 +2696,11 @@ provides-extras = ["llm", "vision", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.3"
+version = "1.7.4"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "croniter" },
     { name = "openai" },
     { name = "posthog" },
     { name = "pydantic" },
@@ -2706,6 +2719,7 @@ requires-dist = [
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = ">=1.0.0" },
     { name = "chromadb", marker = "extra == 'memory'", specifier = ">=1.0.0" },
     { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.4.0" },
+    { name = "croniter", specifier = ">=6.0" },
     { name = "dakera", marker = "extra == 'dakera'", specifier = ">=0.12.8" },
     { name = "ddgs", marker = "extra == 'search'", specifier = ">=9.0.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
@@ -4341,7 +4355,6 @@ dependencies = [
     { name = "wheel" },
     { name = "xformers", marker = "(platform_machine == 'AMD64' and 'linux' in sys_platform) or (platform_machine == 'x86_64' and 'linux' in sys_platform) or (platform_machine == 'AMD64' and sys_platform == 'win32') or (platform_machine == 'x86_64' and sys_platform == 'win32')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/51/ac/d4f6cba63cf9d57558d0724b95307dfdfc359b9a8a95f559b1e84d279cd8/unsloth-2026.7.5.tar.gz", hash = "sha256:fa7906a372a22c9e895dfc522688ab6a04c2dbc5a12d198a96f93d51af8058bd", size = 80799084, upload-time = "2026-07-23T10:14:19.341Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/0e/cd405e465cd9792ea29bcae8f75d197cf5cec5349b161b3f0070563547b3/unsloth-2026.7.5-py3-none-any.whl", hash = "sha256:8d553ccb9af4863890533812a584dc6dfe8ab6b81b7d59788358b6c61ffc8a8f", size = 76139826, upload-time = "2026-07-23T10:14:15.133Z" },
 ]

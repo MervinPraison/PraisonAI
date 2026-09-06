@@ -7,18 +7,23 @@
 For each curated surface in `surface.yaml`, every Python parameter (positional and
 keyword-only; `*args`/`**kwargs` excluded) is looked up on the TypeScript side
 as an interface member or method parameter. Matching order: **exact** name,
-**camelCase** (`snake_to_camel`), **alias** (`rules.yaml`), **flattened** (a nested
-Python config exposed as several TS fields), else **missing**. For matched pairs the
+**camelCase** (`snake_to_camel`), **flattened** (a nested Python config exposed as
+several TS fields), **alias** (`rules.yaml`), else **missing**. For matched pairs the
 checker compares required-ness and the effective default (TS constructor
-fallbacks such as `config.x ?? v` count as defaults). Type classes are compared
-as a warning only. Every gap must be waived in `waivers.yaml` or the check fails.
+fallbacks such as `config.x ?? v` count as defaults); a flattened parameter is
+checked against every TS field it names, and against the Python nested-config
+field defaults when `rules.yaml` names them. A TS default the extractor cannot
+evaluate reads as `unknown` and needs a waiver rather than passing as `undefined`.
+A **required** TS-only member fails the check; an optional one is informational.
+Type classes are compared as a warning only. Every gap must be waived in
+`waivers.yaml` or the check fails.
 This complements `PARITY.md`, which only tracks whether an export exists.
 
 ## Summary
 
 | Surface | Params | Exact | camelCase | Alias | Flattened | Missing | Mismatches | Waived | TS-only / TS total |
 |---|---|---|---|---|---|---|---|---|---|
-| `Agent.__init__` | 42 | 29 | 8 | 3 | 2 | 0 | 6 | 6 | 14 / 59 |
+| `Agent.__init__` | 42 | 29 | 8 | 2 | 3 | 0 | 8 | 8 | 13 / 59 |
 | `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 3 / 26 |
 | `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 1 / 62 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 20 / 21 |
@@ -28,22 +33,22 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 1 / 26 |
 | `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 5 / 12 |
 | `tool()` | 11 | 5 | 5 | 1 | 0 | 0 | 3 | 3 | 3 / 14 |
-| `GoalEngineer.__init__` | 6 | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 2 / 8 |
+| `GoalEngineer.__init__` | 6 | 4 | 2 | 0 | 0 | 0 | 5 | 5 | 2 / 8 |
 | `DoomLoopDetector.__init__` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 15 / 16 |
 | `EscalationPipeline.__init__` | 5 | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 4 / 9 |
 | `ToolsetRegistry.register_toolset` | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 5 |
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 222 | 123 | 88 | 9 | 2 | 0 | 21 | 21 | 85 / 312 |
+| **Total (17 surfaces)** | 222 | 123 | 88 | 8 | 3 | 0 | 28 | 28 | 84 / 312 |
 
 ## Surfaces
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:609`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:618`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:196` (ctor `src/praisonai-ts/src/agent/simple.ts:900`)
-- Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 6 mismatches; 6 waived; 14 TS-only of 59
+- Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 13 TS-only of 59
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -51,7 +56,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `role` | positional | null | `Optional[str]` | exact | `role` | `config.goal \|\| config.backstory` | `string` | default mismatch (waived) |
 | `goal` | positional | null | `Optional[str]` | exact | `goal` | `config.instructions` | `string` | default mismatch (waived) |
 | `backstory` | positional | null | `Optional[str]` | exact | `backstory` | `config.instructions` | `string` | default mismatch (waived) |
-| `instructions` | positional | null | `Optional[str]` | exact | `instructions` | undefined | `string` | ok |
+| `instructions` | positional | null | `Optional[str]` | exact | `instructions` | unknown | `string` | default mismatch (waived) |
 | `llm` | positional | null | `Optional[Union[str, Any]]` | exact | `llm` | undefined | `string \| LLMConfig` | ok |
 | `model` | positional | null | `Optional[Union[str, Any]]` | exact | `model` | `llmName \|\| authModel \|\| resolveDefaultModel()` | `string` | default mismatch (waived) |
 | `base_url` | positional | null | `Optional[str]` | alias | `baseURL` | undefined | `string` | ok |
@@ -69,10 +74,10 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `web` | keyword | null | `Optional[Union[bool, str, 'WebConfig']]` | exact | `web` | undefined | `boolean \| string \| AgentWebConfig` | ok |
 | `context` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]` | exact | `context` | undefined | `boolean \| string \| ContextManagerConfig \| ContextManager` | ok |
 | `autonomy` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]` | exact | `autonomy` | undefined | `boolean \| string \| Record<string, unknown>` | ok |
-| `output` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']]` | flattened | `verbose, markdown, stream` |  |  | ok |
-| `execution` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']]` | flattened | `maxIterations, maxToolCallsPerTurn` |  |  | ok |
+| `output` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']]` | flattened | `verbose, markdown, stream` | verbose=`getEnv('PRAISON_VERBOSE') !== 'false'`, markdown=true, stream=true |  | default mismatch (waived) |
+| `execution` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']]` | flattened | `maxIterations, maxToolCallsPerTurn` | maxIterations=20, maxToolCallsPerTurn=10 |  | ok |
 | `templates` | keyword | null | `Optional[Union[Dict[str, Any], 'TemplateConfig']]` | exact | `templates` | undefined | `Record<string, unknown>` | ok |
-| `caching` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]` | alias | `cache` | false | `boolean` | default mismatch (waived) |
+| `caching` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]` | flattened | `cache, cacheTTL` | cache=false, cacheTTL=3600 |  | default mismatch (waived) |
 | `hooks` | keyword | null | `Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]` | exact | `hooks` | undefined | `AgentHooksInput` | ok (type differs) |
 | `skills` | keyword | null | `Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]` | exact | `skills` | undefined | `string \| string[] \| SkillDiscoveryOptions \| SkillManager` | ok |
 | `self_improve` | keyword | false | `Optional[Union[bool, str, 'SkillReviewProtocol']]` | camelCase | `selfImprove` | false | `boolean \| string \| Record<string, unknown>` | ok |
@@ -90,12 +95,12 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `retry` | keyword | null | `Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]` | exact | `retry` | undefined | `boolean \| AgentRetryConfig` | ok |
 | `reasoning_effort` | keyword | null | `Optional[str]` | camelCase | `reasoningEffort` | undefined | `'off' \| 'minimal' \| 'low' \| 'medium' \| 'high' \| string` | ok |
 
-TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `cacheTTL`?, `telemetry`?
+TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `telemetry`?
 
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:74` (ctor `src/praisonai-ts/src/agent/team.ts:338`)
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:78` (ctor `src/praisonai-ts/src/agent/team.ts:342`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
 
@@ -241,7 +246,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:766`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:770`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -272,8 +277,8 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:413`
-- TypeScript: `src/praisonai-ts/src/llm/index.ts:286` (ctor `src/praisonai-ts/src/llm/index.ts:466`)
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:421`
+- TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -350,16 +355,16 @@ TS-only members: `config`, `parameters`?, `category`?
 
 - Python: `src/praisonai-agents/praisonaiagents/goal/engineer.py:58`
 - TypeScript: `src/praisonai-ts/src/goal/engineer.ts:42` (ctor `src/praisonai-ts/src/goal/engineer.ts:74`)
-- Counts: 6 python params: 4 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 8
+- Counts: 6 python params: 4 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 5 mismatches; 5 waived; 2 TS-only of 8
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
-| `model` | positional | null | `Optional[str]` | exact | `model` | undefined | `string \| null` | ok |
-| `max_criteria` | positional | null | `Optional[int]` | camelCase | `maxCriteria` | undefined | `number \| null` | ok |
-| `threshold` | positional | null | `Optional[float]` | exact | `threshold` | undefined | `number \| null` | ok |
-| `auto_decompose` | positional | null | `Optional[bool]` | camelCase | `autoDecompose` | undefined | `boolean \| null` | ok |
+| `model` | positional | null | `Optional[str]` | exact | `model` | unknown | `string \| null` | default mismatch (waived) |
+| `max_criteria` | positional | null | `Optional[int]` | camelCase | `maxCriteria` | unknown | `number \| null` | default mismatch (waived) |
+| `threshold` | positional | null | `Optional[float]` | exact | `threshold` | unknown | `number \| null` | default mismatch (waived) |
+| `auto_decompose` | positional | null | `Optional[bool]` | camelCase | `autoDecompose` | unknown | `boolean \| null` | default mismatch (waived) |
 | `config` | positional | null | `Optional[GoalConfig]` | exact | `config` | {} | `GoalConfig \| GoalConfigOptions \| null` | ok |
-| `verbose` | positional | false | `bool` | exact | `verbose` | undefined | `boolean` | ok |
+| `verbose` | positional | false | `bool` | exact | `verbose` | unknown | `boolean` | default mismatch (waived) |
 
 TS-only members: `options`?, `llm`?
 
@@ -456,10 +461,17 @@ TS-only members: none
 | `Agent.__init__.backstory` | Same value, resolved at a different moment. TS stores `config.backstory \|\| config.instructions` (or "I am an AI assistant") in the constructor; Python's `self.backstory = backstory or instructions` (agent.py) produces the identical string in the body. Verified equal for the instruction-only, role-only and bare forms. | praisonai-ts |  |  |
 | `Agent.__init__.caching` | Both SDKs default to NO caching, by different routes. Python's `caching=None` resolves to `CachingConfig(enabled=True)` and assigns `self.cache = True`, but `Agent.cache` is written and never read anywhere in praisonaiagents, so the default caches nothing; TS defaults `cache` to false, which its response cache honours. Aligning the literal would turn caching ON in TS and diverge from Python's observable behaviour, so the difference is deliberate. Pinned by tests/unit/agent/parity-waiver-gaps.test.ts ("caching default"). | praisonai-ts |  |  |
 | `Agent.__init__.goal` | Same value, resolved at a different moment. TS stores `config.goal \|\| config.instructions` (or "Help the user with their tasks") in the constructor; Python's `self.goal = goal or instructions` (agent.py) produces the identical string in the body. | praisonai-ts |  |  |
+| `Agent.__init__.instructions` | TypeScript computes it across three branches -- the given value, else role/goal/backstory joined, else a fallback sentence -- so the extractor reports no single default rather than guessing. Python's None resolves the same way in its body. | praisonai-ts |  |  |
 | `Agent.__init__.model` | Same resolution, run eagerly. TS now calls `resolveDefaultModel()` (src/llm/default-model.ts), a byte-for-byte port of Python's `Agent._PROVIDER_DEFAULT_MODELS` / `_resolve_default_model`, so the same environment yields the same model on both sides. What still differs is only the moment: TS resolves in the constructor, Python inside the body, and TS additionally honours `PRAISONAI_MODEL` (a TypeScript-only alias). | praisonai-ts |  |  |
 | `Agent.__init__.name` | TS generates `Agent_<random>`; Python leaves `name` None for an instruction-only agent and uses "Agent" otherwise. Neither is a stable contract (every unnamed Python agent collides on "Agent", and `Handoff` on a None-named Python agent raises AttributeError), and TS exposes no name-keyed lookup like Python's `AgentTeam.get_agent_details`. The one place the random name used to reach the model -- the handoff tool name -- is now sanitised by `defaultHandoffToolName`. | praisonai-ts |  |  |
+| `Agent.__init__.output` | Genuine divergence, newly visible: Python's output=None resolves the silent preset (verbose, markdown and stream all false) while TypeScript defaults markdown and stream to true and verbose to PRAISON_VERBOSE. Aligning them changes default behaviour for every existing caller, so it needs a product decision, not a quiet edit. Flattened rows were never compared until the comparator was fixed, which is why this sat unseen. | praisonai-ts |  |  |
 | `Agent.__init__.role` | Same value, resolved at a different moment. TS now stores `config.role \|\| 'Assistant'` in the constructor, matching Python's `self.role = role or "Assistant"`, so `agent.role` reads back the same string on both sides. The system-prompt TEXT built from role/goal/ backstory still differs between the two SDKs -- that is a separate, untracked gap, not covered by this waiver. | praisonai-ts |  |  |
 | `AgentTeam.__init__.process` | TS treats an undefined process as sequential, the Python default. NOTE (verified, out of scope for this key): the accepted DOMAIN differs -- TS implements `process: "parallel"` with Promise.all, which Python rejects with a ValueError, and TS validates nothing, so a typo runs sequentially instead of raising. | praisonai-ts |  |  |
+| `GoalEngineer.__init__.auto_decompose` | The constructor only overrides `autoDecompose` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading. | praisonai-ts |  |  |
+| `GoalEngineer.__init__.max_criteria` | The constructor only overrides `maxCriteria` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading. | praisonai-ts |  |  |
+| `GoalEngineer.__init__.model` | A real divergence, of the same shape already waived for Agent.__init__.model: TypeScript calls resolveDefaultModel() eagerly while Python leaves model None and resolves it later. The other four GoalEngineer options genuinely agree -- maxCriteria 5, threshold 8.0, autoDecompose true, verbose false on both sides -- they are only 'unknown' because the constructor forwards non-null options into GoalConfig, which the extractor rightly will not constant-fold across files. | praisonai-ts |  |  |
+| `GoalEngineer.__init__.threshold` | The constructor only overrides `threshold` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading. | praisonai-ts |  |  |
+| `GoalEngineer.__init__.verbose` | The constructor only overrides `verbose` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading. | praisonai-ts |  |  |
 | `Handoff.__init__.tool_description_override` | Same derived string, built at a different moment. `defaultHandoffToolDescription` now produces Python's `Transfer task to <name> (<role>) - <goal>` exactly (it previously said "Transfer conversation to <name>", which the model saw). Only the moment of derivation differs. | praisonai-ts |  |  |
 | `Handoff.__init__.tool_name_override` | Same derived string, built at a different moment. `defaultHandoffToolName` now produces Python's `transfer_to_<lowercased, spaces-to-underscores name>` exactly (it previously said `handoff_to_<raw name>`, which could contain a space and be rejected by the provider). Only the moment of derivation differs. | praisonai-ts |  |  |
 | `PraisonAIError.__init__.run_id` | Both sides mint a UUID at construction -- Python's `self.run_id = run_id or str(uuid.uuid4())` (errors.py) is NOT lazy. Only the declared default differs. Edge case: `runId: ''` survives TS's `??` but is replaced by Python's `or`. | praisonai-ts |  |  |

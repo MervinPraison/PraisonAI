@@ -1,4 +1,4 @@
-import { Agent, PraisonAIAgents } from '../../../src/agent/simple';
+import { Agent, PraisonAIAgents } from '../../../src/agent';
 
 async function getWeather(location: string) {
   console.log(`Getting weather for ${location}...`);

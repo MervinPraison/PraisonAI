@@ -3265,10 +3265,14 @@ test("a setting's help and inactive note are ASSOCIATED with the control, not ju
   const describedBy = (address?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
   const help = dom.find((n) => n.className === "setting-help" && n.id === "setting-help-baseUrl");
   const inactive = dom.find((n) => n.dataset["settingInactive"] === "baseUrl");
-  assert.ok(help !== undefined && help.id !== "", "the help note needs a stable id to be pointed at");
-  assert.ok(describedBy.includes(help!.id), "the address must describe itself with its help");
+  // `null`, not `undefined`: `dom.find` returns `FakeNode | null`, so the
+  // original `help !== undefined` was true for a help note that was NOT found
+  // and the assertion only failed one line later, by dereferencing null.
+  assert.ok(help !== null && help.id !== "", "the help note needs a stable id to be pointed at");
+  assert.ok(inactive !== null, "the inactive sentence must exist to be pointed at");
+  assert.ok(describedBy.includes(help.id), "the address must describe itself with its help");
   assert.ok(
-    describedBy.includes(inactive!.id),
+    describedBy.includes(inactive.id),
     "and, while it is off, with the sentence that turns it on",
   );
 

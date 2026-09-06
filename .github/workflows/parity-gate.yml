@@ -23,10 +23,17 @@ on:
       - 'src/praisonai-rust/praisonai/src/**/*.rs'
       - 'src/praisonai/praisonai/_dev/parity/**'
       - 'src/praisonai/praisonai/cli/features/**'
+      # The generator the `names` job runs. Editing it changed what the gate
+      # measured without the gate running.
+      - 'src/praisonai/scripts/**'
       - 'src/praisonai-ts/PARITY.md'
       - 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json'
       - 'src/praisonai-ts/SIGNATURE_PARITY.md'
       - 'src/praisonai-ts/signature-parity.json'
+      # The behaviour baseline itself. These two carry the ratchet floor, so a
+      # pull request that edited only them raised the floor with no job running.
+      - 'src/praisonai-ts/BEHAVIOUR_PARITY.md'
+      - 'src/praisonai-ts/behaviour-parity.json'
       - 'src/praisonai-rust/PARITY.md'
       - 'src/praisonai-rust/FEATURE_PARITY_TRACKER.json'
       - '.github/workflows/parity-gate.yml'

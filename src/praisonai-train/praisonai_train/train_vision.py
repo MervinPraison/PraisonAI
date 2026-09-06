@@ -74,6 +74,19 @@ class TrainVisionModel:
         print("DEBUG: Python Version:", sys.version)
         print("DEBUG: Python Path:", sys.executable)
 
+    @staticmethod
+    def _flag(value, default=False):
+        """Coerce a config flag to bool, accepting YAML booleans and strings.
+
+        Mirrors the LLM trainer's helper so `train: true` and `train: "true"`
+        both work; the old `.lower()` crashed on a real boolean.
+        """
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("true", "1", "yes", "on")
+
     def check_gpu(self):
         gpu_stats = torch.cuda.get_device_properties(0)
         print(f"DEBUG: GPU = {gpu_stats.name}. Max memory = {round(gpu_stats.total_memory/(1024**3),3)} GB.")
@@ -117,12 +130,17 @@ class TrainVisionModel:
             finetune_language_layers=self.config.get("finetune_language_layers", True),
             finetune_attention_modules=self.config.get("finetune_attention_modules", True),
             finetune_mlp_modules=self.config.get("finetune_mlp_modules", True),
-            r=16,
-            lora_alpha=16,
-            lora_dropout=0,
-            bias="none",
-            random_state=3407,
-            use_rslora=False,
+            # These were literals, so lora_r / lora_alpha / lora_dropout /
+            # random_state / use_rslora were accepted in the config, validated,
+            # and then ignored -- a vision run trained at r=16 whatever the
+            # user asked for. The defaults are the previous literals, so an
+            # existing config produces an identical run.
+            r=int(self.config.get("lora_r", 16)),
+            lora_alpha=int(self.config.get("lora_alpha", 16)),
+            lora_dropout=float(self.config.get("lora_dropout", 0)),
+            bias=self.config.get("lora_bias", "none"),
+            random_state=int(self.config.get("random_state", 3407)),
+            use_rslora=self._flag(self.config.get("use_rslora")),
             loftq_config=None
         )
         print("DEBUG: Vision LoRA adapters added.")
@@ -302,14 +320,21 @@ PARAMETER top_p 0.9
         self.print_system_info()
         self.check_gpu()
         self.check_ram()
-        if self.config.get("train", "true").lower() == "true":
+        if self._flag(self.config.get("train"), default=True):
             self.prepare_model()
             self.train_model()
-        if self.config.get("huggingface_save", "true").lower() == "true":
+        # Publishing defaults OFF and is skipped unless a target is set, exactly
+        # as the LLM trainer already does (train/llm/trainer.py). This path
+        # defaulted every flag to the string "true", so a config that merely
+        # omitted `huggingface_save` -- which is what `praisonai-train llm`
+        # writes, since it records only the keys the user supplied -- pushed the
+        # fine-tuned model to the Hub, or died on a missing `hf_model_name`
+        # after the training had already run.
+        if self._flag(self.config.get("huggingface_save")) and self.config.get("hf_model_name"):
             self.save_model_merged()
-        if self.config.get("huggingface_save_gguf", "true").lower() == "true":
+        if self._flag(self.config.get("huggingface_save_gguf")) and self.config.get("hf_model_name"):
             self.push_model_gguf()
-        if self.config.get("ollama_save", "true").lower() == "true":
+        if self._flag(self.config.get("ollama_save")) and self.config.get("ollama_model"):
             self.create_and_push_ollama_model()
 
 

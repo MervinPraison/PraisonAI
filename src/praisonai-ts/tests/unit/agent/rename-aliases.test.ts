@@ -9,25 +9,25 @@
 describe('AgentTeam Rename', () => {
   describe('Primary Class', () => {
     it('should export AgentTeam as primary class', async () => {
-      const { AgentTeam } = await import('../../../src/agent/simple');
+      const { AgentTeam } = await import('../../../src/agent');
       expect(AgentTeam).toBeDefined();
       expect(typeof AgentTeam).toBe('function');
     });
 
     it('should have AgentTeam as the class name', async () => {
-      const { AgentTeam } = await import('../../../src/agent/simple');
+      const { AgentTeam } = await import('../../../src/agent');
       expect(AgentTeam.name).toBe('AgentTeam');
     });
   });
 
   describe('Silent Aliases', () => {
     it('should export PraisonAIAgents as alias for AgentTeam', async () => {
-      const { AgentTeam, PraisonAIAgents } = await import('../../../src/agent/simple');
+      const { AgentTeam, PraisonAIAgents } = await import('../../../src/agent');
       expect(PraisonAIAgents).toBe(AgentTeam);
     });
 
     it('should export Agents as alias for AgentTeam', async () => {
-      const { AgentTeam, Agents } = await import('../../../src/agent/simple');
+      const { AgentTeam, Agents } = await import('../../../src/agent');
       expect(Agents).toBe(AgentTeam);
     });
   });
@@ -35,7 +35,7 @@ describe('AgentTeam Rename', () => {
   describe('Type Exports', () => {
     it('should export AgentTeamConfig type', async () => {
       // Type-only test - if this compiles, the type exists
-      const { AgentTeam } = await import('../../../src/agent/simple');
+      const { AgentTeam } = await import('../../../src/agent');
       expect(AgentTeam).toBeDefined();
     });
   });
@@ -96,21 +96,21 @@ describe('AgentFlow Rename', () => {
 
 describe('Backward Compatibility', () => {
   it('should allow instantiation with old name PraisonAIAgents', async () => {
-    const { PraisonAIAgents, Agent } = await import('../../../src/agent/simple');
+    const { PraisonAIAgents, Agent } = await import('../../../src/agent');
     const agent = new Agent({ instructions: 'Test agent' });
     const team = new PraisonAIAgents([agent]);
     expect(team).toBeDefined();
   });
 
   it('should allow instantiation with old name Agents', async () => {
-    const { Agents, Agent } = await import('../../../src/agent/simple');
+    const { Agents, Agent } = await import('../../../src/agent');
     const agent = new Agent({ instructions: 'Test agent' });
     const team = new Agents([agent]);
     expect(team).toBeDefined();
   });
 
   it('should allow instantiation with new name AgentTeam', async () => {
-    const { AgentTeam, Agent } = await import('../../../src/agent/simple');
+    const { AgentTeam, Agent } = await import('../../../src/agent');
     const agent = new Agent({ instructions: 'Test agent' });
     const team = new AgentTeam([agent]);
     expect(team).toBeDefined();

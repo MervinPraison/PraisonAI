@@ -13,6 +13,7 @@ checked), 2 tooling failure (node/typescript missing, surface not found).
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -30,6 +31,7 @@ from .py_extract import (
     DEFAULT_PYTHON_ROOT,
     PythonSurfaceNotFound,
     extract_python_surface,
+    normalise_default,
 )
 from .schema import Param, SurfaceSignature, snake_to_camel
 
@@ -47,7 +49,11 @@ GENERATED_BY = 'praisonai._dev.parity.signatures'
 BASELINE_REASON = 'baseline 2026-09-02: not yet ported to TypeScript'
 BASELINE_OWNER = 'praisonai-ts'
 
-MATCH_ORDER = ('exact', 'camelCase', 'alias', 'flattened', 'missing')
+# Resolution order, strictest rule first. `flattened` precedes `alias` because a
+# flattening is the stricter statement of the two: `caching -> [cache, cacheTTL]`
+# checks both TS fields, while the `caching -> cache` alias checked only one. With
+# `alias` first the flattening never fired at all.
+MATCH_ORDER = ('exact', 'camelCase', 'flattened', 'alias', 'missing')
 
 EXIT_OK = 0
 EXIT_PARITY = 1
@@ -87,11 +93,47 @@ class SurfaceCatalogue:
 
 
 @dataclass
+class Flattening:
+    """
+    One ``rules.yaml`` ``flattened`` entry: a nested Python config parameter that
+    TypeScript spells out as several top-level fields.
+
+    ``python_config`` (``"<file under python_root>:<ClassName>"``) and
+    ``field_map`` (TS field -> field of that class) say which Python default each
+    TS field must agree with. Without them only required-ness is checked, because
+    the Python parameter's own default (usually ``None``) says nothing about what
+    the individual fields resolve to.
+    """
+    fields: List[str] = field(default_factory=list)
+    python_config: Optional[str] = None
+    field_map: Dict[str, Optional[str]] = field(default_factory=dict)
+
+    @classmethod
+    def from_yaml(cls, value: Any) -> 'Flattening':
+        if isinstance(value, list):
+            return cls(fields=[str(f) for f in value])
+        if not isinstance(value, dict):
+            raise ToolingError(f'rules.yaml: a flattened entry must be a list or a mapping, got {value!r}')
+        mapping = value.get('fields') or {}
+        if isinstance(mapping, list):
+            return cls(fields=[str(f) for f in mapping], python_config=value.get('python_config'))
+        return cls(
+            fields=[str(f) for f in mapping],
+            python_config=value.get('python_config'),
+            field_map={str(k): (str(v) if v is not None else None) for k, v in mapping.items()},
+        )
+
+
+@dataclass
 class Rules:
     """Contents of ``rules.yaml``."""
     case: str = 'snake_to_camel'
     aliases: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    flattened: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
+    flattened: Dict[str, Dict[str, Flattening]] = field(default_factory=dict)
+    #: ``"<file>:<Class>"`` -> ``{field name: Param}``, resolved from the Python
+    #: source by :func:`load_nested_config_defaults`. Empty when the comparator
+    #: runs on pre-extracted fixtures with no repository to read.
+    nested_defaults: Dict[str, Dict[str, Param]] = field(default_factory=dict)
     default_equivalences: List[Tuple[Any, Any]] = field(default_factory=list)
     #: ``(python expression text, typescript token)`` pairs. Separate from
     #: ``default_equivalences`` because a Python *expression* default (a module
@@ -113,7 +155,7 @@ class Rules:
             default_expr_equivalences=expr_equivalences,
             case=data.get('case', 'snake_to_camel'),
             aliases={k: dict(v or {}) for k, v in (data.get('aliases') or {}).items()},
-            flattened={k: {p: list(f) for p, f in (v or {}).items()}
+            flattened={k: {p: Flattening.from_yaml(f) for p, f in (v or {}).items()}
                        for k, v in (data.get('flattened') or {}).items()},
             default_equivalences=equivalences,
         )
@@ -132,6 +174,21 @@ class Waiver:
     owner: str
     issue: Optional[str] = None
     expires: Optional[date] = None
+    kinds: Optional[List[str]] = None
+
+    #: A waiver is keyed by parameter, so without this it silences every KIND of
+    #: gap on that parameter. Waiving a default difference would then also hide a
+    #: parameter becoming REQUIRED in TypeScript -- a change that breaks every
+    #: caller. Found by making verbose/markdown/stream required behind the
+    #: `Agent.__init__.output` waiver and watching the gate stay green.
+    #: So required-ness is never covered implicitly: a waiver must name it.
+    EXPLICIT_ONLY = ('required',)
+
+    def covers(self, gap_kind: str) -> bool:
+        """Whether this waiver suppresses a gap of ``gap_kind``."""
+        if self.kinds is not None:
+            return gap_kind in self.kinds
+        return gap_kind not in self.EXPLICIT_ONLY
 
     @classmethod
     def from_dict(cls, key: str, data: Dict[str, Any]) -> 'Waiver':
@@ -142,12 +199,18 @@ class Waiver:
         expires = data.get('expires')
         if isinstance(expires, str):
             expires = date.fromisoformat(expires)
+        kinds = data.get('kinds')
+        if kinds is not None:
+            if not isinstance(kinds, list) or not all(isinstance(k, str) for k in kinds):
+                raise ToolingError(f'waiver "{key}": "kinds" must be a list of gap kinds')
+            kinds = [str(k) for k in kinds]
         return cls(
             key=key,
             reason=str(data['reason']),
             owner=str(data['owner']),
             issue=str(data['issue']) if data.get('issue') else None,
             expires=expires,
+            kinds=kinds,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -156,6 +219,8 @@ class Waiver:
             out['issue'] = self.issue
         if self.expires:
             out['expires'] = self.expires
+        if self.kinds is not None:
+            out['kinds'] = list(self.kinds)
         return out
 
     def expired(self, today: date) -> bool:
@@ -181,6 +246,48 @@ def load_surfaces(path: Optional[Path] = None) -> SurfaceCatalogue:
 def load_rules(path: Optional[Path] = None) -> Rules:
     path = path or DEFAULT_RULES_FILE
     return Rules.from_dict(yaml.safe_load(path.read_text(encoding='utf-8')) or {})
+
+
+def read_config_class_defaults(repo_root: Path, python_root: str, spec: str) -> Dict[str, Param]:
+    """
+    Field defaults of a Python config dataclass named ``"<file>:<ClassName>"``.
+
+    ``Agent(output=None)`` resolves to ``OutputConfig()``, so ``OutputConfig``'s
+    field defaults -- not the ``output`` parameter's ``None`` -- are what the
+    flattened TypeScript fields must agree with.
+    """
+    rel, _, class_name = spec.partition(':')
+    if not rel or not class_name:
+        raise ToolingError(f'rules.yaml: python_config must be "<file>:<ClassName>", got "{spec}"')
+    path = Path(repo_root) / python_root / rel
+    if not path.is_file():
+        raise ToolingError(f'rules.yaml: python_config file not found: {path}')
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    decl = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.ClassDef) and n.name == class_name), None)
+    if decl is None:
+        raise ToolingError(f'rules.yaml: python_config class {class_name} not found in {path}')
+    out: Dict[str, Param] = {}
+    for stmt in decl.body:
+        if not isinstance(stmt, ast.AnnAssign) or not isinstance(stmt.target, ast.Name):
+            continue
+        name = stmt.target.id
+        default, kind = normalise_default(stmt.value)
+        out[name] = Param(
+            name=name, canonical=snake_to_camel(name), kind='keyword',
+            required=stmt.value is None, default=default, default_kind=kind,
+            type_text=ast.unparse(stmt.annotation) if stmt.annotation is not None else '',
+        )
+    return out
+
+
+def load_nested_config_defaults(rules: Rules, repo_root: Path, python_root: str) -> None:
+    """Fill ``rules.nested_defaults`` for every ``python_config`` named in the rules."""
+    for surface in rules.flattened.values():
+        for flat in surface.values():
+            if flat.python_config and flat.python_config not in rules.nested_defaults:
+                rules.nested_defaults[flat.python_config] = read_config_class_defaults(
+                    repo_root, python_root, flat.python_config)
 
 
 def load_waivers(path: Optional[Path] = None) -> List[Waiver]:
@@ -223,6 +330,11 @@ class ParamRow:
     match: str                       # one of MATCH_ORDER
     ts: Optional[Param] = None       # matched TS member (None for flattened/missing)
     ts_names: List[str] = field(default_factory=list)
+    #: The TS members a `flattened` match resolved to. Populated so gap detection
+    #: can run on them: `ts` stays None for a flattening, and gating gap
+    #: detection on `ts is not None` is what let a flattened field become
+    #: REQUIRED (`new Agent({ name })` stops compiling) with a green gate.
+    ts_members: List[Param] = field(default_factory=list)
     gap: Optional[Gap] = None
     warnings: List[str] = field(default_factory=list)
     waived: Optional[Waiver] = None
@@ -241,6 +353,18 @@ class SurfaceComparison:
     typescript: SurfaceSignature
     rows: List[ParamRow] = field(default_factory=list)
     ts_only: List[Param] = field(default_factory=list)
+
+    def ts_only_required(self) -> List[Param]:
+        """
+        TS-only members the caller MUST pass. An optional one is informational.
+
+        The constructor's own options parameter (`constructor(config:
+        SimpleAgentConfig)`) is excluded: it is required, but a required options
+        OBJECT is not a parity gap -- its members are the compared surface, and
+        Python spells them out as keyword arguments.
+        """
+        carriers = set(self.typescript.extra.get('options_parameters') or [])
+        return [p for p in self.ts_only if p.required and p.name not in carriers]
 
     def counts(self) -> Dict[str, int]:
         counts = {m: 0 for m in MATCH_ORDER}
@@ -266,6 +390,13 @@ class SurfaceComparison:
         }
 
 
+#: The TypeScript extractor emits this when the constructor decides a member's
+#: fallback in a form it cannot evaluate. It is NOT the same as "no default", and
+#: must never compare equal to anything: reading it as `undefined` is how an
+#: invented default (`reasoningEffort: 'high'`, approval forced on) slipped past.
+UNKNOWN_DEFAULT_KIND = 'unknown'
+
+
 def _ts_default_token(param: Param) -> Any:
     """The comparable form of a TS default: JSON literal, expr text, or 'undefined'."""
     if param.default_kind is None:
@@ -275,6 +406,8 @@ def _ts_default_token(param: Param) -> Any:
 
 def defaults_equivalent(py: Param, ts: Param, rules: Rules) -> bool:
     """True when the Python default and the TS effective default mean the same thing."""
+    if ts.default_kind == UNKNOWN_DEFAULT_KIND:
+        return False
     ts_token = _ts_default_token(ts)
     py_value = py.default
     if py.default_kind == 'literal' and ts.default_kind == 'literal':
@@ -302,11 +435,28 @@ def _fmt_default(param: Optional[Param]) -> str:
         return ''
     if param.required:
         return '*required*'
+    if param.default_kind == UNKNOWN_DEFAULT_KIND:
+        return 'unknown'
     if param.default_kind is None:
         return 'undefined'
     if param.default_kind == 'literal':
         return json.dumps(param.default)
     return f'`{param.default}`'
+
+
+def _fmt_row_ts_default(row: ParamRow) -> str:
+    """
+    The TS-default cell for one row.
+
+    A flattened row has no single TS member, so it lists each field's default.
+    Leaving the cell blank (which it was) meant a flattened field's default
+    could change without the report changing -- and report freshness is a gate.
+    """
+    if row.ts is not None:
+        return _fmt_default(row.ts)
+    if not row.ts_members:
+        return ''
+    return ', '.join(f'{m.name}={_fmt_default(m)}' for m in row.ts_members)
 
 
 def compare_surface(py: SurfaceSignature, ts: SurfaceSignature, rules: Rules) -> SurfaceComparison:
@@ -322,20 +472,26 @@ def compare_surface(py: SurfaceSignature, ts: SurfaceSignature, rules: Rules) ->
             continue
         row = ParamRow(python=param, match='missing')
         canonical = rules.canonical(param.name)
+        flat = flattened.get(param.name)
+        # Resolution order: MATCH_ORDER. `flattened` beats `alias` -- see the
+        # comment on that constant.
         if param.name in ts_by_name:
             row.match, row.ts = 'exact', ts_by_name[param.name]
         elif canonical in ts_by_name:
             row.match, row.ts = 'camelCase', ts_by_name[canonical]
+        elif flat is not None and all(f in ts_by_name for f in flat.fields):
+            row.match = 'flattened'
+            row.ts_names = list(flat.fields)
+            row.ts_members = [ts_by_name[f] for f in flat.fields]
         elif aliases.get(param.name) in ts_by_name:
             row.match, row.ts = 'alias', ts_by_name[aliases[param.name]]
-        elif param.name in flattened and all(f in ts_by_name for f in flattened[param.name]):
-            row.match, row.ts_names = 'flattened', list(flattened[param.name])
 
         if row.ts is not None:
             matched_ts.add(row.ts.name)
             _detect_gaps(row, rules)
         elif row.match == 'flattened':
             matched_ts.update(row.ts_names)
+            _detect_flattened_gaps(row, rules, flat)
         else:
             row.gap = Gap('missing', f'is missing from TypeScript (looked for `{canonical}`)')
         rows.append(row)
@@ -358,6 +514,53 @@ def _detect_gaps(row: ParamRow, rules: Rules) -> None:
         )
     if py.type_class != 'unknown' and ts.type_class != 'unknown' and py.type_class != ts.type_class:
         row.warnings.append(f'type differs: python {py.type_class} ({py.type_text}) vs typescript {ts.type_class} ({ts.type_text})')
+
+
+def _detect_flattened_gaps(row: ParamRow, rules: Rules, flat: Flattening) -> None:
+    """
+    Check every TS member a flattening resolved to.
+
+    Before this existed a `flattened` row set `ts_names` and left `ts` None, and
+    `compare_surface` only ran gap detection `if row.ts is not None` -- so the
+    required-ness and defaults of those fields were never compared at all.
+    Making `verbose`, `markdown` and `stream` REQUIRED in `SimpleAgentConfig`
+    (which stops `new Agent({ name })` compiling for every user) left the report
+    byte-identical and every gate green.
+    """
+    py = row.python
+    nested = rules.nested_defaults.get(flat.python_config or '', {})
+    required_problems: List[str] = []
+    default_problems: List[str] = []
+    for member in row.ts_members:
+        # The Python side of this field: the nested config's field when the rule
+        # names one, else the flattened parameter itself.
+        py_field_name = flat.field_map.get(member.name, member.name) if flat.field_map else None
+        py_side = nested.get(py_field_name) if py_field_name else None
+        expected_required = py_side.required if py_side is not None else py.required
+        if expected_required != member.required:
+            side = 'required in Python but optional in TypeScript' if expected_required \
+                else 'optional in Python but required in TypeScript'
+            required_problems.append(f'`{member.name}` is {side}')
+            continue
+        if member.required:
+            continue
+        if py_side is None:
+            # A TS field with no Python counterpart (`cacheTTL`). Nothing to
+            # compare its default against; required-ness above is the whole check.
+            continue
+        if not defaults_equivalent(py_side, member, rules):
+            default_problems.append(
+                f'`{member.name}` default differs: python {py_field_name}='
+                f'{_fmt_default(py_side)} typescript={_fmt_default(member)}'
+            )
+    problems = required_problems + default_problems
+    if not problems:
+        return
+    where = f'flattened to TS [{", ".join(row.ts_names)}]'
+    row.gap = Gap(
+        'required' if required_problems else 'default',
+        f'is {where} and {"; ".join(problems)}',
+    )
 
 
 def signatures_from_json(items: Iterable[Dict[str, Any]]) -> Dict[str, SurfaceSignature]:
@@ -424,6 +627,31 @@ def evaluate(
     by_key = {w.key: w for w in waivers}
     used: set = set()
     for comparison in comparisons:
+        # A TS-only member that is REQUIRED is a parity failure: TypeScript
+        # callers must pass something Python has no way to express, so no
+        # program can be written against both SDKs. `ts_only` used to be
+        # computed and rendered and never looked at, so adding a required
+        # `tenantId` to SimpleAgentConfig failed only on report freshness --
+        # and running `--write`, exactly what the CI error tells you to do,
+        # made it green. An OPTIONAL TS-only member stays informational.
+        for member in comparison.ts_only_required():
+            key = f'{comparison.key}.{member.name}'
+            waiver = by_key.get(key)
+            detail = (f'TypeScript-only member `{member.name}` is required, so a TypeScript '
+                      f'caller must pass a value Python cannot express')
+            if waiver is None:
+                result.failures.append(
+                    f'{comparison.key}: {detail} -- make it optional, port it to Python, '
+                    f'or add a waiver "{key}"'
+                )
+                continue
+            used.add(key)
+            if waiver.expired(today):
+                result.failures.append(
+                    f'{comparison.key}: waiver for `{member.name}` expired on '
+                    f'{waiver.expires.isoformat()} but the gap remains ({detail}) '
+                    f'-- port it or extend the waiver'
+                )
         for row in comparison.rows:
             for warning in row.warnings:
                 result.warnings.append(f'{comparison.key}: `{row.python.name}` {warning}')
@@ -431,6 +659,17 @@ def evaluate(
                 continue
             key = f'{comparison.key}.{row.python.name}'
             waiver = by_key.get(key)
+            if waiver is not None and not waiver.covers(row.gap.kind):
+                # The waiver exists but does not name this kind of gap. Required-ness
+                # is never covered implicitly, so a parameter turning required in
+                # TypeScript still fails even where its default is waived.
+                used.add(key)
+                result.failures.append(
+                    f'{comparison.key}: parameter `{row.python.name}` {row.gap.detail} '
+                    f'-- the waiver "{key}" does not cover a {row.gap.kind} gap; '
+                    f'port it, or add {row.gap.kind!r} to that waiver\'s "kinds" and say why'
+                )
+                continue
             if waiver is None:
                 result.failures.append(
                     f'{comparison.key}: parameter `{row.python.name}` {row.gap.detail} '
@@ -491,7 +730,7 @@ def render_surface_markdown(comparison: SurfaceComparison) -> str:
         p = row.python
         lines.append('| ' + ' | '.join(_md_escape(x) for x in (
             f'`{p.name}`', p.kind, _fmt_default(p), f'`{p.type_text}`' if p.type_text else '',
-            row.match, f'`{row.ts_name}`' if row.ts_name else '', _fmt_default(row.ts),
+            row.match, f'`{row.ts_name}`' if row.ts_name else '', _fmt_row_ts_default(row),
             f'`{row.ts.type_text}`' if row.ts is not None and row.ts.type_text else '',
             _status(row),
         )) + ' |')
@@ -499,6 +738,10 @@ def render_surface_markdown(comparison: SurfaceComparison) -> str:
     if comparison.ts_only:
         lines.append('TS-only members: ' + ', '.join(
             f'`{p.name}`' + ('' if p.required else '?') for p in comparison.ts_only))
+        if comparison.ts_only_required():
+            lines.append('')
+            lines.append('TS-only members that are REQUIRED (a TypeScript caller must pass them): '
+                         + ', '.join(f'`{p.name}`' for p in comparison.ts_only_required()))
     else:
         lines.append('TS-only members: none')
     lines.append('')
@@ -527,11 +770,16 @@ def render_markdown(comparisons: List[SurfaceComparison], waivers: List[Waiver])
         'For each curated surface in `surface.yaml`, every Python parameter (positional and',
         'keyword-only; `*args`/`**kwargs` excluded) is looked up on the TypeScript side',
         'as an interface member or method parameter. Matching order: **exact** name,',
-        '**camelCase** (`snake_to_camel`), **alias** (`rules.yaml`), **flattened** (a nested',
-        'Python config exposed as several TS fields), else **missing**. For matched pairs the',
+        '**camelCase** (`snake_to_camel`), **flattened** (a nested Python config exposed as',
+        'several TS fields), **alias** (`rules.yaml`), else **missing**. For matched pairs the',
         'checker compares required-ness and the effective default (TS constructor',
-        'fallbacks such as `config.x ?? v` count as defaults). Type classes are compared',
-        'as a warning only. Every gap must be waived in `waivers.yaml` or the check fails.',
+        'fallbacks such as `config.x ?? v` count as defaults); a flattened parameter is',
+        'checked against every TS field it names, and against the Python nested-config',
+        "field defaults when `rules.yaml` names them. A TS default the extractor cannot",
+        'evaluate reads as `unknown` and needs a waiver rather than passing as `undefined`.',
+        'A **required** TS-only member fails the check; an optional one is informational.',
+        'Type classes are compared as a warning only. Every gap must be waived in',
+        '`waivers.yaml` or the check fails.',
         'This complements `PARITY.md`, which only tracks whether an export exists.',
         '',
         '## Summary',
@@ -578,6 +826,7 @@ def render_json(comparisons: List[SurfaceComparison], waivers: List[Waiver]) -> 
                 'match': row.match,
                 'ts_name': row.ts_name or None,
                 'ts': row.ts.to_dict() if row.ts is not None else None,
+                'ts_members': [m.to_dict() for m in row.ts_members] or None,
                 'gap': {'kind': row.gap.kind, 'detail': row.gap.detail} if row.gap else None,
                 'waived': row.waived.key if row.waived else None,
                 'warnings': list(row.warnings),
@@ -589,6 +838,7 @@ def render_json(comparisons: List[SurfaceComparison], waivers: List[Waiver]) -> 
             'counts': c.counts(),
             'params': params,
             'ts_only': [p.to_dict() for p in c.ts_only],
+            'ts_only_required': [p.name for p in c.ts_only_required()],
         }
     doc = {
         'generatedBy': GENERATED_BY,
@@ -601,6 +851,115 @@ def render_json(comparisons: List[SurfaceComparison], waivers: List[Waiver]) -> 
         ],
     }
     return json.dumps(doc, indent=2, sort_keys=True) + '\n'
+
+
+# ------------------------------------------------------------ rules self-test
+
+def validate_rules(
+    rules: Rules,
+    python: Dict[str, SurfaceSignature],
+    typescript: Dict[str, SurfaceSignature],
+) -> List[str]:
+    """
+    Problems with ``rules.yaml`` itself, checked against a real extraction.
+
+    Every entry in this file exists to make a match happen. An entry that can
+    never fire is dead weight that reads as coverage: eight of them had
+    accumulated -- aliases for Python parameters that no longer exist, aliases
+    shadowed by the exact/camelCase tiers that run first, a pure case change
+    (which the file's own header says an alias must not be), a flattening
+    shadowed by an alias, and two ``default_equivalences`` the literal branch of
+    :func:`defaults_equivalent` returns True for before the loop is reached.
+    ``test_config_files_load`` did not catch any of them because it only asserted
+    that the YAML says what the YAML says.
+
+    Returns a list of human-readable problems; empty means the rules are clean.
+    """
+    problems: List[str] = []
+
+    for py_value, ts_value in rules.default_equivalences:
+        if py_value == ts_value and type(py_value) is type(ts_value):
+            problems.append(
+                f'default_equivalences: {{python: {py_value!r}, typescript: {ts_value!r}}} is '
+                f'unreachable -- identical literals already compare equal before the loop'
+            )
+
+    def tiers_before(surface: str, py_name: str, ts_names: set) -> Optional[str]:
+        """The earlier MATCH_ORDER tier that already resolves ``py_name``, if any."""
+        if py_name in ts_names:
+            return f'the exact-name tier already matches TS `{py_name}`'
+        canonical = rules.canonical(py_name)
+        if canonical in ts_names:
+            return f'the camelCase tier already matches TS `{canonical}`'
+        return None
+
+    for surface, aliases in sorted(rules.aliases.items()):
+        if surface not in python or surface not in typescript:
+            continue
+        py_names = {p.name for p in python[surface].params}
+        ts_names = {p.name for p in typescript[surface].params if not p.variadic}
+        flattened = rules.flattened.get(surface, {})
+        for py_name, ts_name in sorted(aliases.items()):
+            where = f'aliases.{surface}.{py_name} -> {ts_name}'
+            if py_name not in py_names:
+                problems.append(f'{where}: no Python parameter named `{py_name}` on this surface')
+                continue
+            if rules.canonical(py_name) == ts_name:
+                problems.append(
+                    f'{where}: is a pure case change, which the camelCase tier already does '
+                    f'-- delete it (rules.yaml says an alias must NOT be a pure case change)'
+                )
+                continue
+            shadow = tiers_before(surface, py_name, ts_names)
+            if shadow:
+                problems.append(f'{where}: never fires -- {shadow}')
+                continue
+            if py_name in flattened and all(f in ts_names for f in flattened[py_name].fields):
+                problems.append(
+                    f'{where}: never fires -- the flattened rule for `{py_name}` resolves first'
+                )
+                continue
+            if ts_name not in ts_names:
+                problems.append(f'{where}: no TypeScript member named `{ts_name}` on this surface')
+
+    for surface, entries in sorted(rules.flattened.items()):
+        if surface not in python or surface not in typescript:
+            continue
+        py_names = {p.name for p in python[surface].params}
+        ts_names = {p.name for p in typescript[surface].params if not p.variadic}
+        for py_name, flat in sorted(entries.items()):
+            where = f'flattened.{surface}.{py_name}'
+            if py_name not in py_names:
+                problems.append(f'{where}: no Python parameter named `{py_name}` on this surface')
+                continue
+            shadow = tiers_before(surface, py_name, ts_names)
+            if shadow:
+                problems.append(f'{where}: never fires -- {shadow}')
+                continue
+            missing = [f for f in flat.fields if f not in ts_names]
+            if missing:
+                problems.append(
+                    f'{where}: TypeScript member(s) {", ".join("`" + m + "`" for m in missing)} '
+                    f'do not exist, so the rule never fires'
+                )
+                continue
+            if not flat.fields:
+                problems.append(f'{where}: lists no TypeScript fields')
+                continue
+            nested = rules.nested_defaults.get(flat.python_config or '')
+            for ts_field, py_field in sorted(flat.field_map.items()):
+                if py_field is None:
+                    continue
+                if nested is None:
+                    problems.append(
+                        f'{where}.{ts_field}: maps to Python `{py_field}` but no python_config '
+                        f'was resolved to look it up in'
+                    )
+                elif py_field not in nested:
+                    problems.append(
+                        f'{where}.{ts_field}: `{flat.python_config}` has no field `{py_field}`'
+                    )
+    return problems
 
 
 # ------------------------------------------------------------------- extraction
@@ -672,24 +1031,26 @@ def baseline_waivers(comparisons: List[SurfaceComparison], existing: List[Waiver
                      reason: str = BASELINE_REASON, owner: str = BASELINE_OWNER) -> List[Waiver]:
     """Existing waivers plus one for every currently un-waived gap (never overwrites)."""
     by_key = {w.key: w for w in existing}
-    for c in comparisons:
-        for row in c.rows:
-            if row.gap is None:
-                continue
-            key = f'{c.key}.{row.python.name}'
-            if key not in by_key:
-                by_key[key] = Waiver(key=key, reason=reason, owner=owner)
+    for key in _gap_keys(comparisons):
+        if key not in by_key:
+            by_key[key] = Waiver(key=key, reason=reason, owner=owner)
     return [by_key[k] for k in sorted(by_key)]
+
+
+def _gap_keys(comparisons: List[SurfaceComparison]) -> set:
+    """Every waiver key a current gap would need, Python-side and TS-only alike."""
+    keys = set()
+    for c in comparisons:
+        keys.update(f'{c.key}.{row.python.name}' for row in c.rows if row.gap is not None)
+        keys.update(f'{c.key}.{m.name}' for m in c.ts_only_required())
+    return keys
 
 
 # -------------------------------------------------------------------------- CLI
 
 def prune_waivers(comparisons: List[SurfaceComparison], waivers: List[Waiver]) -> List[Waiver]:
     """Return the waivers whose gap still exists, dropping stale ones."""
-    live = {
-        f'{c.key}.{row.python.name}'
-        for c in comparisons for row in c.rows if row.gap is not None
-    }
+    live = _gap_keys(comparisons)
     return [w for w in waivers if w.key in live]
 
 
@@ -747,6 +1108,15 @@ def strip_source_lines(text: str) -> str:
     return _SOURCE_LOCATION_RE.sub(lambda m: m.group('path'), text)
 
 
+def _raise_on_rules_problems(problems: List[str]) -> None:
+    """A dead or shadowed rule is a broken tool, not a parity gap: exit 2."""
+    if problems:
+        raise ToolingError(
+            'rules.yaml has {n} entr{y} that can never fire:\n  - {items}'.format(
+                n=len(problems), y='y' if len(problems) == 1 else 'ies',
+                items='\n  - '.join(problems)))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -755,14 +1125,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         rules = load_rules()
         waivers = load_waivers()
 
+        load_nested_config_defaults(rules, repo_root, catalogue.python_root)
+
         if args.diff:
             python, typescript = extract_all(repo_root, catalogue, keys=[args.diff])
+            _raise_on_rules_problems(validate_rules(rules, python, typescript))
             comparison = compare_all(python, typescript, rules, keys=[args.diff])[0]
             evaluate([comparison], [w for w in waivers if w.key.startswith(args.diff + '.')], args.today)
             print(render_surface_markdown(comparison))
             return EXIT_OK
 
         python, typescript = extract_all(repo_root, catalogue)
+        _raise_on_rules_problems(validate_rules(rules, python, typescript))
         comparisons = compare_all(python, typescript, rules, keys=[s.key for s in catalogue.surfaces])
 
         if args.baseline:

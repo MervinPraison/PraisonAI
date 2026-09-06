@@ -319,14 +319,36 @@ def probe_endpoint(base_url: str, *, expect=None, timeout: float = DEFAULT_PROBE
             raw_identity=raw.decode("utf-8", errors="replace")[:200],
             latency_ms=int((time.monotonic() - started) * 1000))
 
-    # Something answered but matched no discriminator: report it honestly.
-    if first_reply is not None and first_reply.status == 200:
-        listing = _json(fetch("GET", "/v1/models"))
+    # No discriminator matched. Before declaring the host absent, ask the one
+    # question every OpenAI-compatible server answers. Gating this on the first
+    # probe's status was wrong: that probe is Ollama's `GET /`, which a generic
+    # OpenAI-compatible server 404s -- so a healthy llama-server, LM Studio or
+    # vLLM was reported as "did not answer (refused)" while it was serving.
+    # It also makes the pinned-engine path reachable: an engine named by
+    # PRAISONAI_LOCAL_ENGINE that has no ProbeSpec (llamafile, localai,
+    # ramalama) produced an empty candidate list and could never resolve.
+    # A base the user pasted from LM Studio or vLLM already ends in /v1; adding
+    # another produced /v1/v1/models and a 404, so a healthy server looked absent.
+    models_reply = fetch("GET", "/models" if base.endswith("/v1") else "/v1/models")
+    if 200 <= models_reply.status < 300:
+        listing = _json(models_reply)
+        pinned = LocalEngine(expect) if expect else None
         return Discovery(
-            engine=LocalEngine.UNKNOWN, base_url=base,
+            engine=pinned or LocalEngine.UNKNOWN, base_url=base,
             api_style=ApiStyle.OPENAI_CHAT if isinstance(listing, dict) else ApiStyle.OPENAI_COMPLETIONS,
-            evidence=Evidence.TABLE,
+            # A pinned engine is asserted by the environment, not observed.
+            evidence=Evidence.ENV if pinned else Evidence.TABLE,
             models=parse_openai_models(listing) if isinstance(listing, dict) else (),
+            raw_identity=models_reply.body.decode("utf-8", errors="replace")[:200],
+            latency_ms=int((time.monotonic() - started) * 1000))
+
+    # Some servers expose no model listing at all. If anything answered with a
+    # 2xx we still know a server is there; only a transport failure means absent.
+    if first_reply is not None and 200 <= first_reply.status < 300:
+        return Discovery(
+            engine=LocalEngine(expect) if expect else LocalEngine.UNKNOWN,
+            base_url=base, api_style=ApiStyle.OPENAI_CHAT,
+            evidence=Evidence.ENV if expect else Evidence.TABLE,
             raw_identity=first_reply.body.decode("utf-8", errors="replace")[:200],
             latency_ms=int((time.monotonic() - started) * 1000))
     return None

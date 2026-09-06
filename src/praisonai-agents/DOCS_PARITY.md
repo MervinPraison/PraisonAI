@@ -18,16 +18,16 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 57 | 18040 |
+| ✅ Agent | 22 | 57 | 18046 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 7 | 3531 |
+| ✅ Approval | 1 | 7 | 3616 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 12 | 3747 |
-| ✅ Autonomy | 3 | 7 | 2790 |
+| ✅ Auto Generation | 5 | 12 | 3755 |
+| ✅ Autonomy | 3 | 7 | 2794 |
 | ✅ Bots | 7 | 33 | 13925 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 123 | 38138 |
+| ✅ CLI | 5 | 123 | 38199 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -44,15 +44,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 86 | 32228 |
-| ✅ Guardrails | 4 | 4 | 2288 |
+| ✅ Guardrails | 4 | 4 | 2388 |
 | ✅ Handoffs | 11 | 6 | 2674 |
 | ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 18 | 5555 |
+| ✅ Knowledge | 4 | 18 | 5558 |
 | ✅ LLM | 3 | 15 | 5859 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14436 |
-| ✅ Memory | 6 | 19 | 7548 |
+| ✅ MCP | 1 | 62 | 14489 |
+| ✅ Memory | 6 | 19 | 7588 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -63,17 +63,17 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Prompts | 2 | 9 | 2011 |
 | ✅ Providers | 1 | 57 | 8621 |
 | ✅ Query | 1 | 2 | 736 |
-| ✅ RAG | 5 | 15 | 3118 |
+| ✅ RAG | 5 | 15 | 3122 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 732 |
 | ✅ Retrieval | 2 | 5 | 1042 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3556 |
-| ✅ Security | 1 | 3 | 3529 |
+| ✅ Sandbox | 5 | 7 | 3670 |
+| ✅ Security | 1 | 3 | 3531 |
 | ✅ Sessions | 4 | 20 | 7898 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 6 | 2897 |
-| ✅ Telemetry | 1 | 2 | 648 |
+| ✅ Telemetry | 1 | 2 | 652 |
 | ✅ Templates | 1 | 8 | 1667 |
 | ✅ Tools | 12 | 145 | 44258 |
 | ✅ Tracing | 3 | 2 | 139 |

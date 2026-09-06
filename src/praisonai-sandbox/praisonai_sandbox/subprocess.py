@@ -211,6 +211,117 @@ class SubprocessSandbox:
         self._is_running = False
         logger.info("Subprocess sandbox stopped")
     
+    def _validate_code_against_policy(
+        self,
+        code: str,
+        language: str,
+        policy: SecurityPolicy,
+    ) -> Optional[str]:
+        """Return an error message when *code* violates *policy*.
+
+        blocked_imports was declared in SecurityPolicy, documented, and
+        serialised by to_dict() -- and read by nothing. Only run_command()
+        validated anything, and SandboxManager.run_code() goes through
+        execute(), so the default backend enforced no policy at all: strict()
+        still let code `import subprocess`, open a socket and read
+        /etc/passwd, reporting COMPLETED / exit 0.
+
+        Python is checked by parsing rather than substring matching, so a
+        blocked name inside a string or comment is not a false positive. Code
+        that will not parse is left to the interpreter to reject.
+
+        Import bindings are resolved so aliases cannot slip a blocked call past
+        the check: `import os as x; x.system(...)` and `from os import system;
+        system(...)` both resolve back to `os.system`. Bare names are only
+        flagged when they are read (a Load) -- `subprocess = 3` or
+        `def f(eval): ...` bind a local of the same spelling and are harmless.
+        """
+        blocked = [b for b in (getattr(policy, "blocked_imports", None) or []) if b]
+        if not blocked or language != "python":
+            return None
+
+        import ast
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+
+        # "os.system" in the list means the attribute call, not the os module.
+        modules = {b for b in blocked if "." not in b}
+        dotted = {b for b in blocked if "." in b}
+
+        # Names used in call position -- `eval(...)` -- so a bare blocked builtin
+        # is caught while a mere mention (`print(subprocess_count)`) is not.
+        called_names = {
+            n.func
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+
+        # Resolve local bindings introduced by imports back to their real dotted
+        # names, so an alias cannot spell a blocked call differently:
+        #   import os as x        -> x     resolves to os
+        #   from os import system -> system resolves to os.system
+        # aliases: local name -> real module path (for attribute-call resolution)
+        # from_binds: local name -> real dotted name (for bare-name calls)
+        aliases: Dict[str, str] = {}
+        from_binds: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.split(".")[0]
+                    aliases[bound] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    from_binds[bound] = f"{base}.{alias.name}" if base else alias.name
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if alias.name in modules or root in modules:
+                        return f"Blocked import: {alias.name}"
+            elif isinstance(node, ast.ImportFrom):
+                name = node.module or ""
+                if name in modules or name.split(".")[0] in modules:
+                    return f"Blocked import: {name}"
+                for alias in node.names:
+                    if from_binds.get(alias.asname or alias.name) in dotted:
+                        return f"Blocked import: {from_binds[alias.asname or alias.name]}"
+            elif isinstance(node, ast.Attribute):
+                target = node
+                parts = []
+                while isinstance(target, ast.Attribute):
+                    parts.append(target.attr)
+                    target = target.value
+                if isinstance(target, ast.Name):
+                    # Translate the root through any import alias so
+                    # `import os as x; x.system()` resolves to os.system.
+                    root_real = aliases.get(target.id, target.id)
+                    parts.append(root_real)
+                    full = ".".join(reversed(parts))
+                    if full in dotted:
+                        return f"Blocked call: {full}"
+            elif isinstance(node, ast.Name):
+                # Only a *read* of the name is a use; an assignment target or
+                # parameter merely rebinds the spelling and is harmless.
+                if not isinstance(node.ctx, ast.Load):
+                    continue
+                # A bare blocked name is only a threat when it is called:
+                # `eval('1+1')` matters, `print(subprocess)` (where subprocess
+                # is a local int or an unused mention) does not. Modules stay
+                # dangerous solely via `import`, already handled above.
+                if node in called_names and (node.id in modules or node.id in dotted):
+                    return f"Blocked call: {node.id}"
+                # from os import system; system() -> resolves to os.system
+                if from_binds.get(node.id) in dotted:
+                    return f"Blocked call: {from_binds[node.id]}"
+
+        return None
+
     async def execute(
         self,
         code: str,
@@ -225,7 +336,22 @@ class SubprocessSandbox:
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
-        
+
+        # Enforce the policy before the code is written or spawned. run_command()
+        # has always validated; execute() -- the default backend, and the path
+        # SandboxManager.run_code() takes -- validated nothing.
+        policy = self.config.security_policy
+        policy_error = self._validate_code_against_policy(code, language, policy)
+        if policy_error:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                stdout="",
+                stderr=f"Security policy violation: {policy_error}",
+                exit_code=1,
+                error=f"Security policy violation: {policy_error}",
+            )
+
         code_file = os.path.join(self._temp_dir, f"code_{execution_id}.py")
         with open(code_file, "w") as f:
             f.write(code)

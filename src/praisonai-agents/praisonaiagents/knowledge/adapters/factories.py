@@ -135,6 +135,11 @@ class ChromaKnowledgeAdapter:
         config = kwargs.get("config", {})
         vector_config = config.get("vector_store", {}).get("config", {})
         
+        # The configured embedder. Reading only OPENAI_EMBEDDING_MODEL here meant
+        # an agent that had explicitly selected a local embedder still sent every
+        # document and query to OpenAI -- silently, and with a 200 back.
+        self._embedder = config.get("embedder") or {}
+
         collection_name = vector_config.get("collection_name", "praisonai_knowledge")
         persist_dir = vector_config.get("path") or _default_chroma_path()
         os.makedirs(persist_dir, exist_ok=True)
@@ -169,6 +174,34 @@ class ChromaKnowledgeAdapter:
                 metadata={"hnsw:space": "cosine"}
             )
     
+    def _embedding_call(self):
+        """Resolve (model, kwargs) for the configured embedder.
+
+        Precedence: the embedder block the agent configured > the
+        OPENAI_EMBEDDING_MODEL env var > OpenAI's default. Returns kwargs
+        carrying api_base when the embedder points at a local server, so the
+        request cannot escape to a remote provider.
+        """
+        block = self._embedder or {}
+        provider = (block.get("provider") or "").strip().lower()
+        cfg = block.get("config") or {}
+        model = cfg.get("model")
+        if not model:
+            return os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), {}
+
+        extra = {}
+        base = (cfg.get("ollama_base_url") or cfg.get("openai_base_url")
+                or cfg.get("api_base") or cfg.get("base_url"))
+        if provider == "ollama":
+            if not model.startswith("ollama/"):
+                model = f"ollama/{model}"
+            if base:
+                extra["api_base"] = base.rstrip("/")
+        elif base:
+            extra["api_base"] = base.rstrip("/")
+            extra.setdefault("api_key", cfg.get("api_key") or "local")
+        return model, extra
+
     def search(self, query: str, *, user_id: Optional[str] = None, agent_id: Optional[str] = None,
                run_id: Optional[str] = None, limit: int = 10, filters: Optional[Dict[str, Any]] = None,
                **kwargs: Any):
@@ -176,10 +209,10 @@ class ChromaKnowledgeAdapter:
         from ..models import SearchResult, SearchResultItem
         
         # Get embedding for query
-        embedding_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        embedding_model, embedding_kwargs = self._embedding_call()
         try:
             from praisonaiagents.embedding import embedding
-            result = embedding(query, model=embedding_model)
+            result = embedding(query, model=embedding_model, **embedding_kwargs)
             query_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
             logger.warning(
@@ -257,11 +290,11 @@ class ChromaKnowledgeAdapter:
         content_str = str(content)
         
         # Get embedding
-        embedding_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        embedding_model, embedding_kwargs = self._embedding_call()
         embedding_error = None
         try:
             from praisonaiagents.embedding import embedding
-            result = embedding(content_str, model=embedding_model)
+            result = embedding(content_str, model=embedding_model, **embedding_kwargs)
             content_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
             logger.warning(
