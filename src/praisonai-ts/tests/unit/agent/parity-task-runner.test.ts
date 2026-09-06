@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { Agent, AgentTeam } from '../../../src/agent/simple';
+import { Agent, AgentTeam } from '../../../src/agent';
 import { Task } from '../../../src/agent/types';
 import { resetParityNotices } from '../../../src/utils/parity-notice';
 
