@@ -122,3 +122,33 @@ class TestFormatAndToolsAreRefused:
         """OpenAI honours both together; the refusal must not leak to them."""
         monkeypatch.setenv("OPENAI_API_KEY", "x")
         assert self._params("gpt-4o", tools=self.TOOLS, response_format=self.FORMAT)
+
+
+class TestLocallyServedEmbedderWidths:
+    """Nine local embedders silently inherited OpenAI's 1536.
+
+    Harmless while nothing read the value; wrong the moment it sizes a store.
+    """
+
+    @pytest.mark.parametrize("model,width", [
+        ("nomic-embed-text", 768), ("mxbai-embed-large", 1024), ("all-minilm", 384),
+        ("bge-m3", 1024), ("bge-large", 1024), ("bge-base", 768), ("bge-small", 384),
+        ("snowflake-arctic-embed", 1024), ("granite-embedding", 384),
+        ("paraphrase-multilingual", 768), ("qwen3-embedding", 1024),
+    ])
+    def test_a_local_embedder_reports_its_real_width(self, model, width):
+        from praisonaiagents.embedding.dimensions import get_dimensions
+        assert get_dimensions(model) == width
+
+    def test_an_unknown_embedder_still_reports_the_default(self):
+        """The default must stay, so callers can tell 'unknown' from 'measured'."""
+        from praisonaiagents.embedding.dimensions import DEFAULT_DIMENSION, get_dimensions
+        assert get_dimensions("a-model-nobody-has-heard-of") == DEFAULT_DIMENSION
+
+    def test_a_guessed_width_is_never_sent_to_the_store(self, monkeypatch):
+        """Passing the generic default would size the index wrongly and silently."""
+        from praisonaiagents.embedding.dimensions import DEFAULT_DIMENSION
+        from praisonaiagents.local.embed import local_embedder_config
+        from praisonaiagents.local.capabilities import LocalEngine
+        cfg = local_embedder_config(LocalEngine.OLLAMA, "http://127.0.0.1:11434", "unknown-embedder")
+        assert cfg["config"].get("embedding_dims") != DEFAULT_DIMENSION

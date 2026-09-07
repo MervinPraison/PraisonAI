@@ -2232,9 +2232,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     # supplies it: a store created at the wrong width either
                     # rejects every write or silently corrupts the index.
                     try:
-                        from ..embedding.dimensions import get_dimensions
+                        from ..embedding.dimensions import (
+                            DEFAULT_DIMENSION, get_dimensions)
                         _dims = get_dimensions(_embed_model)
-                        if _dims:
+                        # Only pass a width we actually know. The generic
+                        # default is a guess, and a store built at the wrong
+                        # width is worse than one that infers from the first
+                        # vector.
+                        if _dims and _dims != DEFAULT_DIMENSION:
                             embedder_config.setdefault("config", {})["embedding_dims"] = _dims
                     except Exception:  # noqa: BLE001 -- a missing width must not break setup
                         pass
