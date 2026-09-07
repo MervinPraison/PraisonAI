@@ -132,6 +132,63 @@ def test_determinism_same_input_same_output():
     assert first == "coder"
 
 
+def test_room_restarts_on_next_human_message():
+    roster = ["a", "b"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [
+        RoomEvent(speaker="user", content="hi", round=0),
+        RoomEvent(speaker="a", content="one", round=0),
+        RoomEvent(speaker="b", content="two", round=0),
+    ]
+    # First activity settled.
+    assert planner.plan_next(roster, transcript) is None
+
+    # A new human message on the same durable transcript reopens round 0.
+    transcript.append(RoomEvent(speaker="user", content="again", round=0))
+    assert planner.plan_next(roster, transcript) == "a"
+
+    transcript.append(RoomEvent(speaker="a", content="one", round=0))
+    assert planner.plan_next(roster, transcript) == "b"
+
+    transcript.append(RoomEvent(speaker="b", content="two", round=0))
+    assert planner.plan_next(roster, transcript) is None
+
+
+def test_max_messages_cap_is_per_activity_not_lifetime():
+    roster = ["a", "b"]
+    planner = RoundRobinRoomPlanner(max_rounds=5, max_messages=3)
+    transcript = [
+        RoomEvent(speaker="user", content="go", round=0),
+        RoomEvent(speaker="a", content="hi", round=0),
+        RoomEvent(speaker="b", content="yo", round=0),
+    ]
+    # First activity reached its 3-message cap.
+    assert planner.plan_next(roster, transcript) is None
+
+    # Second human message starts a fresh activity; the cap counts from there,
+    # not lifetime history, so scheduling resumes.
+    transcript.append(RoomEvent(speaker="user", content="more", round=0))
+    assert planner.plan_next(roster, transcript) == "a"
+
+
+def test_mention_admission_scoped_to_current_activity():
+    roster = ["a", "b"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [
+        # Prior settled activity with a stale @mention still in history.
+        RoomEvent(speaker="user", content="first", round=0),
+        RoomEvent(speaker="a", content="@b ping", round=0),
+        RoomEvent(speaker="b", content="pong", round=1),
+        # New activity: opener with no mentions.
+        RoomEvent(speaker="user", content="second", round=0),
+        RoomEvent(speaker="a", content="quiet", round=0),
+        RoomEvent(speaker="b", content="quiet", round=0),
+    ]
+    # The stale round-0 @mention from the prior activity must not leak into the
+    # new activity's round 1.
+    assert planner.plan_next(roster, transcript) is None
+
+
 def test_invalid_config_rejected():
     with pytest.raises(ValueError):
         RoundRobinRoomPlanner(max_rounds=0)

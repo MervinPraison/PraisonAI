@@ -132,21 +132,33 @@ class RoundRobinRoomPlanner:
             return None
         roster_set = set(roster_list)
 
-        # Global message cap (counts every event, passes included).
-        if len(transcript) >= self.max_messages:
+        # Scope all accounting to the *current activity*: the slice of the
+        # transcript from the last human (non-roster) message onward. A durable
+        # room transcript accumulates many activities; each new human message
+        # opens a fresh round-0 fan-out and resets the message cap, so a settled
+        # room reliably restarts when the next human speaks and can never be
+        # permanently disabled by lifetime history.
+        last_human = -1
+        for idx, ev in enumerate(transcript):
+            if ev.speaker not in roster_set:
+                last_human = idx
+        if last_human < 0:
+            # A room only starts once a human (non-roster) message has been seen.
             return None
+        activity = transcript[last_human:]
 
-        # A room only starts once a human (non-roster) message has been seen.
-        if not any(ev.speaker not in roster_set for ev in transcript):
+        # Message cap (counts every event in the current activity, passes
+        # included) — bounds a single human-initiated activity, not lifetime.
+        if len(activity) >= self.max_messages:
             return None
 
         # Determine the round currently being filled: the highest round present
-        # in the transcript. New agent turns are always scheduled into that
-        # round until it is complete, then the next round opens.
-        current_round = max((ev.round for ev in transcript), default=0)
+        # in the current activity. New agent turns are always scheduled into
+        # that round until it is complete, then the next round opens.
+        current_round = max((ev.round for ev in activity), default=0)
 
         for rnd in range(current_round, self.max_rounds):
-            speaker = self._next_in_round(roster_list, roster_set, transcript, rnd)
+            speaker = self._next_in_round(roster_list, roster_set, activity, rnd)
             if speaker is not None:
                 return speaker
             # Round ``rnd`` is settled; a later round only exists if it has
