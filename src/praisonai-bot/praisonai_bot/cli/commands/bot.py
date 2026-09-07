@@ -47,6 +47,9 @@ def _build_capabilities(
     stt_model: Optional[str] = None,
     stream: bool = False,
     stream_edit_interval: int = 700,
+    group_policy: str = "mention_only",
+    allow_silence: bool = False,
+    silence_token: Optional[str] = None,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> "BotCapabilities":
@@ -83,6 +86,9 @@ def _build_capabilities(
         stt_model=stt_model,
         stream=stream,
         stream_edit_interval=stream_edit_interval,
+        group_policy=group_policy,
+        allow_silence=allow_silence,
+        silence_token=silence_token,
         session_id=session_id,
         user_id=user_id,
     )
