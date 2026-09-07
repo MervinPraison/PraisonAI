@@ -166,3 +166,17 @@ waivers:
     - required
     owner: praisonai-ts
     reason: TS cannot infer a name from an anonymous function; Python infers it from __name__
+  tool().input_guardrails:
+    owner: praisonai-ts
+    reason: NOT an equivalence -- unlike every other waiver in this file, this records a real
+      gap. Per-tool input guardrails were added to Python (praisonaiagents/guardrails/tool_guardrails.py)
+      and have no TypeScript counterpart yet; nothing in praisonai-ts resolves the same behaviour by
+      another route. Waived only to unblock the Python PR, since porting is a praisonai-ts change and
+      the two packages do not share a branch. `expires` is set deliberately so this fails the gate
+      rather than becoming permanent if the port is forgotten.
+    expires: '2026-12-07'
+  tool().output_guardrails:
+    owner: praisonai-ts
+    reason: NOT an equivalence -- the output half of the same missing capability. See
+      tool().input_guardrails above. Same expiry, for the same reason.
+    expires: '2026-12-07'
