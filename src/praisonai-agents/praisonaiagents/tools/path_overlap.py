@@ -6,7 +6,7 @@ and forces sequential execution to prevent corruption.
 """
 
 import pathlib
-from typing import List, Dict, Any, Set
+from typing import List
 from .call_executor import ToolCall
 
 __all__ = ["detect_path_conflicts", "extract_paths", "has_write_conflicts"]
@@ -171,15 +171,21 @@ def detect_path_conflicts(tool_calls: List[ToolCall]) -> bool:
         return False
     
     # Shell-like tools carry their write target in free-text (command/code/SQL),
-    # so path extraction cannot see it. Conservatively treat two or more calls to
-    # the same shell-like tool as a conflict and force sequential execution.
-    shell_like_counts: Dict[str, int] = {}
+    # so path extraction cannot see it. Because their real targets are opaque, we
+    # cannot prove two shell-like calls are safe — nor that a shell-like call is
+    # safe alongside a path-based write. Conservatively force sequential execution
+    # whenever there are two or more shell-like calls in total, OR a shell-like
+    # call co-occurs with any other potential write (shell-like or path-based).
+    shell_like_count = 0
+    other_write_count = 0
     for tool_call in tool_calls:
         if tool_call.function_name in _SHELL_LIKE_TOOLS:
-            shell_like_counts[tool_call.function_name] = (
-                shell_like_counts.get(tool_call.function_name, 0) + 1
-            )
-    if any(count >= 2 for count in shell_like_counts.values()):
+            shell_like_count += 1
+        elif _is_potential_write_tool(tool_call.function_name, tool_call.arguments or {}):
+            other_write_count += 1
+    if shell_like_count >= 2:
+        return True
+    if shell_like_count >= 1 and other_write_count >= 1:
         return True
     
     # Extract all paths from write tools

@@ -357,17 +357,13 @@ def _task_has_custom_handler(task):
     )
 
 
-def _execute_task_handler(agents_instance, task_id):
-    """Execute a Task.handler and store the result as the task output.
+def _finalize_task_handler_result(agents_instance, task, result):
+    """Build the TaskOutput/TaskResult from a handler's return value.
 
-    Returns a TaskResult, mirroring _process_task_result so the sync/async
-    execute paths can short-circuit before requiring an agent.
+    Shared by the sync and async handler executors so both paths store the same
+    output shape and expose ``output_variable`` identically.
     """
     from .protocols import TaskResult
-
-    task = agents_instance.tasks[task_id]
-    context = _build_handler_context(agents_instance, task)
-    result = task.handler(context)
 
     raw = getattr(result, 'output', result)
     if raw is None:
@@ -393,18 +389,120 @@ def _execute_task_handler(agents_instance, task_id):
     return TaskResult(task_output=task_output, success=True)
 
 
+def _resolve_coroutine_sync(coro):
+    """Run a coroutine to completion from a synchronous context.
+
+    ``astart`` dispatches sync-marked tasks through the sync ``run_task`` path
+    (in an executor), so an ``async def`` handler still lands here. Rather than
+    stringifying the coroutine, drive it to completion on a private loop.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop in this thread — safe to use asyncio.run.
+        return asyncio.run(coro)
+
+    # A loop is already running in this thread; run the coroutine on a fresh
+    # loop in a worker thread so we don't re-enter the active loop.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _execute_task_handler(agents_instance, task_id):
+    """Execute a Task.handler and store the result as the task output.
+
+    Returns a TaskResult, mirroring _process_task_result so the sync/async
+    execute paths can short-circuit before requiring an agent. Coroutine
+    handlers are resolved here too, since ``astart`` runs sync-marked tasks
+    through this synchronous path.
+    """
+    import asyncio
+
+    task = agents_instance.tasks[task_id]
+    context = _build_handler_context(agents_instance, task)
+    result = task.handler(context)
+    if asyncio.iscoroutine(result):
+        result = _resolve_coroutine_sync(result)
+    return _finalize_task_handler_result(agents_instance, task, result)
+
+
+async def _aexecute_task_handler(agents_instance, task_id):
+    """Async variant of _execute_task_handler that awaits coroutine handlers.
+
+    Mirrors the Workflow engine's async path, which awaits handlers returning a
+    coroutine so an ``async def`` handler runs instead of being stringified.
+    """
+    import asyncio
+
+    task = agents_instance.tasks[task_id]
+    context = _build_handler_context(agents_instance, task)
+    result = task.handler(context)
+    if asyncio.iscoroutine(result):
+        result = await result
+    return _finalize_task_handler_result(agents_instance, task, result)
+
+
+def _record_skipped_task(agents_instance, task):
+    """Record a stable, empty result for a task gated out by should_run.
+
+    Without this the task would be marked completed with no ``task.result``,
+    which makes ``start``/``astart`` fall through to returning the full results
+    dict when the skipped task is the final one, and leaves callers unable to
+    tell a skip from a genuine empty run.
+    """
+    task_output = TaskOutput(
+        description=task.description or (getattr(task, 'name', '') or ''),
+        summary=(task.description or getattr(task, 'name', '') or '')[:10],
+        raw="",
+        agent=getattr(task, 'name', '') or 'skipped',
+        output_format="RAW",
+    )
+    task.result = task_output
+    task.status = "completed"
+
+
 def _task_should_skip(agents_instance, task):
     """Return True when a task's should_run gate evaluates falsy.
 
     Mirrors the Workflow engine's should_run behaviour so conditional tasks are
-    honoured under PraisonAIAgents/AgentTeam as well.
+    honoured under PraisonAIAgents/AgentTeam as well. Coroutine results from an
+    ``async def`` gate are resolved to completion here; the async path uses
+    ``_atask_should_skip`` to await them natively.
     """
     should_run = getattr(task, 'should_run', None)
     if should_run is None:
         return False
     try:
+        import asyncio
         context = _build_handler_context(agents_instance, task)
-        return not should_run(context)
+        result = should_run(context)
+        if asyncio.iscoroutine(result):
+            # astart runs sync-marked tasks through this sync gate; resolve the
+            # coroutine rather than dropping it so async gates are still honoured.
+            result = _resolve_coroutine_sync(result)
+        return not result
+    except Exception as e:
+        logger.error(f"should_run failed for task {getattr(task, 'name', task)}: {e}")
+        return False
+
+
+async def _atask_should_skip(agents_instance, task):
+    """Async variant of _task_should_skip that awaits coroutine gates."""
+    import asyncio
+
+    should_run = getattr(task, 'should_run', None)
+    if should_run is None:
+        return False
+    try:
+        context = _build_handler_context(agents_instance, task)
+        result = should_run(context)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return not result
     except Exception as e:
         logger.error(f"should_run failed for task {getattr(task, 'name', task)}: {e}")
         return False
@@ -1360,9 +1458,10 @@ class AgentTeam(SpawnAnnounceProtocol):
             task.status = "in progress"
 
         # Handler-only tasks (no agent/agent_config) run their custom callable
-        # instead of an LLM, mirroring the Workflow engine.
+        # instead of an LLM, mirroring the Workflow engine. Await here so an
+        # ``async def`` handler actually runs instead of being stringified.
         if _task_has_custom_handler(task):
-            task_result = _execute_task_handler(self, task_id)
+            task_result = await _aexecute_task_handler(self, task_id)
             return task_result.task_output
 
         # Initialize memory asynchronously to avoid blocking the event loop on
@@ -1539,9 +1638,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         await self._arun_task_start_hook(task, task_id)
 
         # Honour the should_run conditional gate (mirrors the Workflow engine).
-        if _task_should_skip(self, task):
+        if await _atask_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
-            task.status = "completed"
+            _record_skipped_task(self, task)
             return
 
         # Use per-task max_retries if available
@@ -1993,7 +2092,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Honour the should_run conditional gate (mirrors the Workflow engine).
         if _task_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
-            task.status = "completed"
+            _record_skipped_task(self, task)
             return
 
         # Use per-task max_retries if available
