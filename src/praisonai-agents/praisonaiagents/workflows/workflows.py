@@ -2855,6 +2855,89 @@ CONCISE SUMMARY:"""
             return min(user_max, n)
         return min(DEFAULT_MAX_PARALLEL_WORKERS, n)
     
+    @staticmethod
+    def _branch_variable_delta(
+        baseline: Dict[str, Any],
+        branch_variables: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Return only the variables a parallel branch actually wrote.
+
+        A branch runs against ``copy.deepcopy(baseline)``, so merging the whole
+        returned dict back would copy every untouched key as well - replacing the
+        parent's objects with per-branch clones and letting a stale copy overwrite
+        a value some other part of the run had moved on from. Only the delta is
+        merged: keys the branch added, plus keys whose value it changed.
+
+        Values that cannot be compared (``!=`` raising, or returning something
+        that is not a bool - numpy arrays, some ORM/pydantic objects) are treated
+        conservatively as *written*, because dropping a real write is the bug this
+        whole method exists to prevent.
+        """
+        if not branch_variables:
+            return {}
+        delta = {}
+        for key, value in branch_variables.items():
+            if key not in baseline:
+                delta[key] = value
+                continue
+            original = baseline[key]
+            if value is original:
+                # deepcopy returns the identical object for atomic/immutable
+                # values, so identity is a cheap "definitely untouched" check.
+                continue
+            try:
+                changed = bool(value != original)
+            except Exception:
+                changed = True
+            if changed:
+                delta[key] = value
+        return delta
+
+    @staticmethod
+    def _merge_branch_variables(
+        all_variables: Dict[str, Any],
+        branch_deltas: List[Tuple[int, Dict[str, Any]]]
+    ) -> None:
+        """Merge parallel branches' variable writes back into the shared scope.
+
+        THE MERGE RULE (please do not "simplify" this back into a race):
+
+        1. Branches never share a variables dict - each gets a deep copy - because
+           concurrent writes to one dict is a data race. Isolation is the safe half
+           of the design; this function is the missing other half, the merge back.
+        2. Deltas are applied in **branch declaration order**, never completion
+           order, so the result does not depend on thread scheduling. Two runs of
+           the same workflow produce the same variables.
+        3. On a **key collision** - two branches writing the same variable with
+           different values - the later branch in declaration order wins, which is
+           exactly what would happen if the same steps ran sequentially (Parallel
+           is meant to be a faster way to run steps, not a different semantics).
+           The collision is logged as a warning naming the key and both branches,
+           because a silently discarded branch result is the bug this fixes; the
+           workflow author has almost certainly reused an ``output_variable`` or a
+           step name by accident.
+        4. Only real writes are merged (see ``_branch_variable_delta``), so an
+           untouched key keeps the parent's own object.
+        """
+        winners: Dict[str, int] = {}
+        for idx, delta in branch_deltas:
+            for key, value in delta.items():
+                previous_idx = winners.get(key)
+                if previous_idx is not None:
+                    try:
+                        conflicting = bool(all_variables[key] != value)
+                    except Exception:
+                        conflicting = True
+                    if conflicting:
+                        logger.warning(
+                            f"Parallel branches {previous_idx} and {idx} both wrote "
+                            f"variable '{key}' with different values; branch {idx} wins "
+                            f"(declaration order). Give the branches distinct "
+                            f"output_variable names to avoid losing a result."
+                        )
+                winners[key] = idx
+                all_variables[key] = value
+
     def _execute_parallel(
         self,
         parallel_step: Parallel,
@@ -2906,6 +2989,12 @@ CONCISE SUMMARY:"""
         # Use ThreadPoolExecutor for parallel execution
         from ..trace.context_events import copy_context_to_callable, get_context_emitter
         
+        # Snapshot of the variables every branch starts from. Branches each get a
+        # deep copy (see below), so this is the reference point used to work out
+        # what a branch actually wrote before merging it back.
+        baseline_variables = dict(all_variables)
+        branch_deltas = []  # [(branch_idx, {var: value}), ...] in declaration order
+
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
         effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
@@ -2917,6 +3006,10 @@ CONCISE SUMMARY:"""
                     emitter = get_context_emitter()
                     emitter.set_branch(f"parallel_{idx}")
                     try:
+                        # Each branch writes into its OWN deep copy: concurrent
+                        # writes to one shared dict would be a data race. The copy
+                        # is merged back below (see _merge_branch_variables) so the
+                        # branch's output_variable writes are not thrown away.
                         return self._execute_single_step_internal(
                             step, opt_prev, input, copy.deepcopy(all_variables), model, False, idx, stream, depth=depth+1
                         )
@@ -2952,6 +3045,9 @@ CONCISE SUMMARY:"""
                 if branch_error is None:
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
+                    branch_deltas.append(
+                        (idx, self._branch_variable_delta(baseline_variables, step_result.get("variables")))
+                    )
                     continue
 
                 logger.error(f"Parallel branch {idx} failed: {branch_error}")
@@ -2973,6 +3069,15 @@ CONCISE SUMMARY:"""
                     # Record the failure but continue with other branches. Do not
                     # fold the exception text into outputs as if it were data.
                     results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
+                    # "partial_ok" means partial results are kept, so the variables
+                    # the branch's *completed* steps wrote are kept too. (The failed
+                    # step itself never reaches the output_variable write, so nothing
+                    # from it can leak in here.) fail_fast/fail_all raise instead, so
+                    # nothing from a failed branch is merged under those modes.
+                    if step_result is not None:
+                        branch_deltas.append(
+                            (idx, self._branch_variable_delta(baseline_variables, step_result.get("variables")))
+                        )
                     # Keep `outputs` index-aligned with parallel_step.steps so a
                     # downstream reader of parallel_outputs[idx] cannot silently
                     # receive a later branch's result once an earlier one fails.
@@ -2990,6 +3095,11 @@ CONCISE SUMMARY:"""
                     f"{len(errors)} parallel branches failed", errors=errors, cause=cause
                 ) from cause
         
+        # Merge each branch's variable writes back into the shared scope. Without
+        # this every `output_variable` set inside a Parallel block was written to a
+        # deep copy that was discarded when the branch returned (silent data loss).
+        self._merge_branch_variables(all_variables, branch_deltas)
+
         # Combine outputs
         combined_output = "\n---\n".join(str(o) for o in outputs)
         all_variables["parallel_outputs"] = outputs
