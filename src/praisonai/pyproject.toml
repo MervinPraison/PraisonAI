@@ -169,7 +169,8 @@ agno = [
     "praisonai-tools>=0.1.0",
 ]
 google-adk = [
-    "praisonai-frameworks[google-adk]>=0.1.8",
+    "praisonai-frameworks>=0.1.8",
+    "google-adk[extensions]>=2.5,<3",
     "praisonai-tools>=0.1.0",
 ]
 pydantic-ai = [
