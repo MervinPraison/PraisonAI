@@ -5,6 +5,19 @@
 # parameter of its __init__ instead of by name (agents.py exports the team
 # class under several aliases).
 #
+# Two optional fields record a decision somebody signed, and both require a
+# `reason` and an `owner` or loading fails (exit 2):
+#
+#   export_identity: {reason: ..., owner: ...}
+#     Why the TypeScript symbol this surface validates is NOT the one
+#     src/praisonai-ts/src/index.ts exports under the Python name.
+#
+#   method_waivers: {python_method_name: {reason: ..., owner: ...}}
+#     A public Python method that will not have a TypeScript counterpart.
+#
+# Neither is a way to make a check quiet: the divergence is still detected and
+# still printed, as a warning carrying the reason.
+#
 # Run: python -m praisonai._dev.parity.signatures --check
 
 python_root: src/praisonai-agents/praisonaiagents
