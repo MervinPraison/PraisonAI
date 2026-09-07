@@ -215,6 +215,14 @@ def __getattr__(name):
         from .memory_mixin import MemoryMixin
         _lazy_cache[name] = MemoryMixin
         return MemoryMixin
+    elif name == 'AttachmentError':
+        from .attachments import AttachmentError
+        _lazy_cache[name] = AttachmentError
+        return AttachmentError
+    elif name == 'build_attachment_parts':
+        from .attachments import build_attachment_parts
+        _lazy_cache[name] = build_attachment_parts
+        return build_attachment_parts
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -297,4 +305,7 @@ __all__ = [
     'ChatMixin',
     'ExecutionMixin',
     'MemoryMixin',
+    # Attachments
+    'AttachmentError',
+    'build_attachment_parts',
 ]

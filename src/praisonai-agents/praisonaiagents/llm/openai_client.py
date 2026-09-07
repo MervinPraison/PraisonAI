@@ -853,6 +853,24 @@ class OpenAIClient:
                     part.get("image_url")
                 )
                 responses_content.append(item)
+            elif part_type == "file":
+                # Chat Completions ``{"type": "file", "file": {...}}`` (used for
+                # PDF attachments) becomes a Responses API ``input_file`` part.
+                # Passing it through untranslated would be rejected by the API.
+                file_spec = part.get("file")
+                if not isinstance(file_spec, dict):
+                    responses_content.append(part)
+                    continue
+                file_item: Dict[str, Any] = {"type": "input_file"}
+                for src, dst in (
+                    ("filename", "filename"),
+                    ("file_data", "file_data"),
+                    ("file_id", "file_id"),
+                    ("file_url", "file_url"),
+                ):
+                    if file_spec.get(src):
+                        file_item[dst] = file_spec[src]
+                responses_content.append(file_item)
             else:
                 responses_content.append(part)
         return responses_content

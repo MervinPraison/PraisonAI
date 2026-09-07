@@ -1203,56 +1203,37 @@ Your Goal: {self.goal}"""
         This is a DRY helper used by chat/achat/run/arun/start/astart.
         Attachments are ephemeral - only text is stored in history.
         
+        Routing lives in ``praisonaiagents.agent.attachments``. The contract is
+        that an attachment is **never dropped silently**: a bad path raises
+        :class:`~praisonaiagents.agent.attachments.AttachmentError`, and a file
+        the target model cannot ingest is logged as a warning *and* replaced
+        with a visible marker part (or a locally extracted text form) so both
+        the caller and the model know what happened.
+        
         Args:
             prompt: Text query (ALWAYS stored in chat_history)
-            attachments: Image/file paths for THIS turn only (NEVER stored)
+            attachments: Image/document/audio paths, URLs, or content-part
+                dicts for THIS turn only (NEVER stored)
             
         Returns:
             Either a string (no attachments) or multimodal message list
+        
+        Raises:
+            AttachmentError: for a path that does not exist or cannot be read,
+                or an attachment that is not a path/URL/content-part dict.
         """
         if not attachments:
             return prompt
-        
+
+        from .attachments import build_attachment_parts, resolve_attachment_model_name
+
+        model_name = resolve_attachment_model_name(self)
+
         # Build multimodal content list
         content = [{"type": "text", "text": prompt}]
-        
         for attachment in attachments:
-            # Handle image files
-            if isinstance(attachment, str):
-                import os
-                import base64
-                
-                if os.path.isfile(attachment):
-                    # File path - read and encode
-                    ext = os.path.splitext(attachment)[1].lower()
-                    if ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
-                        try:
-                            with open(attachment, 'rb') as f:
-                                data = base64.b64encode(f.read()).decode('utf-8')
-                            media_type = {
-                                '.jpg': 'image/jpeg',
-                                '.jpeg': 'image/jpeg',
-                                '.png': 'image/png',
-                                '.gif': 'image/gif',
-                                '.webp': 'image/webp',
-                            }.get(ext, 'image/jpeg')
-                            content.append({
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{media_type};base64,{data}"}
-                            })
-                            logging.debug(f"Successfully encoded image attachment: {attachment} ({len(data)} bytes base64)")
-                        except Exception as e:
-                            logging.warning(f"Failed to load attachment {attachment}: {e}")
-                elif attachment.startswith(('http://', 'https://', 'data:')):
-                    # URL or data URI
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": attachment}
-                    })
-            elif isinstance(attachment, dict):
-                # Already structured content
-                content.append(attachment)
-        
+            content.extend(build_attachment_parts(attachment, model_name))
+
         return content
 
     def _extract_llm_response_content(self, response) -> Optional[str]:
