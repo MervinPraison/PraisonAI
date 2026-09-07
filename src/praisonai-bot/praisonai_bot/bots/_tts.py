@@ -26,8 +26,9 @@ plain text; voice is a transport concern the gateway owns, exactly like STT.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,11 @@ class TtsConfig:
             formats (default ``ogg``).
         max_chars: Skip TTS for replies longer than this many characters
             (``0`` disables the cap). Keeps very long text from being narrated.
+        stream: Opt-in incremental synthesis. When ``True`` the reply is
+            chunked into sentences and each is synthesised and delivered as it
+            becomes available, so time-to-first-audio is first-sentence latency
+            instead of full-response latency. Falls back to a single whole-clip
+            synth when off (default) or unavailable.
     """
 
     enabled: bool = False
@@ -68,6 +74,7 @@ class TtsConfig:
     speed: Optional[float] = None
     format: str = "ogg"
     max_chars: int = 4000
+    stream: bool = False
 
 
 # String tokens treated as booleans for text-backed config (YAML/env).
@@ -130,6 +137,7 @@ def _from_mapping(get: Any) -> TtsConfig:
         speed=_coerce_float(get("speed", base.speed), base.speed),
         format=str(get("format", base.format) or base.format),
         max_chars=_coerce_int(get("max_chars", base.max_chars), base.max_chars),
+        stream=_coerce_bool(get("stream", base.stream), base.stream),
     )
 
 
@@ -239,6 +247,95 @@ def synthesize_voice_reply(text: str, cfg: TtsConfig) -> Optional[str]:
     return None
 
 
+# Sentence boundary: end punctuation (. ! ? … and their CJK forms) plus any
+# trailing closing quotes/brackets, followed by whitespace or end-of-text. The
+# closing quotes are consumed (kept with the sentence); the whitespace/EOT is a
+# lookahead so it stays with the next clause. Deliberately simple — the goal is
+# low time-to-first-audio, not perfect prosody.
+_SENTENCE_END_RE = re.compile(r"[.!?…。！？][\"'”’)\]]*(?=\s|$)")
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split ``text`` into sentence-ish clauses for incremental synthesis.
+
+    Splits on end punctuation followed by whitespace, keeping the punctuation
+    with its sentence. Trailing text without a terminator is returned as a final
+    clause so nothing is dropped. Empty/whitespace-only input yields ``[]``.
+    """
+    if not text or not text.strip():
+        return []
+    clauses: list[str] = []
+    start = 0
+    for match in _SENTENCE_END_RE.finditer(text):
+        end = match.end()
+        clause = text[start:end].strip()
+        if clause:
+            clauses.append(clause)
+        start = end
+    tail = text[start:].strip()
+    if tail:
+        clauses.append(tail)
+    return clauses
+
+
+def iter_sentences(
+    text_chunks: Iterable[str], *, flush_remainder: bool = True
+) -> Iterator[str]:
+    """Yield complete sentences from a stream of text deltas as they close.
+
+    Buffers incoming deltas and emits a clause the moment its terminator
+    arrives, so a caller can synthesise sentence-by-sentence while the model is
+    still generating. Any unterminated remainder is yielded once the source is
+    exhausted (unless ``flush_remainder`` is ``False``).
+    """
+    buffer = ""
+    for chunk in text_chunks:
+        if not chunk:
+            continue
+        buffer += chunk
+        while True:
+            match = _SENTENCE_END_RE.search(buffer)
+            if not match:
+                break
+            end = match.end()
+            # A terminator sitting at the very end of the buffer is ambiguous:
+            # the next delta may continue it (e.g. "3." + "14" → "3.14"). Hold it
+            # until more text confirms the boundary; the trailing flush emits it
+            # if the source is exhausted.
+            if end == len(buffer):
+                break
+            clause = buffer[:end].strip()
+            buffer = buffer[end:]
+            if clause:
+                yield clause
+    if flush_remainder:
+        tail = buffer.strip()
+        if tail:
+            yield tail
+
+
+def stream_voice_reply_clips(
+    text_chunks: Iterable[str], cfg: TtsConfig
+) -> Iterator[str]:
+    """Synthesise voice-note clips sentence-by-sentence from streamed text.
+
+    Consumes an iterable of text deltas (the same deltas the text stream
+    consumer sees), groups them into sentences via :func:`iter_sentences`, and
+    yields the path to a synthesised clip for each sentence as it completes —
+    the incremental counterpart to :func:`synthesize_voice_reply`.
+
+    Failure semantics are audible-output-aware: a synthesis failure for a clause
+    is skipped (logged) rather than aborting the whole turn, so partial audio
+    already delivered is never replayed. Callers that need whole-file fallback
+    should detect an empty stream (no clips yielded) and fall back to
+    :func:`synthesize_voice_reply` on the full text.
+    """
+    for sentence in iter_sentences(text_chunks):
+        path = synthesize_voice_reply(sentence, cfg)
+        if path:
+            yield path
+
+
 __all__ = [
     "TtsConfig",
     "MODE_OFF",
@@ -247,4 +344,7 @@ __all__ = [
     "resolve_tts_config",
     "should_voice_reply",
     "synthesize_voice_reply",
+    "split_sentences",
+    "iter_sentences",
+    "stream_voice_reply_clips",
 ]

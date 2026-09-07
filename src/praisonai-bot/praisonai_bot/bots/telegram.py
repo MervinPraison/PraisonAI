@@ -1879,6 +1879,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         from ._tts import (
             resolve_tts_config,
             should_voice_reply,
+            split_sentences,
             synthesize_voice_reply,
         )
 
@@ -1886,11 +1887,69 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         if not should_voice_reply(cfg, inbound_was_voice=inbound_was_voice):
             return
 
+        # Streaming path (Issue #4918): synthesise & deliver sentence-by-sentence
+        # so time-to-first-audio is first-sentence latency, not whole-reply
+        # latency. Failure semantics are audible-output-aware: if nothing has
+        # played yet we fall back to whole-file TTS; once any clip has been
+        # delivered we never replay from the beginning.
+        # The aggregate narration cap is a whole-reply safeguard, so honour it
+        # against the full text before entering the per-sentence loop — checking
+        # only per sentence would let an over-long reply through when each
+        # clause is individually under the limit.
+        if cfg.stream and not (
+            cfg.max_chars and cfg.max_chars > 0 and len(text) > cfg.max_chars
+        ):
+            sentences = split_sentences(text)
+            if len(sentences) > 1:
+                delivered_any = False
+                try:
+                    for sentence in sentences:
+                        clip = await asyncio.to_thread(
+                            synthesize_voice_reply, sentence, cfg
+                        )
+                        if not clip or not os.path.exists(clip):
+                            # Skip a failed clause once audio is already playing;
+                            # otherwise fall back to whole-file synthesis below.
+                            if delivered_any:
+                                continue
+                            break
+                        await self._deliver_voice_clip(chat_id, clip)
+                        delivered_any = True
+                except Exception as e:
+                    # Best-effort: a delivery failure must never escape and abort
+                    # later media/presentation/hook processing. If partial audio
+                    # already played we stop here; otherwise fall through to the
+                    # whole-file path below.
+                    logger.error(f"Failed to stream voice reply: {e}")
+                    if delivered_any:
+                        return
+                if delivered_any:
+                    return
+            # Single sentence, or first-clause failure with nothing played →
+            # fall through to the whole-file path below.
+
         audio_path: Optional[str] = None
         try:
             audio_path = await asyncio.to_thread(synthesize_voice_reply, text, cfg)
             if not audio_path or not os.path.exists(audio_path):
                 return
+            await self._deliver_voice_clip(chat_id, audio_path)
+        except Exception as e:
+            logger.error(f"Failed to send voice reply: {e}")
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass
+
+    async def _deliver_voice_clip(self, chat_id: int, audio_path: str) -> None:
+        """Send a single synthesised clip as a Telegram voice note, then delete.
+
+        Shared by the whole-file and streaming voice-reply paths so both use the
+        same retry policy and best-effort cleanup.
+        """
+        try:
             with open(audio_path, "rb") as f:
                 async def send_voice_reply():
                     f.seek(0)
@@ -1904,8 +1963,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     platform="telegram",
                     parked_store=None,
                 )
-        except Exception as e:
-            logger.error(f"Failed to send voice reply: {e}")
         finally:
             if audio_path and os.path.exists(audio_path):
                 try:
