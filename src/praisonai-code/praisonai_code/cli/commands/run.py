@@ -164,8 +164,9 @@ def _report_run_truncated(output: Any, result: Any) -> None:
     if not getattr(output, "is_json_mode", False):
         output.print_warning(
             "Run hit the step/iteration limit; the answer above is a summary of "
-            "partial progress, not a completed task. Re-run with a higher "
-            "--max-iter/max_steps to finish."
+            "partial progress, not a completed task. Raise the budget with "
+            "ExecutionConfig(max_steps=...) on the agent (or `execution: "
+            "{max_steps: ...}` in the YAML) and re-run."
         )
     raise typer.Exit(2)
 
