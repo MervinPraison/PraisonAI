@@ -800,6 +800,23 @@ def main_callback(
         help="Enable observability (langfuse, langextract)",
         envvar="PRAISONAI_OBSERVE",
     ),
+    continue_session: bool = typer.Option(
+        False,
+        "--continue",
+        "-c",
+        help="Resume the most recent session in the interactive launch",
+    ),
+    session: Optional[str] = typer.Option(
+        None,
+        "--session",
+        "-s",
+        help="Resume a specific session ID in the interactive launch",
+    ),
+    fork: bool = typer.Option(
+        False,
+        "--fork",
+        help="Fork from the resumed session (requires --continue/--session)",
+    ),
 ):
     """
     PraisonAI - AI Agents Framework CLI.
@@ -893,6 +910,22 @@ def main_callback(
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
         from praisonai_code._wrapper_bridge import wrapper_available
 
+        # Validate the continuity flags up-front (parity with `run`) so an
+        # invalid combination fails closed before any onboarding/model work
+        # (Issue #4910).
+        if fork and not (continue_session or session):
+            typer.echo(
+                "--fork requires --continue or --session to specify which "
+                "session to fork from",
+                err=True,
+            )
+            raise typer.Exit(1)
+        if continue_session and session:
+            typer.echo(
+                "Cannot use both --continue and --session together", err=True
+            )
+            raise typer.Exit(1)
+
         # The bare invocation only launches the wrapper-resident interactive
         # TUI. On a bare `pip install praisonai-code` the wrapper is absent and
         # the TUI path fails fast with its own install hint. Running the
@@ -905,9 +938,80 @@ def main_callback(
 
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
+        # Resolve a session to resume when a continuity flag is present (Issue
+        # #4910), reusing the exact `run`/`chat` machinery so the bare
+        # interactive surface gains --continue/--session/--fork parity without
+        # duplicating persistence logic. No flag → resume_id stays None and the
+        # launch is byte-identical to before (fresh session).
+        resume_id: Optional[str] = None
+        restored_model: Optional[str] = None
+        if continue_session or session:
+            try:
+                from .state.project_sessions import (
+                    find_last_session,
+                    find_session_model,
+                    session_exists_anywhere,
+                )
+
+                if session:
+                    if session_exists_anywhere(session):
+                        resume_id = session
+                    else:
+                        typer.echo(f"Session not found: {session}", err=True)
+                        raise typer.Exit(1)
+                else:
+                    resume_id = find_last_session()
+                    if not resume_id:
+                        typer.echo(
+                            "No previous sessions found. Starting new session.",
+                            err=True,
+                        )
+
+                # Fork non-destructively so the resumed transcript is branched
+                # rather than mutated in place (parity with `run --fork`). An
+                # explicit --fork must fail closed: silently falling back to the
+                # source session would violate the non-destructive guarantee and
+                # let subsequent turns mutate the original (Issue #4910).
+                if fork and resume_id:
+                    try:
+                        from praisonaiagents.session.hierarchy import (
+                            HierarchicalSessionStore,
+                        )
+                        from .utils.project import get_project_sessions_dir
+
+                        hierarchical_store = HierarchicalSessionStore(
+                            str(get_project_sessions_dir())
+                        )
+                        forked_id = hierarchical_store.fork_session(resume_id)
+                    except typer.Exit:
+                        raise
+                    except Exception as exc:
+                        typer.echo(f"Failed to fork session: {exc}", err=True)
+                        raise typer.Exit(1)
+                    if not forked_id:
+                        typer.echo(
+                            f"Failed to fork session: {resume_id}", err=True
+                        )
+                        raise typer.Exit(1)
+                    resume_id = forked_id
+
+                # Restore the recorded session model so resume continues on the
+                # same provider instead of the current default (Issue #3685).
+                if resume_id:
+                    try:
+                        restored_model = find_session_model(resume_id)
+                    except Exception:
+                        restored_model = None
+            except typer.Exit:
+                raise
+            except Exception:
+                # Continuity is opt-in and best-effort; never block launch.
+                resume_id = None
+
         # Route the bare-TUI launch through the shared resolver so a user with
         # only, say, ANTHROPIC_API_KEY set is defaulted to an appropriate model
-        # rather than an OpenAI one — matching `run`, `chat`, and `init`.
+        # rather than an OpenAI one — matching `run`, `chat`, and `init`. A
+        # restored session model (when resuming) takes precedence.
         try:
             from .configuration.model_resolver import resolve_default_model
             resolved_model = resolve_default_model(None)
@@ -915,9 +1019,11 @@ def main_callback(
             resolved_model = _DEFAULT_MODEL
 
         tui_config = AsyncTUIConfig(
-            model=resolved_model,
+            model=restored_model or resolved_model,
             show_logo=True,
             show_status_bar=state.output_format != OutputFormat.json,
+            session_id=resume_id,
+            resume=bool(resume_id),
         )
         
         tui = AsyncTUI(config=tui_config)
