@@ -377,8 +377,17 @@ class TestTheRealRepository:
         missing = {m.name for m in self.inventories()['Session'].unwaived}
         assert {'save_state', 'restore_state', 'add_memory', 'search_memory', 'chat'} <= missing
 
-    def test_function_tool_is_missing_run(self):
-        assert 'run' in {m.name for m in self.inventories()['FunctionTool'].unwaived}
+    def test_function_tool_run_stays_present(self):
+        """`run` was missing when this check was written and has since been ported.
+
+        The assertion is turned around rather than deleted: it now guards the fix,
+        so a later change that drops `run` again is a failing test rather than a
+        silent return to the gap. `safe_run` and the validate helpers are still
+        outstanding, and stay listed.
+        """
+        missing = {m.name for m in self.inventories()['FunctionTool'].unwaived}
+        assert 'run' not in missing, 'FunctionTool.run was ported; it must not go missing again'
+        assert 'safe_run' in missing, 'the remaining gaps are still reported'
 
     def test_agent_execute_counts_as_present_because_this_check_reads_names_only(self):
         """The documented limit, pinned so nobody reads a green Agent.execute as parity.
