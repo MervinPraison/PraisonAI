@@ -1,21 +1,41 @@
 /**
  * Database Module - Exports for persistence layer
- * 
+ *
  * Usage (Python-like simplicity):
  *   import { db } from 'praisonai';
- *   
+ *
  *   const agent = new Agent({
  *     instructions: "You are helpful",
- *     db: db("sqlite:./data.db"),  // URL-style string
+ *     db: db("sqlite:./data.db"),  // URL-style string, persists to a file
  *     sessionId: "my-session"
  *   });
+ *
+ * What is durable today:
+ *   - db("sqlite:./data.db")  persists to disk and survives the process
+ *   - db("sqlite::memory:")   real SQLite, but process-local
+ *   - db("memory:")           in-process Maps, lost when the process exits
+ *
+ * postgres:// and redis:// still throw -- see createDbAdapter below.
  */
 
 export * from './types';
 export { MemoryDbAdapter } from './memory-adapter';
+export {
+  SqliteDbAdapter,
+  createSqliteDbAdapter,
+  SQLITE_SCHEMA_VERSION,
+} from './sqlite-adapter';
+export type {
+  SqliteDbAdapterOptions,
+  SqliteDriver,
+  SqliteDriverName,
+  SqliteConnection,
+  SqliteStatement,
+} from './sqlite-adapter';
 
 import type { DbAdapter, DbConfig } from './types';
 import { MemoryDbAdapter } from './memory-adapter';
+import { SqliteDbAdapter } from './sqlite-adapter';
 
 // Default adapter instance
 let defaultAdapter: DbAdapter | null = null;
@@ -83,28 +103,32 @@ export function createDbAdapter(config: DbConfig): DbAdapter {
     case 'memory':
       return new MemoryDbAdapter();
     case 'sqlite':
-      // The SQLite/Postgres/Redis modules ship low-level transports
-      // (SQLiteAdapter, NeonPostgresAdapter, UpstashRedisAdapter) that do NOT
-      // yet implement the full DbAdapter session/message/run contract used by
-      // the Agent. Returning one here would satisfy the type at the untyped
-      // require() boundary but crash at runtime ("... is not a function") on
-      // first use. Fail loudly with a clear path forward instead of handing
-      // back a non-conforming object.
-      throw new Error(
-        'db("sqlite:...") is not yet wired to the DbAdapter contract. ' +
-        'Use db("memory:") for now, or import { createSQLiteAdapter } from ' +
-        '"praisonai/db/sqlite" for the low-level SQLite transport.'
-      );
+      // Implements the full DbAdapter session/message/run contract on a real
+      // SQLite file, so history survives the process. The database is opened
+      // lazily on first use (the Agent never calls connect()); if no SQLite
+      // driver can open the file the operation REJECTS with the reason and the
+      // fix. It never degrades to memory -- persistence that silently stops
+      // persisting is the failure this replaced.
+      return new SqliteDbAdapter({ filename: config.path || ':memory:' });
     case 'postgres':
+      // Still unwired, deliberately. src/db/postgres.ts is a Neon HTTP
+      // transport (POST https://<host>/sql): it has no local mode, cannot be
+      // exercised without a live Neon endpoint, and exposes query/execute
+      // rather than the session/message/run contract the Agent calls. Wiring
+      // it up untested would trade a clear error for a runtime surprise.
       throw new Error(
         'db("postgres://...") is not yet wired to the DbAdapter contract. ' +
-        'Use db("memory:") for now, or import { createNeonPostgres } from ' +
+        'Use db("sqlite:./data.db") for durable local persistence, db("memory:") ' +
+        'for ephemeral, or import { createNeonPostgres } from ' +
         '"praisonai/db/postgres" for the low-level Postgres transport.'
       );
     case 'redis':
+      // Same reasoning: src/db/redis.ts is an Upstash REST transport with
+      // key/value and hash operations, not sessions, messages and runs.
       throw new Error(
         'db("redis://...") is not yet wired to the DbAdapter contract. ' +
-        'Use db("memory:") for now, or import { createUpstashRedis } from ' +
+        'Use db("sqlite:./data.db") for durable local persistence, db("memory:") ' +
+        'for ephemeral, or import { createUpstashRedis } from ' +
         '"praisonai/db/redis" for the low-level Redis transport.'
       );
     default:
@@ -131,17 +155,24 @@ export function setDefaultDbAdapter(adapter: DbAdapter): void {
 
 /**
  * Factory function for creating a database adapter
- * 
+ *
  * Accepts either:
- * - URL string: db("sqlite:./data.db"), db("postgres://..."), db("redis://...")
+ * - URL string: db("sqlite:./data.db"), db("memory:")
  * - Config object: db({ type: 'sqlite', path: './data.db' })
- * 
+ *
  * Examples:
- *   db("sqlite:./data.db")           // SQLite file
- *   db("postgres://localhost/mydb")  // PostgreSQL
- *   db("redis://localhost:6379")     // Redis
- *   db("memory:")                    // In-memory (default)
- *   db()                             // In-memory (default)
+ *   db("sqlite:./data.db")           // SQLite file -- durable, survives restarts
+ *   db("sqlite::memory:")            // real SQLite, process-local
+ *   db("memory:")                    // in-process Maps (default), lost on exit
+ *   db()                             // same as db("memory:")
+ *
+ * Not yet implemented -- these parse, then throw with the reason:
+ *   db("postgres://localhost/mydb")  // throws: transport is Neon-HTTP only
+ *   db("redis://localhost:6379")     // throws: transport is Upstash-REST only
+ *
+ * The returned adapter connects lazily, so a sqlite URL is cheap to build and
+ * any driver problem surfaces on the first read or write -- as a rejection,
+ * never as a silent fall back to memory.
  */
 export function db(configOrUrl: string | DbConfig = { type: 'memory' }): DbAdapter {
   if (typeof configOrUrl === 'string') {
