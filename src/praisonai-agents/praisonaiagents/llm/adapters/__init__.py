@@ -19,8 +19,16 @@ def collapse_union_param_types(tools):
     Ollama models `parameters.type` as a Go string, so a union like
     `{"type": ["string", "null"]}` -- which is exactly what an Optional[str]
     tool argument produces -- fails to unmarshal and 400s the WHOLE request,
-    not just that tool. Collapsing to the first non-null member keeps the
-    request valid; the field simply stops advertising that it is nullable.
+    not just that tool. Collapsing the nullable to its single concrete member
+    keeps the request valid; the field simply stops advertising that it is
+    nullable.
+
+    Only the nullable case (exactly one concrete type plus "null") is
+    collapsed. A genuine heterogeneous union like ``["string", "integer"]``
+    is left untouched: narrowing it to one arm would misrepresent the tool's
+    accepted inputs and could push the model toward invalid calls. Such unions
+    are rare in generated tool schemas and are the server's problem to reject,
+    not ours to silently rewrite.
 
     Returns a new list; the caller's tool definitions are never mutated.
     """
@@ -32,8 +40,12 @@ def collapse_union_param_types(tools):
         out = {}
         for key, value in node.items():
             if key == "type" and isinstance(value, list):
-                concrete = [t for t in value if t != "null"] or list(value)
-                out[key] = concrete[0] if concrete else "string"
+                concrete = [t for t in value if t != "null"]
+                # Collapse only "<type> | null"; preserve real multi-type unions.
+                if "null" in value and len(concrete) == 1:
+                    out[key] = concrete[0]
+                else:
+                    out[key] = value
             else:
                 out[key] = fix(value)
         return out

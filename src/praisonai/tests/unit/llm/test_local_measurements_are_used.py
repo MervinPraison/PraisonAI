@@ -95,6 +95,25 @@ class TestToolSchemaIsMadeServerSafe:
         collapse_union_param_types(original)
         assert original[0]["function"]["parameters"]["properties"]["c"]["type"] == ["string", "null"]
 
+    def test_a_heterogeneous_union_is_preserved(self, monkeypatch):
+        """Only "<type> | null" collapses; a real multi-type union must survive."""
+        monkeypatch.setenv("OPENAI_API_KEY", "x")
+        from praisonaiagents.llm.adapters import collapse_union_param_types
+        tools = [{"function": {"parameters": {"properties": {
+            "id": {"type": ["string", "integer"]}}}}}]
+        out = collapse_union_param_types(tools)
+        assert out[0]["function"]["parameters"]["properties"]["id"]["type"] == ["string", "integer"], (
+            "narrowing a genuine union misrepresents the tool's accepted inputs"
+        )
+
+    def test_a_type_plus_null_still_collapses(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "x")
+        from praisonaiagents.llm.adapters import collapse_union_param_types
+        tools = [{"function": {"parameters": {"properties": {
+            "n": {"type": ["integer", "null"]}}}}}]
+        out = collapse_union_param_types(tools)
+        assert out[0]["function"]["parameters"]["properties"]["n"]["type"] == "integer"
+
 
 class TestFormatAndToolsAreRefused:
     """Measured: together, the tool call vanishes and the model invents an answer."""

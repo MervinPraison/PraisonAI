@@ -2231,18 +2231,21 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     # and cannot import the dimension table, so the caller
                     # supplies it: a store created at the wrong width either
                     # rejects every write or silently corrupts the index.
-                    try:
-                        from ..embedding.dimensions import (
-                            DEFAULT_DIMENSION, get_dimensions)
-                        _dims = get_dimensions(_embed_model)
-                        # Only pass a width we actually know. The generic
-                        # default is a guess, and a store built at the wrong
-                        # width is worse than one that infers from the first
-                        # vector.
-                        if _dims and _dims != DEFAULT_DIMENSION:
-                            embedder_config.setdefault("config", {})["embedding_dims"] = _dims
-                    except Exception:  # noqa: BLE001 -- a missing width must not break setup
-                        pass
+                    # A width the server *measured* (already in the config) is
+                    # authoritative and must win over the static table. The
+                    # table only fills a genuine gap, and even then never with
+                    # the generic default: a guessed width is worse than letting
+                    # the store infer one from the first vector.
+                    _cfg = embedder_config.setdefault("config", {})
+                    if not _cfg.get("embedding_dims"):
+                        try:
+                            from ..embedding.dimensions import (
+                                DEFAULT_DIMENSION, get_dimensions)
+                            _dims = get_dimensions(_embed_model)
+                            if _dims and _dims != DEFAULT_DIMENSION:
+                                _cfg["embedding_dims"] = _dims
+                        except Exception:  # noqa: BLE001 -- a missing width must not break setup
+                            pass
                     if retrieval_config is not None:
                         retrieval_config.setdefault('embedder_config', embedder_config)
                 else:
