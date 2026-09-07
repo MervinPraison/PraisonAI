@@ -874,22 +874,29 @@ Context:
         Returns:
             GuardrailResult: The result of the guardrail validation
         """
-        from ..guardrails import GuardrailResult
-        
+        from ..guardrails import GuardrailResult, GuardrailRetry
+
         if not self._guardrail_fn:
             return GuardrailResult(success=True, result=task_output)
-        
+
         try:
             # Call the guardrail function
             result = self._guardrail_fn(task_output)
-            
+
             # Check if result is already a GuardrailResult
             if isinstance(result, GuardrailResult):
                 return result
-            
+
             # Otherwise, convert the tuple result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
-            
+
+        except GuardrailRetry as e:
+            # Deliberate rejection carrying a message for the model: keep the
+            # author's wording so the retry prompt reads as an instruction, not
+            # as an internal error report.
+            logger.warning(f"Task {self.id}: Guardrail asked for a retry: {e.feedback}")
+            return GuardrailResult(success=False, result=None, error=e.feedback)
+
         except Exception as e:
             logger.error(f"Task {self.id}: Error in guardrail validation: {e}")
             # On error, return failure

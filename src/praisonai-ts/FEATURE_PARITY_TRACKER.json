@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 411,
+    "pythonCoreFeatures": 412,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 2040,
-    "gapCount": 0,
+    "gapCount": 1,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
-    "priorityP2": 0,
+    "priorityP2": 1,
     "priorityP3": 0
   },
   "pythonCoreSDK": {
@@ -145,6 +145,7 @@
       "GuardrailAction",
       "GuardrailConfig",
       "GuardrailResult",
+      "GuardrailRetry",
       "Handoff",
       "HandoffConfig",
       "HandoffCycleError",
@@ -624,6 +625,7 @@
       ],
       "guardrails": [
         "GuardrailResult",
+        "GuardrailRetry",
         "LLMGuardrail"
       ],
       "knowledge": [
@@ -4935,6 +4937,15 @@
         "priority": "P2",
         "effort": "low",
         "status": "DONE",
+        "category": "guardrails"
+      },
+      {
+        "feature": "GuardrailRetry",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "high",
+        "status": "TODO",
         "category": "guardrails"
       },
       {

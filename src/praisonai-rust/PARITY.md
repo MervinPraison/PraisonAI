@@ -1,6 +1,6 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 411 | **Rust Features:** 667 | **Parity:** 69.8%
+> **Python Features:** 412 | **Rust Features:** 667 | **Parity:** 69.7%
 
 > [!IMPORTANT]
 > **What this measures:** whether a matching *exported symbol name* exists in the
@@ -14,11 +14,11 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 411 |
+| Python Core Features | 412 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **124** |
+| **Actual Gap Count** | **125** |
 | Language Limitations (N/A) | 4 |
-| **Parity** | **69.8%** |
+| **Parity** | **69.7%** |
 
 ## Implemented Features
 
@@ -743,6 +743,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `GoalConfig`
 - ❌ `GoalEngineer`
 - ❌ `GoalVerificationResult`
+- ❌ `GuardrailRetry`
 - ❌ `HandoffToolPolicy`
 - ❌ `HarnessProfile`
 - ❌ `Heartbeat`
