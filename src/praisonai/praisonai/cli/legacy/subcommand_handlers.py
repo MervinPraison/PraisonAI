@@ -305,12 +305,17 @@ def handle_rules_command(self, action: str, action_args: list):
     except Exception as e:
         print(f"[red]ERROR: Rules command failed: {e}[/red]")
 
-def handle_hooks_command(self, action: str):
+def handle_hooks_command(self, action: str) -> int:
     """
     Handle hooks subcommand actions.
-    
+
     Args:
-        action: The hooks action (list, stats, init)
+        action: The hooks action (list, stats, init, help)
+
+    Returns:
+        Process exit code: ``0`` when the action ran, non-zero when it did
+        not. An unknown action previously printed an error and still exited
+        ``0``, so a script adding a hook "succeeded" while doing nothing.
     """
     try:
         from praisonaiagents.memory import HooksManager
@@ -329,8 +334,12 @@ def handle_hooks_command(self, action: str):
                 for event in stats.get('events', []):
                     print(f"  - {event}")
             else:
-                print("[yellow]No hooks configured. Create .praison/hooks.json[/yellow]")
-                
+                print(
+                    "[yellow]No hooks configured. Create "
+                    f"{HooksManager.CONFIG_FILE}[/yellow]"
+                )
+            return 0
+
         elif action == 'stats':
             stats = hooks.get_stats()
             table = Table(title="Hooks Statistics")
@@ -341,14 +350,20 @@ def handle_hooks_command(self, action: str):
                 table.add_row(str(key), str(value))
             
             console.print(table)
-            
+            return 0
+
         elif action == 'init':
-            hooks_dir = os.path.join(os.getcwd(), ".praison")
-            os.makedirs(hooks_dir, exist_ok=True)
-            hooks_file = os.path.join(hooks_dir, "hooks.json")
+            # Derive the file location from the manager itself; a literal here
+            # is exactly how the CLI came to advertise a path the loader never
+            # reads (HooksManager.CONFIG_FILE is ".praisonai/hooks.json").
+            hooks_file = os.path.join(
+                os.getcwd(), HooksManager.CONFIG_FILE.replace("/", os.sep)
+            )
+            os.makedirs(os.path.dirname(hooks_file), exist_ok=True)
             
             if os.path.exists(hooks_file):
                 print(f"[yellow]hooks.json already exists at {hooks_file}[/yellow]")
+                return 0
             else:
                 template = {
                     "enabled": True,
@@ -367,6 +382,7 @@ def handle_hooks_command(self, action: str):
                     json.dump(template, f, indent=2)
                 print(f"[green]✅ Created hooks.json at {hooks_file}[/green]")
                 print("[cyan]Edit the file to configure your hooks[/cyan]")
+                return 0
                 
         elif action == 'help' or action == '--help':
             print("[bold]Hooks Commands:[/bold]")
@@ -379,15 +395,19 @@ def handle_hooks_command(self, action: str):
             print("  pre_run_command, post_run_command")
             print("  pre_user_prompt, post_user_prompt")
             print("  pre_mcp_tool_use, post_mcp_tool_use")
+            return 0
         else:
             print(f"[red]Unknown hooks action: {action}[/red]")
             print("Use 'praisonai hooks help' for available commands")
-            
+            return 1
+
     except ImportError as e:
         print(f"[red]ERROR: Failed to import hooks module: {e}[/red]")
         print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        return 1
     except Exception as e:
         print(f"[red]ERROR: Hooks command failed: {e}[/red]")
+        return 1
 
 def handle_knowledge_command(self, action: str, action_args: list):
     """
