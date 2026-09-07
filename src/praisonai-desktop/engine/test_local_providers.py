@@ -35,10 +35,35 @@ BASE = "http://192.168.1.50:11434"
 KEY = "sk-a-real-looking-key-123456"
 
 
+def _provider_env_names():
+    return [name for name in os.environ
+            if name.endswith("_API_BASE") or name.endswith("_API_KEY")]
+
+
 def _clear():
-    for name in list(os.environ):
-        if name.endswith("_API_BASE") or name.endswith("_API_KEY"):
-            os.environ.pop(name, None)
+    for name in _provider_env_names():
+        os.environ.pop(name, None)
+
+
+class _RestoresProviderEnv(unittest.TestCase):
+    """Snapshot the provider env vars and restore them after each test.
+
+    ``_clear()`` deletes every ``*_API_BASE`` / ``*_API_KEY`` variable to give
+    each case a clean slate. Without restoring the originals afterwards, an
+    ``OPENAI_API_KEY`` the developer or CI exports would be gone for every test
+    that ran later in the same process -- the suite would be order-dependent and
+    could mask or cause unrelated failures. Snapshotting here keeps the isolation
+    the tests need without leaking that mutation out.
+    """
+
+    def setUp(self):
+        self._env_snapshot = {name: os.environ[name] for name in _provider_env_names()}
+        self.addCleanup(self._restore_env)
+        _clear()
+
+    def _restore_env(self):
+        _clear()
+        os.environ.update(self._env_snapshot)
 
 
 class ProviderPrefix(unittest.TestCase):
@@ -69,11 +94,7 @@ class ProviderPrefix(unittest.TestCase):
         self.assertIsNone(server.provider_env_names("ollama")[1])
 
 
-class BaseUrlReachesTheProvider(unittest.TestCase):
-
-    def setUp(self):
-        _clear()
-        self.addCleanup(_clear)
+class BaseUrlReachesTheProvider(_RestoresProviderEnv):
 
     def _apply(self, model, base_url=BASE, api_key=KEY):
         server._apply_env({"model": model, "base_url": base_url, "api_key": api_key})
@@ -116,12 +137,8 @@ class BaseUrlReachesTheProvider(unittest.TestCase):
         self.assertIsNone(os.environ.get("LM_STUDIO_API_KEY"))
 
 
-class LitellmAgrees(unittest.TestCase):
+class LitellmAgrees(_RestoresProviderEnv):
     """Assert against litellm itself, not just our own env vars."""
-
-    def setUp(self):
-        _clear()
-        self.addCleanup(_clear)
 
     def test_litellm_resolves_each_runtime_to_the_configured_host(self):
         try:
