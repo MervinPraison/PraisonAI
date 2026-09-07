@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 2860 |
+| ✅ Agent | 109 | 7 | 2978 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 281 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -30,7 +30,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ CLI | 14 | 1 | 159 |
 | ✅ Caching | 2 | 1 | 249 |
 | ✅ Callbacks | 3 | 1 | 211 |
-| ✅ Chat | 4 | 1 | 86 |
+| ✅ Chat | 4 | 1 | 100 |
 | ✅ Chunking | 3 | 2 | 298 |
 | ✅ Citations | 3 | 1 | 156 |
 | ✅ Code Execution | 9 | 4 | 464 |
@@ -43,7 +43,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Embeddings | 13 | 3 | 841 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
-| ✅ Execution | 6 | 1 | 159 |
+| ✅ Execution | 6 | 1 | 184 |
 | ✅ Failover | 5 | 1 | 160 |
 | ✅ Files | 15 | 1 | 151 |
 | ✅ Flow | 5 | 1 | 164 |
@@ -55,7 +55,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Jobs | 8 | 1 | 156 |
 | ✅ Knowledge | 37 | 2 | 352 |
 | ✅ LLM | 29 | 2 | 279 |
-| ✅ Loops | 11 | 1 | 235 |
+| ✅ Loops | 11 | 1 | 241 |
 | ✅ MCP | 21 | 4 | 870 |
 | ✅ Memory | 24 | 4 | 783 |
 | ✅ Middleware | 2 | 1 | 162 |
@@ -65,7 +65,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Output | 3 | 1 | 220 |
 | ✅ Parallel Execution | 12 | 2 | 256 |
 | ✅ Planning | 11 | 2 | 529 |
-| ✅ Plugins | 9 | 2 | 710 |
+| ✅ Plugins | 9 | 2 | 724 |
 | ✅ Prompts | 4 | 2 | 262 |
 | ✅ Providers | 26 | 116 | 8149 |
 | ✅ PubSub | 1 | 1 | 149 |
@@ -74,19 +74,19 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Realtime | 5 | 1 | 150 |
 | ✅ Reflection | 3 | 1 | 151 |
 | ✅ Retrieval | 5 | 1 | 150 |
-| ✅ Routing | 1 | 1 | 247 |
+| ✅ Routing | 1 | 1 | 252 |
 | ✅ Sandbox | 8 | 2 | 222 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
-| ✅ Sessions | 19 | 2 | 433 |
+| ✅ Sessions | 19 | 2 | 437 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
-| ✅ Tasks | 8 | 1 | 283 |
+| ✅ Tasks | 8 | 1 | 300 |
 | ✅ Teams | 1 | 1 | 200 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 53 | 16 | 3366 |
+| ✅ Tools | 53 | 18 | 3754 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |
