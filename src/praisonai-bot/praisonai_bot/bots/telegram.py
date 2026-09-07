@@ -1892,22 +1892,37 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # latency. Failure semantics are audible-output-aware: if nothing has
         # played yet we fall back to whole-file TTS; once any clip has been
         # delivered we never replay from the beginning.
-        if cfg.stream:
+        # The aggregate narration cap is a whole-reply safeguard, so honour it
+        # against the full text before entering the per-sentence loop — checking
+        # only per sentence would let an over-long reply through when each
+        # clause is individually under the limit.
+        if cfg.stream and not (
+            cfg.max_chars and cfg.max_chars > 0 and len(text) > cfg.max_chars
+        ):
             sentences = split_sentences(text)
             if len(sentences) > 1:
                 delivered_any = False
-                for sentence in sentences:
-                    clip = await asyncio.to_thread(
-                        synthesize_voice_reply, sentence, cfg
-                    )
-                    if not clip or not os.path.exists(clip):
-                        # Skip a failed clause once audio is already playing;
-                        # otherwise fall back to whole-file synthesis below.
-                        if delivered_any:
-                            continue
-                        break
-                    await self._deliver_voice_clip(chat_id, clip)
-                    delivered_any = True
+                try:
+                    for sentence in sentences:
+                        clip = await asyncio.to_thread(
+                            synthesize_voice_reply, sentence, cfg
+                        )
+                        if not clip or not os.path.exists(clip):
+                            # Skip a failed clause once audio is already playing;
+                            # otherwise fall back to whole-file synthesis below.
+                            if delivered_any:
+                                continue
+                            break
+                        await self._deliver_voice_clip(chat_id, clip)
+                        delivered_any = True
+                except Exception as e:
+                    # Best-effort: a delivery failure must never escape and abort
+                    # later media/presentation/hook processing. If partial audio
+                    # already played we stop here; otherwise fall through to the
+                    # whole-file path below.
+                    logger.error(f"Failed to stream voice reply: {e}")
+                    if delivered_any:
+                        return
                 if delivered_any:
                     return
             # Single sentence, or first-clause failure with nothing played →

@@ -224,6 +224,18 @@ class TestIterSentences:
     def test_ignores_empty_chunks(self):
         assert list(iter_sentences(["", "Hi.", "", ""])) == ["Hi."]
 
+    def test_terminator_at_chunk_boundary_not_split_early(self):
+        # A "." at the tail of a delta may be a decimal continued by the next
+        # delta ("3." + "14") — it must not be finalised as a sentence end.
+        assert list(iter_sentences(["Pi is 3.", "14 exactly."])) == [
+            "Pi is 3.14 exactly."
+        ]
+
+    def test_boundary_terminator_emitted_once_confirmed(self):
+        # Held terminator is emitted as soon as a following delta confirms the
+        # boundary (whitespace/next clause), not only at flush.
+        assert list(iter_sentences(["One.", " Two."])) == ["One.", "Two."]
+
 
 class TestStreamVoiceReplyClips:
     def test_yields_a_clip_per_sentence(self, monkeypatch):

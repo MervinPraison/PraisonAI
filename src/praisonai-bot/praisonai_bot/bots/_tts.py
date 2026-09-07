@@ -298,6 +298,12 @@ def iter_sentences(
             if not match:
                 break
             end = match.end()
+            # A terminator sitting at the very end of the buffer is ambiguous:
+            # the next delta may continue it (e.g. "3." + "14" → "3.14"). Hold it
+            # until more text confirms the boundary; the trailing flush emits it
+            # if the source is exhausted.
+            if end == len(buffer):
+                break
             clause = buffer[:end].strip()
             buffer = buffer[end:]
             if clause:
