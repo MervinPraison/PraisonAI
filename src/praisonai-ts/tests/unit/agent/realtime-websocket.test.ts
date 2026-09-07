@@ -209,6 +209,29 @@ describe('RealtimeAgent - real WebSocket connection', () => {
       await agent.disconnect();
     });
 
+    it('a throwing onMessage handler does not skip later handlers or the wildcard emit', async () => {
+      server = await startMinimalWsServer();
+      const agent = new RealtimeAgent({ ...QUIET, apiKey: 'sk-test', url: server.url });
+
+      const reached: string[] = [];
+      const all: any[] = [];
+      agent.onMessage(() => {
+        throw new Error('bad handler');
+      });
+      agent.onMessage((text) => reached.push(text));
+      agent.on('*', (event) => all.push(event));
+
+      await agent.connect();
+      const connection = await server.nextConnection();
+      connection.send({ type: 'response.text.delta', delta: 'ok' });
+
+      await waitFor(() => all.length === 1, 3000, 'wildcard emit after a throwing handler');
+      expect(reached).toEqual(['ok']); // later handler still ran
+      expect(all[0].data).toEqual({ type: 'response.text.delta', delta: 'ok' });
+
+      await agent.disconnect();
+    });
+
     it('surfaces server error events to onError handlers', async () => {
       server = await startMinimalWsServer();
       const agent = new RealtimeAgent({ ...QUIET, apiKey: 'sk-test', url: server.url });

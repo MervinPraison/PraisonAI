@@ -782,7 +782,7 @@ export class RealtimeAgent {
     // Python-parity convenience callbacks.
     if (type === 'response.text.delta') {
       const delta = typeof parsed.delta === 'string' ? parsed.delta : '';
-      for (const callback of [...this.messageCallbacks]) callback(delta);
+      this.invokeCallbacks(this.messageCallbacks, delta);
     } else if (type === 'response.audio.delta') {
       const delta = typeof parsed.delta === 'string' ? parsed.delta : '';
       if (delta) {
@@ -792,7 +792,7 @@ export class RealtimeAgent {
         } catch {
           bytes = null;
         }
-        if (bytes) for (const callback of [...this.audioCallbacks]) callback(bytes);
+        if (bytes) this.invokeCallbacks(this.audioCallbacks, bytes);
       }
     } else if (type === 'error') {
       const error = new Error(
@@ -813,9 +813,18 @@ export class RealtimeAgent {
   }
 
   private reportError(error: Error): void {
-    for (const callback of [...this.errorCallbacks]) {
+    this.invokeCallbacks(this.errorCallbacks, error);
+  }
+
+  /**
+   * Invoke user callbacks over a snapshot of the list, isolating each one so a
+   * throwing handler cannot skip later handlers or stop the frame from reaching
+   * `emit`. Mirrors the isolation already applied to error callbacks.
+   */
+  private invokeCallbacks<T>(callbacks: Array<(value: T) => void>, value: T): void {
+    for (const callback of [...callbacks]) {
       try {
-        callback(error);
+        callback(value);
       } catch {
         /* a bad handler must not break the socket */
       }
