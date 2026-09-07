@@ -1163,18 +1163,74 @@ def _llm_overrides(cfg: dict) -> dict:
     return out
 
 
+# Providers whose base URL or key litellm reads from its own environment
+# variable rather than OPENAI_*. The desktop has exactly two credential
+# settings -- Base URL and API key -- and used to send both to OPENAI_API_BASE
+# and OPENAI_API_KEY only. So a user who selected `ollama/llama3.2` and set
+# Base URL to their Ollama host got the litellm default (localhost:11434)
+# instead, and `lm_studio/...` and `hosted_vllm/...` got no base URL at all.
+# Verified against litellm 1.83.14 with get_llm_provider().
+#
+# litellm's convention is <PROVIDER>_API_BASE / <PROVIDER>_API_KEY, uppercased,
+# so a provider absent from this table still resolves; the entries here exist
+# where the name is not a straight upper-casing of the prefix, or where only
+# one of the pair applies.
+PROVIDER_ENV_OVERRIDES = {
+    "ollama": ("OLLAMA_API_BASE", None),          # local, no key
+    "ollama_chat": ("OLLAMA_API_BASE", None),
+    "lm_studio": ("LM_STUDIO_API_BASE", "LM_STUDIO_API_KEY"),
+    "hosted_vllm": ("HOSTED_VLLM_API_BASE", "HOSTED_VLLM_API_KEY"),
+    "openai": ("OPENAI_API_BASE", "OPENAI_API_KEY"),
+    "text-completion-openai": ("OPENAI_API_BASE", "OPENAI_API_KEY"),
+    "together_ai": ("TOGETHERAI_API_BASE", "TOGETHERAI_API_KEY"),
+}
+
+
+def model_provider(model: str) -> str:
+    """The provider prefix of a model id, or "" for a bare name.
+
+    `ollama/llama3.2` -> `ollama`. A bare `gpt-4o-mini` has no prefix and takes
+    the plain-OpenAI path, which is why "" maps to the OPENAI_* variables.
+    """
+    if not isinstance(model, str) or "/" not in model:
+        return ""
+    return model.split("/", 1)[0].strip().lower()
+
+
+def provider_env_names(provider: str):
+    """The (base_url_var, api_key_var) litellm reads for this provider."""
+    if not provider:
+        return ("OPENAI_API_BASE", "OPENAI_API_KEY")
+    if provider in PROVIDER_ENV_OVERRIDES:
+        return PROVIDER_ENV_OVERRIDES[provider]
+    upper = provider.upper().replace("-", "_")
+    return (f"{upper}_API_BASE", f"{upper}_API_KEY")
+
+
 def _apply_env(cfg: dict) -> None:
     """Credentials and endpoint go to the environment, which the OpenAI client
     reads directly -- the constructor parameter routes through the heavier path."""
+    # Route the two settings to the variables the *selected provider* reads.
+    # Sending them to OPENAI_* alone meant Base URL was inert for every local
+    # runtime: ollama fell back to localhost:11434 and lm_studio/hosted_vllm
+    # got no base URL at all.
+    provider = model_provider(cfg.get("model") or "")
+    base_var, key_var = provider_env_names(provider)
+
     if cfg.get("base_url"):
         # Set as an env var rather than base_url=, which routes through a
         # heavier code path for identical intent.
-        _export("OPENAI_API_BASE", cfg["base_url"])
+        _export(base_var, cfg["base_url"])
+        if base_var != "OPENAI_API_BASE":
+            # Keep the OpenAI pair in step so an OpenAI-compatible server
+            # reached by a bare model id still works after switching back.
+            _export("OPENAI_API_BASE", cfg["base_url"])
     else:
         # Clearing the setting clears only what *we* exported. Popping
         # unconditionally deleted the key inherited from the user's shell --
         # and this setting is documented as "blank uses the environment", so
         # that turned every request into an auth error.
+        _unset_if_ours(base_var)
         _unset_if_ours("OPENAI_API_BASE")
     key = cfg.get("api_key") or ""
     # A too-short value is a typo or a test fixture, not a credential. Exporting
@@ -1182,8 +1238,13 @@ def _apply_env(cfg: dict) -> None:
     # refuses it at entry (see api_key's validate) so this is a backstop, not
     # the only guard -- silently ignoring it is what made a bad key look set.
     if len(key) >= MIN_API_KEY_CHARS:
-        _export("OPENAI_API_KEY", key)
+        if key_var:
+            _export(key_var, key)
+        if key_var != "OPENAI_API_KEY":
+            _export("OPENAI_API_KEY", key)
     elif not key:
+        if key_var:
+            _unset_if_ours(key_var)
         _unset_if_ours("OPENAI_API_KEY")
 
 

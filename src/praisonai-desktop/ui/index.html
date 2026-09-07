@@ -659,6 +659,8 @@ const SETTINGS = [
       "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "o4-mini",
         "anthropic/claude-sonnet-4-20250514", "gemini/gemini-2.0-flash",
         "ollama/llama3.2",
+        "lm_studio/qwen2.5-7b-instruct", "hosted_vllm/meta-llama/Llama-3.1-8B-Instruct",
+        "huggingface/meta-llama/Llama-3.1-8B-Instruct", "openrouter/qwen/qwen-2.5-72b-instruct",
     ]},
     default: "gpt-4o-mini" },
 
@@ -686,7 +688,7 @@ const SETTINGS = [
     default: "off" },
 
   { key: "base_url", section: "model", label: "Base URL override",
-    description: "Point at a proxy, Azure, or a local server. Blank uses the provider default.",
+    description: "Point at Ollama, LM Studio, vLLM, a proxy or Azure. Sent to whichever provider the model names. Blank uses the provider default.",
     keywords: ["endpoint", "proxy", "azure", "ollama", "lm studio"],
     control: { kind: "text", placeholder: "https://api.openai.com/v1" },
     default: "", requiresRestart: true },
