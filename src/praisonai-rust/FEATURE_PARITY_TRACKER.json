@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "IN_PROGRESS",
   "summary": {
-    "pythonCoreFeatures": 412,
+    "pythonCoreFeatures": 417,
     "rustFeatures": 667,
-    "gapCount": 129,
-    "parityPercentage": 68.7
+    "gapCount": 134,
+    "parityPercentage": 67.9
   },
   "pythonCoreSDK": {
     "exports": [
@@ -190,6 +190,7 @@
       "MemoryConfig",
       "MessageType",
       "MinimalTelemetry",
+      "ModelRequestBlocked",
       "MultiAgentExecutionConfig",
       "MultiAgentHooksConfig",
       "MultiAgentMemoryConfig",
@@ -261,6 +262,8 @@
       "SandboxResult",
       "SandboxStatus",
       "ScopeRequiredError",
+      "ScriptExhausted",
+      "ScriptedModel",
       "SecurityPolicy",
       "SendResult",
       "Session",
@@ -315,6 +318,7 @@
       "aembed",
       "aembedding",
       "aembeddings",
+      "allow_model_requests",
       "apply_config_defaults",
       "async_display_callbacks",
       "clean_triple_backticks",
@@ -374,6 +378,7 @@
       "load_skill",
       "loop",
       "memory",
+      "no_model_requests",
       "parallel",
       "parallel_handoffs",
       "parse_plugin_header",
@@ -4168,6 +4173,15 @@
         "category": "bots"
       },
       {
+        "feature": "ModelRequestBlocked",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "MultiAgentExecutionConfig",
         "python": true,
         "rust": true,
@@ -4555,6 +4569,24 @@
         "category": "other"
       },
       {
+        "feature": "ScriptExhausted",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ScriptedModel",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SecurityPolicy",
         "python": true,
         "rust": true,
@@ -4832,6 +4864,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "allow_model_requests",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "apply_config_defaults",
@@ -5213,6 +5254,15 @@
       },
       {
         "feature": "memory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "no_model_requests",
         "python": true,
         "rust": false,
         "priority": "P3",
