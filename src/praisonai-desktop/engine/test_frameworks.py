@@ -109,13 +109,36 @@ class TurnConfig(unittest.TestCase):
                                             "system_prompt": "Be terse."})
         self.assertIn("Be terse.", doc)
 
-    def test_a_prompt_with_quotes_does_not_break_the_document(self):
-        """The prompt is user input; it must not be able to corrupt the YAML."""
-        import yaml
-        doc = server._framework_yaml('He said "hello": now what?',
-                                     {"framework": "crewai", "system_prompt": ""})
-        parsed = yaml.safe_load(doc)
+    def test_a_prompt_with_quotes_is_encoded_not_interpolated(self):
+        """The prompt is user input; it must not be able to corrupt the YAML.
+
+        Asserted without PyYAML: the desktop engine is stdlib-only by design
+        (see this module's header) and its CI installs nothing else, so a test
+        importing yaml fails there while passing locally -- which is how this
+        first went red.
+        """
+        import json
+
+        raw = 'He said "hello": now what?'
+        doc = server._framework_yaml(raw, {"framework": "crewai",
+                                           "system_prompt": ""})
+        self.assertIn(json.dumps(raw), doc,
+                      "the prompt was interpolated raw instead of encoded")
+        self.assertNotIn("\n" + raw, doc)
+
+    def test_the_document_parses_when_a_yaml_reader_is_present(self):
+        """The real check, run only where PyYAML exists (it is a praisonai dep)."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML absent: the engine venv is stdlib-only")
+        parsed = yaml.safe_load(server._framework_yaml(
+            'He said "hello": now what?',
+            {"framework": "crewai", "system_prompt": 'A "quoted" persona'}))
         self.assertIn("assistant", parsed["roles"])
+        self.assertEqual(
+            parsed["roles"]["assistant"]["tasks"]["reply"]["description"],
+            'He said "hello": now what?')
 
     def test_the_setting_has_a_default(self):
         self.assertEqual(server.DEFAULT_SETTINGS.get("framework"), "praisonai")
