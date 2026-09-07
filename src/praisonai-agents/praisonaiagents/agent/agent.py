@@ -2245,7 +2245,23 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             (isinstance(llm, str) and llm.startswith("panel:"))
             or (isinstance(llm, dict) and llm.get("provider") == "panel")
         )
-        if _is_panel:
+        # An already-built model object (an ``LLM``, a subclass, or a test double
+        # such as ``model_harness.ScriptedModel``) is adopted as this agent's
+        # backend. Without this branch such an object fell through to the plain
+        # OpenAI path, where ``self.llm`` became the object itself and every turn
+        # was sent to OpenAI under a model name that was really a repr -- the
+        # opposite of what passing your own model means. Duck-typed on
+        # ``get_response`` so any conforming backend works, not just ``LLM``.
+        _is_model_instance = (
+            llm is not None
+            and not isinstance(llm, (str, dict))
+            and callable(getattr(llm, "get_response", None))
+        )
+        if _is_model_instance:
+            self._llm_instance = llm
+            self._using_custom_llm = True
+            self.llm = getattr(llm, "model", None) or type(llm).__name__
+        elif _is_panel:
             self._panel_descriptor = llm
             self._using_custom_llm = True
             self.llm = llm if isinstance(llm, str) else "panel"

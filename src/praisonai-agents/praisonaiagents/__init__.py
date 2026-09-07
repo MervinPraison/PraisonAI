@@ -133,6 +133,13 @@ _LAZY_IMPORTS = {
     'resolve_harness': ('praisonaiagents.model_harness.profiles', 'resolve_harness'),
     'register_profile': ('praisonaiagents.model_harness.profiles', 'register_profile'),
 
+    # Test doubles - drive an Agent offline and keep real requests out of a suite
+    'ScriptedModel': ('praisonaiagents.model_harness.scripted', 'ScriptedModel'),
+    'ScriptExhausted': ('praisonaiagents.model_harness.scripted', 'ScriptExhausted'),
+    'allow_model_requests': ('praisonaiagents.model_harness.guard', 'allow_model_requests'),
+    'no_model_requests': ('praisonaiagents.model_harness.guard', 'no_model_requests'),
+    'ModelRequestBlocked': ('praisonaiagents.model_harness.guard', 'ModelRequestBlocked'),
+
     # Run outcomes - typed validation and agent execution results
     'AgentRunOutcome': ('praisonaiagents.run_outcome', 'AgentRunOutcome'),
     'RunStatus': ('praisonaiagents.run_outcome', 'RunStatus'),
