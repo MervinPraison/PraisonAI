@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 7 | 1825 |
 | ✅ Plugins | 8 | 5 | 3124 |
-| ✅ Prompts | 2 | 9 | 2011 |
+| ✅ Prompts | 2 | 9 | 2018 |
 | ✅ Providers | 1 | 57 | 8636 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3122 |
@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1042 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3670 |
-| ✅ Security | 1 | 3 | 3537 |
+| ✅ Security | 1 | 3 | 3558 |
 | ✅ Sessions | 4 | 20 | 7898 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 8 | 3231 |
