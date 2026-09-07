@@ -1799,6 +1799,18 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         )
                         if _agent_approval is not None:
                             agent_extra_kwargs['approval'] = _agent_approval
+                        # Thread the coding-sized step budget (`praisonai code
+                        # --max-steps`, built into args.execution by the code
+                        # command) onto the wrapper-dispatched REPL agent, so the
+                        # common `pip install praisonai` path does not silently
+                        # keep the general-purpose core defaults (20 steps / 10
+                        # tool calls per turn) and truncate a coding task.
+                        _agent_execution = (
+                            getattr(self.args, 'execution', None)
+                            if hasattr(self, 'args') else None
+                        )
+                        if _agent_execution is not None:
+                            agent_extra_kwargs['execution'] = _agent_execution
 
                         def _build_agent():
                             # Build the agent from the CURRENT conversation history
@@ -2020,6 +2032,13 @@ def _process_interactive_prompt(self, prompt, tools_list, console, show_profilin
         agent_approval = getattr(self.args, 'agent_approval', None) if hasattr(self, 'args') else None
         if agent_approval is not None:
             agent_kwargs['approval'] = agent_approval
+        # Thread the coding-sized step budget (`praisonai code --max-steps`,
+        # built into args.execution by the code command) onto the
+        # wrapper-dispatched single-prompt agent so it does not silently keep
+        # the general-purpose core defaults (20 steps / 10 tool calls per turn).
+        agent_execution = getattr(self.args, 'execution', None) if hasattr(self, 'args') else None
+        if agent_execution is not None:
+            agent_kwargs['execution'] = agent_execution
         thinking_budget = getattr(self.args, 'thinking_budget', None) if hasattr(self, 'args') else None
 
         # Show thinking indicator and create agent
