@@ -12,8 +12,11 @@ from praisonai_bot.bots._tts import (
     MODE_MATCH_INBOUND,
     MODE_OFF,
     TtsConfig,
+    iter_sentences,
     resolve_tts_config,
     should_voice_reply,
+    split_sentences,
+    stream_voice_reply_clips,
     synthesize_voice_reply,
 )
 
@@ -181,6 +184,79 @@ class TestSynthesizeVoiceReply:
         assert synthesize_voice_reply("hi", TtsConfig(enabled=True)) is None
 
 
+class TestSplitSentences:
+    def test_empty_returns_empty(self):
+        assert split_sentences("   ") == []
+
+    def test_single_sentence_no_terminator(self):
+        assert split_sentences("hello there") == ["hello there"]
+
+    def test_multiple_sentences(self):
+        assert split_sentences("One. Two! Three?") == ["One.", "Two!", "Three?"]
+
+    def test_trailing_remainder_kept(self):
+        assert split_sentences("Done. And more") == ["Done.", "And more"]
+
+    def test_decimal_not_split(self):
+        # A period inside 3.14 has no following whitespace, so it is not a break.
+        assert split_sentences("Pi is 3.14 exactly.") == ["Pi is 3.14 exactly."]
+
+    def test_closing_quote_kept_with_sentence(self):
+        assert split_sentences('He said "hi." Then left.') == [
+            'He said "hi."',
+            "Then left.",
+        ]
+
+
+class TestIterSentences:
+    def test_emits_as_terminators_arrive(self):
+        chunks = ["Hello", " world.", " How", " are you?", " Bye"]
+        assert list(iter_sentences(chunks)) == [
+            "Hello world.",
+            "How are you?",
+            "Bye",
+        ]
+
+    def test_flush_remainder_false_drops_tail(self):
+        chunks = ["One.", " partial"]
+        assert list(iter_sentences(chunks, flush_remainder=False)) == ["One."]
+
+    def test_ignores_empty_chunks(self):
+        assert list(iter_sentences(["", "Hi.", "", ""])) == ["Hi."]
+
+
+class TestStreamVoiceReplyClips:
+    def test_yields_a_clip_per_sentence(self, monkeypatch):
+        seen = []
+
+        def fake_tts_tool(text, voice=None, model=None, output_format="ogg", speed=None):
+            seen.append(text)
+            return {"success": True, "audio_path": f"/tmp/{len(seen)}.ogg"}
+
+        import praisonai_bot.tools.audio as audio_mod
+
+        monkeypatch.setattr(audio_mod, "tts_tool", fake_tts_tool)
+
+        cfg = TtsConfig(enabled=True, stream=True)
+        clips = list(stream_voice_reply_clips(["One.", " Two.", " Three."], cfg))
+        assert clips == ["/tmp/1.ogg", "/tmp/2.ogg", "/tmp/3.ogg"]
+        assert seen == ["One.", "Two.", "Three."]
+
+    def test_skips_failed_clause_but_keeps_going(self, monkeypatch):
+        def fake_tts_tool(text, voice=None, model=None, output_format="ogg", speed=None):
+            if "boom" in text:
+                return {"success": False, "error": "boom"}
+            return {"success": True, "audio_path": "/tmp/ok.ogg"}
+
+        import praisonai_bot.tools.audio as audio_mod
+
+        monkeypatch.setattr(audio_mod, "tts_tool", fake_tts_tool)
+
+        cfg = TtsConfig(enabled=True, stream=True)
+        clips = list(stream_voice_reply_clips(["boom now.", " fine now."], cfg))
+        assert clips == ["/tmp/ok.ogg"]
+
+
 class TestSchema:
     def test_schema_defaults_off(self):
         from praisonai_bot.bots._config_schema import TtsConfigSchema
@@ -188,6 +264,19 @@ class TestSchema:
         schema = TtsConfigSchema()
         assert schema.enabled is False
         assert schema.mode == "off"
+        assert schema.stream is False
+
+    def test_stream_resolves_from_metadata(self):
+        cfg = resolve_tts_config(
+            _cfg(metadata={"voice": {"mode": "always", "stream": True}})
+        )
+        assert cfg.stream is True
+
+    def test_stream_string_bool_coerced(self):
+        cfg = resolve_tts_config(
+            _cfg(metadata={"voice": {"mode": "always", "stream": "true"}})
+        )
+        assert cfg.stream is True
 
     def test_channel_schema_accepts_voice_block(self):
         from praisonai_bot.bots._config_schema import ChannelConfigSchema

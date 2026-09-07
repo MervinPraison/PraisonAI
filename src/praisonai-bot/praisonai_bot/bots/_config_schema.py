@@ -287,6 +287,11 @@ class TtsConfigSchema(BaseModel):
     speed: Optional[float] = None  # Optional speaking-rate multiplier
     format: str = "ogg"  # Voice-note native formats: ogg/opus
     max_chars: int = Field(default=4000, ge=0)  # Skip TTS above this length (0 = no cap)
+    # Incremental (sentence-level) synthesis (Issue #4918). When true the reply
+    # is chunked into sentences and each is synthesised & delivered as it becomes
+    # available, cutting time-to-first-audio to first-sentence latency. Off by
+    # default (whole-clip synthesis).
+    stream: bool = False
 
 
 class BotCommandsConfigSchema(BaseModel):
