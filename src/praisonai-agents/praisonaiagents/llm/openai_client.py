@@ -21,6 +21,7 @@ import inspect
 from pathlib import Path
 
 from ..errors import ToolExecutionError
+from ..model_harness.guard import check_model_request
 
 # Graceful "wrap-up" instruction injected when the step budget is nearly
 # exhausted, so the model produces a coherent final answer instead of being
@@ -422,7 +423,15 @@ class OpenAIClient:
     
     @property
     def sync_client(self):
-        """Get the synchronous OpenAI client (lazy initialization)."""
+        """Get the synchronous OpenAI client (lazy initialization).
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
+                Every request this class makes goes through this property, so
+                guarding it here covers the whole OpenAI-native path.
+        """
+        check_model_request(getattr(self, "model", None), "openai.chat.completions")
         if self._sync_client is None:
             OpenAI, _ = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
@@ -433,7 +442,13 @@ class OpenAIClient:
     
     @property
     def async_client(self):
-        """Get the asynchronous OpenAI client (lazy initialization)."""
+        """Get the asynchronous OpenAI client (lazy initialization).
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
+        """
+        check_model_request(getattr(self, "model", None), "openai.chat.completions")
         if self._async_client is None:
             _, AsyncOpenAI = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}

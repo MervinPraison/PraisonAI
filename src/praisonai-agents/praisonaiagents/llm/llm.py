@@ -23,6 +23,7 @@ import time
 import json
 import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
+from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
@@ -1510,7 +1511,14 @@ Respond with ONLY a valid JSON tool call in this format:
             
         Returns:
             The completion response from litellm
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        # Last gate before the network. A ScriptedModel overrides this method
+        # entirely, so scripted turns never reach (or trip) the guard.
+        check_model_request(self.model, "litellm.completion")
         import litellm
         response = self._call_with_retry(litellm.completion, **completion_params)
         if not completion_params.get("stream"):
@@ -1528,7 +1536,12 @@ Respond with ONLY a valid JSON tool call in this format:
             
         Returns:
             The completion response from litellm
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        check_model_request(self.model, "litellm.acompletion")
         import litellm
         response = await self._call_with_retry_async(
             litellm.acompletion,
@@ -6497,7 +6510,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         Call ``litellm.responses()`` synchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        check_model_request(self.model, "litellm.responses")
         import litellm
         return self._call_with_retry(litellm.responses, **params)
 
@@ -6505,7 +6523,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         Call ``litellm.aresponses()`` asynchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        check_model_request(self.model, "litellm.aresponses")
         import litellm
         response = await self._call_with_retry_async(litellm.aresponses, **params)
         self._track_token_usage(response, self._response_model_for_tracking(response))
@@ -6597,7 +6620,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         Returns the same (response_text, tool_calls) tuple as the Chat
         Completions streaming path.  Emits StreamEvents when configured.
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        check_model_request(self.model, "litellm.responses")
         import litellm
 
         params["stream"] = True
@@ -6724,7 +6752,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         Async streaming for Responses API.
         Returns (response_text, tool_calls).
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
+        check_model_request(self.model, "litellm.aresponses")
         import litellm
 
         params["stream"] = True
