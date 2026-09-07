@@ -80,8 +80,11 @@ def wrap_inter_agent(
     if trusted:
         return content
 
-    # Idempotency: never double-wrap already-enveloped content.
-    if INTER_AGENT_ENVELOPE_MARKER in content:
+    # Idempotency: never double-wrap already-enveloped content. The envelope is
+    # always *prefixed*, so only a leading marker proves prior wrapping. Using a
+    # substring check anywhere would let a hostile upstream embed the marker in
+    # its body to skip both the header and the ``max_chars`` bound below.
+    if content.startswith(INTER_AGENT_ENVELOPE_MARKER):
         return content
 
     if max_chars and len(content) > max_chars:
