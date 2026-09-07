@@ -1,12 +1,12 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-09-06",
+  "lastUpdated": "2026-09-07",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 411,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 2037,
+    "typescriptFeatures": 2040,
     "gapCount": 0,
     "stubCount": 0,
     "priorityP0": 0,
@@ -2088,8 +2088,10 @@
       "agent": [
         "AGENT_RUN_STATUSES",
         "Agent",
+        "AgentChatCallOptions",
         "AgentChatOptions",
         "AgentEvent",
+        "AgentExecuteTask",
         "AgentGuardrailEntry",
         "AgentGuardrailFunction",
         "AgentGuardrailInput",
@@ -2103,6 +2105,7 @@
         "AgentRunOutcomeOptions",
         "AgentRunStatus",
         "AgentStreamOptions",
+        "AgentTaskLike",
         "AgentTeam",
         "AgentTeamConfig",
         "AgentTeamProcess",

@@ -1322,7 +1322,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:900",
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1008",
         "location": "src/praisonai-ts/src/agent/simple.ts:196",
         "options_parameters": [
           "config"
@@ -1814,7 +1814,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3344",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3495",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2073,7 +2073,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2305",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2424",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2704,7 +2704,7 @@
           "PraisonAIAgents",
           "Agents"
         ],
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:648",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:837",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -2842,7 +2842,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2011",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2231",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -7274,8 +7274,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:213",
-        "location": "src/praisonai-ts/src/tools/decorator.ts:48",
+        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:214",
+        "location": "src/praisonai-ts/src/tools/decorator.ts:49",
         "options_parameters": [
           "config"
         ]
