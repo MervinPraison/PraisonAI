@@ -85,6 +85,7 @@ class AsyncTUIConfig:
     show_logo: bool = True
     show_status_bar: bool = True
     session_id: Optional[str] = None
+    resume: bool = False  # Replay session_id's transcript on launch (bare `praisonai -c/--session`)
     workspace: Optional[str] = None
     history_file: Optional[str] = None
     compact_mode: bool = False
@@ -891,6 +892,57 @@ class AsyncTUI:
             return None
         return self._registry
 
+    def _resume_session(self, session_id: Optional[str] = None) -> bool:
+        """Restore a stored session's conversation into the TUI scrollback.
+
+        Shared by the in-TUI ``/continue`` command and the bare-invocation
+        ``praisonai -c/--session`` launch path (Issue #4910). When
+        ``session_id`` is ``None`` the most recently updated session is used
+        (``/continue`` semantics); otherwise the given id is loaded directly.
+        Reuses the same store + :meth:`_replay_history` renderer as before so
+        both surfaces show prior turns identically. Returns ``True`` when a
+        session was loaded and replayed.
+        """
+        try:
+            from praisonai_code.cli.session import get_session_store
+            store = get_session_store()
+            if session_id is None:
+                sessions = store.list_sessions()
+                if not sessions:
+                    self.messages.append(ChatMessage(role="system", content="No sessions to continue."))
+                    return False
+                sorted_sessions = sorted(
+                    sessions,
+                    key=lambda s: s.get("updated_at", s.get("created_at", 0)),
+                    reverse=True,
+                )
+                session_id = sorted_sessions[0].get("session_id")
+            session = store.load(session_id)
+            if not session:
+                self.messages.append(ChatMessage(role="system", content="Could not load session."))
+                return False
+            self.session_id = session.session_id
+            # Load the full stored history (not the default 50-message tail) so
+            # the replay's "… N earlier turns" note reflects the true total and
+            # older turns aren't silently dropped before bounding.
+            history = session.get_chat_history(
+                max_messages=max(session.message_count, 1)
+            )
+            self._conversation_history = history
+            # Reset the display so repeated resumes redraw the restored
+            # conversation cleanly instead of appending to — and duplicating —
+            # stale on-screen turns.
+            self.messages.clear()
+            self.messages.append(ChatMessage(
+                role="system",
+                content=f"Continued session: {self.session_id} ({len(history)} messages)",
+            ))
+            self._replay_history(history)
+            return True
+        except Exception as e:
+            self.messages.append(ChatMessage(role="system", content=f"Could not continue session: {e}"))
+            return False
+
     def _replay_history(self, history, limit: int = 20) -> None:
         """Redraw a restored conversation as live chat messages.
 
@@ -1110,46 +1162,8 @@ Tips:
             return True
         
         elif cmd == "continue":
-            # Continue most recent session
-            try:
-                from praisonai_code.cli.session import get_session_store
-                store = get_session_store()
-                sessions = store.list_sessions()
-                if not sessions:
-                    self.messages.append(ChatMessage(role="system", content="No sessions to continue."))
-                else:
-                    # Get most recent
-                    sorted_sessions = sorted(
-                        sessions,
-                        key=lambda s: s.get("updated_at", s.get("created_at", 0)),
-                        reverse=True
-                    )
-                    if sorted_sessions:
-                        session = store.load(sorted_sessions[0].get("session_id"))
-                        if session:
-                            self.session_id = session.session_id
-                            # Load the full stored history (not the default
-                            # 50-message tail) so the replay's "… N earlier
-                            # turns" note reflects the true total and older
-                            # turns aren't silently dropped before bounding.
-                            history = session.get_chat_history(
-                                max_messages=max(session.message_count, 1)
-                            )
-                            self._conversation_history = history
-                            # Reset the display so repeated /continue calls (or
-                            # continuing after prior activity) redraw the
-                            # restored conversation cleanly instead of appending
-                            # to — and duplicating — stale on-screen turns.
-                            self.messages.clear()
-                            self.messages.append(ChatMessage(
-                                role="system", 
-                                content=f"Continued session: {self.session_id} ({len(history)} messages)"
-                            ))
-                            self._replay_history(history)
-                        else:
-                            self.messages.append(ChatMessage(role="system", content="Could not load session."))
-            except Exception as e:
-                self.messages.append(ChatMessage(role="system", content=f"Could not continue session: {e}"))
+            # Continue most recent session (or a specific id when given).
+            self._resume_session(args.strip() or None)
             return True
         
         elif cmd == "import":
@@ -1880,7 +1894,15 @@ Example: /handoff code "refactor the auth module" """
         import asyncio
         
         self._running = True
-        
+
+        # Resume a prior session into the scrollback before the loop starts
+        # (Issue #4910). Reuses the same store + replay path as `/continue`, so
+        # a returning user reaches the interactive surface with their prior
+        # transcript already restored. Best-effort: a failure degrades to a
+        # fresh session rather than aborting launch.
+        if self.config.resume and self.config.session_id:
+            self._resume_session(self.config.session_id)
+
         # Start runtime (ACP/LSP servers) before TUI
         try:
             # Use the shared async bridge instead of a throwaway loop so
