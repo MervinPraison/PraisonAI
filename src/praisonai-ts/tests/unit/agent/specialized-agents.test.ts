@@ -259,16 +259,26 @@ describe('RealtimeAgent (Python Parity)', () => {
       expect(typeof agent.off).toBe('function');
     });
 
-    it('should emit events on connect', async () => {
-      const agent = new RealtimeAgent({});
+    // connect() used to set connected = true and emit a fabricated
+    // 'session.created' without opening any socket, so this suite asserted the
+    // bug. Events now come only from a real server; see
+    // tests/unit/agent/realtime-websocket.test.ts for the full coverage.
+    it('should not emit session.created when the connection fails', async () => {
+      const agent = new RealtimeAgent({
+        verbose: false,
+        apiKey: 'sk-invalid',
+        url: 'ws://127.0.0.1:9/v1/realtime',
+        connectTimeoutMs: 2000,
+      });
       let eventReceived = false;
-      
+
       agent.on('session.created', () => {
         eventReceived = true;
       });
-      
-      await agent.connect();
-      expect(eventReceived).toBe(true);
+
+      await expect(agent.connect()).rejects.toThrow();
+      expect(eventReceived).toBe(false);
+      expect(agent.isConnected()).toBe(false);
     });
   });
 
