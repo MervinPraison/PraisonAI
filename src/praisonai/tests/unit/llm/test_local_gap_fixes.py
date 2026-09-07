@@ -167,3 +167,53 @@ class TestLlamaCppPrefixIsRoutable:
         llm = LLM(model=model)
         resolved = llm._resolve_openai_compatible_model()
         assert resolved == model or resolved == f"openai/{model}"
+
+
+class TestNonOllamaEndpointGetsV1:
+    """S7: every local engine but Ollama serves under /v1.
+
+    Handing an LM Studio / vLLM / llama-server target the bare server root sent
+    chat to /chat/completions, which those servers answer with 404. It was
+    latent while non-Ollama engines could not be discovered at all; fixing
+    discovery made it reachable.
+    """
+
+    def _target(self, engine, base="http://127.0.0.1:1234"):
+        from praisonaiagents.local.capabilities import ApiStyle, Evidence, LocalEngine
+        from praisonaiagents.local.discover import Discovery
+        from praisonaiagents.local.target import build_target
+        d = Discovery(engine=LocalEngine(engine), base_url=base,
+                      api_style=ApiStyle.OPENAI_CHAT, engine_version=None,
+                      models=("m",), raw_identity="", latency_ms=1, blocked=None,
+                      evidence=Evidence.SERVER)
+        return build_target(d, "m")
+
+    @pytest.mark.parametrize("engine", ["lm_studio", "vllm", "llama_cpp", "mlx_lm"])
+    def test_openai_shaped_engines_expose_a_v1_root(self, engine):
+        t = self._target(engine)
+        assert t.openai_base_url == "http://127.0.0.1:1234/v1"
+
+    def test_ollama_keeps_the_bare_root(self):
+        """litellm's ollama provider builds its own /api paths from the root."""
+        t = self._target("ollama", "http://127.0.0.1:11434")
+        assert t.base_url == "http://127.0.0.1:11434"
+
+    def test_agent_hands_non_ollama_the_v1_root(self, monkeypatch):
+        from praisonaiagents.local.capabilities import LocalEngine
+        target = self._target("lm_studio")
+        monkeypatch.setenv("OPENAI_API_KEY", "x")
+        monkeypatch.setattr("praisonaiagents.local.resolve", lambda *a, **k: target)
+        from praisonaiagents import Agent
+        agent = Agent(instructions="x", llm="local")
+        assert agent.llm_instance.base_url == "http://127.0.0.1:1234/v1", (
+            "a non-Ollama local engine was given the bare root, so chat would "
+            "go to /chat/completions and 404"
+        )
+
+    def test_agent_hands_ollama_the_bare_root(self, monkeypatch):
+        target = self._target("ollama", "http://127.0.0.1:11434")
+        monkeypatch.setenv("OPENAI_API_KEY", "x")
+        monkeypatch.setattr("praisonaiagents.local.resolve", lambda *a, **k: target)
+        from praisonaiagents import Agent
+        agent = Agent(instructions="x", llm="local")
+        assert agent.llm_instance.base_url == "http://127.0.0.1:11434"
