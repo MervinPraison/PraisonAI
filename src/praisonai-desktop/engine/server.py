@@ -768,6 +768,7 @@ DEFAULT_SETTINGS = {
     "top_p": 1,
     "reasoning_effort": "off",
     "base_url": "",
+    "framework": "praisonai",
     "api_key": "",
     "system_prompt": "",
     "auto_title": True,
@@ -1163,18 +1164,74 @@ def _llm_overrides(cfg: dict) -> dict:
     return out
 
 
+# Providers whose base URL or key litellm reads from its own environment
+# variable rather than OPENAI_*. The desktop has exactly two credential
+# settings -- Base URL and API key -- and used to send both to OPENAI_API_BASE
+# and OPENAI_API_KEY only. So a user who selected `ollama/llama3.2` and set
+# Base URL to their Ollama host got the litellm default (localhost:11434)
+# instead, and `lm_studio/...` and `hosted_vllm/...` got no base URL at all.
+# Verified against litellm 1.83.14 with get_llm_provider().
+#
+# litellm's convention is <PROVIDER>_API_BASE / <PROVIDER>_API_KEY, uppercased,
+# so a provider absent from this table still resolves; the entries here exist
+# where the name is not a straight upper-casing of the prefix, or where only
+# one of the pair applies.
+PROVIDER_ENV_OVERRIDES = {
+    "ollama": ("OLLAMA_API_BASE", None),          # local, no key
+    "ollama_chat": ("OLLAMA_API_BASE", None),
+    "lm_studio": ("LM_STUDIO_API_BASE", "LM_STUDIO_API_KEY"),
+    "hosted_vllm": ("HOSTED_VLLM_API_BASE", "HOSTED_VLLM_API_KEY"),
+    "openai": ("OPENAI_API_BASE", "OPENAI_API_KEY"),
+    "text-completion-openai": ("OPENAI_API_BASE", "OPENAI_API_KEY"),
+    "together_ai": ("TOGETHERAI_API_BASE", "TOGETHERAI_API_KEY"),
+}
+
+
+def model_provider(model: str) -> str:
+    """The provider prefix of a model id, or "" for a bare name.
+
+    `ollama/llama3.2` -> `ollama`. A bare `gpt-4o-mini` has no prefix and takes
+    the plain-OpenAI path, which is why "" maps to the OPENAI_* variables.
+    """
+    if not isinstance(model, str) or "/" not in model:
+        return ""
+    return model.split("/", 1)[0].strip().lower()
+
+
+def provider_env_names(provider: str):
+    """The (base_url_var, api_key_var) litellm reads for this provider."""
+    if not provider:
+        return ("OPENAI_API_BASE", "OPENAI_API_KEY")
+    if provider in PROVIDER_ENV_OVERRIDES:
+        return PROVIDER_ENV_OVERRIDES[provider]
+    upper = provider.upper().replace("-", "_")
+    return (f"{upper}_API_BASE", f"{upper}_API_KEY")
+
+
 def _apply_env(cfg: dict) -> None:
     """Credentials and endpoint go to the environment, which the OpenAI client
     reads directly -- the constructor parameter routes through the heavier path."""
+    # Route the two settings to the variables the *selected provider* reads.
+    # Sending them to OPENAI_* alone meant Base URL was inert for every local
+    # runtime: ollama fell back to localhost:11434 and lm_studio/hosted_vllm
+    # got no base URL at all.
+    provider = model_provider(cfg.get("model") or "")
+    base_var, key_var = provider_env_names(provider)
+
     if cfg.get("base_url"):
         # Set as an env var rather than base_url=, which routes through a
         # heavier code path for identical intent.
-        _export("OPENAI_API_BASE", cfg["base_url"])
+        _export(base_var, cfg["base_url"])
+        if base_var != "OPENAI_API_BASE":
+            # Keep the OpenAI pair in step so an OpenAI-compatible server
+            # reached by a bare model id still works after switching back.
+            _export("OPENAI_API_BASE", cfg["base_url"])
     else:
         # Clearing the setting clears only what *we* exported. Popping
         # unconditionally deleted the key inherited from the user's shell --
         # and this setting is documented as "blank uses the environment", so
         # that turned every request into an auth error.
+        _unset_if_ours(base_var)
         _unset_if_ours("OPENAI_API_BASE")
     key = cfg.get("api_key") or ""
     # A too-short value is a typo or a test fixture, not a credential. Exporting
@@ -1182,8 +1239,13 @@ def _apply_env(cfg: dict) -> None:
     # refuses it at entry (see api_key's validate) so this is a backstop, not
     # the only guard -- silently ignoring it is what made a bad key look set.
     if len(key) >= MIN_API_KEY_CHARS:
-        _export("OPENAI_API_KEY", key)
+        if key_var:
+            _export(key_var, key)
+        if key_var != "OPENAI_API_KEY":
+            _export("OPENAI_API_KEY", key)
     elif not key:
+        if key_var:
+            _unset_if_ours(key_var)
         _unset_if_ours("OPENAI_API_KEY")
 
 
@@ -1309,6 +1371,121 @@ def set_launch_at_login(on: bool) -> dict:
         '  <key>RunAtLoad</key><true/>\n'
         '</dict></plist>\n')
     return {"ok": True, "enabled": True, "path": str(LAUNCH_AGENT)}
+
+
+# --- agent frameworks ---------------------------------------------------------
+# praisonai's FrameworkAdapterRegistry discovers adapters through the
+# `praisonai.framework_adapters` entry-point group, so installing
+# praisonai-frameworks makes CrewAI, AutoGen, LangGraph, Agno, Google ADK,
+# OpenAI Agents SDK and Pydantic AI selectable without a change here. The
+# desktop provisions the praisonai wrapper (see ENGINE_PACKAGES), so the
+# registry is importable; the frameworks themselves are not, which is why
+# availability is reported rather than assumed.
+DEFAULT_FRAMEWORK = "praisonai"
+
+
+def framework_registry():
+    """The wrapper's adapter registry, or None if the wrapper is absent."""
+    try:
+        from praisonai.framework_adapters import registry
+        return registry
+    except Exception:  # noqa: BLE001 - an old venv predates the wrapper
+        return None
+
+
+def list_frameworks() -> dict:
+    """Which frameworks this install can run, and how to get the others.
+
+    Reports availability rather than asserting it: a framework the user has
+    not installed must be refused with its install command, not silently
+    swapped for the default -- that is how a setting comes to mean nothing.
+    """
+    reg = framework_registry()
+    if reg is None:
+        return {"available": [DEFAULT_FRAMEWORK], "known": [DEFAULT_FRAMEWORK],
+                "hints": {}, "default": DEFAULT_FRAMEWORK,
+                "error": "the praisonai wrapper is not installed in this engine"}
+    try:
+        known = list(reg.list_framework_choices(include_unavailable=True))
+        available = list(reg.list_available_frameworks())
+        hints = {name: reg.get_install_hint(name)
+                 for name in known if name not in available}
+    except Exception as exc:  # noqa: BLE001
+        return {"available": [DEFAULT_FRAMEWORK], "known": [DEFAULT_FRAMEWORK],
+                "hints": {}, "default": DEFAULT_FRAMEWORK, "error": str(exc)}
+    return {"available": available, "known": known, "hints": hints,
+            "default": DEFAULT_FRAMEWORK, "error": None}
+
+
+def framework_error(name: str):
+    """Why this framework cannot be used, or None if it can."""
+    if not name or name == DEFAULT_FRAMEWORK:
+        return None
+    info = list_frameworks()
+    if name in info["available"]:
+        return None
+    hint = info["hints"].get(name)
+    if name not in info["known"]:
+        # The registry only knows its builtins until praisonai-frameworks is
+        # installed; its entry points are what add CrewAI, AutoGen, LangGraph,
+        # Agno, Google ADK, OpenAI Agents SDK and Pydantic AI. Naming the
+        # package is the difference between a dead end and a next step.
+        return (f"\u201c{name}\u201d is not registered in this engine. "
+                f"Available now: {', '.join(info['available'])}. "
+                f"Installing praisonai-frameworks adds CrewAI, AutoGen, "
+                f"LangGraph, Agno, Google ADK, OpenAI Agents SDK and "
+                f"Pydantic AI \u2014 for example: "
+                f"pip install \"praisonai-frameworks[{name}]\"")
+    return (f"\u201c{name}\u201d is not installed in the app\u2019s environment. "
+            + (f"Install it with: {hint}" if hint else "Install it and restart."))
+
+
+def _framework_yaml(prompt: str, cfg: dict) -> str:
+    """One agent, one task -- the chat turn expressed as an agents config.
+
+    AgentsGenerator is the only path that reaches a non-praisonai adapter, and
+    it takes a YAML document rather than an Agent object.
+    """
+    import json as _json
+
+    instructions = cfg.get("system_prompt") or "You are a helpful assistant."
+    return (
+        "framework: {fw}\n"
+        "topic: desktop chat\n"
+        "roles:\n"
+        "  assistant:\n"
+        "    role: Assistant\n"
+        "    goal: Answer the user clearly and concisely.\n"
+        "    backstory: {bs}\n"
+        "    tasks:\n"
+        "      reply:\n"
+        "        description: {desc}\n"
+        "        expected_output: A direct answer to the user.\n"
+    ).format(fw=cfg.get("framework") or DEFAULT_FRAMEWORK,
+             bs=_json.dumps(instructions),
+             desc=_json.dumps(prompt))
+
+
+def run_with_framework(prompt: str, cfg: dict) -> str:
+    """Run one turn through the selected framework adapter.
+
+    Raises RuntimeError with an actionable message when the framework is not
+    installed, rather than falling back to the built-in agent -- a silent
+    fallback would make the setting look effective while changing nothing.
+    """
+    name = cfg.get("framework") or DEFAULT_FRAMEWORK
+    problem = framework_error(name)
+    if problem:
+        raise RuntimeError(problem)
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = AgentsGenerator(
+        agent_file=None,
+        framework=name,
+        config_list=[{"model": cfg.get("model") or DEFAULT_SETTINGS["model"]}],
+        agent_yaml=_framework_yaml(prompt, cfg),
+    )
+    return str(generator.generate_crew_and_kickoff() or "")
 
 
 def _get_agent(session_id: str = "default", tools: bool = True):
@@ -1762,6 +1939,10 @@ class Handler(BaseHTTPRequestHandler):
             cfg = load_settings()
             # The UI only needs to know whether a key is set, never its value.
             self._json(redacted(cfg))
+            return
+        if self.path == "/frameworks":
+            # What this install can actually run, and how to get the rest.
+            self._json(list_frameworks())
             return
         if self.path == "/projects":
             # Names come from the chats filed under them; instructions come from
@@ -2227,7 +2408,26 @@ class Handler(BaseHTTPRequestHandler):
             start_kwargs = dict(_llm_overrides(load_settings()))
             if media_attachments:
                 start_kwargs["attachments"] = media_attachments
-            for chunk in agent.start(turn_prompt, stream=True, **start_kwargs):
+
+            # A non-default framework runs through its adapter instead of the
+            # built-in Agent. Those adapters have no streaming contract, so the
+            # answer arrives whole; refusing here rather than falling back is
+            # deliberate -- a silent fallback would leave the setting looking
+            # effective while changing nothing.
+            _fw = (load_settings().get("framework") or DEFAULT_FRAMEWORK).strip()
+            _framework_turn = bool(_fw) and _fw != DEFAULT_FRAMEWORK
+            if _framework_turn:
+                whole = run_with_framework(turn_prompt, load_settings())
+                if whole:
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
+                    streamed = True
+                    chars += len(whole)
+                    reply.append(whole)
+                    emit("delta", {"text": whole})
+
+            for chunk in (() if _framework_turn
+                          else agent.start(turn_prompt, stream=True, **start_kwargs)):
                 # Counted here too. This call drains the queue, so discarding
                 # its result meant the tally further down always read zero
                 # unless the loop body never ran at all -- and the tests only
