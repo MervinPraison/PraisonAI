@@ -40,7 +40,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 17 | 2 | 469 |
 | ✅ Display | 22 | 1 | 342 |
-| ✅ Embeddings | 13 | 3 | 841 |
+| ✅ Embeddings | 13 | 3 | 898 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 6 | 1 | 184 |
@@ -57,7 +57,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ LLM | 29 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 241 |
 | ✅ MCP | 21 | 4 | 870 |
-| ✅ Memory | 24 | 4 | 783 |
+| ✅ Memory | 24 | 4 | 840 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 5 | 1 | 162 |
 | ✅ Observability | 12 | 28 | 2318 |

@@ -21,7 +21,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 57 | 18181 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 7 | 3616 |
+| ✅ Approval | 1 | 7 | 3644 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3879 |
 | ✅ Autonomy | 3 | 7 | 2794 |
@@ -30,7 +30,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ CLI | 5 | 123 | 38327 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4855 |
+| ✅ Code Execution | 2 | 14 | 4974 |
 | ✅ Conditions | 1 | 3 | 1386 |
 | ✅ Configuration | 3 | 8 | 3323 |
 | ✅ Context Management | 16 | 36 | 14104 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 8 | 3231 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44258 |
+| ✅ Tools | 12 | 145 | 44263 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
