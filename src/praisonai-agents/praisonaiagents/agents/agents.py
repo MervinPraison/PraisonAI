@@ -1509,6 +1509,15 @@ class AgentTeam(SpawnAnnounceProtocol):
                 
                 task.retry_count += 1
                 task.status = "in progress"  # Keep task in progress for retry
+                # Carry the reason into the re-run. Without this the whole-task
+                # retry re-asks the identical prompt and the model has no way to
+                # know what was wrong; Process._build_task_context turns this
+                # dict into "Previous attempt failed validation with reason: ...".
+                task.validation_feedback = {
+                    'validation_response': guardrail_result.error,
+                    'validated_task': task.name or task.description,
+                    'rejected_output': getattr(task_output, 'raw', str(task_output)),
+                }
                 logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
                 return task_output, True  # Signal retry needed
             

@@ -2634,7 +2634,124 @@ class ToolExecutionMixin:
                 "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
             }
 
-    def _check_tool_policy_and_guardrails(self, function_name, arguments):
+    def _find_declared_tool(self, function_name, tools=None):
+        """Return the tool OBJECT named ``function_name``, or ``None``.
+
+        Per-tool guardrails are declared on the tool the user wrote
+        (``@tool(input_guardrails=...)``), so gating them needs the object, not
+        just the name. Searched over the agent's own tools (or the caller's
+        ``tools_override``, so a run-scoped tool list cannot silently bypass its
+        own guardrails). Deliberately does NOT fall back to the global tool
+        registry: a guardrail must come from the tool this agent was actually
+        given, never from a same-named tool registered elsewhere.
+        """
+        candidates = tools if tools is not None else getattr(self, "tools", None)
+        if not isinstance(candidates, (list, tuple)):
+            return None
+        for tool_obj in candidates:
+            if getattr(tool_obj, "name", None) == function_name:
+                return tool_obj
+            if getattr(tool_obj, "__name__", None) == function_name:
+                return tool_obj
+        return None
+
+    def _check_per_tool_input_guardrails(self, function_name, arguments, tools=None):
+        """Run the guardrails declared on THIS tool against its arguments.
+
+        ORDERING (deliberate, see also ``_apply_per_tool_output_guardrails``):
+        this runs LAST on the way in - after the human approval gate, after the
+        agent-wide PolicyEngine, and after any agent-wide tool-call guardrail -
+        so it sits immediately before dispatch. That is the safest order for two
+        reasons:
+
+        1. Nothing can rewrite the arguments between this verdict and the call.
+           A guardrail that approved ``send_email(to=alice@corp.com)`` and then
+           had the arguments rewritten underneath it would be a guardrail in
+           name only, and the rewrite is exactly the capability an attacker-
+           steered agent-wide component would reach for. "The tool never runs
+           with arguments its own guardrail did not see" is the whole promise of
+           this feature, so it is the invariant that gets protected.
+        2. Human approval stays *upstream* of every automated rewrite. The human
+           is auditing what the MODEL proposed; if a guardrail could sanitise
+           the arguments first, an approval prompt would show a call the model
+           never made, and a rewriting guardrail could launder a call past human
+           review.
+
+        Returns an error dict when blocked (never raises), or ``(None, arguments)``
+        with the possibly-rewritten arguments when allowed. Zero overhead for
+        tools that declared no guardrail: one attribute read, then out.
+        """
+        tool_obj = self._find_declared_tool(function_name, tools)
+        if tool_obj is None:
+            return None, arguments
+        from ..guardrails.tool_guardrails import get_tool_guardrail_chain, INPUT
+        chain = get_tool_guardrail_chain(tool_obj, INPUT)
+        if chain is None:
+            return None, arguments
+        is_valid, processed = chain.validate_tool_call(function_name, arguments)
+        if not is_valid:
+            # Hand the reason back to the MODEL as this tool's result so it can
+            # react (pick different arguments, choose another tool, explain to
+            # the user). Raising here would abort the run and surface a stack
+            # trace to the user for what is a normal, expected policy outcome.
+            logging.warning(
+                f"Tool '{function_name}' blocked by its input guardrail: {processed}"
+            )
+            return {
+                "error": (
+                    f"Tool '{function_name}' was blocked by an input guardrail: "
+                    f"{processed}"
+                ),
+                "guardrail_denied": True,
+                "tool_guardrail": "input",
+            }
+        if isinstance(processed, dict):
+            arguments = processed
+        return None, arguments
+
+    def _apply_per_tool_output_guardrails(self, function_name, result, tools=None):
+        """Run the guardrails declared on THIS tool against its raw result.
+
+        ORDERING (deliberate): this runs FIRST on the way out - before any
+        agent-wide tool-result guardrail and before the ``trust_level``
+        external-content fence (``tools.trust.wrap_if_external``) and output
+        truncation. Mirroring the input side, the per-tool guardrail is the
+        layer closest to the tool in both directions:
+
+        * It sees the RAW result. If the trust fence ran first, every guardrail
+          would have to parse and strip ``<external_tool_result>`` markers to
+          find the content it cares about, and a guardrail that redacts by
+          rewriting could damage or forge the fence.
+        * The fence therefore stays outermost, wrapping whatever the guardrails
+          finally allow, so a substituted result is fenced exactly like an
+          original one and cannot escape the injection markers.
+
+        Returns the (possibly substituted) result, or an error dict tagged
+        ``guardrail_denied`` when blocked. Never raises.
+        """
+        tool_obj = self._find_declared_tool(function_name, tools)
+        if tool_obj is None:
+            return result
+        from ..guardrails.tool_guardrails import get_tool_guardrail_chain, OUTPUT
+        chain = get_tool_guardrail_chain(tool_obj, OUTPUT)
+        if chain is None:
+            return result
+        is_valid, processed = chain.validate_tool_result(function_name, result)
+        if not is_valid:
+            logging.warning(
+                f"Tool '{function_name}' result blocked by its output guardrail: {processed}"
+            )
+            return {
+                "error": (
+                    f"Tool '{function_name}' result was blocked by an output "
+                    f"guardrail: {processed}"
+                ),
+                "guardrail_denied": True,
+                "tool_guardrail": "output",
+            }
+        return processed
+
+    def _check_tool_policy_and_guardrails(self, function_name, arguments, tools=None):
         """Gate a tool call through the attached PolicyEngine and tool guardrails.
 
         Consults ``self._policy`` (a ``PolicyEngine``) via ``check_tool`` and any
@@ -2694,9 +2811,18 @@ class ToolExecutionMixin:
                 }
             if isinstance(processed, dict):
                 arguments = processed
+
+        # Per-tool guardrails run LAST, immediately before dispatch, so nothing
+        # can rewrite the arguments between the tool's own verdict and the call.
+        # See _check_per_tool_input_guardrails for the full ordering rationale.
+        per_tool = self._check_per_tool_input_guardrails(function_name, arguments, tools)
+        if isinstance(per_tool, dict):
+            return per_tool  # Error dict -> handed back to the model
+        _, arguments = per_tool
+
         return None, arguments
 
-    def _apply_tool_result_guardrails(self, function_name, result):
+    def _apply_tool_result_guardrails(self, function_name, result, tools=None):
         """Gate a tool's raw result through any tool-result guardrails.
 
         Runs after execution and before the result re-enters the LLM context so
@@ -2707,9 +2833,19 @@ class ToolExecutionMixin:
         mirroring ``_check_tool_policy_and_guardrails``. Zero overhead when no
         tool-result guardrail is set. Denial error dicts pass straight through
         untouched so a gated/failed tool is not re-inspected.
+
+        Order: per-tool guardrails (``@tool(output_guardrails=...)``) run first,
+        then agent-wide ones, then - back in the caller - the ``trust_level``
+        external-content fence and truncation. The tool's own validator is
+        therefore closest to the tool and always sees raw, unfenced output.
         """
         guardrails = getattr(self, "_tool_result_guardrails", None)
-        if not guardrails:
+        # NOTE: the early return here used to be ``if not guardrails: return``.
+        # Per-tool output guardrails are declared on the TOOL, not on the agent,
+        # so an agent with no agent-wide result guardrail must still run them -
+        # bailing out on the agent-wide list alone would make
+        # ``@tool(output_guardrails=...)`` silently dead for the common case.
+        if not guardrails and self._find_declared_tool(function_name, tools) is None:
             return result
         # Only skip results the framework itself already gated/denied — those
         # carry an explicit control marker and were never real tool output. An
@@ -2725,7 +2861,16 @@ class ToolExecutionMixin:
             or result.get("approval_error")
         ):
             return result
-        for guardrail in guardrails:
+
+        # Per-tool guardrails run FIRST on the way out, so the tool's own
+        # validator sees the raw result before any agent-wide guardrail rewrites
+        # it and before the trust fence wraps it. See
+        # _apply_per_tool_output_guardrails for the full ordering rationale.
+        result = self._apply_per_tool_output_guardrails(function_name, result, tools)
+        if isinstance(result, dict) and result.get("guardrail_denied"):
+            return result
+
+        for guardrail in guardrails or []:
             validate = getattr(guardrail, "validate_tool_result", None)
             if validate is None:
                 continue

@@ -1,6 +1,6 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 411 | **Rust Features:** 667 | **Parity:** 69.8%
+> **Python Features:** 417 | **Rust Features:** 667 | **Parity:** 68.8%
 
 > [!IMPORTANT]
 > **What this measures:** whether a matching *exported symbol name* exists in the
@@ -14,11 +14,11 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 411 |
+| Python Core Features | 417 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **124** |
+| **Actual Gap Count** | **130** |
 | Language Limitations (N/A) | 4 |
-| **Parity** | **69.8%** |
+| **Parity** | **68.8%** |
 
 ## Implemented Features
 
@@ -743,6 +743,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `GoalConfig`
 - ❌ `GoalEngineer`
 - ❌ `GoalVerificationResult`
+- ❌ `GuardrailRetry`
 - ❌ `HandoffToolPolicy`
 - ❌ `HarnessProfile`
 - ❌ `Heartbeat`
@@ -760,6 +761,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `MAX_NESTING_DEPTH`
 - ❌ `ManagedBackendProtocol`
 - ❌ `ManagedEvent`
+- ❌ `ModelRequestBlocked`
 - ❌ `NetworkError`
 - ❌ `ObservabilityEventType`
 - ❌ `ObservabilityHooks`
@@ -772,6 +774,8 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `RulesConfig`
 - ❌ `RunOutcome`
 - ❌ `RunStatus`
+- ❌ `ScriptExhausted`
+- ❌ `ScriptedModel`
 - ❌ `SendResult`
 - ❌ `SessionErrorEvent`
 - ❌ `SessionIdleEvent`
@@ -791,6 +795,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `__version__`
 - ❌ `add_memory_adapter`
 - ❌ `add_memory_factory`
+- ❌ `allow_model_requests`
 - ❌ `configure_structured_logging`
 - ❌ `discover_skills`
 - ❌ `get_default_policy`
@@ -808,6 +813,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `list_runtimes`
 - ❌ `list_toolsets`
 - ❌ `load_skill`
+- ❌ `no_model_requests`
 - ❌ `parallel_handoffs`
 - ❌ `register_memory_adapter`
 - ❌ `register_memory_factory`

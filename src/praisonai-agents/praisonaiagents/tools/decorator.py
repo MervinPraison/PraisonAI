@@ -27,6 +27,16 @@ Usage:
     @tool(approval=True)
     def refund_order(order_id: str) -> str:
         return "refunded"
+
+    # Guarding just this one tool's arguments and result:
+    def internal_only(arguments: dict):
+        if not arguments["to"].endswith("@corp.com"):
+            return False, "Recipient is outside the company domain."
+        return True, arguments
+
+    @tool(input_guardrails=[internal_only])
+    def send_email(to: str, body: str) -> str:
+        return "sent"
 """
 
 import inspect
@@ -114,7 +124,9 @@ class FunctionTool(BaseTool):
         approval: Optional[Union[bool, str]] = None,
         requires_approval: Union[bool, str] = _UNSET,
         to_model_output: Optional[Callable[[Any], Any]] = None,
-        restart_safe: Optional[bool] = None
+        restart_safe: Optional[bool] = None,
+        input_guardrails: Optional[Any] = None,
+        output_guardrails: Optional[Any] = None
     ):
         self._func = func
         # Restart-safety contract for durable resume (see BaseTool.restart_safe).
@@ -144,6 +156,16 @@ class FunctionTool(BaseTool):
         self.approval = resolved
         self.requires_approval = resolved
         
+        # Per-tool guardrails, declared alongside ``approval``/``restart_safe``.
+        # Coerced to a ToolGuardrailChain here (at definition time) so a
+        # malformed declaration raises at the @tool site rather than on the
+        # first call, and so the executor's per-call work is one attribute read.
+        # ``None`` when nothing was declared, which keeps unguarded tools on the
+        # zero-overhead fast path.
+        from ..guardrails.tool_guardrails import build_tool_guardrails, INPUT, OUTPUT
+        self.input_guardrails = build_tool_guardrails(input_guardrails, INPUT)
+        self.output_guardrails = build_tool_guardrails(output_guardrails, OUTPUT)
+
         # Detect injected parameters
         self._injected_params = get_injected_params(func)
         
@@ -244,7 +266,9 @@ def tool(
     approval: Optional[Union[bool, str]] = None,
     requires_approval: Union[bool, str] = _UNSET,
     to_model_output: Optional[Callable[[Any], Any]] = None,
-    restart_safe: Optional[bool] = None
+    restart_safe: Optional[bool] = None,
+    input_guardrails: Optional[Any] = None,
+    output_guardrails: Optional[Any] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -275,6 +299,10 @@ def tool(
         def deploy(env: str) -> str:
             return "deployed"
 
+        @tool(input_guardrails=[internal_only], output_guardrails=[no_secrets])
+        def send_email(to: str, body: str) -> str:
+            return "sent"
+
     Args:
         func: The function to wrap (when used without parentheses)
         name: Override the tool name (default: function name)
@@ -304,6 +332,26 @@ def tool(
             recorded, operator-visible outcome to reconcile instead). Defaults
             to ``None`` (undeclared): durable resume falls back to a read-only
             name heuristic and fails closed when uncertain.
+        input_guardrails: Guardrail(s) that see this tool's arguments before it
+            runs, and may block the call or rewrite the arguments. Scoped to
+            THIS tool only - unlike ``Agent(guardrails=...)``, which fires for
+            every tool. Each entry is a ``fn(arguments: dict)`` returning
+            ``(True, arguments)`` to allow (optionally rewritten),
+            ``(False, "reason")`` to block, or any object exposing
+            ``validate_tool_call`` (a ``GuardrailProtocol``/``GuardrailChain``).
+            A blocked call is reported back to the *model* as the tool result so
+            it can react; it never raises at the user. Runs immediately before
+            dispatch - after the approval gate and after any agent-wide
+            policy/guardrail - so nothing can rewrite the arguments between the
+            guardrail's verdict and the tool. Defaults to ``None``.
+        output_guardrails: Guardrail(s) that see this tool's raw result before it
+            re-enters the LLM context, and may block it or substitute a
+            different value (e.g. redact a secret). Each entry is a
+            ``fn(result)`` using the same ``(success, value)`` convention, or an
+            object exposing ``validate_tool_result``. Runs immediately after the
+            tool returns - before any agent-wide result guardrail and before the
+            ``trust_level`` external-content fence - so the guardrail always
+            sees the raw, unfenced output. Defaults to ``None``.
     
     Returns:
         FunctionTool instance that wraps the function
@@ -322,7 +370,9 @@ def tool(
             retry_policy=retry_policy,
             approval=resolved_approval,
             to_model_output=to_model_output,
-            restart_safe=restart_safe
+            restart_safe=restart_safe,
+            input_guardrails=input_guardrails,
+            output_guardrails=output_guardrails
         )
 
         # Register approval requirement with the global registry so local,

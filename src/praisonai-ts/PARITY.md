@@ -22,15 +22,15 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 411 |
+| Python Core Features | 417 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 2040 |
-| **Gap Count** | **0** |
+| **Gap Count** | **6** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
-| P2 (Medium) | 0 |
-| P3 (Low) | 0 |
+| P2 (Medium) | 1 |
+| P3 (Low) | 5 |
 
 ## Gap Matrix
 
@@ -123,10 +123,11 @@
 | `route` | ✅ | ✅ | low | ✅ exported |
 | `when` | ✅ | ✅ | low | ✅ exported |
 
-### P2_CLI (47 exported, 0 stub, 0 missing)
+### P2_CLI (47 exported, 0 stub, 1 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `GuardrailRetry` | ✅ | ❌ | high | ⏳ missing |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ exported |
 | `Citation` | ✅ | ✅ | high | ✅ exported |
 | `CitationsMode` | ✅ | ✅ | high | ✅ exported |
@@ -175,10 +176,15 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (285 exported, 0 stub, 0 missing)
+### P3_Advanced (285 exported, 0 stub, 5 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `ModelRequestBlocked` | ✅ | ❌ | high | ⏳ missing |
+| `ScriptExhausted` | ✅ | ❌ | high | ⏳ missing |
+| `ScriptedModel` | ✅ | ❌ | high | ⏳ missing |
+| `allow\_model\_requests` | ✅ | ❌ | low | ⏳ missing |
+| `no\_model\_requests` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
 | `AGGRESSIVE\_POLICY` | ✅ | ✅ | low | ✅ exported |
@@ -560,10 +566,10 @@ from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, 
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (2 exports)</summary>
+<summary><strong>guardrails</strong> (3 exports)</summary>
 
 ```python
-from praisonaiagents import GuardrailResult, LLMGuardrail
+from praisonaiagents import GuardrailResult, GuardrailRetry, LLMGuardrail
 ```
 
 </details>
@@ -614,7 +620,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (106 exports)</summary>
+<summary><strong>other</strong> (111 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

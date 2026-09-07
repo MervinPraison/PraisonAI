@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-09-02",
+  "lastUpdated": "2026-09-07",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "IN_PROGRESS",
   "summary": {
-    "pythonCoreFeatures": 411,
+    "pythonCoreFeatures": 417,
     "rustFeatures": 667,
-    "gapCount": 128,
-    "parityPercentage": 68.9
+    "gapCount": 134,
+    "parityPercentage": 67.9
   },
   "pythonCoreSDK": {
     "exports": [
@@ -140,6 +140,7 @@
       "GuardrailAction",
       "GuardrailConfig",
       "GuardrailResult",
+      "GuardrailRetry",
       "Handoff",
       "HandoffConfig",
       "HandoffCycleError",
@@ -189,6 +190,7 @@
       "MemoryConfig",
       "MessageType",
       "MinimalTelemetry",
+      "ModelRequestBlocked",
       "MultiAgentExecutionConfig",
       "MultiAgentHooksConfig",
       "MultiAgentMemoryConfig",
@@ -260,6 +262,8 @@
       "SandboxResult",
       "SandboxStatus",
       "ScopeRequiredError",
+      "ScriptExhausted",
+      "ScriptedModel",
       "SecurityPolicy",
       "SendResult",
       "Session",
@@ -314,6 +318,7 @@
       "aembed",
       "aembedding",
       "aembeddings",
+      "allow_model_requests",
       "apply_config_defaults",
       "async_display_callbacks",
       "clean_triple_backticks",
@@ -373,6 +378,7 @@
       "load_skill",
       "loop",
       "memory",
+      "no_model_requests",
       "parallel",
       "parallel_handoffs",
       "parse_plugin_header",
@@ -2671,6 +2677,15 @@
         "category": "guardrails"
       },
       {
+        "feature": "GuardrailRetry",
+        "python": true,
+        "rust": false,
+        "priority": "P2",
+        "effort": "high",
+        "status": "TODO",
+        "category": "guardrails"
+      },
+      {
         "feature": "LLMGuardrail",
         "python": true,
         "rust": true,
@@ -4158,6 +4173,15 @@
         "category": "bots"
       },
       {
+        "feature": "ModelRequestBlocked",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "MultiAgentExecutionConfig",
         "python": true,
         "rust": true,
@@ -4545,6 +4569,24 @@
         "category": "other"
       },
       {
+        "feature": "ScriptExhausted",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ScriptedModel",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SecurityPolicy",
         "python": true,
         "rust": true,
@@ -4822,6 +4864,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "allow_model_requests",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "apply_config_defaults",
@@ -5203,6 +5254,15 @@
       },
       {
         "feature": "memory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "no_model_requests",
         "python": true,
         "rust": false,
         "priority": "P3",

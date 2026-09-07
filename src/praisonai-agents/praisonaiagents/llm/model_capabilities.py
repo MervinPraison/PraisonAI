@@ -102,6 +102,50 @@ def _fallback_supports_prompt_caching(model_name: str) -> bool:
     return any(p in name for p in ("claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "gpt-4o", "gpt-4.1", "gpt-5", "deepseek"))
 
 
+def _fallback_supports_vision(model_name: str) -> bool:
+    """Static heuristic used only when litellm is unavailable."""
+    name = _base_model_name(model_name)
+    return any(
+        p in name
+        for p in (
+            "gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-4-vision", "gpt-5",
+            "o1", "o3", "o4", "claude-3", "claude-sonnet", "claude-opus",
+            "claude-haiku", "gemini", "llava", "pixtral", "grok-2", "grok-4",
+            "qwen-vl", "qwen2-vl", "internvl", "vision",
+        )
+    )
+
+
+def _fallback_supports_pdf_input(model_name: str) -> bool:
+    """Static heuristic used only when litellm is unavailable.
+
+    Narrower than vision: a model may read images and still reject a raw PDF
+    document part. Kept to the families that accept PDFs natively today
+    (Anthropic Claude 3.5+/4, OpenAI gpt-4o/4.1/5 file inputs, Gemini).
+    """
+    name = _base_model_name(model_name)
+    return any(
+        p in name
+        for p in (
+            "claude-3-5", "claude-3-7", "claude-sonnet", "claude-opus",
+            "claude-haiku", "gpt-4o", "gpt-4.1", "gpt-5", "gemini",
+        )
+    )
+
+
+def _fallback_supports_audio_input(model_name: str) -> bool:
+    """Static heuristic used only when litellm is unavailable.
+
+    Very narrow on purpose: most chat models reject an ``input_audio`` part
+    outright, so guessing ``True`` would trade a silent drop for a hard API
+    error. Only the explicitly audio-capable families are reported.
+    """
+    name = _base_model_name(model_name)
+    if "audio" in name:  # gpt-4o-audio-preview, gpt-audio, ...
+        return True
+    return any(p in name for p in ("gemini-1.5", "gemini-2", "gemini-3", "qwen-audio"))
+
+
 @lru_cache(maxsize=256)
 def supports_structured_outputs(model_name: str) -> bool:
     """
@@ -299,6 +343,89 @@ def supports_prompt_caching(model_name: str) -> bool:
     if litellm is not None:
         return False
     return _fallback_supports_prompt_caching(model_name)
+
+
+@lru_cache(maxsize=256)
+def supports_vision(model_name: str) -> bool:
+    """Check if a model can accept image parts.
+
+    Uses LiteLLM's ``supports_vision()`` as the primary check, falling back to
+    a static heuristic when litellm is not installed.
+    """
+    if not model_name:
+        return False
+
+    litellm = None
+    try:
+        litellm = _get_litellm()
+        if litellm is None:
+            return _fallback_supports_vision(model_name)
+        if hasattr(litellm, "supports_vision"):
+            return litellm.supports_vision(model=model_name)
+    except Exception:
+        pass
+
+    if litellm is not None:
+        return False
+    return _fallback_supports_vision(model_name)
+
+
+@lru_cache(maxsize=256)
+def supports_pdf_input(model_name: str) -> bool:
+    """Check if a model can accept a PDF document part natively.
+
+    Uses LiteLLM's ``supports_pdf_input()`` (top level or ``litellm.utils``)
+    as the primary check, falling back to a static heuristic when litellm is
+    not installed. Callers that get ``False`` must degrade *visibly* (e.g.
+    extract the PDF's text) rather than dropping the attachment.
+    """
+    if not model_name:
+        return False
+
+    litellm = None
+    try:
+        litellm = _get_litellm()
+        if litellm is None:
+            return _fallback_supports_pdf_input(model_name)
+        fn = getattr(litellm, "supports_pdf_input", None)
+        if fn is None and hasattr(litellm, "utils"):
+            fn = getattr(litellm.utils, "supports_pdf_input", None)
+        if fn is not None:
+            return fn(model=model_name)
+    except Exception:
+        pass
+
+    if litellm is not None:
+        return False
+    return _fallback_supports_pdf_input(model_name)
+
+
+@lru_cache(maxsize=256)
+def supports_audio_input(model_name: str) -> bool:
+    """Check if a model can accept an ``input_audio`` part.
+
+    Uses LiteLLM's ``supports_audio_input()`` as the primary check, falling
+    back to a static heuristic when litellm is not installed.
+    """
+    if not model_name:
+        return False
+
+    litellm = None
+    try:
+        litellm = _get_litellm()
+        if litellm is None:
+            return _fallback_supports_audio_input(model_name)
+        fn = getattr(litellm, "supports_audio_input", None)
+        if fn is None and hasattr(litellm, "utils"):
+            fn = getattr(litellm.utils, "supports_audio_input", None)
+        if fn is not None:
+            return fn(model=model_name)
+    except Exception:
+        pass
+
+    if litellm is not None:
+        return False
+    return _fallback_supports_audio_input(model_name)
 
 
 # Models that support web fetch via LiteLLM (Anthropic only)
