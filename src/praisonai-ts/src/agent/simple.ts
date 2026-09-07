@@ -474,6 +474,76 @@ export interface AgentRetryConfig {
 }
 
 /**
+ * The duck-type Python's `Agent.execute` looks for: `hasattr(task, 'description')`
+ * (praisonaiagents/agent/execution_mixin.py). A {@link Task} satisfies it, and
+ * so does any plain object carrying a `description` string.
+ */
+export interface AgentTaskLike {
+  description?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * What {@link Agent.execute} accepts as its task.
+ *
+ * {@link Task} is listed alongside {@link AgentTaskLike} because a class
+ * instance gets no implicit index signature in TypeScript, so a real `Task`
+ * would not satisfy `AgentTaskLike` -- and `agent.execute(task)`, the exact
+ * call this method exists to support, would fail to compile.
+ */
+export type AgentExecuteTask = string | AgentTaskLike | Task;
+
+/**
+ * The prompt {@link Agent.execute} runs, resolved exactly as Python resolves it:
+ * `task.description` when present, else the string, else `str(task)`. An absent
+ * task falls back to the agent's own instructions (Python's `start(prompt=None)`
+ * rule), which is what `execute()` with no argument has always done here.
+ */
+function resolveExecutePrompt(task: AgentExecuteTask | null | undefined, instructions: string): string {
+  if (task === undefined || task === null) return instructions;
+  if (typeof task === 'string') return task;
+  const description = (task as AgentTaskLike).description;
+  if (typeof description === 'string') return description;
+  return String(task);
+}
+
+/**
+ * Errors that survive `errorsAsNull`, mirroring the ones Python's `Agent.chat`
+ * re-raises rather than collapsing to `None`
+ * (praisonaiagents/agent/chat_mixin.py: `except ToolExecutionError: raise`,
+ * `except BudgetExceededError: raise`, `except InterruptedError: raise`).
+ *
+ * Matched by `name` rather than `instanceof` so this stays a pure-value check:
+ * every class here already sets its own `name`, and importing them would put
+ * more of the error module on the browser bundle graph for no benefit.
+ */
+const TERMINAL_CHAT_ERROR_NAMES = new Set([
+  'AbortError',
+  'BudgetExceededError',
+  'InterruptedError',
+  'ToolExecutionError',
+]);
+
+/** True when `error` must reject even though the caller asked for `null`. */
+function isTerminalChatError(error: unknown, signal: AbortSignal | undefined): boolean {
+  // A cancelled run is not a failed one: swallowing it would make an aborted
+  // turn indistinguishable from a model that returned nothing.
+  if (signal?.aborted) return true;
+  const name = (error as { name?: unknown } | null | undefined)?.name;
+  return typeof name === 'string' && TERMINAL_CHAT_ERROR_NAMES.has(name);
+}
+
+/** Chained prior output as one string; an array is joined with blank lines. */
+function joinContext(context: string | string[] | null | undefined): string | undefined {
+  if (context === undefined || context === null) return undefined;
+  if (Array.isArray(context)) {
+    const parts = context.filter((c): c is string => typeof c === 'string' && c.length > 0);
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }
+  return context;
+}
+
+/**
  * Per-call options for {@link Agent.chat} (and {@link Agent.stream}), mirroring
  * the keyword arguments of Python's `Agent.chat`.
  */
@@ -511,6 +581,37 @@ export interface AgentChatOptions {
   toolChoice?: 'auto' | 'none' | 'required' | string;
   /** Python parity: seed (Optional[int]). Forwarded on OpenAI-compatible requests. */
   seed?: number;
+}
+
+/**
+ * Per-call options for {@link Agent.chat} only.
+ *
+ * `errorsAsNull` lives here rather than on {@link AgentChatOptions} on purpose:
+ * `start()` and `stream()` accept AgentChatOptions and do NOT honour it, and an
+ * option that is accepted and ignored is the defect this package keeps a ledger
+ * for (see `utils/parity-notice.ts`).
+ */
+export interface AgentChatCallOptions extends AgentChatOptions {
+  /**
+   * Opt in to Python's error contract: resolve with `null` instead of
+   * rejecting when the turn fails.
+   *
+   * Python's `Agent.chat` catches `Exception` around the LLM call, reports it
+   * through `display_error`, and returns `None`
+   * (praisonaiagents/agent/chat_mixin.py, the two
+   * `except Exception ... return None` arms at the end of `_chat_impl`), so
+   * Python code is written as `result = agent.chat(...)` followed by
+   * `if result is None:`. TypeScript rejects instead, which is the better
+   * default -- a failure that is ignored is a failure that ships -- so this is
+   * opt-in and per call, and the default is unchanged.
+   *
+   * What is NOT swallowed, matching Python's own re-raises: cancellation
+   * (an aborted signal, or an `AbortError`/`InterruptedError`),
+   * `ToolExecutionError`, and `BudgetExceededError`. The swallowed error is
+   * still reported through {@link Logger}, mirroring Python's `display_error`,
+   * so a failed turn is never silent.
+   */
+  errorsAsNull?: boolean;
 }
 
 /**
@@ -756,6 +857,13 @@ export class Agent {
    * `Agent.last_stop_reason`). `null` until the agent has run at least once.
    */
   public lastStopReason: StopReason | null = null;
+  /**
+   * Text the agent last produced, for {@link Agent.getResult}. `null` until the
+   * agent has completed a turn; set by {@link Agent.runTurn}, which every
+   * public entry point (start, chat, execute, stream, streamEvents) goes
+   * through.
+   */
+  private _lastResult: string | null = null;
   private dbAdapter?: DbAdapter;
   private sessionId: string;
   private runId: string;
@@ -1897,12 +2005,23 @@ export class Agent {
   }
 
   /**
+   * The cache key for one turn. `previousResult` is part of it because it is
+   * substituted for `{{previous}}` in the prompt before the model sees it, so
+   * the same raw prompt with a different chained context is a DIFFERENT model
+   * input and must not share a cache entry. Omitting it let `execute(task,
+   * contextA)` return the response computed for `execute(task, contextB)`.
+   */
+  private cacheKeyFor(prompt: string, previousResult?: string): string {
+    return `${this.sessionId}:${previousResult ?? ''}:${prompt}`;
+  }
+
+  /**
    * Get cached response if available and not expired
    */
-  private getCachedResponse(prompt: string): string | null {
+  private getCachedResponse(prompt: string, previousResult?: string): string | null {
     if (!this.cache) return null;
     
-    const cacheKey = `${this.sessionId}:${prompt}`;
+    const cacheKey = this.cacheKeyFor(prompt, previousResult);
     const cached = this.responseCache.get(cacheKey);
     
     if (cached) {
@@ -1920,10 +2039,10 @@ export class Agent {
   /**
    * Cache a response
    */
-  private cacheResponse(prompt: string, response: string): void {
+  private cacheResponse(prompt: string, response: string, previousResult?: string): void {
     if (!this.cache) return;
     
-    const cacheKey = `${this.sessionId}:${prompt}`;
+    const cacheKey = this.cacheKeyFor(prompt, previousResult);
     this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
   }
 
@@ -2333,6 +2452,23 @@ export class Agent {
    * start(), chat(), stream(), streamEvents() -- goes through here.
    */
   private async runTurn(
+    prompt: string,
+    previousResult: string | undefined,
+    onToken: ((token: string) => void) | undefined,
+    signal: AbortSignal | undefined,
+    onEvent: ((event: AgentEvent) => void) | undefined,
+    options?: AgentChatOptions,
+  ): Promise<string> {
+    // One place to record what the agent produced, so `getResult()` cannot
+    // drift away from the turn machinery as entry points are added. A turn
+    // that throws leaves the previous result in place rather than clearing it.
+    const result = await this.runTurnUnrecorded(prompt, previousResult, onToken, signal, onEvent, options);
+    this._lastResult = result;
+    return result;
+  }
+
+  /** {@link Agent.runTurn} without the `getResult()` bookkeeping. */
+  private async runTurnUnrecorded(
     prompt: string,
     previousResult: string | undefined,
     onToken: ((token: string) => void) | undefined,
@@ -3335,19 +3471,87 @@ export class Agent {
   /**
    * Send one message and return the reply, keeping conversation history.
    *
+   * Rejects if the turn fails. Python's `Agent.chat` instead reports the error
+   * and returns `None`; pass `{ errorsAsNull: true }` in `options` for that
+   * contract, which changes the return type to `string | null` and nothing
+   * else. See {@link AgentChatCallOptions.errorsAsNull} for what stays fatal.
+   *
    * @param prompt - The user message.
    * @param previousResult - Substituted for `{{previous}}` in the prompt.
    * @param signal - Turn-scoped abort signal (Python parity: cancel_token).
    * @param options - Per-call options mirroring Python's `Agent.chat` keyword
-   *   arguments (temperature, tools, outputJson, stream, toolChoice, seed, ...).
+   *   arguments (temperature, tools, outputJson, stream, toolChoice, seed, ...),
+   *   plus the chat-only `errorsAsNull`.
    */
-  async chat(prompt: string, previousResult?: string, signal?: AbortSignal, options?: AgentChatOptions): Promise<string> {
+  // The default overload is declared first for two reasons that happen to
+  // align. TypeScript resolves overloads top-down, so an existing caller keeps
+  // `Promise<string>`; a call whose object literal carries `errorsAsNull: true`
+  // fails this overload's excess-property check and falls through to the null
+  // one below. The signature-parity extractor also reads the FIRST overload
+  // (ts_extract.mjs, matches[0]) and flattens a param typed as a plain,
+  // same-file interface -- so `options` must name `AgentChatOptions` directly
+  // here, not `AgentChatCallOptions` and not an intersection, or Python's chat
+  // keywords (temperature, tools, seed, ...) stop being seen and the gate fails.
+  async chat(
+    prompt: string,
+    previousResult?: string,
+    signal?: AbortSignal,
+    options?: AgentChatOptions,
+  ): Promise<string>;
+  // `errorsAsNull: false` is the default contract spelled out -- still a
+  // rejection, still `Promise<string>`. It needs its own overload because the
+  // one above types `options` as AgentChatOptions, which does not know the key.
+  async chat(
+    prompt: string,
+    previousResult: string | undefined,
+    signal: AbortSignal | undefined,
+    options: AgentChatCallOptions & { errorsAsNull: false },
+  ): Promise<string>;
+  async chat(
+    prompt: string,
+    previousResult: string | undefined,
+    signal: AbortSignal | undefined,
+    options: AgentChatCallOptions & { errorsAsNull: true },
+  ): Promise<string | null>;
+  async chat(
+    prompt: string,
+    previousResult?: string,
+    signal?: AbortSignal,
+    options?: AgentChatCallOptions,
+  ): Promise<string | null> {
+    try {
+      return await this.chatOrThrow(prompt, previousResult, signal, options);
+    } catch (error) {
+      // Default: reject, as this SDK always has. Only a caller that asked for
+      // Python's contract (`errorsAsNull`) gets `null`, and only for the
+      // errors Python itself swallows.
+      if (!options?.errorsAsNull) throw error;
+      if (isTerminalChatError(error, signal ?? this.signal)) throw error;
+      // Python calls display_error here; the failure must stay audible.
+      await Logger.error(`Error in LLM chat: ${error instanceof Error ? error.message : String(error)}`, error);
+      return null;
+    }
+  }
+
+  /** {@link Agent.chat}'s body: always rejects on failure. */
+  private async chatOrThrow(
+    prompt: string,
+    previousResult?: string,
+    signal?: AbortSignal,
+    options?: AgentChatCallOptions,
+  ): Promise<string> {
     // Lazy init: restore history on first chat (like Python SDK)
     await this.initDbSession();
     
-    // Check cache first
-    const cached = this.getCachedResponse(prompt);
+    // Check cache first. previousResult is part of the key: it is substituted
+    // into the prompt before the model sees it, so a different chained context
+    // is a different call and must miss the cache.
+    const cached = this.getCachedResponse(prompt, previousResult);
     if (cached) {
+      // A served cache hit is still what the agent produced this turn, so
+      // getResult() must reflect it -- runTurn (which records _lastResult) is
+      // skipped on this path, so record it here.
+      this._lastResult = cached;
       return cached;
     }
     
@@ -3370,15 +3574,49 @@ export class Agent {
       await this.persistMessage('assistant', response);
     }
     
-    // Cache the response
-    this.cacheResponse(prompt, response);
+    // Cache the response under the same previousResult-aware key.
+    this.cacheResponse(prompt, response, previousResult);
     
     return response;
   }
 
-  async execute(previousResult?: string): Promise<string> {
-    // For backward compatibility and multi-agent support
-    return this.start(this.instructions, previousResult);
+  /**
+   * Run a task on this agent.
+   *
+   * Python parity: `praisonaiagents/agent/execution_mixin.py` (`Agent.execute`)
+   * takes a TASK -- `task.description` if the argument has one, else
+   * `str(task)` -- and runs it through `chat()`. This method does the same, so
+   * a port of `agent.execute(task)` behaves the way the Python it came from
+   * behaves.
+   *
+   * The forms, precisely:
+   *
+   * - `execute()` -- no task named: runs the agent's own `instructions`, the
+   *   same fallback {@link Agent.start} uses for `start()`. Unchanged.
+   * - `execute(task)` where `task` is a string: runs that string as the task.
+   * - `execute(task)` where `task` is task-like (anything with a string
+   *   `description`, e.g. a {@link Task}): runs `task.description`.
+   * - `execute(task)` with any other value: runs `String(task)`, matching
+   *   Python's `str(task)` fallback.
+   * - `context` (second argument) is prior output to chain in: it is
+   *   substituted for the `{{previous}}` placeholder in the resolved prompt,
+   *   exactly as {@link Agent.chat}'s `previousResult` is. An array is joined
+   *   with blank lines. Python accepts `context` on `execute()` and ignores
+   *   it; honouring it here is additive, and no Python program can tell.
+   *
+   * BREAKING (v2): before this, the single argument was the previous result
+   * and the agent always ran its own `instructions`, so `execute(taskText)`
+   * discarded `taskText` unless the instructions contained `{{previous}}`.
+   * That chaining call is now written `execute(undefined, previousResult)`,
+   * which reproduces the old behaviour exactly.
+   *
+   * @param task - The task to run, or omitted to run the agent's instructions.
+   * @param context - Prior output, substituted for `{{previous}}`.
+   * @returns The agent's response. Rejects on failure (see {@link Agent.chat}
+   *   for the `errorsAsNull` opt-in to Python's return-null contract).
+   */
+  async execute(task?: AgentExecuteTask | null, context?: string | string[] | null): Promise<string> {
+    return this.chat(resolveExecutePrompt(task, this.instructions), joinContext(context));
   }
 
   /**
@@ -3416,8 +3654,23 @@ export class Agent {
     return this.runId;
   }
 
+  /**
+   * The text this agent produced on its most recent completed turn.
+   *
+   * `null` until the agent has run. A turn that throws (or is cancelled)
+   * leaves the previous value in place -- the field records the last result
+   * there WAS, not the last attempt. Streaming runs are included: the value is
+   * the full assembled response, recorded when the run completes.
+   *
+   * There is no Python counterpart -- Python callers keep the return value of
+   * `chat()`/`start()`. This exists for hosts that hand an `Agent` to one
+   * component and read its output from another; before this it was hard-coded
+   * to `null` and so could never do that.
+   *
+   * @returns The last response text, or `null` if the agent has not produced one.
+   */
   getResult(): string | null {
-    return null;
+    return this._lastResult;
   }
 
   getInstructions(): string {
