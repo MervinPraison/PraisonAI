@@ -338,6 +338,68 @@ describe('RealtimeAgent - real WebSocket connection', () => {
   });
 
   // ==========================================================================
+  // Concurrent lifecycle: overlapping connect()/disconnect() must not leak
+  // ==========================================================================
+
+  describe('concurrent lifecycle', () => {
+    it('two concurrent connect() calls open exactly one socket', async () => {
+      server = await startMinimalWsServer();
+      const agent = new RealtimeAgent({ ...QUIET, apiKey: 'sk-test', url: server.url });
+
+      // Both callers race; they must share the one in-flight handshake instead
+      // of each opening a socket and racing to overwrite this.ws.
+      await Promise.all([agent.connect(), agent.connect()]);
+
+      expect(agent.isConnected()).toBe(true);
+      expect(server.connections).toHaveLength(1);
+      await agent.disconnect();
+    });
+
+    it('disconnect() during the handshake wins: the socket is dropped', async () => {
+      // A WebSocket that never fires "open" until we let it, so disconnect()
+      // lands squarely mid-handshake.
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      let openTrigger: (() => void) | undefined;
+      let closed = false;
+      class SlowSocket {
+        readyState = 0;
+        constructor(public url: string, public options: any) {
+          openTrigger = () => {
+            this.readyState = 1;
+            (listeners['open'] ?? []).forEach((fn) => fn({}));
+          };
+        }
+        addEventListener(type: string, fn: (event: any) => void) {
+          (listeners[type] ??= []).push(fn);
+        }
+        send() {}
+        close() {
+          closed = true;
+          this.readyState = 3;
+          (listeners['close'] ?? []).forEach((fn) => fn({ code: 1000 }));
+        }
+      }
+
+      const agent = new RealtimeAgent({
+        ...QUIET,
+        apiKey: 'sk-test',
+        url: 'ws://injected/endpoint',
+        webSocket: SlowSocket as any,
+      });
+
+      const connecting = agent.connect();
+      // Cancel while the handshake is still pending.
+      await agent.disconnect();
+      // Now allow the handshake to "complete" late; it must not win.
+      openTrigger?.();
+
+      await expect(connecting).rejects.toThrow(/cancel|supersed/i);
+      expect(agent.isConnected()).toBe(false);
+      expect(closed).toBe(true);
+    });
+  });
+
+  // ==========================================================================
   // Endpoint and credentials
   // ==========================================================================
 
@@ -398,10 +460,39 @@ describe('RealtimeAgent - real WebSocket connection', () => {
       delete (globalThis as any).WebSocket;
       _resetWebSocketResolution();
       try {
-        // `ws` is not a dependency of this package, so this resolves nothing.
-        await expect(resolveWebSocketImplementation()).rejects.toThrow(
-          /requires a WebSocket implementation/
+        // Force the `ws` fallback to report "not installed". `ws` is reachable
+        // as a transitive dependency in this repo, so absence cannot be assumed;
+        // the injected loader reproduces a clean runtime where it is missing.
+        const notInstalled = () => {
+          const error: any = new Error("Cannot find module 'ws'");
+          error.code = 'ERR_MODULE_NOT_FOUND';
+          return Promise.reject(error);
+        };
+        await expect(
+          resolveWebSocketImplementation(undefined, notInstalled)
+        ).rejects.toThrow(/requires a WebSocket implementation/);
+      } finally {
+        (globalThis as any).WebSocket = previous;
+        _resetWebSocketResolution();
+      }
+    });
+
+    it('falls back to the ws package when no global WebSocket exists', async () => {
+      const previous = (globalThis as any).WebSocket;
+      delete (globalThis as any).WebSocket;
+      _resetWebSocketResolution();
+      try {
+        class FakeWs {
+          send() {}
+          close() {}
+          addEventListener() {}
+        }
+        const resolved = await resolveWebSocketImplementation(undefined, () =>
+          Promise.resolve({ WebSocket: FakeWs })
         );
+        expect(resolved.ctor).toBe(FakeWs as any);
+        expect(resolved.source).toBe("'ws' package");
+        expect(resolved.supportsHeaders).toBe(true);
       } finally {
         (globalThis as any).WebSocket = previous;
         _resetWebSocketResolution();

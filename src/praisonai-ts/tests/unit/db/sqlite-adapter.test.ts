@@ -471,6 +471,23 @@ describeSqlite(sqliteSuiteName, () => {
     expect(adapter.isConnected()).toBe(false);
   });
 
+  it('diagnoses a partial schema missing a column only an INSERT touches', async () => {
+    const file = tmpFile('partial');
+    // A `spans` table with the NOT NULL core but no `attributes` column. The
+    // core-only check used to pass this file, then the first saveSpan() would
+    // fail deep in the driver on "table spans has no column named attributes".
+    // The full-column check must catch it at open().
+    execRaw(
+      file,
+      'CREATE TABLE spans (id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, ' +
+        'parent_id TEXT, name TEXT NOT NULL, started_at INTEGER NOT NULL, ' +
+        'completed_at INTEGER, status TEXT NOT NULL);',
+    );
+    const adapter = new SqliteDbAdapter({ filename: file });
+    await expect(adapter.connect()).rejects.toThrow(/incompatible shape.*attributes/s);
+    expect(adapter.isConnected()).toBe(false);
+  });
+
   it('db("sqlite:<file>") is the durable adapter, end to end', async () => {
     const file = tmpFile('factory');
     const writing = db(`sqlite:${file}`);

@@ -70,7 +70,13 @@ export function _resetWebSocketResolution(): void {
  * @throws if no implementation can be found - never silently degrades.
  */
 export async function resolveWebSocketImplementation(
-  injected?: WebSocketConstructorLike
+  injected?: WebSocketConstructorLike,
+  /**
+   * Loader for the optional `ws` package. Defaults to a dynamic import through
+   * a computed specifier. Overridable in tests so the "no implementation
+   * available" path can be exercised without uninstalling a transitive `ws`.
+   */
+  wsLoader?: () => Promise<any>
 ): Promise<ResolvedWebSocket> {
   if (injected) {
     // An injected constructor is assumed to accept the same options object the
@@ -102,7 +108,9 @@ export async function resolveWebSocketImplementation(
   const specifier = ['w', 's'].join('');
   let loadError: any = null;
   try {
-    const mod: any = await import(/* webpackIgnore: true */ specifier);
+    const mod: any = wsLoader
+      ? await wsLoader()
+      : await import(/* webpackIgnore: true */ specifier);
     const ctor = mod?.WebSocket ?? mod?.default?.WebSocket ?? mod?.default ?? mod;
     if (typeof ctor === 'function') {
       cachedWebSocket = {
@@ -359,6 +367,12 @@ export class RealtimeAgent {
 
   private connected: boolean = false;
   private ws: WebSocketLike | null = null;
+  /** In-flight connect(), so concurrent callers share one handshake. */
+  private connecting: Promise<void> | null = null;
+  /** The socket being opened by the in-flight connect(), for cancellation. */
+  private connectingSocket: WebSocketLike | null = null;
+  /** Bumped on every teardown/disconnect so a stale handshake can abort. */
+  private connectGeneration: number = 0;
   private eventHandlers: Map<RealtimeEventType, Array<(event: RealtimeEvent) => void>> = new Map();
   private messageCallbacks: Array<(text: string) => void> = [];
   private audioCallbacks: Array<(audio: Uint8Array) => void> = [];
@@ -426,8 +440,24 @@ export class RealtimeAgent {
       return;
     }
 
-    // A half-dead socket from a previous attempt must not linger.
+    // Concurrent callers share the one in-flight handshake instead of each
+    // opening a socket and racing to overwrite `this.ws`.
+    if (this.connecting) return this.connecting;
+
+    const attempt = this.doConnect();
+    this.connecting = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.connecting === attempt) this.connecting = null;
+    }
+  }
+
+  private async doConnect(): Promise<void> {
+    // A half-dead socket from a previous attempt must not linger. Bumping the
+    // generation here invalidates any earlier handshake still in flight.
     this.teardown();
+    const generation = this.connectGeneration;
 
     const url = this.getUrl();
     const usingDefaultEndpoint = !this.urlOverride;
@@ -473,60 +503,102 @@ export class RealtimeAgent {
       );
     }
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try {
-          socket.close();
-        } catch {
-          /* already gone */
-        }
-        reject(new Error(`Timed out after ${this.connectTimeoutMs}ms connecting to ${url}`));
-      }, this.connectTimeoutMs);
-      if (typeof (timer as any).unref === 'function') (timer as any).unref();
+    /** Was this handshake superseded by a teardown/disconnect/newer connect? */
+    const superseded = () => this.connectGeneration !== generation;
 
-      const settle = (error?: Error) => {
-        if (settled) return false;
-        settled = true;
-        clearTimeout(timer);
-        if (error) reject(error);
-        else resolve();
-        return true;
-      };
+    // A disconnect() may have landed before the socket even existed. If so, the
+    // generation has already moved on; abandon this socket immediately.
+    if (superseded()) {
+      try {
+        socket.close();
+      } catch {
+        /* already gone */
+      }
+      throw new Error('Connection was cancelled by disconnect() during handshake');
+    }
 
-      socket.addEventListener('open', () => {
-        settle();
-      });
+    // Expose the opening socket so a concurrent disconnect() can cancel it.
+    this.connectingSocket = socket;
 
-      socket.addEventListener('error', (event: any) => {
-        const error = new Error(
-          `WebSocket connection to ${url} failed: ${describeFailure(event)}`
-        );
-        if (!settle(error)) {
-          // Post-handshake error: report it, do not claim a connection.
-          this.connected = false;
-          this.reportError(error);
-        }
-      });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try {
+            socket.close();
+          } catch {
+            /* already gone */
+          }
+          reject(new Error(`Timed out after ${this.connectTimeoutMs}ms connecting to ${url}`));
+        }, this.connectTimeoutMs);
+        if (typeof (timer as any).unref === 'function') (timer as any).unref();
 
-      socket.addEventListener('close', (event: any) => {
-        if (
-          !settle(
-            new Error(
-              `WebSocket to ${url} closed during handshake: ${describeFailure(event)}`
+        const settle = (error?: Error) => {
+          if (settled) return false;
+          settled = true;
+          clearTimeout(timer);
+          if (error) reject(error);
+          else resolve();
+          return true;
+        };
+
+        socket.addEventListener('open', () => {
+          if (superseded()) {
+            // disconnect()/a newer connect() won the race; drop this socket.
+            settle(new Error('Connection superseded before handshake completed'));
+            try {
+              socket.close();
+            } catch {
+              /* already gone */
+            }
+            return;
+          }
+          settle();
+        });
+
+        socket.addEventListener('error', (event: any) => {
+          const error = new Error(
+            `WebSocket connection to ${url} failed: ${describeFailure(event)}`
+          );
+          if (!settle(error)) {
+            // Post-handshake error: report it, do not claim a connection.
+            this.connected = false;
+            this.reportError(error);
+          }
+        });
+
+        socket.addEventListener('close', (event: any) => {
+          if (
+            !settle(
+              new Error(
+                `WebSocket to ${url} closed during handshake: ${describeFailure(event)}`
+              )
             )
-          )
-        ) {
-          this.handleClose(event);
-        }
-      });
+          ) {
+            this.handleClose(event);
+          }
+        });
 
-      socket.addEventListener('message', (event: any) => {
-        this.handleMessage(event);
+        socket.addEventListener('message', (event: any) => {
+          this.handleMessage(event);
+        });
       });
-    });
+    } finally {
+      if (this.connectingSocket === socket) this.connectingSocket = null;
+    }
+
+    // A disconnect() that arrived during the handshake must win: never mark
+    // ourselves connected against a socket the caller already asked us to drop.
+    if (superseded()) {
+      try {
+        socket.close();
+      } catch {
+        /* already gone */
+      }
+      throw new Error('Connection was cancelled by disconnect() during handshake');
+    }
 
     this.ws = socket;
     this.connected = true;
@@ -541,13 +613,38 @@ export class RealtimeAgent {
    * Disconnect from the realtime session.
    */
   async disconnect(): Promise<void> {
+    // Cancel any handshake still in flight so it cannot mark us connected
+    // after the caller asked to disconnect. teardown() bumps the generation,
+    // which the pending doConnect() checks; awaiting its promise below makes
+    // disconnect() a hard barrier even when the socket did not exist yet.
+    const pendingConnect = this.connecting;
+    const pendingSocket = this.connectingSocket;
+
     const socket = this.ws;
-    if (!socket) {
+    if (!socket && !pendingSocket && !pendingConnect) {
       this.connected = false;
       return;
     }
 
     this.log('Disconnecting from realtime session...');
+
+    // Invalidate the in-flight attempt first, then close its socket.
+    this.teardown();
+    if (pendingSocket) {
+      try {
+        pendingSocket.close(1000, 'client disconnect');
+      } catch {
+        /* already gone */
+      }
+    }
+    if (pendingConnect) {
+      // The pending connect() will reject (superseded); do not let that reject
+      // escape from disconnect().
+      await pendingConnect.catch(() => undefined);
+    }
+
+    if (!socket) return;
+
     await new Promise<void>((resolve) => {
       let done = false;
       const finish = () => {
@@ -569,10 +666,18 @@ export class RealtimeAgent {
     this.teardown();
   }
 
-  /** Drop the socket reference and mark the agent disconnected. */
+  /**
+   * Drop the socket reference and mark the agent disconnected.
+   *
+   * Bumps {@link connectGeneration} so any handshake still in flight is
+   * invalidated: it will close its socket and reject rather than flip the
+   * agent back to connected.
+   */
   private teardown(): void {
+    this.connectGeneration++;
     this.ws = null;
     this.connected = false;
+    this.connectingSocket = null;
   }
 
   /**
