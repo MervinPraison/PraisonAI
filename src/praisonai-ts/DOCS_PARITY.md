@@ -19,12 +19,12 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 106 | 7 | 2860 |
+| ✅ Agent | 109 | 7 | 2860 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 281 |
 | ✅ Audio | 8 | 1 | 162 |
 | ✅ Auto Generation | 16 | 3 | 618 |
-| ✅ Autonomy | 5 | 1 | 164 |
+| ✅ Autonomy | 5 | 1 | 168 |
 | ✅ Bots | 14 | 1 | 184 |
 | ✅ Budget | 2 | 1 | 197 |
 | ✅ CLI | 14 | 1 | 159 |
@@ -49,13 +49,13 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
 | ✅ Guardrails | 15 | 3 | 744 |
-| ✅ Handoffs | 16 | 1 | 262 |
+| ✅ Handoffs | 16 | 1 | 420 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
 | ✅ Jobs | 8 | 1 | 156 |
 | ✅ Knowledge | 37 | 2 | 352 |
 | ✅ LLM | 29 | 2 | 279 |
-| ✅ Loops | 11 | 1 | 180 |
+| ✅ Loops | 11 | 1 | 235 |
 | ✅ MCP | 21 | 4 | 870 |
 | ✅ Memory | 24 | 4 | 783 |
 | ✅ Middleware | 2 | 1 | 162 |
@@ -64,7 +64,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Optimizer | 2 | 1 | 162 |
 | ✅ Output | 3 | 1 | 220 |
 | ✅ Parallel Execution | 12 | 2 | 256 |
-| ✅ Planning | 11 | 2 | 525 |
+| ✅ Planning | 11 | 2 | 529 |
 | ✅ Plugins | 9 | 2 | 710 |
 | ✅ Prompts | 4 | 2 | 262 |
 | ✅ Providers | 26 | 116 | 8149 |
@@ -72,27 +72,27 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Query | 7 | 2 | 246 |
 | ✅ RAG | 16 | 2 | 386 |
 | ✅ Realtime | 5 | 1 | 150 |
-| ✅ Reflection | 3 | 1 | 147 |
+| ✅ Reflection | 3 | 1 | 151 |
 | ✅ Retrieval | 5 | 1 | 150 |
-| ✅ Routing | 1 | 1 | 153 |
+| ✅ Routing | 1 | 1 | 247 |
 | ✅ Sandbox | 8 | 2 | 222 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 19 | 2 | 433 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
-| ✅ Tasks | 8 | 1 | 173 |
+| ✅ Tasks | 8 | 1 | 283 |
 | ✅ Teams | 1 | 1 | 200 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 49 | 16 | 3366 |
+| ✅ Tools | 53 | 16 | 3366 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |
 | ✅ Vision | 4 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
-| ✅ Web | 6 | 1 | 150 |
+| ✅ Web | 6 | 1 | 154 |
 | ✅ Workflows | 8 | 3 | 910 |
 
 ## Undocumented Categories (Need Documentation)
