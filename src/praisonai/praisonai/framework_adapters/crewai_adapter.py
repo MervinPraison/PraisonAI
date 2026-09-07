@@ -239,20 +239,16 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         ``kickoff_async``, transparently delegate to the base thread-offload
         path so behaviour degrades instead of breaking.
         """
+        from crewai import Crew
         from crewai.telemetry import Telemetry
 
-        crew = self._build_crew(
-            config, llm_config, topic,
-            tools_dict=tools_dict,
-            agent_callback=agent_callback,
-            task_callback=task_callback,
-            cli_config=cli_config,
-        )
-
-        kickoff_async = getattr(crew, "kickoff_async", None)
-        if not callable(kickoff_async):
+        # Decide the async path *before* constructing the Crew. kickoff_async is
+        # a method on the Crew class, so this capability check is construction
+        # -free — the fallback then builds exactly one Crew (inside run()),
+        # never two.
+        if not callable(getattr(Crew, "kickoff_async", None)):
             logger.debug(
-                "Installed crewai lacks crew.kickoff_async(); falling back to "
+                "Installed crewai lacks Crew.kickoff_async(); falling back to "
                 "the bounded thread-offload path for arun."
             )
             return await self._thread_offload_run(
@@ -263,9 +259,17 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 cli_config=cli_config,
             )
 
+        crew = self._build_crew(
+            config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config,
+        )
+
         crew_telemetry = getattr(crew, "_telemetry", None)
         disable_target = crew_telemetry if crew_telemetry is not None else Telemetry
         with scoped_telemetry_disable(disable_target):
-            response = await kickoff_async()
+            response = await crew.kickoff_async()
         return f"### Task Output ###\n{response}"
     
