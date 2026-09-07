@@ -187,6 +187,36 @@ def test_control_no_model_requests_restores_a_blocked_setting_too():
     assert model_requests_allowed() is False
 
 
+def test_overlapping_no_model_requests_scopes_stay_blocked_until_all_exit():
+    """Two scopes with independent lifetimes must not re-enable early.
+
+    The inner scope exiting first must not restore ``allowed`` while the outer
+    scope is still open -- the failure mode a save/restore snapshot has.
+    """
+    allow_model_requests(True)
+
+    outer = no_model_requests()
+    inner = no_model_requests()
+    outer.__enter__()
+    inner.__enter__()
+    assert model_requests_allowed() is False
+
+    # Inner exits first; the outer scope is still open, so requests stay blocked.
+    inner.__exit__(None, None, None)
+    assert model_requests_allowed() is False
+
+    outer.__exit__(None, None, None)
+    assert model_requests_allowed() is True
+
+
+def test_no_model_requests_reblocks_even_when_globally_allowed():
+    """A block scope must win over a True global flag for its duration."""
+    allow_model_requests(True)
+    with no_model_requests():
+        assert model_requests_allowed() is False
+    assert model_requests_allowed() is True
+
+
 def test_blocked_error_is_not_swallowed_by_the_agents_error_handling(litellm_sentinel):
     """The agent turns most failures into a None answer; this must escape that."""
     allow_model_requests(False)
