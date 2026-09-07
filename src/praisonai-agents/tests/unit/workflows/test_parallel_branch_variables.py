@@ -261,3 +261,72 @@ def test_loop_iteration_variables_stay_iteration_scoped(is_parallel):
     assert variables["loop_outputs"] == ["X-a", "X-b"]
     assert "inner_var" not in variables
     assert variables.get("after_output") == "AFTER"  # control
+
+
+# ---------------------------------------------------------------------------
+# Write detection is by identity, not value equality
+# ---------------------------------------------------------------------------
+
+def test_equal_valued_write_still_wins_collision_in_declaration_order(caplog):
+    """A later branch writing the same value the variable already held is a write.
+
+    Baseline ``shared="SAME"``; the first branch rebinds it to ``"OTHER"`` and the
+    second rebinds it back to ``"SAME"``. Sequential execution of these steps ends
+    with ``"SAME"`` (second is last), so the parallel merge must too. Value-equality
+    detection dropped the second branch's write because it equalled the baseline,
+    leaving ``"OTHER"`` and suppressing the collision warning.
+    """
+    wf = Workflow(steps=[
+        parallel([
+            Task(name="first", handler=_handler("OTHER"),
+                 output_variable="shared", max_retries=0),
+            Task(name="second", handler=_handler("SAME"),
+                 output_variable="shared", max_retries=0),
+        ]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"shared": "SAME"})
+    with caplog.at_level(logging.WARNING):
+        variables = wf.start("go")["variables"]
+
+    assert variables.get("shared") == "SAME", (
+        "an equal-valued write was dropped, breaking declaration-order semantics"
+    )
+    assert variables.get("after_output") == "AFTER"  # control
+    assert any("shared" in rec.getMessage() and "Parallel branches" in rec.getMessage()
+               for rec in caplog.records), (
+        "an equal-valued collision must still be reported"
+    )
+
+
+def test_untouched_value_with_non_bool_inequality_is_not_a_write(caplog):
+    """A carried-through object whose ``!=`` is not a bool must not become a write.
+
+    ``_NonBoolEq.__ne__`` returns a non-bool (like a numpy array), so value-based
+    detection ``bool(value != original)`` raised and conservatively classified the
+    untouched value as written - replacing the parent's object with a branch-local
+    clone and emitting a spurious collision warning across branches. Identity
+    detection never evaluates ``!=`` for an untouched key.
+    """
+    class _NonBoolEq:
+        def __ne__(self, other):
+            return [True]  # not a bool; bool([True]) is True but the array case raises
+        __hash__ = None
+
+    sentinel = _NonBoolEq()
+    wf = Workflow(steps=[
+        parallel([
+            Task(name="one", handler=_handler("1"), output_variable="v1", max_retries=0),
+            Task(name="two", handler=_handler("2"), output_variable="v2", max_retries=0),
+        ]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"carried": sentinel})
+    with caplog.at_level(logging.WARNING):
+        variables = wf.start("go")["variables"]
+
+    assert variables["v1"] == "1" and variables["v2"] == "2"
+    assert variables["carried"] is sentinel, (
+        "an untouched non-comparable value was replaced by a branch's deep copy"
+    )
+    assert not any("carried" in rec.getMessage() for rec in caplog.records), (
+        "an untouched value must not produce a collision warning"
+    )
