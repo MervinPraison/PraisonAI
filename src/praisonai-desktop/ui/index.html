@@ -687,6 +687,12 @@ const SETTINGS = [
       { value: "high", label: "High" }]},
     default: "off" },
 
+  { key: "framework", section: "model", label: "Agent framework",
+    description: "Which engine runs a turn. PraisonAI is built in; installing praisonai-frameworks adds CrewAI, AutoGen, LangGraph, Agno, Google ADK, OpenAI Agents SDK and Pydantic AI.",
+    keywords: ["crewai", "autogen", "langgraph", "agno", "adk", "pydantic"],
+    control: { kind: "text", placeholder: "praisonai" },
+    default: "praisonai", requiresRestart: true },
+
   { key: "base_url", section: "model", label: "Base URL override",
     description: "Point at Ollama, LM Studio, vLLM, a proxy or Azure. Sent to whichever provider the model names. Blank uses the provider default.",
     keywords: ["endpoint", "proxy", "azure", "ollama", "lm studio"],
