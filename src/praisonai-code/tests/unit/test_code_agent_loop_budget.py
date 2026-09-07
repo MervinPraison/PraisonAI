@@ -390,6 +390,72 @@ def test_build_code_execution_config_raises_both_knobs():
     assert cfg.resolved_max_tool_calls() == DEFAULT_CODE_MAX_STEPS
 
 
+def test_profiled_run_gets_the_coding_sized_budget(monkeypatch):
+    """A profiled single-prompt run must not silently keep the small core
+    defaults: `--profile` built its Agent with no ExecutionConfig, so a real
+    coding task would still truncate at 20 steps / 10 tool calls per turn."""
+    agent_cls = _install_stub_agent(monkeypatch, answer="done")
+    # The profiler prints a report and exits 0; we only need the Agent kwargs.
+    monkeypatch.setattr(
+        "praisonai_code.cli.features.cli_profiler.CLIProfiler",
+        lambda *a, **k: _NullProfiler(),
+        raising=True,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["--profile", "--max-steps", "55", "Fix the build"]
+    )
+
+    assert result.exit_code == 0, result.output
+    execution = agent_cls.last_kwargs.get("execution")
+    assert execution is not None, "--profile built the agent with no ExecutionConfig"
+    assert execution.max_steps == 55
+    assert execution.max_tool_calls_per_turn == 55
+
+
+class _NullProfiler:
+    """No-op profiler so the --profile path exercises Agent construction only."""
+
+    def start(self): ...
+    def stop(self): ...
+    def mark_import_start(self): ...
+    def mark_import_end(self): ...
+    def mark_init_start(self): ...
+    def mark_init_end(self): ...
+    def mark_exec_start(self): ...
+    def mark_exec_end(self): ...
+    def print_report(self): ...
+
+
+def test_interactive_dispatch_threads_the_budget_onto_args(monkeypatch):
+    """The interactive/single-prompt dispatch must carry the coding budget on
+    ``args.execution`` so the wrapper-legacy and resident TUI paths both apply
+    it — otherwise `--max-steps` is silently dropped for the common
+    `pip install praisonai` interactive session."""
+    captured = {}
+
+    def _fake_resident(prompt, args, *, plan=False, session_id=None):
+        captured["execution"] = getattr(args, "execution", None)
+
+    # Force the resident-TUI branch (wrapper absent) and capture the args.
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available",
+        lambda: False,
+        raising=True,
+    )
+    monkeypatch.setattr(code_module, "_run_resident_code", _fake_resident, raising=True)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["--max-steps", "63", "Fix the build"])
+
+    assert result.exit_code == 0, result.output
+    execution = captured.get("execution")
+    assert execution is not None, "interactive dispatch dropped the execution budget"
+    assert execution.max_steps == 63
+    assert execution.max_tool_calls_per_turn == 63
+
+
 # ---------------------------------------------------------------------------
 # (d) the smoke gate must be able to install its harness
 # ---------------------------------------------------------------------------

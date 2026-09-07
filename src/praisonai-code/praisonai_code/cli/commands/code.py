@@ -440,6 +440,7 @@ def code_main(
             verbose=verbose,
             profile_deep=profile_deep,
             thinking_budget=thinking_budget,
+            max_steps=max_steps,
         )
         return
 
@@ -899,6 +900,7 @@ def _run_profiled_code(
     verbose: bool = False,
     profile_deep: bool = False,
     thinking_budget: Optional[int] = None,
+    max_steps: Optional[int] = None,
 ):
     """Run code assistant with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -934,6 +936,12 @@ def _run_profiled_code(
         # keeps profiler stdout clean.
         "output": "verbose" if verbose else "minimal",
     }
+    # Same coding-sized budget as the headless/interactive paths, so a profiled
+    # single-prompt run does not silently keep the general-purpose core defaults
+    # (20 steps / 10 tool calls per turn) and truncate a real coding task.
+    _execution = build_code_execution_config(max_steps)
+    if _execution is not None:
+        agent_config["execution"] = _execution
     if model:
         agent_config["llm"] = model
     
