@@ -14,6 +14,7 @@ from .protocols import (
     is_guardrail_object,
 )
 from .chain import GuardrailChain
+from .retry import GuardrailRetry
 
 __all__ = [
     "GuardrailResult", 
@@ -22,5 +23,6 @@ __all__ = [
     "StructuralGuardrailProtocol", 
     "PolicyGuardrailProtocol", 
     "GuardrailChain",
+    "GuardrailRetry",
     "is_guardrail_object",
 ]

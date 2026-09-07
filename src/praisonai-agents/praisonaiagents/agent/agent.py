@@ -741,6 +741,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 - bool: True enables with defaults
                 - Callable: Validation function
                 - GuardrailConfig: Custom configuration
+                A validator rejects an answer by returning ``(False, "why")`` or
+                by raising ``GuardrailRetry("why")``. Either way the reason is
+                appended to the same conversation and the model gets another
+                attempt in the same run, up to
+                ``GuardrailConfig(max_retries=...)`` (default 3); see
+                ``guardrail_retry_count``.
             web: Web search/fetch. Accepts:
                 - bool: True enables with defaults
                 - WebConfig: Custom configuration
@@ -2628,6 +2634,10 @@ Your Goal: {self.goal}
         # Initialize guardrail settings
         self.guardrail = guardrail
         self.max_guardrail_retries = max_guardrail_retries
+        # Observability for in-run output-validation retries (see
+        # _apply_guardrail_with_retry / the guardrail_retry_count property).
+        self._guardrail_retry_count = 0
+        self._last_guardrail_error = None
         self._guardrail_fn = None
         self._setup_guardrail()
         
@@ -6878,6 +6888,22 @@ Answer:"""
             except Exception as e:
                 logging.error(f"Failed to process handoff item {handoff_item}: {e}")
 
+    @property
+    def guardrail_retry_count(self) -> int:
+        """How many times output validation has sent the model back for a retry.
+
+        Cumulative over the agent's lifetime, incremented once per rejected
+        answer that was handed back to the model (see
+        ``_apply_guardrail_with_retry``). Read it to confirm a run converged in
+        one correction rather than burning ``max_guardrail_retries``.
+        """
+        return getattr(self, "_guardrail_retry_count", 0)
+
+    @property
+    def last_guardrail_error(self):
+        """The most recent rejection message a guardrail sent back to the model."""
+        return getattr(self, "_last_guardrail_error", None)
+
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.
         
@@ -6887,17 +6913,25 @@ Answer:"""
         Returns:
             GuardrailResult: The result of the guardrail validation
         """
-        from ..guardrails import GuardrailResult
-        
+        from ..guardrails import GuardrailResult, GuardrailRetry
+
         if not self._guardrail_fn:
             return GuardrailResult(success=True, result=task_output)
-        
+
         try:
             # Call the guardrail function
             result = self._guardrail_fn(task_output)
-            
+
             # Convert the result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
+
+        except GuardrailRetry as e:
+            # Deliberate rejection with a message meant for the model. Keep the
+            # author's wording verbatim - it is fed back into the conversation
+            # by _apply_guardrail_with_retry - rather than wrapping it as an
+            # internal validation *error*.
+            logging.warning(f"Agent {self.name}: Guardrail asked for a retry: {e.feedback}")
+            return GuardrailResult(success=False, result=None, error=e.feedback)
 
         except Exception as e:
             logging.error(f"Agent {self.name}: Error in guardrail validation: {e}")
@@ -6961,48 +6995,133 @@ Answer:"""
         else:
             return False, None, guardrail_result.error
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None):
-        """Apply guardrail validation with retry logic (sync version)."""
+    def _guardrail_retry_feedback(self, error):
+        """The correction turn handed back to the model after a rejection.
+
+        Shared by the in-conversation retry and the legacy single-prompt
+        fallback so the instruction reads the same whichever transport the
+        configured provider uses.
+        """
+        return (
+            f"Previous response failed validation due to: {error}. "
+            "Please provide an improved response."
+        )
+
+    def _extend_guardrail_conversation(self, conversation, response_text, feedback):
+        """Append the rejected answer and the validator's reason to ``conversation``.
+
+        This is what makes the correction happen *inside* the same run: the
+        model sees its own answer plus why it was refused, so it patches that
+        answer instead of re-deriving one from the bare prompt. Extends (and
+        returns) the list in place, so successive retries accumulate the way a
+        real conversation does.
+
+        The assistant turn is skipped when the caller's conversation already
+        ends with it, which is the case for callers that hand over live chat
+        history rather than the pre-call message list.
+        """
+        last = conversation[-1] if conversation else None
+        already_present = (
+            isinstance(last, dict)
+            and last.get("role") == "assistant"
+            and last.get("content") == response_text
+        )
+        if response_text and not already_present:
+            conversation.append({"role": "assistant", "content": response_text})
+        conversation.append({"role": "user", "content": feedback})
+        return conversation
+
+    def _record_guardrail_retry(self, *, attempt, error, delay):
+        """Count and announce one guardrail retry.
+
+        ``guardrail_retry_count`` makes the retries observable to callers and
+        tests; the RETRY stream event puts them on the same channel as
+        transient-failure retries, so a CLI/UI shows "retrying" rather than
+        appearing to hang.
+        """
+        self._guardrail_retry_count = getattr(self, "_guardrail_retry_count", 0) + 1
+        self._last_guardrail_error = error
+        emit = getattr(self, "_emit_retry_stream_event", None)
+        if emit is not None:
+            emit(
+                attempt=attempt,
+                max_attempts=self.max_guardrail_retries,
+                delay=delay,
+                reason=f"guardrail validation failed: {error}",
+            )
+
+    def _guardrail_retry_delay(self, retry_count):
+        """Backoff before the next guardrail retry (agent execution policy)."""
+        execution_config = getattr(self, '_execution_config', None)
+        if execution_config is not None:
+            return BackoffPolicy.delay(
+                retry_count,
+                execution_config.retry_initial_delay,
+                execution_config.retry_backoff_factor,
+                execution_config.retry_jitter
+            )
+        # Fall back to simple backoff if no execution config
+        return 1.0 * (2.0 ** (retry_count - 1))
+
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None):
+        """Apply guardrail validation with retry logic (sync version).
+
+        Args:
+            response_text: The answer to validate.
+            prompt: The originating prompt, used only by the fallback below.
+            messages: The conversation that produced ``response_text`` (as sent
+                to the model, without its reply). When supplied, a rejection is
+                appended to *that* conversation - rejected answer plus the
+                validator's reason - so the model corrects itself in the same
+                run with its context intact. When omitted (providers whose
+                message list the caller does not hold), the retry falls back to
+                re-asking the original prompt with the reason appended.
+
+        Bounded by ``max_guardrail_retries``; a validator that never passes
+        raises rather than looping.
+        """
         retry_count = 0
         current_response = response_text
-        
+        # Own copy: _chat_completion rewrites its messages list in place.
+        conversation = list(messages) if messages else None
+
         while retry_count <= self.max_guardrail_retries:
             success, result, error = self._validate_with_guardrail(current_response)
-            
+
             if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")
                 return result
-            
+
             # Guardrail failed
             if retry_count >= self.max_guardrail_retries:
                 raise Exception(
                     f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
                     f"Last error: {error}"
                 )
-            
+
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
-            
+
             # Add exponential backoff delay to avoid hammering the LLM
-            execution_config = getattr(self, '_execution_config', None)
-            if execution_config is not None:
-                total_delay = BackoffPolicy.delay(
-                    retry_count,
-                    execution_config.retry_initial_delay,
-                    execution_config.retry_backoff_factor,
-                    execution_config.retry_jitter
-                )
-            else:
-                # Fall back to simple backoff if no execution config
-                total_delay = 1.0 * (2.0 ** (retry_count - 1))
-            
+            total_delay = self._guardrail_retry_delay(retry_count)
+            self._record_guardrail_retry(attempt=retry_count, error=error, delay=total_delay)
+
             logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
             time.sleep(total_delay)
-            
+
             # Regenerate response for retry
             try:
-                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
-                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
+                feedback = self._guardrail_retry_feedback(error)
+                if conversation is not None:
+                    retry_messages = self._extend_guardrail_conversation(
+                        conversation, current_response, feedback
+                    )
+                else:
+                    retry_messages = [{"role": "user", "content": f"{prompt}\n\nNote: {feedback}"}]
+                # stream=False: the retry reads a complete message and nothing
+                # consumes deltas, so streaming here only costs a failed
+                # sync-adapter attempt and an ERROR log before falling back.
+                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
                 if response and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7011,14 +7130,19 @@ Answer:"""
             except Exception as e:
                 logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
-        
+
         return current_response
 
-    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
-        """Apply guardrail validation with retry logic (async version)."""
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None):
+        """Apply guardrail validation with retry logic (async version).
+
+        See ``_apply_guardrail_with_retry`` for the ``messages`` contract.
+        """
         retry_count = 0
         current_response = response_text
-        
+        # Own copy: the completion path rewrites its messages list in place.
+        conversation = list(messages) if messages else None
+
         while retry_count <= self.max_guardrail_retries:
             # A string/LLMGuardrail guardrail fires a *blocking* LLM call inside
             # _validate_with_guardrail. Offload it to a thread so it does not
@@ -7037,41 +7161,42 @@ Answer:"""
                     lambda: self._validate_with_guardrail(current_response)
                 ),
             )
-            
+
             if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")
                 return result
-            
+
             # Guardrail failed
             if retry_count >= self.max_guardrail_retries:
                 raise Exception(
                     f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
                     f"Last error: {error}"
                 )
-            
+
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
-            
+
             # Add exponential backoff delay to avoid hammering the LLM
-            execution_config = getattr(self, '_execution_config', None)
-            if execution_config is not None:
-                total_delay = BackoffPolicy.delay(
-                    retry_count,
-                    execution_config.retry_initial_delay,
-                    execution_config.retry_backoff_factor,
-                    execution_config.retry_jitter
-                )
-            else:
-                # Fall back to simple backoff if no execution config
-                total_delay = 1.0 * (2.0 ** (retry_count - 1))
-            
+            total_delay = self._guardrail_retry_delay(retry_count)
+            self._record_guardrail_retry(attempt=retry_count, error=error, delay=total_delay)
+
             logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
             await asyncio.sleep(total_delay)
-            
+
             # Regenerate response for retry (async version)
             try:
-                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
-                response = await self._execute_unified_achat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
+                feedback = self._guardrail_retry_feedback(error)
+                if conversation is not None:
+                    retry_messages = self._extend_guardrail_conversation(
+                        conversation, current_response, feedback
+                    )
+                else:
+                    retry_messages = [{"role": "user", "content": f"{prompt}\n\nNote: {feedback}"}]
+                # stream=False: the retry consumes a complete message, and the
+                # helper's own default is stream=True regardless of the agent's
+                # setting, which would make the retry stream when nothing reads
+                # the deltas.
+                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id)
                 if response and hasattr(response, 'choices') and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7082,9 +7207,9 @@ Answer:"""
             except Exception as e:
                 logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
-        
+
         return current_response
-    
+
     def _get_tools_cache_key(self, tools):
         """Generate a cache key for tools list."""
         if tools is None:

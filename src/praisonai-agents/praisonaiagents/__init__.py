@@ -227,6 +227,7 @@ _LAZY_IMPORTS = {
     # Guardrails
     'GuardrailResult': ('praisonaiagents.guardrails', 'GuardrailResult'),
     'LLMGuardrail': ('praisonaiagents.guardrails', 'LLMGuardrail'),
+    'GuardrailRetry': ('praisonaiagents.guardrails', 'GuardrailRetry'),
     
     # Approval (agent-centric approval backends)
     'AutoApproveBackend': ('praisonaiagents.approval.backends', 'AutoApproveBackend'),

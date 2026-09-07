@@ -22,14 +22,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 411 |
+| Python Core Features | 412 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 2040 |
-| **Gap Count** | **0** |
+| **Gap Count** | **1** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
-| P2 (Medium) | 0 |
+| P2 (Medium) | 1 |
 | P3 (Low) | 0 |
 
 ## Gap Matrix
@@ -123,10 +123,11 @@
 | `route` | ✅ | ✅ | low | ✅ exported |
 | `when` | ✅ | ✅ | low | ✅ exported |
 
-### P2_CLI (47 exported, 0 stub, 0 missing)
+### P2_CLI (47 exported, 0 stub, 1 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `GuardrailRetry` | ✅ | ❌ | high | ⏳ missing |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ exported |
 | `Citation` | ✅ | ✅ | high | ✅ exported |
 | `CitationsMode` | ✅ | ✅ | high | ✅ exported |
@@ -560,10 +561,10 @@ from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, 
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (2 exports)</summary>
+<summary><strong>guardrails</strong> (3 exports)</summary>
 
 ```python
-from praisonaiagents import GuardrailResult, LLMGuardrail
+from praisonaiagents import GuardrailResult, GuardrailRetry, LLMGuardrail
 ```
 
 </details>
