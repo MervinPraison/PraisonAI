@@ -17,8 +17,11 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     name = "crewai"
     install_hint = 'pip install "praisonai-frameworks[crewai]"'
     requires_tools_extra = True
-    # CrewAI's kickoff() is sync-only; arun offloads run() to a bounded pool.
-    SUPPORTS_ASYNC = False
+    # CrewAI exposes a native async entry point (crew.kickoff_async(), available
+    # since crewai 0.28); arun awaits it directly instead of pinning a worker
+    # thread. When an older crewai without kickoff_async is installed, arun
+    # transparently falls back to the base thread-offload path.
+    SUPPORTS_ASYNC = True
     # Extended YAML fields CrewAI actually consumes; the rest are dropped and
     # warned about via warn_unsupported_fields.
     SUPPORTED_YAML_FIELDS = frozenset({
@@ -62,11 +65,46 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         # observability_session context manager, so the adapter no longer
         # finalizes here — this keeps the lifecycle symmetric across every
         # adapter and prevents double-finalize.
+        from crewai.telemetry import Telemetry
+
+        crew = self._build_crew(
+            config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config,
+        )
+
+        # Prefer per-instance telemetry shadowing around kickoff so the
+        # opt-out is race-free even under concurrent runs. Falls back to
+        # the (locked) class-level patch when the Crew does not expose a
+        # per-instance telemetry object.
+        crew_telemetry = getattr(crew, "_telemetry", None)
+        disable_target = crew_telemetry if crew_telemetry is not None else Telemetry
+        with scoped_telemetry_disable(disable_target):
+            response = crew.kickoff()
+        return f"### Task Output ###\n{response}"
+
+    def _build_crew(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback = None,
+        task_callback = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ):
+        """Build a configured CrewAI ``Crew`` from YAML config.
+
+        Shared by the sync ``run`` (``crew.kickoff()``) and the async ``arun``
+        (``crew.kickoff_async()``) so both entry points construct agents/tasks
+        identically — the only difference is which kickoff variant is awaited.
+        """
         # Import CrewAI only when needed (availability already validated at CLI entry)
-        import os
         from crewai import Agent, Task, Crew
         from crewai.telemetry import Telemetry
-        from .._framework_availability import is_available
 
         # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
         logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
@@ -169,7 +207,8 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                                        if ctx in tasks_dict]
                         task.context = context_tasks
 
-                # Create and run the crew
+                # Create the crew (kickoff is driven by run/arun so the same
+                # crew can be executed synchronously or asynchronously).
                 crew = Crew(
                     agents=list(agents.values()),
                     tasks=tasks,
@@ -180,15 +219,53 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 logger.debug(f"Agents: {crew.agents}")
                 logger.debug(f"Tasks: {crew.tasks}")
 
-                # Prefer per-instance telemetry shadowing around kickoff so the
-                # opt-out is race-free even under concurrent runs. Falls back to
-                # the (locked) class-level patch when the Crew does not expose a
-                # per-instance telemetry object.
-                crew_telemetry = getattr(crew, "_telemetry", None)
-                disable_target = crew_telemetry if crew_telemetry is not None else Telemetry
-                with scoped_telemetry_disable(disable_target):
-                    response = crew.kickoff()
-                result = f"### Task Output ###\n{response}"
+                return crew
 
-                return result
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback = None,
+        task_callback = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Run CrewAI natively async via ``crew.kickoff_async()``.
+
+        Avoids pinning a bounded-pool worker thread for the whole run (the base
+        ``arun`` fallback). If the installed crewai is too old to expose
+        ``kickoff_async``, transparently delegate to the base thread-offload
+        path so behaviour degrades instead of breaking.
+        """
+        from crewai.telemetry import Telemetry
+
+        crew = self._build_crew(
+            config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config,
+        )
+
+        kickoff_async = getattr(crew, "kickoff_async", None)
+        if not callable(kickoff_async):
+            logger.debug(
+                "Installed crewai lacks crew.kickoff_async(); falling back to "
+                "the bounded thread-offload path for arun."
+            )
+            return await self._thread_offload_run(
+                config, llm_config, topic,
+                tools_dict=tools_dict,
+                agent_callback=agent_callback,
+                task_callback=task_callback,
+                cli_config=cli_config,
+            )
+
+        crew_telemetry = getattr(crew, "_telemetry", None)
+        disable_target = crew_telemetry if crew_telemetry is not None else Telemetry
+        with scoped_telemetry_disable(disable_target):
+            response = await kickoff_async()
+        return f"### Task Output ###\n{response}"
     
