@@ -98,15 +98,15 @@ export function embed(text: string, config?: EmbeddingConfig): EmbeddingResult {
   const cfg = { ..._globalConfig, ...config };
   const dimensions = getDimensions(cfg.model);
   
-  // Placeholder implementation - would call OpenAI API
-  // In production, this would use the LLM client
-  const embedding = new Array(dimensions).fill(0).map(() => Math.random() * 2 - 1);
-  
-  return {
-    embedding,
-    model: cfg.model ?? 'text-embedding-3-small',
-    dimensions,
-  };
+  // Embedding requires a network call, so it cannot be done synchronously.
+  // This function previously returned random vectors, which made every
+  // similarity search silently meaningless rather than failing.
+  throw new Error(
+    `Cannot embed synchronously (model '${cfg.model ?? 'text-embedding-3-small'}', ` +
+      `${dimensions} dims). Use the async embedder instead:\n` +
+      "  import { embed } from 'praisonai/llm/embeddings';\n" +
+      '  const { embedding } = await embed(text, { model });'
+  );
 }
 
 /**
@@ -125,16 +125,14 @@ export function embeddings(texts: string[], config?: EmbeddingConfig): BatchEmbe
   const cfg = { ..._globalConfig, ...config };
   const dimensions = getDimensions(cfg.model);
   
-  // Placeholder implementation
-  const embeddingsList = texts.map(() => 
-    new Array(dimensions).fill(0).map(() => Math.random() * 2 - 1)
+  // Same reason as embed(): a real embedding needs the network.
+  throw new Error(
+    `Cannot embed ${texts.length} text(s) synchronously (model ` +
+      `'${cfg.model ?? 'text-embedding-3-small'}', ${dimensions} dims). ` +
+      "Use the async embedder instead:\n" +
+      "  import { embedMany } from 'praisonai/llm/embeddings';\n" +
+      '  const vectors = await embedMany(texts, { model });'
   );
-  
-  return {
-    embeddings: embeddingsList,
-    model: cfg.model ?? 'text-embedding-3-small',
-    dimensions,
-  };
 }
 
 // ============================================================================
