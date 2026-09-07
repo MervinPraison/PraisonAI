@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -795,27 +795,35 @@ class GatewayHandler:
         action = getattr(args, "schedules_command", None)
         config_path = getattr(args, "config_file", None) or "gateway.yaml"
 
-        def _load() -> Dict:
+        def _load() -> Tuple[Dict, bool]:
+            """Return ``(config, ok)``.
+
+            ``ok`` is ``False`` when an existing file could not be read/parsed
+            or is not a YAML mapping. A mutating action MUST refuse to write in
+            that case, otherwise it would clobber agents/channels/hooks with a
+            schedule-only document. A genuinely missing file returns
+            ``({}, True)`` so the first ``add`` can create it.
+            """
             if os.path.exists(config_path):
                 try:
                     with open(config_path, "r") as f:
                         data = yaml.safe_load(f) or {}
-                    if not isinstance(data, dict):
-                        print(
-                            f"Error: {config_path} must contain a YAML mapping at the root."
-                        )
-                        return {}
-                    return data
                 except Exception as e:
                     print(f"Error reading {config_path}: {e}")
-                    return {}
-            return {}
+                    return {}, False
+                if not isinstance(data, dict):
+                    print(
+                        f"Error: {config_path} must contain a YAML mapping at the root."
+                    )
+                    return {}, False
+                return data, True
+            return {}, True
 
         def _save(cfg: Dict) -> None:
             with open(config_path, "w") as f:
                 yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
 
-        cfg = _load()
+        cfg, load_ok = _load()
         schedules = cfg.get("schedules") or {}
         if not isinstance(schedules, dict):
             schedules = {}
@@ -847,6 +855,12 @@ class GatewayHandler:
             return 0
 
         if action == "remove":
+            if not load_ok:
+                print(
+                    f"Refusing to modify {config_path}: it could not be read. "
+                    "Fix the file first to avoid overwriting your configuration."
+                )
+                return 1
             name = getattr(args, "name", None)
             if not name:
                 print("Error: schedule name required")
@@ -861,6 +875,12 @@ class GatewayHandler:
             return 0
 
         if action == "add":
+            if not load_ok:
+                print(
+                    f"Refusing to modify {config_path}: it could not be read. "
+                    "Fix the file first to avoid overwriting your configuration."
+                )
+                return 1
             name = getattr(args, "name", None)
             if not name:
                 print("Error: schedule name required (e.g. 'morning-brief')")

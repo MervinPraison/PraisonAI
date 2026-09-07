@@ -843,7 +843,13 @@ class GatewayConfigSchema(BaseModel):
     # ``ScheduleRunner`` store at boot, so an unattended automation lives in the
     # same file as agents/channels (config-as-code parity). Keyed by a stable
     # name used to derive an idempotent job id.
-    schedules: Optional[Dict[str, ScheduleConfigSchema]] = None
+    #
+    # Kept as raw dicts (not strict ``ScheduleConfigSchema``) so a single
+    # malformed entry does not reject the entire gateway config and block
+    # startup — the boot-time loader validates each entry independently and
+    # skips only the bad one (best-effort). ``normalize_and_validate`` still
+    # surfaces a warning per invalid entry so the operator sees it.
+    schedules: Optional[Dict[str, Dict[str, Any]]] = None
 
     # Gateway server settings (host/port, drain_timeout, admission control,
     # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so
@@ -868,6 +874,23 @@ class GatewayConfigSchema(BaseModel):
         if self.hooks is not None:
             for entry in self.hooks:
                 HookSchema(**entry)
+        # Validate declarative schedules per-entry, non-fatally (#4913). A bad
+        # schedule must NOT block the whole gateway from starting — the
+        # boot-time loader already skips invalid entries — so we surface a
+        # warning here for early operator feedback instead of raising.
+        if self.schedules:
+            import logging as _logging
+            _log = _logging.getLogger(__name__)
+            for _name, _spec in self.schedules.items():
+                if not isinstance(_spec, dict):
+                    _log.warning(
+                        "Ignoring malformed schedule %r (not a mapping)", _name
+                    )
+                    continue
+                try:
+                    ScheduleConfigSchema(**_spec)
+                except Exception as _e:
+                    _log.warning("Ignoring invalid schedule %r: %s", _name, _e)
         # Migrate single-bot format (platform + token at top level)
         if self.platform and self.token and not self.channels:
             self.channels = {

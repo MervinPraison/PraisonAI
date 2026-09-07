@@ -59,7 +59,23 @@ def test_gateway_schema_carries_schedules():
         schedules={"morning-brief": _spec()},
     )
     assert "morning-brief" in cfg.schedules
-    assert cfg.schedules["morning-brief"].agent == "personal"
+    # Schedules are kept as raw dicts on the gateway schema (best-effort,
+    # per-entry validation happens in the loader) so a malformed entry cannot
+    # reject the whole config.
+    assert cfg.schedules["morning-brief"]["agent"] == "personal"
+
+
+def test_gateway_schema_does_not_abort_on_malformed_schedule():
+    """A malformed schedule entry must NOT block the whole gateway (#4913)."""
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    # "bad" has no trigger — invalid per ScheduleConfigSchema — but the gateway
+    # config must still validate so the gateway can start and skip it at load.
+    cfg = GatewayConfigSchema(
+        channels={"telegram": {"token": "x"}},
+        schedules={"good": _spec(), "bad": {"agent": "x", "prompt": "p"}},
+    )
+    assert set(cfg.schedules) == {"good", "bad"}
 
 
 # ── config → store coercion ──────────────────────────────────────────────
@@ -77,7 +93,15 @@ class _FakeStore:
         self.jobs[job.id] = job
 
     def update(self, job):
+        # Mirror the real store: ``update`` preserves only the lease, not
+        # ``last_run_at`` — the loader is responsible for carrying that over.
         self.jobs[job.id] = job
+
+    def list(self, agent_id=None, principal=None):
+        return list(self.jobs.values())
+
+    def remove(self, job_id):
+        return self.jobs.pop(job_id, None) is not None
 
 
 def test_job_from_config_delivery():
@@ -134,6 +158,59 @@ def test_load_no_schedules_is_noop():
     assert store.jobs == {}
 
 
+def test_load_preserves_last_run_at_on_upsert():
+    """Re-loading must not reset run-state and re-fire the job (#4913)."""
+    from praisonai_bot.scheduler import load_schedules_into_store
+
+    store = _FakeStore()
+    config = {"schedules": {"morning-brief": _spec()}}
+    load_schedules_into_store(config, store)
+
+    # Simulate the job having already run once.
+    (job_id,) = list(store.jobs)
+    store.jobs[job_id].last_run_at = 1_000_000.0
+
+    # Re-load the same config (e.g. gateway restart / hot-reload).
+    load_schedules_into_store(config, store)
+    assert store.jobs[job_id].last_run_at == 1_000_000.0
+
+
+def test_load_prunes_removed_config_job():
+    """A schedule removed from YAML must stop firing after reconcile (#4913)."""
+    from praisonai_bot.scheduler import load_schedules_into_store
+
+    store = _FakeStore()
+    load_schedules_into_store(
+        {"schedules": {"a": _spec(), "b": _spec()}}, store
+    )
+    assert len(store.jobs) == 2
+
+    # "b" removed from config → pruned on next load.
+    load_schedules_into_store({"schedules": {"a": _spec()}}, store)
+    assert len(store.jobs) == 1
+
+
+def test_prune_leaves_chat_created_jobs_untouched():
+    """Reconciliation only prunes config-owned (cfg-*) jobs (#4913)."""
+    from praisonai_bot.scheduler import load_schedules_into_store
+    from praisonaiagents.scheduler.models import ScheduleJob
+    from praisonaiagents.scheduler.parser import parse_schedule
+
+    store = _FakeStore()
+    chat_job = ScheduleJob(
+        id="chat-random-xyz",
+        name="chat-job",
+        schedule=parse_schedule("*/24h"),
+        message="from chat",
+    )
+    store.add(chat_job)
+
+    # Load an empty schedules block: config-owned jobs would be pruned, but the
+    # chat-created job (non ``cfg-`` id) must survive.
+    load_schedules_into_store({"schedules": {}}, store)
+    assert "chat-random-xyz" in store.jobs
+
+
 # ── CLI mutation surface ─────────────────────────────────────────────────
 
 def test_cli_schedule_add_list_remove(tmp_path):
@@ -181,3 +258,35 @@ def test_cli_schedule_add_requires_single_trigger(tmp_path):
         channel=None, channel_id=None, pre_run=None, config_file=config_path,
     ))
     assert code == 1
+
+
+def test_cli_schedule_add_refuses_to_clobber_broken_config(tmp_path):
+    """`schedule add` must not overwrite an unreadable config (#4913)."""
+    from praisonai_bot.cli.features.gateway import GatewayHandler
+
+    config_path = tmp_path / "gateway.yaml"
+    # A file that exists but is not a YAML mapping (a list at the root).
+    config_path.write_text("- not\n- a\n- mapping\n")
+
+    code = GatewayHandler().schedules(SimpleNamespace(
+        schedules_command="add", name="x", agent="a", prompt="p",
+        cron="0 8 * * *", every=None, at=None,
+        channel=None, channel_id=None, pre_run=None, config_file=str(config_path),
+    ))
+    assert code == 1
+    # The original (non-mapping) content must be preserved, not clobbered.
+    assert config_path.read_text() == "- not\n- a\n- mapping\n"
+
+
+def test_cli_schedule_remove_refuses_to_clobber_broken_config(tmp_path):
+    """`schedule remove` must not overwrite an unreadable config (#4913)."""
+    from praisonai_bot.cli.features.gateway import GatewayHandler
+
+    config_path = tmp_path / "gateway.yaml"
+    config_path.write_text("- broken\n")
+
+    code = GatewayHandler().schedules(SimpleNamespace(
+        schedules_command="remove", name="x", config_file=str(config_path),
+    ))
+    assert code == 1
+    assert config_path.read_text() == "- broken\n"

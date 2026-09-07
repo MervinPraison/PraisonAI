@@ -9113,6 +9113,13 @@ class WebSocketGateway:
         # rotated hook secrets take effect without a full process restart.
         self._apply_hooks_from_config(new_cfg)
 
+        # Issue #4913: reconcile declarative ``schedules:`` on hot-reload so an
+        # added, edited or removed schedule takes effect without a full process
+        # restart — mirroring the boot-time load. The loader upserts on a stable
+        # id and prunes config-owned jobs no longer present, so it is idempotent
+        # and safe to run on every reload. No-op when the block is absent.
+        self._load_declarative_schedules(new_cfg)
+
         # Issue #3021: reconcile opt-in lifecycle policies on reload so enabling
         # / disabling scale-to-zero or changing the drain-marker path takes
         # effect without a full process restart. No-op when the ``lifecycle``
