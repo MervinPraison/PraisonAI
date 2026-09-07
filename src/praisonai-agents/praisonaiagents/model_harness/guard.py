@@ -83,6 +83,11 @@ def _initial_state() -> bool:
 
 _lock = threading.RLock()
 _allowed = _initial_state()
+# Count of currently-active no_model_requests() scopes. Requests are blocked
+# whenever this is non-zero, independently of the global _allowed flag, so
+# overlapping or cross-thread scopes cannot restore a shared snapshot and
+# re-enable requests while another scope is still open.
+_block_depth = 0
 
 
 class ModelRequestBlocked(BaseException):
@@ -127,28 +132,31 @@ def allow_model_requests(allowed: bool = True) -> None:
 
 def model_requests_allowed() -> bool:
     """Return whether real model requests are currently permitted."""
-    return _allowed
+    with _lock:
+        return _allowed and _block_depth == 0
 
 
 @contextmanager
 def no_model_requests() -> Iterator[None]:
     """Block real model requests for the duration of the ``with`` block.
 
-    Restores the previous setting on exit, so it nests and composes with a
-    suite-wide :func:`allow_model_requests` call::
+    Composes with a suite-wide :func:`allow_model_requests` call and with other
+    ``no_model_requests`` blocks. Rather than saving and restoring the global
+    flag -- which lets an inner or cross-thread scope exiting first re-enable
+    requests while an outer scope is still open -- this increments a block
+    counter, so requests stay blocked until *every* open scope has exited::
 
         with no_model_requests():
             agent.start("hello")  # raises ModelRequestBlocked
     """
-    global _allowed
+    global _block_depth
     with _lock:
-        previous = _allowed
-        _allowed = False
+        _block_depth += 1
     try:
         yield
     finally:
         with _lock:
-            _allowed = previous
+            _block_depth -= 1
 
 
 def _describe_call_site() -> Optional[str]:
@@ -199,7 +207,9 @@ def check_model_request(model: Optional[str] = None, provider: Optional[str] = N
     Raises:
         ModelRequestBlocked: If requests are currently blocked.
     """
-    if _allowed:
+    with _lock:
+        blocked = (not _allowed) or _block_depth > 0
+    if not blocked:
         return
     call_site = _describe_call_site()
     target = f"model {model!r}" if model else "a model"
