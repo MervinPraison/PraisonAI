@@ -41,6 +41,15 @@ _PATH_ARG_NAMES = frozenset({
     "directory", "dir", "folder"
 })
 
+# Tools whose write target lives in free-text (shell/SQL/code) rather than a
+# canonical path argument. We cannot reliably resolve their real targets, so
+# any two calls to the same shell-like tool are treated as a conflict and forced
+# to run sequentially. This covers execute_command (registered "critical" risk)
+# and similar tools that would otherwise slip past path-shaped detection.
+_SHELL_LIKE_TOOLS = frozenset({
+    "execute_command", "acp_execute_command", "execute_code",
+})
+
 
 def _is_potential_write_tool(function_name: str, arguments: dict) -> bool:
     """Check if a tool call is potentially a write operation.
@@ -53,7 +62,7 @@ def _is_potential_write_tool(function_name: str, arguments: dict) -> bool:
         True if the tool might perform write operations
     """
     # Check explicit write tools first
-    if function_name in _WRITE_TOOLS:
+    if function_name in _WRITE_TOOLS or function_name in _SHELL_LIKE_TOOLS:
         return True
     
     normalized_name = function_name.lower()
@@ -160,6 +169,18 @@ def detect_path_conflicts(tool_calls: List[ToolCall]) -> bool:
     """
     if len(tool_calls) < 2:
         return False
+    
+    # Shell-like tools carry their write target in free-text (command/code/SQL),
+    # so path extraction cannot see it. Conservatively treat two or more calls to
+    # the same shell-like tool as a conflict and force sequential execution.
+    shell_like_counts: Dict[str, int] = {}
+    for tool_call in tool_calls:
+        if tool_call.function_name in _SHELL_LIKE_TOOLS:
+            shell_like_counts[tool_call.function_name] = (
+                shell_like_counts.get(tool_call.function_name, 0) + 1
+            )
+    if any(count >= 2 for count in shell_like_counts.values()):
+        return True
     
     # Extract all paths from write tools
     all_paths = []

@@ -431,7 +431,11 @@ class Process:
             # Add data from context tasks
             if current_task.context:
                 for ctx_task in current_task.context:
-                    if ctx_task.result and ctx_task.name != current_task.name:
+                    if isinstance(ctx_task, str):
+                        context += f"\n{ctx_task}"
+                    elif isinstance(ctx_task, list):
+                        context += f"\n{', '.join(str(item) for item in ctx_task)}"
+                    elif hasattr(ctx_task, 'result') and ctx_task.result and ctx_task.name != current_task.name:
                         context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
         else:
             # New behavior: only include the most recent previous task
@@ -446,7 +450,13 @@ class Process:
             if current_task.context:
                 # Get the most recent context task with a result
                 for ctx_task in reversed(current_task.context):
-                    if ctx_task.result and ctx_task.name != current_task.name:
+                    if isinstance(ctx_task, str):
+                        context += f"\n{ctx_task}"
+                        break
+                    elif isinstance(ctx_task, list):
+                        context += f"\n{', '.join(str(item) for item in ctx_task)}"
+                        break
+                    elif hasattr(ctx_task, 'result') and ctx_task.result and ctx_task.name != current_task.name:
                         context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
                         break  # Only include the most recent one
                         
@@ -743,7 +753,7 @@ Type: {current_task.task_type}
 Status: {current_task.status}
 Previous tasks: {current_task.previous_tasks}
 Next tasks: {current_task.next_tasks}
-Context tasks: {[t.name for t in current_task.context] if current_task.context else []}
+Context tasks: {[getattr(t, 'name', str(t)) for t in current_task.context] if current_task.context else []}
 Description length: {len(current_task.description)}
             """)
 
@@ -1431,7 +1441,7 @@ Type: {current_task.task_type}
 Status: {current_task.status}
 Previous tasks: {current_task.previous_tasks}
 Next tasks: {current_task.next_tasks}
-Context tasks: {[t.name for t in current_task.context] if current_task.context else []}
+Context tasks: {[getattr(t, 'name', str(t)) for t in current_task.context] if current_task.context else []}
 Description length: {len(current_task.description)}
             """)
 

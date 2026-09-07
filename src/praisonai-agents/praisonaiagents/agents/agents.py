@@ -327,6 +327,89 @@ async def _execute_with_agent_async(executor_agent, task_prompt, task, tools, st
         )
 
 
+def _build_handler_context(agents_instance, task):
+    """Build a lightweight context object for a Task.handler / should_run callable.
+
+    Mirrors the WorkflowContext shape used by the Workflow engine so a handler
+    written for either engine behaves identically.
+    """
+    variables = dict(getattr(agents_instance, 'variables', None) or {})
+    task_vars = getattr(task, 'variables', None)
+    if task_vars:
+        variables.update(task_vars)
+    try:
+        from ..workflows.workflows import WorkflowContext
+        return WorkflowContext(
+            input=variables.get('input', ''),
+            current_step=getattr(task, 'name', '') or '',
+            variables=variables,
+        )
+    except Exception:
+        return {'variables': variables, 'current_step': getattr(task, 'name', '')}
+
+
+def _task_has_custom_handler(task):
+    """A handler-only task has no agent/agent_config but does have a handler."""
+    return (
+        getattr(task, 'handler', None) is not None
+        and getattr(task, 'agent', None) is None
+        and getattr(task, 'agent_config', None) is None
+    )
+
+
+def _execute_task_handler(agents_instance, task_id):
+    """Execute a Task.handler and store the result as the task output.
+
+    Returns a TaskResult, mirroring _process_task_result so the sync/async
+    execute paths can short-circuit before requiring an agent.
+    """
+    from .protocols import TaskResult
+
+    task = agents_instance.tasks[task_id]
+    context = _build_handler_context(agents_instance, task)
+    result = task.handler(context)
+
+    raw = getattr(result, 'output', result)
+    if raw is None:
+        raw = ""
+    raw = str(raw)
+
+    task_output = TaskOutput(
+        description=task.description or (getattr(task, 'name', '') or ''),
+        summary=(task.description or getattr(task, 'name', '') or '')[:10],
+        raw=raw,
+        agent=getattr(task, 'name', '') or 'handler',
+        output_format="RAW",
+    )
+    task.result = task_output
+
+    output_variable = getattr(task, 'output_variable', None)
+    if output_variable:
+        if getattr(agents_instance, 'variables', None) is None:
+            agents_instance.variables = {}
+        agents_instance.variables[output_variable] = raw
+
+    task.status = "completed"
+    return TaskResult(task_output=task_output, success=True)
+
+
+def _task_should_skip(agents_instance, task):
+    """Return True when a task's should_run gate evaluates falsy.
+
+    Mirrors the Workflow engine's should_run behaviour so conditional tasks are
+    honoured under PraisonAIAgents/AgentTeam as well.
+    """
+    should_run = getattr(task, 'should_run', None)
+    if should_run is None:
+        return False
+    try:
+        context = _build_handler_context(agents_instance, task)
+        return not should_run(context)
+    except Exception as e:
+        logger.error(f"should_run failed for task {getattr(task, 'name', task)}: {e}")
+        return False
+
+
 def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     """
     Build unified execution context for task execution (DRY helper).
@@ -530,6 +613,14 @@ def _process_task_result(agents_instance, context, agent_output):
                 logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
         task.result = task_output
+
+        # Expose the task output under its output_variable so downstream tasks /
+        # should_run gates can read it (mirrors the Workflow engine).
+        output_variable = getattr(task, 'output_variable', None)
+        if output_variable:
+            if getattr(agents_instance, 'variables', None) is None:
+                agents_instance.variables = {}
+            agents_instance.variables[output_variable] = agent_output
 
         # Fail-closed: when structured output was requested but not produced,
         # the task did not fulfil its contract. Surface it as a failed result so
@@ -898,7 +989,13 @@ class AgentTeam(SpawnAnnounceProtocol):
                 )
 
         if not agents:
-            raise ValueError("At least one agent must be provided")
+            # Handler-only tasks (task.handler with no agent) don't need an agent,
+            # mirroring the Workflow engine. Allow a team built solely from them.
+            has_handler_only_task = any(
+                _task_has_custom_handler(t) for t in (tasks or [])
+            )
+            if not has_handler_only_task:
+                raise ValueError("At least one agent must be provided")
         
         # ─────────────────────────────────────────────────────────────────────
         # Core initialization
@@ -1262,6 +1359,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "not started":
             task.status = "in progress"
 
+        # Handler-only tasks (no agent/agent_config) run their custom callable
+        # instead of an LLM, mirroring the Workflow engine.
+        if _task_has_custom_handler(task):
+            task_result = _execute_task_handler(self, task_id)
+            return task_result.task_output
+
         # Initialize memory asynchronously to avoid blocking the event loop on
         # synchronous Memory() construction. The shared helper's own
         # `if not task.memory:` guard makes this a safe no-op for the sync path.
@@ -1434,6 +1537,12 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         # Call on_task_start callback and propagate variables (async-aware, mirrors run_task)
         await self._arun_task_start_hook(task, task_id)
+
+        # Honour the should_run conditional gate (mirrors the Workflow engine).
+        if _task_should_skip(self, task):
+            logger.info(f"Task {task_id} skipped by should_run gate")
+            task.status = "completed"
+            return
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -1849,6 +1958,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "not started":
             task.status = "in progress"
 
+        # Handler-only tasks (no agent/agent_config) run their custom callable
+        # instead of an LLM, mirroring the Workflow engine.
+        if _task_has_custom_handler(task):
+            task_result = _execute_task_handler(self, task_id)
+            return task_result.task_output
+
         # Build execution context using DRY helper
         context = _build_execution_context(self, task_id)
 
@@ -1874,6 +1989,12 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         # Call on_task_start callback and propagate variables (shared with arun_task)
         self._run_task_start_hook(task, task_id)
+
+        # Honour the should_run conditional gate (mirrors the Workflow engine).
+        if _task_should_skip(self, task):
+            logger.info(f"Task {task_id} skipped by should_run gate")
+            task.status = "completed"
+            return
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
