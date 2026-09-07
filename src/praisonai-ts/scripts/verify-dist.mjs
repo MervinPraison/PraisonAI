@@ -4,7 +4,7 @@
 // Exits non-zero if either entry fails to load or Agent is missing.
 
 import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 
 const require = createRequire(import.meta.url);
@@ -25,7 +25,7 @@ function check(label, mod) {
 const cjs = require(join(root, 'dist', 'index.js'));
 check('cjs (require)', cjs);
 
-const esm = await import(join(root, 'dist', 'esm', 'index.js'));
+const esm = await import(pathToFileURL(join(root, 'dist', 'esm', 'index.js')).href);
 check('esm (import)', esm);
 
 if (failed) {
