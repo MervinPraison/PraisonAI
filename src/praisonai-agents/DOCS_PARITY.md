@@ -31,7 +31,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
-| ✅ Conditions | 1 | 3 | 1347 |
+| ✅ Conditions | 1 | 3 | 1386 |
 | ✅ Configuration | 3 | 8 | 3323 |
 | ✅ Context Management | 16 | 36 | 14104 |
 | ✅ Deep Research | 8 | 2 | 587 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 7 | 1825 |
 | ✅ Plugins | 8 | 5 | 3124 |
-| ✅ Prompts | 2 | 9 | 2011 |
+| ✅ Prompts | 2 | 9 | 2018 |
 | ✅ Providers | 1 | 57 | 8636 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3122 |
@@ -69,10 +69,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1042 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3670 |
-| ✅ Security | 1 | 3 | 3537 |
+| ✅ Security | 1 | 3 | 3558 |
 | ✅ Sessions | 4 | 20 | 7898 |
 | ✅ Skills | 6 | 16 | 5984 |
-| ✅ Tasks | 2 | 7 | 3084 |
+| ✅ Tasks | 2 | 8 | 3231 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 8 | 1667 |
 | ✅ Tools | 12 | 145 | 44258 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2791 |
-| ✅ Workflows | 5 | 18 | 7425 |
+| ✅ Workflows | 5 | 18 | 7446 |
 
 ## Documentation Without Features
 

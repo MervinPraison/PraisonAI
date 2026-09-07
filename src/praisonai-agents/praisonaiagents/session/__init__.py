@@ -192,6 +192,16 @@ def __getattr__(name: str):
         _module_cache[name] = build_handoff_prompt
         return build_handoff_prompt
 
+    # Inter-agent content provenance envelope
+    if name == "MessageOrigin":
+        from .provenance import MessageOrigin
+        _module_cache[name] = MessageOrigin
+        return MessageOrigin
+    if name == "wrap_inter_agent":
+        from .provenance import wrap_inter_agent
+        _module_cache[name] = wrap_inter_agent
+        return wrap_inter_agent
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -226,4 +236,6 @@ __all__ = [
     "clear_session_context",
     "workspace_id",
     "build_handoff_prompt",
+    "MessageOrigin",
+    "wrap_inter_agent",
 ]
