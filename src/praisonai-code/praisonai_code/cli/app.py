@@ -968,7 +968,10 @@ def main_callback(
                         )
 
                 # Fork non-destructively so the resumed transcript is branched
-                # rather than mutated in place (parity with `run --fork`).
+                # rather than mutated in place (parity with `run --fork`). An
+                # explicit --fork must fail closed: silently falling back to the
+                # source session would violate the non-destructive guarantee and
+                # let subsequent turns mutate the original (Issue #4910).
                 if fork and resume_id:
                     try:
                         from praisonaiagents.session.hierarchy import (
@@ -979,10 +982,18 @@ def main_callback(
                         hierarchical_store = HierarchicalSessionStore(
                             str(get_project_sessions_dir())
                         )
-                        resume_id = hierarchical_store.fork_session(resume_id)
-                    except Exception:
-                        # Fork is best-effort; fall back to resuming in place.
-                        pass
+                        forked_id = hierarchical_store.fork_session(resume_id)
+                    except typer.Exit:
+                        raise
+                    except Exception as exc:
+                        typer.echo(f"Failed to fork session: {exc}", err=True)
+                        raise typer.Exit(1)
+                    if not forked_id:
+                        typer.echo(
+                            f"Failed to fork session: {resume_id}", err=True
+                        )
+                        raise typer.Exit(1)
+                    resume_id = forked_id
 
                 # Restore the recorded session model so resume continues on the
                 # same provider instead of the current default (Issue #3685).
