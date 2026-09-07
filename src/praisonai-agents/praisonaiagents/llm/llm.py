@@ -2513,6 +2513,18 @@ Respond with ONLY a valid JSON tool call in this format:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return None
         
+        # Let the provider adapter rewrite anything its server cannot parse.
+        # Ollama 400s the entire request on a union-typed parameter, which is
+        # what an Optional[str] tool argument produces; hosted providers get
+        # the schema untouched.
+        if formatted_tools:
+            try:
+                adapter = getattr(self, '_provider_adapter', None)
+                if adapter is not None:
+                    formatted_tools = adapter.format_tools(formatted_tools)
+            except Exception as e:  # noqa: BLE001 -- never break tool formatting
+                logging.debug(f"Adapter tool formatting skipped: {e}")
+
         # Cache the formatted tools
         result = formatted_tools if formatted_tools else None
         if len(self._formatted_tools_cache) < self._max_cache_size:
@@ -6031,6 +6043,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return model
         return f"openai/{model}"
 
+    def _guard_format_with_tools(self, params: Dict[str, Any]) -> None:
+        """Refuse a combination that makes the model fabricate.
+
+        On Ollama a JSON grammar makes the tool-call tag unemittable, so the
+        model cannot call the tool and instead invents a confident answer,
+        returned with HTTP 200 and no warning. Measured: the same request
+        without the grammar calls the tool correctly; with it the model
+        returned an invented temperature having never run the tool.
+
+        Raising is what this package's own quirk table prescribes -- a
+        fabricated answer that looks right is worse than an error.
+        """
+        adapter = getattr(self, '_provider_adapter', None)
+        if adapter is None or not getattr(adapter, 'format_and_tools_conflict', False):
+            return
+        if params.get("tools") and params.get("response_format"):
+            raise ValueError(
+                "This local provider cannot honour a structured-output schema and "
+                "tools in the same request: the JSON grammar makes the tool call "
+                "unemittable, so the model silently fabricates an answer instead "
+                "of calling your tool. Send tools without output_json/output_pydantic, "
+                "or drop the tools for this call."
+            )
+
     def _build_completion_params(self, **override_params) -> Dict[str, Any]:
         """Build parameters for litellm completion calls with all necessary config"""
         params = {
@@ -6279,6 +6315,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 logging.debug(f"Claude memory tool enabled with beta header: {beta_header}")
         
+        self._guard_format_with_tools(params)
         return params
 
     # ── Responses API support ───────────────────────────────────────────

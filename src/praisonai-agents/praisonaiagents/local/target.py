@@ -216,6 +216,17 @@ def build_target(discovery: Discovery, model_id, *, caps=None,
         "model_id": model_evidence if model_id else Evidence.UNKNOWN,
         "engine_version": Evidence.SERVER if discovery.engine_version else Evidence.UNKNOWN,
     }
+    # Keep the facts the probe already learned reachable by callers that must
+    # not probe: the token budgeter and the embedder factory.
+    if model_id:
+        from .embed import remember_model_facts
+        _facts = dict(extra)
+        remember_model_facts(
+            model_id,
+            context_length=_facts.get("context_length"),
+            embedding_dimension=_facts.get("embedding_length"),
+        )
+
     return LocalTarget(
         engine=engine,
         base_url=discovery.base_url,

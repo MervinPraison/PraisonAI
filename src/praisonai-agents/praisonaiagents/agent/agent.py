@@ -2227,6 +2227,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 if _embed_model:
                     embedder_config = _local_embedder(
                         _target.engine, _target.base_url, _embed_model)
+                    # Carry the real vector width. local/ is a dependency sink
+                    # and cannot import the dimension table, so the caller
+                    # supplies it: a store created at the wrong width either
+                    # rejects every write or silently corrupts the index.
+                    try:
+                        from ..embedding.dimensions import get_dimensions
+                        _dims = get_dimensions(_embed_model)
+                        if _dims:
+                            embedder_config.setdefault("config", {})["embedding_dims"] = _dims
+                    except Exception:  # noqa: BLE001 -- a missing width must not break setup
+                        pass
                     if retrieval_config is not None:
                         retrieval_config.setdefault('embedder_config', embedder_config)
                 else:
