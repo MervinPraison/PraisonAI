@@ -37,6 +37,26 @@ def _resolve_installer(global_env: bool = False):
     return [sys.executable, "-m", "pip", "install"]
 
 
+def _plugin_create_command_name():
+    """Name of the registered command that creates a single-file plugin.
+
+    Derived from this Typer app's own command registry so a hint printed to the
+    user can never advertise a subcommand that is not registered (issue: the
+    ``discover`` empty-state used to point at a non-existent ``plugins init``).
+    """
+    registered = {
+        getattr(cmd, "name", None) or getattr(cmd, "callback", None).__name__
+        for cmd in app.registered_commands
+    }
+    for candidate in ("create", "init", "new"):
+        if candidate in registered:
+            return candidate
+    raise RuntimeError(
+        "plugins app registers no plugin-creation command; "
+        f"registered commands: {sorted(n for n in registered if n)}"
+    )
+
+
 def _registered_entry_point_names():
     """Return the set of currently registered entry-point plugin names."""
     try:
@@ -626,7 +646,10 @@ def plugins_discover(
             
             if not plugins:
                 console.print("[yellow]No single-file plugins found.[/yellow]")
-                console.print("\nCreate one with: praisonai plugins init <name>")
+                console.print(
+                    "\nCreate one with: praisonai plugins "
+                    f"{_plugin_create_command_name()} <name>"
+                )
                 return
             
             table = Table(title=f"Single-File Plugins ({len(plugins)} found)")
