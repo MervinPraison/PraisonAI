@@ -53,6 +53,45 @@ MIN_BRANCHES_FOR_LLM_SUMMARY = 3
 # and acquire a *different* lock object (which would defeat the run guard).
 _RUN_LOCK_INIT_GUARD = threading.Lock()
 
+
+class _WriteTrackingDict(dict):
+    """A ``dict`` that records which keys were assigned after construction.
+
+    A parallel branch runs against its own deep copy of the shared variables and
+    the branch's writes must be merged back (see ``_merge_branch_variables``). The
+    only reliable way to know *which* keys a branch wrote - not equality (drops an
+    equal-valued write, mis-flags a value whose ``!=`` is not a bool) nor identity
+    (blind to a rebind to an interned immutable like ``x = "SAME"``) - is to record
+    the assignment as it happens. Keys set at construction time seed the branch's
+    starting scope and are deliberately *not* counted as writes.
+    """
+
+    __slots__ = ("written_keys",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A set, not a copy of the values: only the identity of *which* keys were
+        # written matters, and the current value is read from the dict at merge.
+        self.written_keys = set()
+
+    def __setitem__(self, key, value):
+        self.written_keys.add(key)
+        super().__setitem__(key, value)
+
+    def update(self, *args, **kwargs):
+        # dict.update does NOT route through __setitem__, so a StepResult.variables
+        # merge (``all_variables.update(result.variables)``) would otherwise be an
+        # invisible write. Record its keys explicitly.
+        merged = dict(*args, **kwargs)
+        self.written_keys.update(merged)
+        super().update(merged)
+
+    def setdefault(self, key, default=None):
+        # setdefault also bypasses __setitem__ and creates the key when absent.
+        if key not in self:
+            self.written_keys.add(key)
+        return super().setdefault(key, default)
+
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
     def __init__(self, message: str, cause: Exception = None, errors: List = None):
@@ -2855,6 +2894,89 @@ CONCISE SUMMARY:"""
             return min(user_max, n)
         return min(DEFAULT_MAX_PARALLEL_WORKERS, n)
     
+    @staticmethod
+    def _branch_variable_delta(
+        branch_variables: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Return only the variables a parallel branch actually wrote.
+
+        A branch runs against its *own* ``copy.deepcopy`` of the shared scope, so
+        merging the whole returned dict back would copy every untouched key as
+        well - replacing the parent's objects with per-branch clones and letting a
+        stale copy overwrite a value some other part of the run had moved on from.
+        Only the delta is merged: the keys the branch actually assigned.
+
+        Writes are read from ``_WriteTrackingDict.written_keys`` - the exact set of
+        keys the branch bound via ``variables[name] = ...`` (an ``output_variable``
+        write, a ``StepResult.variables`` merge, or a nested pattern's own merge).
+        Recording the assignment itself is the only detection that is always right:
+
+        * value **equality** dropped an equal-valued write (writing a variable back
+          to the value it already held), losing declaration-order semantics on a
+          reused ``output_variable``, and it misclassified an untouched value whose
+          ``!=`` is not a bool (numpy arrays, some ORM/pydantic objects) as a write;
+        * object **identity** still could not see a write whose value is an interned
+          immutable (``x = "SAME"`` rebinds to the very object already there).
+
+        Tracking the assignment sidesteps both: an untouched key is never in
+        ``written_keys`` (so the parent keeps its own object and no ``!=`` is ever
+        evaluated), and every real write is present regardless of its value.
+        """
+        if not branch_variables:
+            return {}
+        written = getattr(branch_variables, "written_keys", None)
+        if written is None:
+            # Not a tracking dict (a branch replaced ``ctx.variables`` wholesale, or
+            # a nested pattern returned a plain dict). Fall back to merging every
+            # key so a real write is never dropped - the bug this method prevents.
+            return dict(branch_variables)
+        return {key: branch_variables[key] for key in written if key in branch_variables}
+
+    @staticmethod
+    def _merge_branch_variables(
+        all_variables: Dict[str, Any],
+        branch_deltas: List[Tuple[int, Dict[str, Any]]]
+    ) -> None:
+        """Merge parallel branches' variable writes back into the shared scope.
+
+        THE MERGE RULE (please do not "simplify" this back into a race):
+
+        1. Branches never share a variables dict - each gets a deep copy - because
+           concurrent writes to one dict is a data race. Isolation is the safe half
+           of the design; this function is the missing other half, the merge back.
+        2. Deltas are applied in **branch declaration order**, never completion
+           order, so the result does not depend on thread scheduling. Two runs of
+           the same workflow produce the same variables.
+        3. On a **key collision** - two branches writing the same variable with
+           different values - the later branch in declaration order wins, which is
+           exactly what would happen if the same steps ran sequentially (Parallel
+           is meant to be a faster way to run steps, not a different semantics).
+           The collision is logged as a warning naming the key and both branches,
+           because a silently discarded branch result is the bug this fixes; the
+           workflow author has almost certainly reused an ``output_variable`` or a
+           step name by accident.
+        4. Only real writes are merged (see ``_branch_variable_delta``), so an
+           untouched key keeps the parent's own object.
+        """
+        winners: Dict[str, int] = {}
+        for idx, delta in branch_deltas:
+            for key, value in delta.items():
+                previous_idx = winners.get(key)
+                if previous_idx is not None:
+                    try:
+                        conflicting = bool(all_variables[key] != value)
+                    except Exception:
+                        conflicting = True
+                    if conflicting:
+                        logger.warning(
+                            f"Parallel branches {previous_idx} and {idx} both wrote "
+                            f"variable '{key}' with different values; branch {idx} wins "
+                            f"(declaration order). Give the branches distinct "
+                            f"output_variable names to avoid losing a result."
+                        )
+                winners[key] = idx
+                all_variables[key] = value
+
     def _execute_parallel(
         self,
         parallel_step: Parallel,
@@ -2906,6 +3028,8 @@ CONCISE SUMMARY:"""
         # Use ThreadPoolExecutor for parallel execution
         from ..trace.context_events import copy_context_to_callable, get_context_emitter
         
+        branch_deltas = []  # [(branch_idx, {var: value}), ...] in declaration order
+
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
         effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
@@ -2913,12 +3037,21 @@ CONCISE SUMMARY:"""
             futures = []
             for idx, step in enumerate(parallel_step.steps):
                 # Wrap execution to propagate context and set branch_id for parallel tracking
-                def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous):
+                # Each branch writes into its OWN deep copy: concurrent writes to
+                # one shared dict would be a data race. The copy is a
+                # _WriteTrackingDict so the merge back (see _merge_branch_variables)
+                # knows exactly which keys the branch assigned - the branch's
+                # output_variable writes are not thrown away, and untouched keys are
+                # not merged as per-branch clones. Keys present at construction seed
+                # the scope and are not counted as writes.
+                branch_vars = _WriteTrackingDict(copy.deepcopy(all_variables))
+
+                def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
                     emitter.set_branch(f"parallel_{idx}")
                     try:
                         return self._execute_single_step_internal(
-                            step, opt_prev, input, copy.deepcopy(all_variables), model, False, idx, stream, depth=depth+1
+                            step, opt_prev, input, branch_vars, model, False, idx, stream, depth=depth+1
                         )
                     finally:
                         emitter.clear_branch()
@@ -2952,6 +3085,9 @@ CONCISE SUMMARY:"""
                 if branch_error is None:
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
+                    branch_deltas.append(
+                        (idx, self._branch_variable_delta(step_result.get("variables")))
+                    )
                     continue
 
                 logger.error(f"Parallel branch {idx} failed: {branch_error}")
@@ -2973,6 +3109,15 @@ CONCISE SUMMARY:"""
                     # Record the failure but continue with other branches. Do not
                     # fold the exception text into outputs as if it were data.
                     results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
+                    # "partial_ok" means partial results are kept, so the variables
+                    # the branch's *completed* steps wrote are kept too. (The failed
+                    # step itself never reaches the output_variable write, so nothing
+                    # from it can leak in here.) fail_fast/fail_all raise instead, so
+                    # nothing from a failed branch is merged under those modes.
+                    if step_result is not None:
+                        branch_deltas.append(
+                            (idx, self._branch_variable_delta(step_result.get("variables")))
+                        )
                     # Keep `outputs` index-aligned with parallel_step.steps so a
                     # downstream reader of parallel_outputs[idx] cannot silently
                     # receive a later branch's result once an earlier one fails.
@@ -2990,6 +3135,11 @@ CONCISE SUMMARY:"""
                     f"{len(errors)} parallel branches failed", errors=errors, cause=cause
                 ) from cause
         
+        # Merge each branch's variable writes back into the shared scope. Without
+        # this every `output_variable` set inside a Parallel block was written to a
+        # deep copy that was discarded when the branch returned (silent data loss).
+        self._merge_branch_variables(all_variables, branch_deltas)
+
         # Combine outputs
         combined_output = "\n---\n".join(str(o) for o in outputs)
         all_variables["parallel_outputs"] = outputs
