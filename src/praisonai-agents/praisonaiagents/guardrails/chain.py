@@ -6,6 +6,7 @@ separated from the protocol definitions for clean architecture.
 """
 from typing import List, Dict, Any, Tuple
 from .protocols import GuardrailProtocol
+from .retry import GuardrailRetry
 
 
 class GuardrailChain:
@@ -104,6 +105,11 @@ class GuardrailChain:
                     if not is_valid:
                         return False, processed_content  # Failed validation
                     content = processed_content  # Update content with processing
+                except GuardrailRetry as e:
+                    # Deliberate "not acceptable, here is why" signal: surface the
+                    # author's message verbatim so it can be handed to the model,
+                    # instead of burying it under the generic error wrapper below.
+                    return False, e.feedback
                 except Exception as e:
                     if not self.fail_open:
                         return False, f"Guardrail error: {str(e)}"  # Fail closed on error

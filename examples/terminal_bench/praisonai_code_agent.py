@@ -16,9 +16,13 @@ Architecture:
     Harbor Container → `praisonai code -p --output json "TASK" --dangerously-skip-approval`
 
 Notes:
-    - `--dangerously-skip-approval` sets PRAISON_APPROVAL_MODE=auto +
-      PRAISONAI_TOOL_SAFETY=off so the assistant runs fully autonomously in the
-      container (no approval hang in a non-TTY session).
+    - `--dangerously-skip-approval` registers an always-approve backend on the
+      approval registry (plus PRAISON_APPROVAL_MODE=auto /
+      PRAISONAI_TOOL_SAFETY=off) so the assistant runs fully autonomously in the
+      container. Before that registry wiring existed the flag left every
+      critical-tool prompt in place and the non-TTY container auto-denied all of
+      them, so the agent could not run a single shell command while still
+      exiting 0 -- one cause of the 0.000 scores in #3932.
     - The JSON envelope provides token, cost, session, and status metadata while
       the real exit status still surfaces install/auth/startup failures.
     - The base `praisonai` package is sufficient; heavy `code` extras are not

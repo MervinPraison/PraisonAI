@@ -26,6 +26,9 @@ output
 !src/praisonai-code/praisonai_code/cli/output/
 !src/praisonai-bot/praisonai_bot/cli/output/
 !src/praisonai-ts/src/db/
+# The bare `db` rule above also swallows the SQLite adapter's test
+# directory, so the durability suite would silently never be committed.
+!src/praisonai-ts/tests/unit/db/
 !src/praisonai-ts/src/cli/output/
 
 .files

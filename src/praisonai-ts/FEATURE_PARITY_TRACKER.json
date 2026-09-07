@@ -4,15 +4,15 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 411,
+    "pythonCoreFeatures": 417,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 2040,
-    "gapCount": 0,
+    "gapCount": 6,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
-    "priorityP2": 0,
-    "priorityP3": 0
+    "priorityP2": 1,
+    "priorityP3": 5
   },
   "pythonCoreSDK": {
     "path": "src/praisonai-agents/praisonaiagents",
@@ -145,6 +145,7 @@
       "GuardrailAction",
       "GuardrailConfig",
       "GuardrailResult",
+      "GuardrailRetry",
       "Handoff",
       "HandoffConfig",
       "HandoffCycleError",
@@ -194,6 +195,7 @@
       "MemoryConfig",
       "MessageType",
       "MinimalTelemetry",
+      "ModelRequestBlocked",
       "MultiAgentExecutionConfig",
       "MultiAgentHooksConfig",
       "MultiAgentMemoryConfig",
@@ -265,6 +267,8 @@
       "SandboxResult",
       "SandboxStatus",
       "ScopeRequiredError",
+      "ScriptExhausted",
+      "ScriptedModel",
       "SecurityPolicy",
       "SendResult",
       "Session",
@@ -319,6 +323,7 @@
       "aembed",
       "aembedding",
       "aembeddings",
+      "allow_model_requests",
       "apply_config_defaults",
       "async_display_callbacks",
       "clean_triple_backticks",
@@ -378,6 +383,7 @@
       "load_skill",
       "loop",
       "memory",
+      "no_model_requests",
       "parallel",
       "parallel_handoffs",
       "parse_plugin_header",
@@ -624,6 +630,7 @@
       ],
       "guardrails": [
         "GuardrailResult",
+        "GuardrailRetry",
         "LLMGuardrail"
       ],
       "knowledge": [
@@ -711,6 +718,7 @@
         "LearnProtocol",
         "ManagedBackendProtocol",
         "ManagedEvent",
+        "ModelRequestBlocked",
         "NetworkError",
         "ObservabilityEventType",
         "ObservabilityHooks",
@@ -720,6 +728,8 @@
         "RunOutcome",
         "RunStatus",
         "ScopeRequiredError",
+        "ScriptExhausted",
+        "ScriptedModel",
         "SendResult",
         "SessionErrorEvent",
         "SessionIdleEvent",
@@ -735,6 +745,7 @@
         "__version__",
         "add_memory_adapter",
         "add_memory_factory",
+        "allow_model_requests",
         "config",
         "configure_structured_logging",
         "embedding",
@@ -750,6 +761,7 @@
         "list_runtimes",
         "list_toolsets",
         "memory",
+        "no_model_requests",
         "register_memory_adapter",
         "register_memory_factory",
         "register_profile",
@@ -4938,6 +4950,15 @@
         "category": "guardrails"
       },
       {
+        "feature": "GuardrailRetry",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "high",
+        "status": "TODO",
+        "category": "guardrails"
+      },
+      {
         "feature": "LLMGuardrail",
         "python": true,
         "typescript": true,
@@ -6425,6 +6446,15 @@
         "category": "bots"
       },
       {
+        "feature": "ModelRequestBlocked",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "MultiAgentExecutionConfig",
         "python": true,
         "typescript": true,
@@ -6812,6 +6842,24 @@
         "category": "other"
       },
       {
+        "feature": "ScriptExhausted",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ScriptedModel",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SecurityPolicy",
         "python": true,
         "typescript": true,
@@ -7089,6 +7137,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "allow_model_requests",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "apply_config_defaults",
@@ -7476,6 +7533,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "no_model_requests",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "other"
       },
       {

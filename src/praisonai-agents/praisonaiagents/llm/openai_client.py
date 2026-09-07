@@ -21,6 +21,7 @@ import inspect
 from pathlib import Path
 
 from ..errors import ToolExecutionError
+from ..model_harness.guard import check_model_request
 
 # Graceful "wrap-up" instruction injected when the step budget is nearly
 # exhausted, so the model produces a coherent final answer instead of being
@@ -422,7 +423,15 @@ class OpenAIClient:
     
     @property
     def sync_client(self):
-        """Get the synchronous OpenAI client (lazy initialization)."""
+        """Get the synchronous OpenAI client (lazy initialization).
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
+                Every request this class makes goes through this property, so
+                guarding it here covers the whole OpenAI-native path.
+        """
+        check_model_request(getattr(self, "model", None), "openai.chat.completions")
         if self._sync_client is None:
             OpenAI, _ = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
@@ -433,7 +442,13 @@ class OpenAIClient:
     
     @property
     def async_client(self):
-        """Get the asynchronous OpenAI client (lazy initialization)."""
+        """Get the asynchronous OpenAI client (lazy initialization).
+
+        Raises:
+            ModelRequestBlocked: If a test suite turned real model requests off
+                via ``praisonaiagents.model_harness.allow_model_requests(False)``.
+        """
+        check_model_request(getattr(self, "model", None), "openai.chat.completions")
         if self._async_client is None:
             _, AsyncOpenAI = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
@@ -853,6 +868,24 @@ class OpenAIClient:
                     part.get("image_url")
                 )
                 responses_content.append(item)
+            elif part_type == "file":
+                # Chat Completions ``{"type": "file", "file": {...}}`` (used for
+                # PDF attachments) becomes a Responses API ``input_file`` part.
+                # Passing it through untranslated would be rejected by the API.
+                file_spec = part.get("file")
+                if not isinstance(file_spec, dict):
+                    responses_content.append(part)
+                    continue
+                file_item: Dict[str, Any] = {"type": "input_file"}
+                for src, dst in (
+                    ("filename", "filename"),
+                    ("file_data", "file_data"),
+                    ("file_id", "file_id"),
+                    ("file_url", "file_url"),
+                ):
+                    if file_spec.get(src):
+                        file_item[dst] = file_spec[src]
+                responses_content.append(file_item)
             else:
                 responses_content.append(part)
         return responses_content

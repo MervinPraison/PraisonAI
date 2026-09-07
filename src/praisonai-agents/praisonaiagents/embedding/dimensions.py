@@ -34,7 +34,19 @@ MODEL_DIMENSIONS: Dict[str, int] = {
     # cross-checked against `<family>.embedding_length` from /api/show. Without
     # these every local embedder inherited DEFAULT_DIMENSION (1536, OpenAI's),
     # so a vector index was built 2x-4x the size the model actually produces.
-    "nomic-embed-text": 768,      # measured
+    "nomic-embed-text": 768,
+    # Locally-served embedders. Each was silently taking DEFAULT_DIMENSION
+    # (1536) -- harmless while nothing read the value, wrong now that it sizes
+    # the vector store.
+    "bge-m3": 1024,
+    "bge-large": 1024,
+    "bge-base": 768,
+    "bge-small": 384,
+    "snowflake-arctic-embed": 1024,
+    "snowflake-arctic-embed2": 1024,
+    "granite-embedding": 384,
+    "paraphrase-multilingual": 768,
+    "qwen3-embedding": 1024,      # measured
     "mxbai-embed-large": 1024,    # measured
     "all-minilm": 384,            # measured; Ollama's short tag for all-MiniLM
     # HuggingFace common models

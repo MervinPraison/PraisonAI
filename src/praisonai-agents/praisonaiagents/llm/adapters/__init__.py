@@ -13,6 +13,48 @@ import json
 from typing import Dict, Any, List, Optional
 
 
+def collapse_union_param_types(tools):
+    """Rewrite tool schemas a local server cannot parse.
+
+    Ollama models `parameters.type` as a Go string, so a union like
+    `{"type": ["string", "null"]}` -- which is exactly what an Optional[str]
+    tool argument produces -- fails to unmarshal and 400s the WHOLE request,
+    not just that tool. Collapsing the nullable to its single concrete member
+    keeps the request valid; the field simply stops advertising that it is
+    nullable.
+
+    Only the nullable case (exactly one concrete type plus "null") is
+    collapsed. A genuine heterogeneous union like ``["string", "integer"]``
+    is left untouched: narrowing it to one arm would misrepresent the tool's
+    accepted inputs and could push the model toward invalid calls. Such unions
+    are rare in generated tool schemas and are the server's problem to reject,
+    not ours to silently rewrite.
+
+    Returns a new list; the caller's tool definitions are never mutated.
+    """
+    def fix(node):
+        if isinstance(node, list):
+            return [fix(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        out = {}
+        for key, value in node.items():
+            if key == "type" and isinstance(value, list):
+                concrete = [t for t in value if t != "null"]
+                # Collapse only "<type> | null"; preserve real multi-type unions.
+                if "null" in value and len(concrete) == 1:
+                    out[key] = concrete[0]
+                else:
+                    out[key] = value
+            else:
+                out[key] = fix(value)
+        return out
+
+    if not tools:
+        return tools
+    return [fix(tool) for tool in tools]
+
+
 def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
     """Recover a tool call a local model emitted as JSON text.
 
@@ -54,6 +96,10 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
 class DefaultAdapter:
     """Default provider adapter with sensible fallbacks."""
     
+    def format_tools(self, tools):
+        """Hosted providers get the schema untouched -- they support all of it."""
+        return tools
+
     def supports_prompt_caching(self) -> bool:
         return False
     
@@ -183,6 +229,14 @@ Now provide your final answer using this result. Summarize the information natur
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Ollama-specific tool call recovery from response text."""
         return _recover_json_tool_calls(response_text, tools)
+
+    def format_tools(self, tools):
+        # Ollama 400s the whole request on a union-typed parameter.
+        return collapse_union_param_types(tools)
+
+    # A JSON grammar and tools cannot coexist here: the grammar makes the
+    # tool-call tag unemittable and the model fabricates instead.
+    format_and_tools_conflict = True
     
     
     def get_default_settings(self) -> Dict[str, Any]:
@@ -219,6 +273,10 @@ class LocalOpenAIAdapter(DefaultAdapter):
         # Same reason as Ollama: these servers front small local models that
         # answer with the tool call as text, especially after a repair prompt.
         return _recover_json_tool_calls(response_text, tools)
+
+    def format_tools(self, tools):
+        # llama.cpp and vLLM share Ollama's strict parameter-type handling.
+        return collapse_union_param_types(tools)
 
 
 class AnthropicAdapter(DefaultAdapter):
@@ -313,6 +371,7 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
 
 
 __all__ = [
+    "collapse_union_param_types",
     'DefaultAdapter',
     'OllamaAdapter', 
     'LocalOpenAIAdapter',

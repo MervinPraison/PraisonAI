@@ -14,6 +14,125 @@ from praisonai_code.cli.utils.env_utils import scopes_no_plugins
 app = typer.Typer(help="Terminal-native code assistant mode")
 
 
+# Default multi-step tool budget for a *coding* session.
+#
+# The core Agent defaults (ExecutionConfig.max_iter=20, max_tool_calls_per_turn
+# =10) are general-purpose: they suit a question-answering agent with two or
+# three tools, and they are deliberately left alone here so no existing library
+# user's behaviour changes. They are far too small for a coding agent, whose
+# unit of work is read -> edit -> run tests -> read the failure: roughly four
+# tool calls per fix attempt, before any orientation (ls/glob/grep) at all. Ten
+# calls is "list files, read two files, one grep" — it cannot reach a test run,
+# so every non-trivial task truncated mid-way.
+#
+# 200 is chosen to cover the *tail* rather than the median: agentic coding
+# trajectories cluster around 20-40 steps but the hard tasks — the ones a
+# benchmark actually measures — run well past 100, and a budget set at the
+# median silently truncates exactly those. 200 steps is ~50 edit/verify cycles,
+# which comfortably covers a multi-file fix while still bounding a genuinely
+# runaway loop. The orthogonal guards are unaffected and still stop a broken
+# tool much earlier: the per-tool loop guard, ExecutionConfig.max_execution_time,
+# max_budget, and the model's own context limit.
+DEFAULT_CODE_MAX_STEPS = 200
+
+# Env fallback so a sandbox/CI runner can set the budget without editing the
+# command line (mirrors the --append-system-prompt / PRAISONAI_* convention).
+_MAX_STEPS_ENV = "PRAISONAI_CODE_MAX_STEPS"
+
+
+def resolve_code_max_steps(max_steps=None) -> int:
+    """Resolve the coding session's multi-step tool budget.
+
+    Precedence: explicit ``--max-steps`` > ``PRAISONAI_CODE_MAX_STEPS`` >
+    :data:`DEFAULT_CODE_MAX_STEPS`. An unparseable or non-positive value falls
+    through to the next source rather than failing the run.
+    """
+    import os as _os
+
+    for candidate in (max_steps, _os.environ.get(_MAX_STEPS_ENV)):
+        if candidate is None or candidate == "":
+            continue
+        try:
+            value = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return DEFAULT_CODE_MAX_STEPS
+
+
+def build_code_execution_config(max_steps=None):
+    """Build the ``ExecutionConfig`` a ``praisonai code`` session runs under.
+
+    Sets *both* budget knobs to the resolved value because the two tool loops
+    enforce different ones: the OpenAI-native loop is bounded by ``max_steps``
+    (via ``Agent._resolve_max_steps``), while the LiteLLM loop additionally
+    counts every tool call in the turn against ``max_tool_calls_per_turn`` —
+    which is why a Gemini/Anthropic-routed session stopped after exactly ten
+    calls while an OpenAI-routed one ran to twenty. Raising only one leaves the
+    other as the real (and invisible) ceiling.
+
+    Returns ``None`` if the core config type cannot be imported, so the agent
+    keeps its own defaults rather than failing to start.
+    """
+    try:
+        from praisonaiagents.config import ExecutionConfig
+    except Exception:  # noqa: BLE001 — budget is an enhancement, never a hard dep
+        try:
+            from praisonaiagents.config.feature_configs import ExecutionConfig
+        except Exception:  # noqa: BLE001
+            return None
+    budget = resolve_code_max_steps(max_steps)
+    return ExecutionConfig(
+        max_steps=budget,
+        max_tool_calls_per_turn=budget,
+    )
+
+
+def _install_bypass_approval_backend() -> None:
+    """Register an always-approve backend for --no-safe/--dangerously-skip-approval.
+
+    The env vars those flags set are read by the CLI's own tool wiring, but the
+    core ``@require_approval`` decorator that gates critical tools resolves its
+    decision through the approval registry's backend. Registering
+    ``AutoApproveBackend`` there is what actually makes the opt-out flags skip
+    approval — the same mechanism ``--plan`` uses to *tighten* the policy, used
+    here to loosen it.
+
+    Strictly opt-in: only ever called from the explicit --no-safe /
+    --dangerously-skip-approval branch, so the safe-by-default path is
+    untouched. Best-effort — a registry failure leaves approvals in place
+    (fails closed).
+    """
+    try:
+        from praisonaiagents.approval import get_approval_registry
+        from praisonaiagents.approval.backends import AutoApproveBackend
+
+        get_approval_registry().set_backend(AutoApproveBackend())
+    except Exception:  # noqa: BLE001 — never fail *open* on a wiring error
+        pass
+
+
+def _clear_bypass_approval_backend() -> None:
+    """Undo :func:`_install_bypass_approval_backend` for a safe-mode run.
+
+    Removes the global backend only when it is the ``AutoApproveBackend`` this
+    module installs, so a bypass left over from an earlier ``--no-safe`` call in
+    the same process (REPL/worker/test) cannot silently keep a later
+    safe-by-default session unguarded, while a backend registered by a caller or
+    by ``--plan`` is preserved.
+    """
+    try:
+        from praisonaiagents.approval import get_approval_registry
+        from praisonaiagents.approval.backends import AutoApproveBackend
+
+        registry = get_approval_registry()
+        if isinstance(registry.get_backend(), AutoApproveBackend):
+            registry.remove_backend()
+    except Exception:  # noqa: BLE001 — best-effort cleanup
+        pass
+
+
 @app.callback(invoke_without_command=True)
 @scopes_no_plugins
 def code_main(
@@ -36,6 +155,7 @@ def code_main(
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent profile (applies its tools and permission/mode scope)"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps", help=f"Maximum tool-calling steps for this coding session (default: {DEFAULT_CODE_MAX_STEPS}). Env fallback: PRAISONAI_CODE_MAX_STEPS"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     append_system_prompt: Optional[str] = typer.Option(None, "--append-system-prompt", help="Append text (or @file) to the system prompt for this invocation only. Env fallback: PRAISONAI_APPEND_SYSTEM_PROMPT"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
@@ -224,12 +344,27 @@ def code_main(
     if dangerously_skip_approval or not safe_mode:
         os.environ["PRAISON_APPROVAL_MODE"] = "auto"
         os.environ["PRAISONAI_TOOL_SAFETY"] = "off"
+        # PRAISON_APPROVAL_MODE/PRAISONAI_TOOL_SAFETY are read by the CLI's own
+        # tool wiring, but the gate that actually prompts for a critical tool
+        # (e.g. acp_execute_command) is the core `@require_approval` decorator,
+        # which consults the approval *registry* backend. Without registering a
+        # bypass backend the flag left every prompt in place — and a scripted
+        # run with no tty answered "no" to each one, so the agent could not run
+        # a single command while still exiting 0. Install the same
+        # AutoApproveBackend the `--plan` branch already registers below (one
+        # mechanism, not a second env var).
+        _install_bypass_approval_backend()
     else:
         os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
         # Clear any stale bypass from a previous --no-safe run in the same
         # process (REPL/worker/test). Leaving PRAISONAI_TOOL_SAFETY=off would
         # silently keep later safe-default agents unguarded.
         os.environ.pop("PRAISONAI_TOOL_SAFETY", None)
+        # Same reasoning for the registry: a bypass backend installed by an
+        # earlier --no-safe run in this process must not survive into a
+        # safe-by-default one. Only a backend *we* installed is removed, so a
+        # caller-supplied backend is never clobbered.
+        _clear_bypass_approval_backend()
     
     # Headless one-shot: emit a clean, machine-readable envelope and exit with a
     # status-reflecting code. Routes around the decorated interactive chat path
@@ -292,6 +427,7 @@ def code_main(
             tools_arg=tools,
             agent_profile=agent_profile,
             approval=headless_approval,
+            max_steps=max_steps,
         )
         return
 
@@ -304,6 +440,7 @@ def code_main(
             verbose=verbose,
             profile_deep=profile_deep,
             thinking_budget=thinking_budget,
+            max_steps=max_steps,
         )
         return
 
@@ -324,6 +461,9 @@ def code_main(
     # profile (tools + permission/mode scope), consumed when the agent is built.
     args.thinking_budget = thinking_budget
     args.agent_profile = agent_profile
+    # Same coding-sized budget for the interactive session, threaded onto the
+    # resident TUI's existing `execution` capability option.
+    args.execution = build_code_execution_config(max_steps)
 
     # Resolve the named profile's permission/mode scope into an approval config
     # so the code session runs least-privilege (e.g. `--agent plan` is rejected
@@ -430,6 +570,7 @@ def _run_resident_code(prompt, args, *, plan=False, session_id=None):
         plan_mode=plan,
         enable_acp=not getattr(args, "no_acp", False),
         enable_lsp=not getattr(args, "no_lsp", False),
+        execution=getattr(args, "execution", None),
     )
 
     tui = AsyncTUI(config=tui_config)
@@ -457,6 +598,19 @@ def _print_result_succeeded(result) -> bool:
     if isinstance(result, str):
         return bool(result.strip())
     return True
+
+
+def _print_result_truncated(agent) -> bool:
+    """Whether the headless run stopped by exhausting its step/tool budget.
+
+    Delegates to ``run._run_was_truncated`` so ``code -p`` and ``run`` share one
+    definition of "truncated" (the core records ``last_stop_reason ==
+    "max_steps"`` on the agent when either tool loop runs out of budget) instead
+    of growing a second, drifting guard.
+    """
+    from praisonai_code.cli.commands.run import _run_was_truncated
+
+    return _run_was_truncated(agent)
 
 
 def _collect_print_usage(model: Optional[str]) -> dict:
@@ -512,14 +666,17 @@ def _run_print_code(
     tools_arg: Optional[str] = None,
     agent_profile: Optional[dict] = None,
     approval: Optional[Any] = None,
+    max_steps: Optional[int] = None,
 ):
     """Headless one-shot code run with clean stdout and a status exit code.
 
     Builds the code agent directly (bypassing the decorated interactive path),
     runs the prompt once, and emits a machine-readable envelope
     ``{result, session_id, usage:{in,out,cost}, status}`` to stdout. Exit code
-    is 0 on success and 1 on failure (empty result or raised error), giving
-    scripts/CI/benchmarks a reliable signal — parity with ``run --output json``.
+    is 0 on success, 2 when the run was *truncated* by the step/tool budget
+    (``status: "truncated"`` — a wrap-up summary, not a finished task), and 1 on
+    failure (empty result or raised error), giving scripts/CI/benchmarks a
+    reliable signal — parity with ``run --output json``.
 
     ``tools_arg`` is the raw ``--tools`` string, resolved *inside* this run's
     try/except (via the same ``_resolve_tools_arg``/``ToolResolver`` as the
@@ -573,6 +730,12 @@ def _run_print_code(
         # decorations so stdout carries only our envelope.
         "output": "minimal",
     }
+    # Give the coding agent a coding-sized step budget. Without this it inherits
+    # the general-purpose Agent defaults (20 steps / 10 tool calls per turn) and
+    # truncates before it can reach a test run — see DEFAULT_CODE_MAX_STEPS.
+    _execution = build_code_execution_config(max_steps)
+    if _execution is not None:
+        agent_config["execution"] = _execution
     if model:
         agent_config["llm"] = model
 
@@ -614,6 +777,7 @@ def _run_print_code(
     status = "ok"
     result = None
     error_message = None
+    agent = None
     try:
         workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
         merged_tools = _get_headless_code_tools(
@@ -673,6 +837,12 @@ def _run_print_code(
 
     if status != "error" and not _print_result_succeeded(result):
         status = "failed"
+    elif status == "ok" and _print_result_truncated(agent):
+        # A step/tool-budget exhaustion still returns a non-empty wrap-up
+        # summary, so string-emptiness alone reports a *truncated* run as a
+        # completed one. Reuse `run`'s terminal-reason check so both headless
+        # surfaces agree, and expose it as a distinct status + exit code.
+        status = "truncated"
 
     usage = _collect_print_usage(model)
 
@@ -689,6 +859,13 @@ def _run_print_code(
         # exit code — nothing else — so it pipes cleanly.
         if result:
             print(result)
+        if status == "truncated":
+            typer.echo(
+                "Warning: run hit the step/tool-call budget; the output above "
+                "is a summary of partial progress, not a completed task. "
+                "Re-run with a higher --max-steps.",
+                err=True,
+            )
         if error_message:
             typer.echo(f"Error: {error_message}", err=True)
     else:
@@ -702,6 +879,10 @@ def _run_print_code(
             envelope["error"] = error_message
         print(json.dumps(envelope))
 
+    if status == "truncated":
+        # Exit 2 = incomplete run (mirrors `run`'s truncation contract), distinct
+        # from a hard failure (1) and a clean completion (0).
+        raise typer.Exit(2)
     if status != "ok":
         raise typer.Exit(1)
 
@@ -719,6 +900,7 @@ def _run_profiled_code(
     verbose: bool = False,
     profile_deep: bool = False,
     thinking_budget: Optional[int] = None,
+    max_steps: Optional[int] = None,
 ):
     """Run code assistant with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -754,6 +936,12 @@ def _run_profiled_code(
         # keeps profiler stdout clean.
         "output": "verbose" if verbose else "minimal",
     }
+    # Same coding-sized budget as the headless/interactive paths, so a profiled
+    # single-prompt run does not silently keep the general-purpose core defaults
+    # (20 steps / 10 tool calls per turn) and truncate a real coding task.
+    _execution = build_code_execution_config(max_steps)
+    if _execution is not None:
+        agent_config["execution"] = _execution
     if model:
         agent_config["llm"] = model
     

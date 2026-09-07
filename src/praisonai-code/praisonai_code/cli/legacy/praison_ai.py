@@ -82,6 +82,30 @@ def _get_call_module():
     call_module = getattr(_mod, 'call')
     return call_module
 
+
+def _build_call_args(args, argv=None):
+    """Build the ``praisonai.api.call.main()`` argv from parsed CLI args.
+
+    ``--port``/``--host`` are forwarded only when the user typed them. The
+    call server's own defaults (``$PORT``, else 8090 / 127.0.0.1) differ from
+    the shared argparse defaults (8005 / 127.0.0.1), so always forwarding
+    ``args.port`` would silently move the server off its documented port.
+    """
+    raw = sys.argv[1:] if argv is None else list(argv)
+
+    def _typed(flag):
+        return any(a == flag or a.startswith(flag + "=") for a in raw)
+
+    call_args = []
+    if getattr(args, "public", False):
+        call_args.append("--public")
+    if _typed("--port") and getattr(args, "port", None) is not None:
+        call_args.extend(["--port", str(args.port)])
+    if _typed("--host") and getattr(args, "host", None) is not None:
+        call_args.extend(["--host", str(args.host)])
+    return call_args
+
+
 def _get_gradio():
     """Lazy import gradio only when gradio UI is used.
     
@@ -648,10 +672,7 @@ class PraisonAI:
                 print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                 print("\npip install \"praisonai[call]\"\n")
                 return
-            call_args = []
-            if args.public:
-                call_args.append('--public')
-            _get_call_module().main(call_args)
+            _get_call_module().main(_build_call_args(args))
             return
 
         if args.command == 'train':
@@ -1058,9 +1079,7 @@ class PraisonAI:
                 print("\npip install \"praisonai[call]\"\n")
                 sys.exit(1)
             
-            call_args = []
-            if args.public:
-                call_args.append('--public')
+            call_args = _build_call_args(args)
             _get_call_module().main(call_args)
             sys.exit(0)
 
@@ -1189,8 +1208,9 @@ class PraisonAI:
                 
                 # Get action from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
-                self.handle_hooks_command(action)
-                sys.exit(0)
+                # Propagate the handler's exit code: an unknown action used to
+                # print an error and still exit 0, so scripts saw success.
+                sys.exit(self.handle_hooks_command(action) or 0)
 
             elif args.command == 'knowledge':
                 self._require_agents()

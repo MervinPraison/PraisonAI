@@ -1725,7 +1725,9 @@ Write the complete compiled report:"""
             # deny or a tool-call guardrail. The check is pure/sync (no awaits).
             check = getattr(self, "_check_tool_policy_and_guardrails", None)
             if check is not None:
-                policy_result = check(function_name, arguments)
+                # ``tools_override`` is threaded through so a run-scoped tool
+                # list cannot bypass the per-tool guardrails its tools declare.
+                policy_result = check(function_name, arguments, tools_override)
                 if isinstance(policy_result, dict):
                     return policy_result  # Error dict
                 _, arguments = policy_result
@@ -2064,7 +2066,7 @@ Write the complete compiled report:"""
                 # unsafe tool output. Fail-closed. Zero overhead when unset.
                 apply_result_guardrails = getattr(self, "_apply_tool_result_guardrails", None)
                 if apply_result_guardrails is not None:
-                    result = apply_result_guardrails(function_name, result)
+                    result = apply_result_guardrails(function_name, result, tools_override)
 
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring

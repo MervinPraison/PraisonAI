@@ -2,6 +2,12 @@
 Hooks command group for PraisonAI CLI.
 
 Provides hook management commands.
+
+Only actions the legacy handler actually implements are registered here.
+``add`` and ``remove`` used to be advertised but were never implemented: the
+handler printed "Unknown hooks action" and the dispatcher still exited 0, so a
+script that "added" a hook succeeded while doing nothing. Hooks are configured
+by editing the file that ``praisonai hooks init`` creates.
 """
 
 import typer
@@ -11,34 +17,23 @@ app = typer.Typer(help="Hook management")
 
 @app.command("list")
 def hooks_list():
-    """List available hooks."""
+    """List configured hooks."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
-    
-    argv = ['hooks', 'list']
-    
-    run_wrapper_command(argv, feature="hooks")
+
+    run_wrapper_command(['hooks', 'list'], feature="hooks")
 
 
-@app.command("add")
-def hooks_add(
-    name: str = typer.Argument(..., help="Hook name"),
-    event: str = typer.Option(..., "--event", "-e", help="Event to hook into"),
-):
-    """Add a hook."""
+@app.command("stats")
+def hooks_stats():
+    """Show hooks statistics."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
-    
-    argv = ['hooks', 'add', name, '--event', event]
-    
-    run_wrapper_command(argv, feature="hooks")
+
+    run_wrapper_command(['hooks', 'stats'], feature="hooks")
 
 
-@app.command("remove")
-def hooks_remove(
-    name: str = typer.Argument(..., help="Hook name to remove"),
-):
-    """Remove a hook."""
+@app.command("init")
+def hooks_init():
+    """Create the hooks.json template in this workspace."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
-    
-    argv = ['hooks', 'remove', name]
-    
-    run_wrapper_command(argv, feature="hooks")
+
+    run_wrapper_command(['hooks', 'init'], feature="hooks")

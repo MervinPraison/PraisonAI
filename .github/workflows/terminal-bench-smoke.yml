@@ -21,7 +21,10 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # harbor requires >=3.12; on 3.11 `pip install harbor` resolved to no
+          # candidate version at all and every scheduled run died in ~15s, so
+          # this gate has never produced a Terminal-Bench score.
+          python-version: "3.12"
 
       - name: Install Harbor + PraisonAI
         run: |
@@ -34,7 +37,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PYTHONPATH: .
         run: |
-          harbor run -c examples/terminal_bench/job_code_smoke.yaml || true
+          harbor run -c examples/terminal_bench/job_code_smoke.yaml
 
       - name: Upload Harbor results
         if: always()

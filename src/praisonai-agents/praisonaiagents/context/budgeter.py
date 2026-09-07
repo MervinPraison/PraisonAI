@@ -101,6 +101,18 @@ def get_model_limit(model: str) -> int:
     Returns:
         Context window size in tokens
     """
+    # A local server told us the real window when it was probed. litellm knows no
+    # local tag, so without this a 40960-token model inherits the generic 128000
+    # default and compaction budgets it at three times its real room -- the
+    # server then truncates silently. No probing here: this is a cached read.
+    try:
+        from ..local.embed import context_length_for
+        probed = context_length_for(model)
+        if probed:
+            return probed
+    except Exception:  # noqa: BLE001 -- budgeting must never fail on a lookup
+        pass
+
     # Prefer data-driven lookup via litellm (context window = max_input_tokens)
     info = _litellm_model_info(model)
     if info:

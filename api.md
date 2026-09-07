@@ -53,9 +53,11 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">get_recommended_stage</a>(prompt: str) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">get_rules_context</a>(file_path: Optional[str] = None, include_manual: Optional[List[str]] = None) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">get_skills_prompt</a>() -> str</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">guardrail_retry_count</a>() -> int</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to_async</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">is_closed</a>() -> bool</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">last_guardrail_error</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">last_stop_reason</a>() -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">list_mcp_servers</a>() -> List[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>()</code>

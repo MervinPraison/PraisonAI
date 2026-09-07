@@ -15,7 +15,51 @@ from typing import Optional, Sequence, Tuple
 from .capabilities import LocalEngine
 
 __all__ = ["ENV_EMBED_MODEL", "PREFERRED_EMBED_MODELS",
-           "select_embedding_model", "local_embedder_config"]
+           "select_embedding_model", "local_embedder_config",
+           "remember_model_facts", "context_length_for", "embedding_dimension_for"]
+
+# Facts the discovery probe already learned, kept so callers that cannot probe
+# (a token budgeter on a hot path, an embedder factory) can still use them.
+# Populated by resolve(); process-local; never triggers I/O of its own.
+_MODEL_FACTS: dict = {}
+
+
+def remember_model_facts(model_id, context_length=None, embedding_dimension=None) -> None:
+    """Record what /api/show already told us about a model."""
+    if not model_id:
+        return
+    facts = _MODEL_FACTS.setdefault(model_id, {})
+    if context_length:
+        facts["context_length"] = int(context_length)
+    if embedding_dimension:
+        facts["embedding_dimension"] = int(embedding_dimension)
+
+
+def context_length_for(model_id):
+    """The model's real context window, or None if we never probed it.
+
+    Without this a local model inherits the generic 128000 default, so context
+    compaction budgets a 40960-token model as if it had three times the room and
+    the server truncates silently.
+    """
+    if not model_id:
+        return None
+    for key in (model_id, model_id.split("/", 1)[-1]):
+        got = _MODEL_FACTS.get(key, {}).get("context_length")
+        if got:
+            return got
+    return None
+
+
+def embedding_dimension_for(model_id):
+    """The embedder's real vector width, or None if unknown."""
+    if not model_id:
+        return None
+    for key in (model_id, model_id.split("/", 1)[-1]):
+        got = _MODEL_FACTS.get(key, {}).get("embedding_dimension")
+        if got:
+            return got
+    return None
 
 ENV_EMBED_MODEL = "PRAISONAI_LOCAL_EMBED_MODEL"
 
@@ -83,17 +127,20 @@ def local_embedder_config(engine: LocalEngine, base_url: str,
 
     Shaped for the knowledge/memory layer (mem0-style provider + config).
     """
+    dimension = embedding_dimension_for(model)
     if engine is LocalEngine.OLLAMA:
-        return {
-            "provider": "ollama",
-            "config": {"model": model, "ollama_base_url": base_url},
-        }
+        config = {"model": model, "ollama_base_url": base_url}
+        if dimension:
+            # Without this the store is created at whatever the first vector
+            # happens to be, or at a 1536 default that no local embedder emits.
+            config["embedding_dims"] = dimension
+        return {"provider": "ollama", "config": config}
     # Everything else speaks OpenAI over HTTP.
     trimmed = base_url.rstrip("/")
-    return {
-        "provider": "openai",
-        "config": {
-            "model": model,
-            "openai_base_url": trimmed if trimmed.endswith("/v1") else trimmed + "/v1",
-        },
+    config = {
+        "model": model,
+        "openai_base_url": trimmed if trimmed.endswith("/v1") else trimmed + "/v1",
     }
+    if dimension:
+        config["embedding_dims"] = dimension
+    return {"provider": "openai", "config": config}

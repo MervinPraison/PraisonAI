@@ -28,7 +28,7 @@ import { AdapterRegistry, BackendNotAvailableError } from '../utils/adapter-regi
 import type { AdapterClass, AdapterFactory, AdapterKwargs } from '../utils/adapter-registry';
 import { ChromaVectorStore } from '../integrations/vector/chroma';
 import type { ChromaConfig } from '../integrations/vector/chroma';
-import { embed, getDimensions } from '../embeddings';
+import { getDimensions } from '../embeddings';
 import { notYetHonoured } from '../utils/parity-notice';
 
 export type MaybePromise<T> = T | Promise<T>;
@@ -374,7 +374,14 @@ export class ChromaMemory implements MemoryProtocol {
     const port = config.port ?? 8000;
     this.baseUrl = config.path ?? `http://${host}:${port}`;
     this.store = config.store ?? new ChromaVectorStore({ host: config.host, port: config.port, path: config.path });
-    this.embedder = config.embedder ?? ((text, model) => embed(text, { model }).embedding);
+    // Default to the real async embedder. This previously used the sync
+    // placeholder in ../embeddings, which returned random vectors -- so every
+    // semantic search over memory scored noise, with nothing to indicate it.
+    this.embedder = config.embedder ?? (async (text, model) => {
+      const { embed: embedAsync } = await import('../llm/embeddings');
+      const result = await embedAsync(text, { model });
+      return result.embedding;
+    });
     this.fetchImpl = config.fetchImpl ?? (globalThis as { fetch?: typeof fetch }).fetch;
   }
 
