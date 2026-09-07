@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-09-08
+> **Version:** 1.7.4 | **Last Updated:** 2026-09-08
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2045 |
+| TypeScript Features | 2048 |
 | **Gap Count** | **6** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -975,7 +975,7 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (139 exports)</summary>
+<summary><strong>tools</strong> (142 exports)</summary>
 
 ```typescript
 import { ArxivDownloadTool, ArxivPaper, ArxivSearchTool, BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MCP, MCPTool... } from 'praisonai';
