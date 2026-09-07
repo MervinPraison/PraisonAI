@@ -5,6 +5,7 @@
  */
 
 import { getApprovalManager, ToolApprovalDeniedError } from '../ai/tool-approval';
+import { ToolValidationError } from './base';
 
 export interface ToolParameters {
   type: 'object';
@@ -435,6 +436,57 @@ export class FunctionTool<TParams = any, TResult = any> {
   }
 
   /**
+   * Python parity: `FunctionTool.run(**kwargs)` — the name ported code calls.
+   *
+   * Returns the FULL result, as Python's `run()` does (the compact,
+   * model-facing view is {@link toModelOutput}, applied by {@link execute}),
+   * so this is the {@link executeRaw} value under a Python-shaped name.
+   *
+   * It deliberately runs the SAME gates as `executeRaw` — restart safety, the
+   * approval gate, the retry policy — instead of calling the wrapped function
+   * directly. Python can afford a raw `run()` because `@tool(approval=...)`
+   * also records the requirement in the process-wide ApprovalRegistry, which
+   * the agent consults by tool NAME; TypeScript holds the requirement only on
+   * this instance, so a raw `run()` here would be an ungated second door onto
+   * the same tool.
+   */
+  async run(params: TParams, context?: ToolContext): Promise<TResult> {
+    return this.executeRaw(params, context);
+  }
+
+  /**
+   * Python parity: `BaseTool.validate()`. Throws {@link ToolValidationError}
+   * listing every problem found; returns `true` when the tool is well formed.
+   */
+  validate(): boolean {
+    const errors: string[] = [];
+    if (!this.name || typeof this.name !== 'string') {
+      errors.push("Tool must have a non-empty string 'name'");
+    }
+    if (!this.description || typeof this.description !== 'string') {
+      errors.push("Tool must have a non-empty string 'description'");
+    }
+    if (typeof this.executeFn !== 'function') {
+      errors.push("Tool must have a callable 'execute'");
+    }
+    const params = this.getParameters() as unknown;
+    if (params !== undefined && params !== null) {
+      if (typeof params !== 'object' || Array.isArray(params)) {
+        errors.push("'parameters' must be an object");
+      } else {
+        if (!('type' in (params as object))) errors.push("'parameters' must have a 'type' field");
+        if (!('properties' in (params as object))) {
+          errors.push("'parameters' must have a 'properties' field for OpenAI compatibility");
+        }
+      }
+    }
+    if (errors.length > 0) {
+      throw new ToolValidationError(`Tool '${this.name}' validation failed: ${errors.join('; ')}`);
+    }
+    return true;
+  }
+
+  /**
    * Get the tool definition for LLM
    */
   getDefinition(): ToolDefinition {
@@ -470,31 +522,235 @@ export function tool<TParams = any, TResult = any>(
   return new FunctionTool(config);
 }
 
+/** Trust levels a registered tool may declare (Python `ToolTrustLevel`). */
+export const TOOL_TRUST_LEVELS = ['trusted', 'external'] as const;
+export type ToolTrustLevel = typeof TOOL_TRUST_LEVELS[number];
+
 /**
- * Tool Registry - Manages tool registration and lookup
+ * Everything {@link ToolRegistry.register} accepts, mirroring Python's
+ * `Union[BaseTool, Callable]`: a {@link FunctionTool}, a BaseTool-like object
+ * with `run()`/`execute()`, or a plain function.
+ */
+export type RegisterableTool =
+  | FunctionTool
+  | { name?: string; description?: string; parameters?: any; run?: Function; execute?: Function }
+  | ((...args: any[]) => any);
+
+/**
+ * Options for {@link ToolRegistry.register} / {@link registerTool}.
+ *
+ * Python parity: `ToolRegistry.register(tool, name=None, overwrite=False,
+ * trust_level=None, dynamic_schema_overrides=None)`.
+ */
+export interface RegisterToolOptions {
+  /** Register under this name instead of the tool's own (Python `name`). */
+  name?: string;
+  /** Replace an existing registration under the same name (Python `overwrite`). */
+  overwrite?: boolean;
+  /** Trust level recorded for the entry (Python `trust_level`); read back with {@link ToolRegistry.getTrustLevel}. */
+  trustLevel?: ToolTrustLevel | string;
+  /** Per-entry schema shaper applied on top of the tool's own (Python `dynamic_schema_overrides`). */
+  dynamicSchemaOverrides?: (schema: ToolParameters) => ToolParameters;
+}
+
+/** A registry slot: the tool plus the entry-level metadata (Python `ToolEntry`). */
+interface ToolEntry {
+  tool: FunctionTool;
+  trustLevel?: string;
+  schemaOverride?: (schema: ToolParameters) => ToolParameters;
+}
+
+/**
+ * Parameter names of a plain function, in declaration order.
+ *
+ * Returns `[]` — meaning "hand it the argument object whole" — for the shapes
+ * where positional mapping would be wrong or unreadable: a destructured
+ * parameter (`({ city })`), a rest parameter, or a signature this cannot
+ * parse. Guessing there would be worse than not mapping.
+ */
+interface ParsedParam {
+  name: string;
+  /** True when the parameter declares a default value (`x = 1`) — it is optional. */
+  optional: boolean;
+}
+
+function paramNamesOf(fn: Function): ParsedParam[] {
+  const source = fn.toString();
+  const parenthesised = source.match(/\(([^)]*)\)/);
+  let raw: string;
+  if (parenthesised) {
+    raw = parenthesised[1];
+  } else {
+    // A single-parameter arrow with no parentheses: `city => ...`.
+    const bare = source.match(/^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/);
+    if (!bare) return [];
+    raw = bare[1];
+  }
+  // Destructuring or a rest parameter: the caller's object IS the argument.
+  if (/[{}\[\]]/.test(raw) || raw.includes('...')) return [];
+  return raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)
+    .map(part => ({
+      // Strip the type annotation and default so the name is clean.
+      name: part.split(/[:=]/)[0].trim(),
+      optional: part.includes('='),
+    }))
+    .filter(param => param.name.length > 0);
+}
+
+/**
+ * Wrap a plain function as a {@link FunctionTool}, so
+ * `register_tool(myFunction)` works the way it does in Python.
+ *
+ * The model returns NAMED arguments (`{ city: "Paris" }`) while a plain
+ * function takes positional ones, so the wrapper maps the object back onto the
+ * declared parameter order — the same mapping `Agent` applies to plain tool
+ * functions. A schema is derived from those parameter names when the caller
+ * supplies none.
+ */
+export function functionToTool(
+  fn: (...args: any[]) => any,
+  options?: { name?: string; description?: string; parameters?: ToolParameters }
+): FunctionTool {
+  const parsed = paramNamesOf(fn);
+  const names = parsed.map(p => p.name);
+  const parameters: ToolParameters = options?.parameters ?? {
+    type: 'object',
+    properties: Object.fromEntries(
+      names.map(n => [n, { type: 'string', description: `Parameter ${n}` }])
+    ),
+    // A parameter with a default is optional; leaving it out of `required`
+    // lets the model omit it and the function's default take over.
+    required: parsed.filter(p => !p.optional).map(p => p.name),
+  };
+  return new FunctionTool({
+    name: options?.name || fn.name || 'anonymous_tool',
+    description: options?.description,
+    parameters,
+    execute: (params: any) => {
+      if (names.length > 0 && params && typeof params === 'object' && !Array.isArray(params)) {
+        return fn(...names.map(n => (params as Record<string, any>)[n]));
+      }
+      return fn(params);
+    },
+  });
+}
+
+/**
+ * Coerce anything Python's registry would accept into a {@link FunctionTool}.
+ * A `FunctionTool` passes through untouched, so its approval gate, retry
+ * policy and restart-safety declaration are preserved.
+ */
+export function coerceToFunctionTool(tool: RegisterableTool, name?: string): FunctionTool {
+  if (tool instanceof FunctionTool) return tool;
+
+  if (typeof tool === 'function') {
+    return functionToTool(tool as (...args: any[]) => any, { name });
+  }
+
+  if (tool && typeof tool === 'object') {
+    const candidate = tool as {
+      name?: string; description?: string; parameters?: any;
+      run?: Function; execute?: Function;
+    };
+    const impl = typeof candidate.execute === 'function'
+      ? candidate.execute
+      : typeof candidate.run === 'function'
+        ? candidate.run
+        : undefined;
+    if (impl) {
+      const resolved = name || candidate.name;
+      if (!resolved) {
+        throw new TypeError('Cannot register a tool object without a name');
+      }
+      return new FunctionTool({
+        name: resolved,
+        description: candidate.description,
+        parameters: candidate.parameters,
+        execute: (params: any, context?: ToolContext) => impl.call(candidate, params, context),
+      });
+    }
+  }
+
+  throw new TypeError(
+    `Cannot register ${typeof tool}, expected a FunctionTool, a tool object with run()/execute(), or a function`
+  );
+}
+
+/**
+ * Tool Registry — the Python-equivalent registry (`praisonaiagents/tools/registry.py`).
+ *
+ * Holds ready-to-run tools looked up BY NAME. This is the registry the
+ * snake_case parity names ({@link get_registry}, {@link register_tool},
+ * {@link get_tool}) resolve to. The separate `tools/registry/` module is a
+ * registry of tool FACTORIES with a different contract; see
+ * `getToolsRegistry()` there.
  */
 export class ToolRegistry {
-  private tools: Map<string, FunctionTool> = new Map();
+  private tools: Map<string, ToolEntry> = new Map();
 
-  register(tool: FunctionTool, options?: { overwrite?: boolean }): this {
-    if (this.tools.has(tool.name) && !options?.overwrite) {
-      throw new Error(`Tool '${tool.name}' is already registered. Use { overwrite: true } to replace.`);
+  /**
+   * Register a tool. Accepts a {@link FunctionTool}, a BaseTool-like object,
+   * or a plain function (Python `register(tool, name, overwrite, trust_level,
+   * dynamic_schema_overrides)`); anything that is not already a `FunctionTool`
+   * is wrapped in one.
+   *
+   * Throws when the name is taken and `overwrite` is not set — the global
+   * {@link registerTool} helper follows Python and skips instead.
+   */
+  register(tool: RegisterableTool, options?: RegisterToolOptions): this {
+    const trustLevel = options?.trustLevel;
+    if (trustLevel !== undefined && !(TOOL_TRUST_LEVELS as readonly string[]).includes(trustLevel)) {
+      throw new Error(
+        `Invalid trustLevel '${trustLevel}'. Use one of ${TOOL_TRUST_LEVELS.join(', ')}.`
+      );
     }
-    this.tools.set(tool.name, tool);
+    const coerced = coerceToFunctionTool(tool, options?.name);
+    const key = options?.name || coerced.name;
+    if (this.tools.has(key) && !options?.overwrite) {
+      throw new Error(`Tool '${key}' is already registered. Use { overwrite: true } to replace.`);
+    }
+    this.tools.set(key, {
+      tool: coerced,
+      trustLevel,
+      schemaOverride: options?.dynamicSchemaOverrides,
+    });
     return this;
   }
 
   get(name: string): FunctionTool | undefined {
-    return this.tools.get(name);
+    return this.tools.get(name)?.tool;
   }
 
   has(name: string): boolean {
     return this.tools.has(name);
   }
 
+  /** Remove a tool; `true` if one was removed (Python `unregister`). */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  /** The names under which tools are registered (Python `list_tools`). */
+  listTools(): string[] {
+    return Array.from(this.tools.keys());
+  }
+
+  /** Every registered tool keyed by its registration name (Python `get_all`). */
+  getAll(): Record<string, FunctionTool> {
+    return Object.fromEntries(Array.from(this.tools, ([name, entry]) => [name, entry.tool]));
+  }
+
+  /** The trust level recorded for a registration, if any (Python `get_trust_level`). */
+  getTrustLevel(name: string): string | undefined {
+    return this.tools.get(name)?.trustLevel;
+  }
+
   /** Every registered tool, available or not. */
   list(): FunctionTool[] {
-    return Array.from(this.tools.values());
+    return Array.from(this.tools.values(), entry => entry.tool);
   }
 
   /** Registered tools whose availability check passes. */
@@ -521,14 +777,52 @@ export class ToolRegistry {
     return this.list().filter(t => t.isRestartSafe);
   }
 
+  /** The entry's parameters schema, with the entry-level override applied last. */
+  private entryParameters(entry: ToolEntry): ToolParameters {
+    const base = entry.tool.getParameters();
+    if (!entry.schemaOverride) return base;
+    try {
+      return entry.schemaOverride(JSON.parse(JSON.stringify(base)) as ToolParameters) ?? base;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[praisonai] dynamicSchemaOverrides failed for tool '${entry.tool.name}': ${reason}`);
+      return base;
+    }
+  }
+
+  /**
+   * Available entries paired with the NAME they are registered under.
+   *
+   * A tool registered with `{ name: 'renamed' }` is keyed as `'renamed'` even
+   * though its own `.name` is unchanged. Model definitions must advertise the
+   * registration key, because that is the name the agent dispatches on — see
+   * {@link get}, which looks up by key. Advertising `entry.tool.name` would
+   * offer a name the registry cannot resolve.
+   */
+  private availableNamedEntries(): Array<[string, ToolEntry]> {
+    return Array.from(this.tools.entries()).filter(([, entry]) => entry.tool.isAvailable());
+  }
+
   /** Definitions offered to a model: unavailable tools are excluded. */
   getDefinitions(): ToolDefinition[] {
-    return this.listAvailable().map(t => t.getDefinition());
+    return this.availableNamedEntries().map(([name, entry]) => ({
+      name,
+      description: entry.tool.description,
+      parameters: this.entryParameters(entry),
+      category: entry.tool.category,
+    }));
   }
 
   /** OpenAI tool payloads offered to a model: unavailable tools are excluded. */
   toOpenAITools(): Array<{ type: 'function'; function: any }> {
-    return this.listAvailable().map(t => t.toOpenAITool());
+    return this.availableNamedEntries().map(([name, entry]) => ({
+      type: 'function' as const,
+      function: {
+        name,
+        description: entry.tool.description,
+        parameters: this.entryParameters(entry),
+      },
+    }));
   }
 
   delete(name: string): boolean {
@@ -538,11 +832,18 @@ export class ToolRegistry {
   clear(): void {
     this.tools.clear();
   }
+
+  get size(): number {
+    return this.tools.size;
+  }
 }
 
 // Global registry instance
 let globalRegistry: ToolRegistry | null = null;
 
+/**
+ * The process-wide tool registry (Python `get_registry`).
+ */
 export function getRegistry(): ToolRegistry {
   if (!globalRegistry) {
     globalRegistry = new ToolRegistry();
@@ -550,10 +851,73 @@ export function getRegistry(): ToolRegistry {
   return globalRegistry;
 }
 
-export function registerTool(tool: FunctionTool, options?: { overwrite?: boolean }): void {
-  getRegistry().register(tool, options);
+/**
+ * Register a tool with the global registry (Python `register_tool`).
+ *
+ * Accepts what Python accepts — a {@link FunctionTool}, a BaseTool-like
+ * object, or a plain function — and, like Python, SKIPS a name that is
+ * already taken unless `overwrite` is set, rather than throwing.
+ */
+export function registerTool(tool: RegisterableTool, options?: RegisterToolOptions): void {
+  const registry = getRegistry();
+  const key = options?.name
+    || (tool instanceof FunctionTool ? tool.name : undefined)
+    || (typeof tool === 'function' ? tool.name : (tool as { name?: string })?.name);
+  if (key && registry.has(key) && !options?.overwrite) {
+    // Python parity: `ToolRegistry.register` logs and returns on a duplicate.
+    console.debug(`[praisonai] tool '${key}' already registered, skipping`);
+    return;
+  }
+  registry.register(tool, options);
 }
 
+/** Look a tool up by name in the global registry (Python `get_tool`). */
 export function getTool(name: string): FunctionTool | undefined {
   return getRegistry().get(name);
 }
+
+/** Whether a name is registered globally (Python `has_tool`). */
+export function hasTool(name: string): boolean {
+  return getRegistry().has(name);
+}
+
+/** Remove a tool from the global registry (Python `remove_tool`). */
+export function removeTool(name: string): boolean {
+  return getRegistry().unregister(name);
+}
+
+/** Names of every globally registered tool (Python `list_tools`). */
+export function listTools(): string[] {
+  return getRegistry().listTools();
+}
+
+/** OpenAI tool definitions for every available global tool (Python `get_tool_definitions`). */
+export function getToolDefinitions(): ToolDefinition[] {
+  return getRegistry().getDefinitions();
+}
+
+// ---------------------------------------------------------------------------
+// Python-shaped aliases
+//
+// These are the names the Python docs use. They resolve to THIS registry —
+// the one whose semantics match `praisonaiagents/tools/registry.py`. The
+// factory registry in `tools/registry/` is reached through its own,
+// unambiguous names (`getToolsRegistry`, `registerToolFactory`, ...).
+// ---------------------------------------------------------------------------
+
+/** Python `get_registry()`. */
+export const get_registry = getRegistry;
+/** Python `register_tool(tool, name=None, trust_level=None, dynamic_schema_overrides=None)`. */
+export const register_tool = registerTool;
+/** Python `get_tool(name)`. */
+export const get_tool = getTool;
+/** Python `has_tool(name)`. */
+export const has_tool = hasTool;
+/** Python `remove_tool(name)`. */
+export const remove_tool = removeTool;
+/** Python `list_tools()`. */
+export const list_tools = listTools;
+/** Python `get_tool_definitions()`. */
+export const get_tool_definitions = getToolDefinitions;
+/** Python `add_tool(...)` — the simplified alias for `register_tool`. */
+export const add_tool = registerTool;

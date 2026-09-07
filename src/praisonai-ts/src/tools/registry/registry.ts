@@ -19,6 +19,35 @@ import type {
 } from './types';
 
 /**
+ * Thrown when a tool id is not present in the factory registry.
+ *
+ * Distinct from {@link ToolConstructionError} on purpose: "you asked for a
+ * tool nobody registered" and "the registered tool failed to build" need
+ * different fixes, and collapsing both into a `null` hid the second one.
+ */
+export class ToolNotRegisteredError extends Error {
+  readonly toolId: string;
+  constructor(id: string, available: string[]) {
+    super(`Tool "${id}" is not registered. Available tools: ${available.join(', ')}`);
+    this.name = 'ToolNotRegisteredError';
+    this.toolId = id;
+  }
+}
+
+/** Thrown when a registered tool's factory throws while building an instance. */
+export class ToolConstructionError extends Error {
+  readonly toolId: string;
+  constructor(id: string, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(`Tool "${id}" is registered but failed to build: ${reason}`);
+    this.name = 'ToolConstructionError';
+    this.toolId = id;
+    (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+
+/**
  * Tools Registry - Manages tool registration, lookup, and instantiation
  */
 export class ToolsRegistry {
@@ -86,11 +115,18 @@ export class ToolsRegistry {
   ): PraisonTool<TInput, TOutput> {
     const registered = this.tools.get(id);
     if (!registered) {
-      throw new Error(`Tool "${id}" is not registered. Available tools: ${this.list().map(t => t.id).join(', ')}`);
+      throw new ToolNotRegisteredError(id, this.list().map(t => t.id));
     }
 
-    // Create the tool using the factory
-    const tool = registered.factory(config) as PraisonTool<TInput, TOutput>;
+    // Create the tool using the factory. A factory that throws is a BUILD
+    // failure, not a missing tool — surface it as such so callers can tell
+    // the two apart (see tryCreate).
+    let tool: PraisonTool<TInput, TOutput>;
+    try {
+      tool = registered.factory(config) as PraisonTool<TInput, TOutput>;
+    } catch (error) {
+      throw new ToolConstructionError(id, error);
+    }
 
     // Wrap execute with middleware and hooks
     const originalExecute = tool.execute.bind(tool);
@@ -150,6 +186,20 @@ export class ToolsRegistry {
     };
 
     return tool;
+  }
+
+  /**
+   * Like {@link create}, but returns `null` when the tool is simply not
+   * registered. A registered tool whose factory throws still raises
+   * {@link ToolConstructionError} — a broken tool must never look identical
+   * to a missing one.
+   */
+  tryCreate<TConfig = unknown, TInput = unknown, TOutput = unknown>(
+    id: string,
+    config?: TConfig
+  ): PraisonTool<TInput, TOutput> | null {
+    if (!this.tools.has(id)) return null;
+    return this.create<TConfig, TInput, TOutput>(id, config);
   }
 
   /**
@@ -295,60 +345,77 @@ export function resetToolsRegistry(): void {
   globalRegistry = null;
 }
 
+// ---------------------------------------------------------------------------
+// Global helpers for THIS registry.
+//
+// These names are deliberately not the Python ones. This module registers tool
+// FACTORIES keyed by an install id and BUILDS instances from them; Python's
+// `tools/registry.py` registers ready-to-run tools and LOOKS THEM UP by name.
+// The snake_case parity names (`get_registry`, `register_tool`, `get_tool`,
+// `validate_tool`) belong to that other contract and live in `tools/decorator.ts`
+// and `tools/base.ts`.
+// ---------------------------------------------------------------------------
+
 /**
- * Get the global registry instance (alias for getToolsRegistry)
- * For Python SDK parity: get_registry()
+ * Register a tool FACTORY with the global factory registry.
+ *
+ * Not `register_tool`: Python's takes the callable you already have, this one
+ * takes install metadata plus a builder.
  */
-export function get_registry(): ToolsRegistry {
-  return getToolsRegistry();
+export function registerToolFactory(metadata: ToolMetadata, factory: ToolFactory): void {
+  getToolsRegistry().register(metadata, factory);
 }
 
-/** camelCase alias for get_registry — idiomatic TypeScript */
-export const getRegistry = get_registry;
+/**
+ * Build an instance of a registered tool, throwing
+ * {@link ToolNotRegisteredError} for an unknown id and
+ * {@link ToolConstructionError} when the factory fails.
+ */
+export function createToolInstance<TConfig = unknown, TInput = unknown, TOutput = unknown>(
+  id: string,
+  config?: TConfig
+): PraisonTool<TInput, TOutput> {
+  return getToolsRegistry().create<TConfig, TInput, TOutput>(id, config);
+}
 
 /**
- * Get a single tool by name from the global registry
- * For Python SDK parity: get_tool()
+ * Build an instance of a registered tool, or `null` if no tool is registered
+ * under `id`.
+ *
+ * A registered tool whose factory throws still raises
+ * {@link ToolConstructionError}: "not registered" and "failed to build" are
+ * different failures and must not share a return value.
  */
-export function get_tool<TConfig = unknown, TInput = unknown, TOutput = unknown>(
+export function tryCreateToolInstance<TConfig = unknown, TInput = unknown, TOutput = unknown>(
   id: string,
   config?: TConfig
 ): PraisonTool<TInput, TOutput> | null {
-  try {
-    const registry = getToolsRegistry();
-    return registry.create<TConfig, TInput, TOutput>(id, config);
-  } catch {
-    return null;
-  }
+  return getToolsRegistry().tryCreate<TConfig, TInput, TOutput>(id, config);
 }
 
-/** camelCase alias for get_tool — idiomatic TypeScript */
-export const getTool = get_tool;
+/**
+ * @deprecated Ambiguous with `getTool` from `tools/decorator` (which looks a
+ * tool up by name). Use {@link tryCreateToolInstance}, which says that it
+ * BUILDS the tool.
+ */
+export const getTool = tryCreateToolInstance;
 
 /**
- * Register a tool with the global registry
- * For Python SDK parity: register_tool()
+ * Report whether a registered tool's npm dependency and required environment
+ * variables are in place.
+ *
+ * Not `validate_tool`: Python's `validate_tool(tool)` takes the tool object
+ * and raises `ToolValidationError` on a malformed tool — that one is exported
+ * as `validateTool` / `validate_tool` from `tools/base.ts`.
  */
-export function register_tool(metadata: ToolMetadata, factory: ToolFactory): void {
-  const registry = getToolsRegistry();
-  registry.register(metadata, factory);
-}
-
-/** camelCase alias for register_tool — idiomatic TypeScript */
-export const registerTool = register_tool;
-
-/**
- * Validate a tool's configuration and dependencies
- * For Python SDK parity: validate_tool()
- */
-export async function validate_tool(id: string): Promise<{
+export async function validateToolInstall(id: string): Promise<{
   valid: boolean;
   installed: boolean;
   missingEnvVars: string[];
   errors: string[];
 }> {
   const registry = getToolsRegistry();
-  
+
   if (!registry.has(id)) {
     return {
       valid: false,
@@ -369,7 +436,7 @@ export async function validate_tool(id: string): Promise<{
   }
 
   const errors: string[] = [];
-  
+
   if (!status.installed) {
     const installCmd = status.installCommand ?? `npm install ${registry.getMetadata(id)?.packageName ?? id}`;
     errors.push(`Package dependency not installed. Run: ${installCmd}`);
@@ -386,6 +453,3 @@ export async function validate_tool(id: string): Promise<{
     errors
   };
 }
-
-/** camelCase alias for validate_tool — idiomatic TypeScript */
-export const validateTool = validate_tool;

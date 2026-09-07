@@ -1,26 +1,44 @@
 // Export base tool interfaces and classes
-export { BaseTool, ToolResult, ToolValidationError, validateTool, createTool, type ToolParameters } from './base';
-
-// Legacy @tool decorator registry (camelCase names reserved for this API)
 export {
-  tool, FunctionTool, ToolRegistry, getRegistry, registerTool, getTool,
-  type ToolConfig, type ToolContext,
+  BaseTool, ToolResult, ToolValidationError, createTool, type ToolParameters,
+  // `validate_tool(tool)` in Python takes the tool object and raises
+  // ToolValidationError — that is this function, not the factory registry's
+  // install/env report.
+  validateTool, validate_tool,
+} from './base';
+
+// The Python-equivalent tool registry: ready-to-run tools looked up BY NAME
+// (praisonaiagents/tools/registry.py + tools/decorator.py). The snake_case
+// parity names resolve here.
+export {
+  tool, FunctionTool, ToolRegistry,
+  functionToTool, coerceToFunctionTool,
+  TOOL_TRUST_LEVELS,
+  getRegistry, registerTool, getTool, hasTool, removeTool, listTools, getToolDefinitions,
+  get_registry, register_tool, get_tool, has_tool, remove_tool, list_tools,
+  get_tool_definitions, add_tool,
+  type ToolConfig, type ToolContext, type RegisterableTool, type RegisterToolOptions,
+  type ToolTrustLevel,
 } from './decorator';
 
 // Export all tool modules
 export * from './arxivTools';
 export * from './mcpSse';
 
-// New AI SDK tools registry — snake_case parity names (avoid camelCase clash with decorator)
+// The AI SDK tools registry: tool FACTORIES keyed by install id, which BUILDS
+// instances. A different contract from Python's registry, so it carries names
+// that say so rather than borrowing the snake_case parity ones.
 export {
   ToolsRegistry,
   getToolsRegistry,
   createToolsRegistry,
   resetToolsRegistry,
-  get_registry,
-  get_tool,
-  register_tool,
-  validate_tool,
+  registerToolFactory,
+  createToolInstance,
+  tryCreateToolInstance,
+  validateToolInstall,
+  ToolNotRegisteredError,
+  ToolConstructionError,
 } from './registry';
 export type {
   ToolExecutionContext,

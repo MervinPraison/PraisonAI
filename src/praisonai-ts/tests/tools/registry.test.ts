@@ -7,14 +7,13 @@ import {
   getToolsRegistry,
   createToolsRegistry,
   resetToolsRegistry,
-  get_registry,
-  getRegistry,
-  get_tool,
+  registerToolFactory,
+  createToolInstance,
+  tryCreateToolInstance,
+  validateToolInstall,
+  ToolNotRegisteredError,
+  ToolConstructionError,
   getTool,
-  register_tool,
-  registerTool,
-  validate_tool,
-  validateTool,
 } from '../../src/tools/registry/registry';
 import {
   createLoggingMiddleware,
@@ -476,57 +475,65 @@ const parityFactory = () => ({
   execute: async () => ({ ok: true }),
 });
 
-describe('Python SDK parity functions', () => {
+describe('factory-registry global helpers', () => {
   beforeEach(() => {
     resetToolsRegistry();
   });
 
-  describe('get_registry / getRegistry', () => {
+  describe('getToolsRegistry', () => {
     it('should return the global singleton', () => {
-      const r1 = get_registry();
-      const r2 = get_registry();
+      const r1 = getToolsRegistry();
+      const r2 = getToolsRegistry();
       expect(r1).toBe(r2);
       expect(r1).toBeInstanceOf(ToolsRegistry);
     });
+  });
 
-    it('getRegistry is an alias for get_registry', () => {
-      expect(getRegistry()).toBe(get_registry());
+  describe('registerToolFactory', () => {
+    it('should register a tool factory in the global registry', () => {
+      registerToolFactory(parityMetadata, parityFactory);
+      expect(getToolsRegistry().has('parity-tool')).toBe(true);
     });
   });
 
-  describe('register_tool / registerTool', () => {
-    it('should register a tool in the global registry', () => {
-      register_tool(parityMetadata, parityFactory);
-      expect(get_registry().has('parity-tool')).toBe(true);
-    });
-
-    it('registerTool is an alias for register_tool', () => {
-      registerTool(parityMetadata, parityFactory);
-      expect(get_registry().has('parity-tool')).toBe(true);
-    });
-  });
-
-  describe('get_tool / getTool', () => {
-    it('should return a tool instance for a registered tool', () => {
-      register_tool(parityMetadata, parityFactory);
-      const tool = get_tool('parity-tool');
+  describe('createToolInstance / tryCreateToolInstance', () => {
+    it('should build an instance for a registered tool', () => {
+      registerToolFactory(parityMetadata, parityFactory);
+      const tool = createToolInstance('parity-tool');
       expect(tool).not.toBeNull();
       expect(tool?.name).toBe('parityTool');
     });
 
-    it('should return null for an unregistered tool', () => {
-      expect(get_tool('nonexistent')).toBeNull();
+    it('tryCreateToolInstance returns null for an unregistered tool', () => {
+      expect(tryCreateToolInstance('nonexistent')).toBeNull();
     });
 
-    it('getTool is an alias for get_tool', () => {
-      register_tool(parityMetadata, parityFactory);
+    it('createToolInstance throws ToolNotRegisteredError for an unregistered tool', () => {
+      expect(() => createToolInstance('nonexistent')).toThrow(ToolNotRegisteredError);
+    });
+
+    it('a failing factory raises ToolConstructionError, not "not found"', () => {
+      registerToolFactory(
+        { ...parityMetadata, id: 'broken-tool' },
+        () => { throw new Error('missing API key'); }
+      );
+      // The defect this replaces: both a missing tool and a broken one
+      // returned null, so callers could not tell them apart.
+      expect(() => createToolInstance('broken-tool')).toThrow(ToolConstructionError);
+      expect(() => tryCreateToolInstance('broken-tool')).toThrow(/failed to build: missing API key/);
+      // Control: the unregistered id still yields a plain null.
+      expect(tryCreateToolInstance('never-registered')).toBeNull();
+    });
+
+    it('deprecated getTool alias still builds instances', () => {
+      registerToolFactory(parityMetadata, parityFactory);
       expect(getTool('parity-tool')).not.toBeNull();
     });
   });
 
-  describe('validate_tool / validateTool', () => {
+  describe('validateToolInstall', () => {
     it('should return invalid result for unregistered tool', async () => {
-      const result = await validate_tool('nonexistent');
+      const result = await validateToolInstall('nonexistent');
       expect(result.valid).toBe(false);
       expect(result.errors).toContain('Tool "nonexistent" is not registered');
     });
@@ -538,21 +545,16 @@ describe('Python SDK parity functions', () => {
         requiredEnv: ['REQUIRED_API_KEY_XYZ_NOT_SET'],
         packageName: 'nonexistent-package-xyz',
       };
-      register_tool(metaWithEnv, parityFactory);
+      registerToolFactory(metaWithEnv, parityFactory);
 
-      const result = await validate_tool('env-tool');
+      const result = await validateToolInstall('env-tool');
       expect(result.missingEnvVars).toContain('REQUIRED_API_KEY_XYZ_NOT_SET');
-      expect(result.errors.some(e => e.includes('REQUIRED_API_KEY_XYZ_NOT_SET'))).toBe(true);
-    });
-
-    it('validateTool is an alias for validate_tool', async () => {
-      const result = await validateTool('nonexistent');
-      expect(result.valid).toBe(false);
+      expect(result.errors.some((e: string) => e.includes('REQUIRED_API_KEY_XYZ_NOT_SET'))).toBe(true);
     });
 
     it('error message for uninstalled package should not contain "undefined"', async () => {
-      register_tool(parityMetadata, parityFactory);
-      const result = await validate_tool('parity-tool');
+      registerToolFactory(parityMetadata, parityFactory);
+      const result = await validateToolInstall('parity-tool');
       // installed may be false since 'parity-tool' npm package doesn't exist
       for (const e of result.errors) {
         expect(e).not.toContain('undefined');
@@ -567,9 +569,9 @@ describe('Python SDK parity functions', () => {
         packageName: 'path',   // Node built-in, always resolvable
         requiredEnv: [],
       };
-      register_tool(builtinMeta, parityFactory);
+      registerToolFactory(builtinMeta, parityFactory);
 
-      const result = await validate_tool('builtin-tool');
+      const result = await validateToolInstall('builtin-tool');
       expect(result.valid).toBe(true);
       expect(result.installed).toBe(true);
       expect(result.missingEnvVars).toHaveLength(0);
