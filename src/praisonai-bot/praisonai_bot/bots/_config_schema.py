@@ -309,6 +309,62 @@ class BotCommandsConfigSchema(BaseModel):
     include_user_scope: bool = False
 
 
+class DeliveryTargetSchema(BaseModel):
+    """Schema for a scheduled job's delivery target (Issue #4913).
+
+    Where a recurring job's output is posted. Mirrors the core
+    ``praisonaiagents.scheduler.DeliveryTarget`` fields so the same dict shape
+    is accepted from YAML, CLI and Python. ``channel`` is the platform name
+    (``telegram``/``discord``/...) and ``channel_id`` the platform chat id.
+    """
+
+    channel: str
+    channel_id: str = ""
+    thread_id: Optional[str] = None
+    # One-way notification vs. a resumable conversation opener. Default keeps
+    # the core's continuable behaviour so a reply in the same chat resumes.
+    continuable: bool = True
+
+
+class ScheduleConfigSchema(BaseModel):
+    """Schema for a declarative recurring agent→channel delivery (Issue #4913).
+
+    One entry under ``schedules:`` in gateway.yaml. Coerced at boot into the
+    existing core ``ScheduleJob`` + ``DeliveryTarget`` and upserted into the
+    ``ScheduleRunner`` store, so a recurring channel delivery is a few lines of
+    YAML with no Python — reaching CLI+YAML+Python parity with every other
+    gateway capability. Exactly one of ``cron``/``every``/``at`` must be set.
+    """
+
+    agent: str
+    prompt: str
+    cron: Optional[str] = None
+    every: Optional[str] = None
+    at: Optional[str] = None
+    deliver: Optional[DeliveryTargetSchema] = None
+    # Optional cheap go/no-go gate run before the (expensive) model turn — an
+    # existing core capability (a shell/python command). "nothing to do" skips
+    # the run with no tokens spent and no delivery.
+    pre_run: Optional[str] = None
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_one_trigger(self):
+        set_triggers = [
+            name for name in ("cron", "every", "at") if getattr(self, name)
+        ]
+        if len(set_triggers) == 0:
+            raise ValueError(
+                "schedule requires exactly one of 'cron', 'every' or 'at'"
+            )
+        if len(set_triggers) > 1:
+            raise ValueError(
+                "schedule accepts only one of 'cron', 'every' or 'at'; got "
+                f"{', '.join(set_triggers)}"
+            )
+        return self
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -781,6 +837,13 @@ class GatewayConfigSchema(BaseModel):
     # Routing and daemon config
     routing: Optional[RoutingConfigSchema] = None
     daemon: Optional[DaemonConfigSchema] = None
+
+    # Declarative recurring agent→channel deliveries (Issue #4913). Each entry
+    # is coerced into a core ``ScheduleJob`` and loaded into the existing
+    # ``ScheduleRunner`` store at boot, so an unattended automation lives in the
+    # same file as agents/channels (config-as-code parity). Keyed by a stable
+    # name used to derive an idempotent job id.
+    schedules: Optional[Dict[str, ScheduleConfigSchema]] = None
 
     # Gateway server settings (host/port, drain_timeout, admission control,
     # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so

@@ -779,6 +779,135 @@ class GatewayHandler:
         print("Usage: praisonai gateway hooks {add|list|remove} ...")
         return 1
 
+    def schedules(self, args) -> int:
+        """Manage declarative recurring schedules in gateway.yaml (Issue #4913).
+
+        Sub-actions: ``add``, ``list``, ``remove``. Edits the ``schedules:``
+        section of ``gateway.yaml`` so a recurring agent→channel delivery is
+        declarable from the CLI, consistent with the YAML and Python surfaces —
+        the missing CLI arm that brings scheduling to full CLI+YAML+Python
+        parity. The gateway loads this same block into the shared schedule
+        store at boot, so the job fires through the existing tick + delivery
+        loop.
+        """
+        import yaml
+
+        action = getattr(args, "schedules_command", None)
+        config_path = getattr(args, "config_file", None) or "gateway.yaml"
+
+        def _load() -> Dict:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r") as f:
+                        data = yaml.safe_load(f) or {}
+                    if not isinstance(data, dict):
+                        print(
+                            f"Error: {config_path} must contain a YAML mapping at the root."
+                        )
+                        return {}
+                    return data
+                except Exception as e:
+                    print(f"Error reading {config_path}: {e}")
+                    return {}
+            return {}
+
+        def _save(cfg: Dict) -> None:
+            with open(config_path, "w") as f:
+                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+        cfg = _load()
+        schedules = cfg.get("schedules") or {}
+        if not isinstance(schedules, dict):
+            schedules = {}
+
+        if action == "list":
+            if not schedules:
+                print(f"No schedules configured in {config_path}")
+                return 0
+            print(f"Schedules in {config_path}:")
+            for name, spec in schedules.items():
+                if not isinstance(spec, dict):
+                    continue
+                when = (
+                    (f"cron={spec['cron']}" if spec.get("cron") else None)
+                    or (f"every={spec['every']}" if spec.get("every") else None)
+                    or (f"at={spec['at']}" if spec.get("at") else None)
+                    or "-"
+                )
+                deliver = spec.get("deliver") or {}
+                target = "-"
+                if isinstance(deliver, dict) and deliver.get("channel"):
+                    target = deliver["channel"]
+                    if deliver.get("channel_id"):
+                        target = f"{target}:{deliver['channel_id']}"
+                print(
+                    f"  {name}  agent={spec.get('agent') or '<default>'} "
+                    f"{when}  deliver={target}"
+                )
+            return 0
+
+        if action == "remove":
+            name = getattr(args, "name", None)
+            if not name:
+                print("Error: schedule name required")
+                return 1
+            if name not in schedules:
+                print(f"No schedule '{name}' found in {config_path}")
+                return 1
+            del schedules[name]
+            cfg["schedules"] = schedules
+            _save(cfg)
+            print(f"Removed schedule '{name}' from {config_path}")
+            return 0
+
+        if action == "add":
+            name = getattr(args, "name", None)
+            if not name:
+                print("Error: schedule name required (e.g. 'morning-brief')")
+                return 1
+            agent = getattr(args, "agent", None)
+            prompt = getattr(args, "prompt", None)
+            if not agent:
+                print("Error: --agent is required")
+                return 1
+            if not prompt:
+                print("Error: --prompt is required")
+                return 1
+            triggers = [
+                t for t in ("cron", "every", "at")
+                if getattr(args, t, None)
+            ]
+            if len(triggers) != 1:
+                print(
+                    "Error: pass exactly one of --cron / --every / --at"
+                )
+                return 1
+
+            entry: Dict = {"agent": agent, "prompt": prompt}
+            for t in ("cron", "every", "at"):
+                val = getattr(args, t, None)
+                if val:
+                    entry[t] = val
+            channel = getattr(args, "channel", None)
+            if channel:
+                deliver: Dict = {"channel": channel}
+                channel_id = getattr(args, "channel_id", None)
+                if channel_id:
+                    deliver["channel_id"] = channel_id
+                entry["deliver"] = deliver
+            pre_run = getattr(args, "pre_run", None)
+            if pre_run:
+                entry["pre_run"] = pre_run
+
+            schedules[name] = entry
+            cfg["schedules"] = schedules
+            _save(cfg)
+            print(f"Added schedule '{name}' to {config_path}")
+            return 0
+
+        print("Usage: praisonai gateway schedule {add|list|remove} ...")
+        return 1
+
     def status(self, host: str = "127.0.0.1", port: int = 8765, deep: bool = False) -> None:
         """Check gateway status.
         

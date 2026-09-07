@@ -6046,6 +6046,25 @@ class WebSocketGateway:
             audit_dir=cfg.get("audit_dir"),
         )
 
+    def _load_declarative_schedules(self, config: dict) -> None:
+        """Load a config's ``schedules:`` block into the shared store (#4913).
+
+        Coerces each declared recurring agent→channel delivery into a core
+        ``ScheduleJob`` and upserts it (idempotent on a stable id) so it fires
+        through the existing scheduler tick + delivery loop. Best-effort — a
+        missing scheduler package or a malformed entry never aborts startup.
+        """
+        try:
+            from praisonaiagents.scheduler import get_default_store
+            from praisonai_bot.scheduler import load_schedules_into_store
+        except ImportError as e:
+            logger.debug("Declarative schedules unavailable, skipping: %s", e)
+            return
+        try:
+            load_schedules_into_store(config, get_default_store())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Failed to load declarative schedules: %s", e)
+
     def _start_scheduler_tick(self, interval: float = 15.0) -> None:
         """Start a background task that polls the scheduler for due jobs.
 
@@ -9739,6 +9758,11 @@ class WebSocketGateway:
             self._config_watch_task = asyncio.create_task(
                 self._watch_config(config_path)
             )
+            # Issue #4913: load declarative ``schedules:`` from the config into
+            # the shared store before the tick starts, so a recurring
+            # agent→channel delivery declared in gateway.yaml fires alongside
+            # channels/agents (config-as-code parity). No-op when absent.
+            self._load_declarative_schedules(cfg)
             # Launch scheduler tick to poll for due jobs
             self._start_scheduler_tick()
             # Issue #3021: launch opt-in lifecycle loops. Both are no-op when
