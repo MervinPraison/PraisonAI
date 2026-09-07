@@ -1845,6 +1845,13 @@ hooks_app = typer.Typer(
 app.add_typer(hooks_app, name="hooks")
 
 
+schedule_app = typer.Typer(
+    help="Manage declarative recurring schedules (schedules:) in gateway.yaml",
+    no_args_is_help=True,
+)
+app.add_typer(schedule_app, name="schedule")
+
+
 sessions_app = typer.Typer(
     help="Inspect stored gateway conversation sessions",
     no_args_is_help=True,
@@ -2140,6 +2147,70 @@ def gateway_hooks_remove(
     _run_hooks_action(hooks_command="remove", path=path, config_file=config)
 
 
+def _run_schedule_action(**kwargs) -> None:
+    """Reuse GatewayHandler.schedules() by adapting kwargs to its Namespace API."""
+    from types import SimpleNamespace
+    from ..features.gateway import GatewayHandler
+
+    code = GatewayHandler().schedules(SimpleNamespace(**kwargs))
+    if code:
+        raise typer.Exit(code)
+
+
+@schedule_app.command("add")
+def gateway_schedule_add(
+    name: str = typer.Argument(..., help="Schedule name, e.g. 'morning-brief'"),
+    agent: str = typer.Option(..., "--agent", help="Agent id to run"),
+    prompt: str = typer.Option(..., "--prompt", help="Prompt the agent runs on each fire"),
+    cron: Optional[str] = typer.Option(None, "--cron", help="Cron expression, e.g. '0 8 * * *'"),
+    every: Optional[str] = typer.Option(None, "--every", help="Interval, e.g. '24h' / '30m'"),
+    at: Optional[str] = typer.Option(None, "--at", help="One-shot ISO timestamp"),
+    channel: Optional[str] = typer.Option(None, "--channel", help="Delivery platform, e.g. telegram"),
+    channel_id: Optional[str] = typer.Option(None, "--channel-id", help="Delivery chat/channel id"),
+    pre_run: Optional[str] = typer.Option(None, "--pre-run", help="Optional shell go/no-go gate"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Add a recurring agent→channel schedule to gateway.yaml.
+
+    Pass exactly one of --cron / --every / --at.
+
+    Examples:
+        praisonai gateway schedule add morning-brief --agent personal \\
+            --cron "0 8 * * *" --channel telegram --channel-id 12345 \\
+            --prompt "Summarise my calendar and unread priorities."
+    """
+    _run_schedule_action(
+        schedules_command="add", name=name, agent=agent, prompt=prompt,
+        cron=cron, every=every, at=at, channel=channel, channel_id=channel_id,
+        pre_run=pre_run, config_file=config,
+    )
+
+
+@schedule_app.command("list")
+def gateway_schedule_list(
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """List declarative schedules configured in gateway.yaml.
+
+    Examples:
+        praisonai gateway schedule list
+    """
+    _run_schedule_action(schedules_command="list", config_file=config)
+
+
+@schedule_app.command("remove")
+def gateway_schedule_remove(
+    name: str = typer.Argument(..., help="Schedule name to remove"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Remove a declarative schedule from gateway.yaml.
+
+    Examples:
+        praisonai gateway schedule remove morning-brief
+    """
+    _run_schedule_action(schedules_command="remove", name=name, config_file=config)
+
+
 @app.callback(invoke_without_command=True)
 def gateway_callback(ctx: typer.Context):
     """Show gateway help if no subcommand provided."""
@@ -2160,6 +2231,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]diagnostics[/green] Export a pre-sanitised support bundle (diagnostics export)
   [green]send[/green]        Send a test message to a channel
   [green]hooks[/green]       Manage inbound trigger hooks (add | list | remove)
+  [green]schedule[/green]    Manage recurring agent->channel schedules (add | list | remove)
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
   [green]logs[/green]        Show daemon service logs

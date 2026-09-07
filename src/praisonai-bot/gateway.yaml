@@ -17,4 +17,15 @@ channels:
       group: support
       default: personal
     group_policy: mention_only
+# Declarative recurring agent->channel deliveries (Issue #4913). Loaded into the
+# schedule store at boot and delivered through the gateway's scheduler. Also
+# manageable via `praisonai gateway schedule add|list|remove`.
+# schedules:
+#   morning-brief:
+#     agent: personal
+#     cron: "0 8 * * *"        # or: every: 24h / at: 2026-01-01T09:00
+#     deliver:
+#       channel: telegram
+#       channel_id: ${OWNER_CHAT_ID}
+#     prompt: "Summarise my calendar and unread priorities for today."
 config_version: 1
