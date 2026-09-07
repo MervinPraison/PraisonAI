@@ -214,6 +214,13 @@ class BaseTool(ABC):
     # ``False`` marks an effectful tool that must never be silently re-executed
     # on resume.
     restart_safe: Optional[bool] = None
+    # Per-tool guardrails (see praisonaiagents.guardrails.tool_guardrails).
+    # A subclass may declare either a coerced ToolGuardrailChain or a raw list
+    # of ``fn(arguments)`` / ``fn(result)`` validators; the executor coerces and
+    # memoises a raw list on first use. ``None`` means "unguarded", which keeps
+    # the executor's per-call fast path free of any work.
+    input_guardrails: Optional[Any] = None
+    output_guardrails: Optional[Any] = None
     
     def __init__(self, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None):
         """Initialize the tool and validate configuration.

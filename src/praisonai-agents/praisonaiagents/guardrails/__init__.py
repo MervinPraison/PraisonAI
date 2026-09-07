@@ -14,6 +14,13 @@ from .protocols import (
     is_guardrail_object,
 )
 from .chain import GuardrailChain
+from .tool_guardrails import (
+    ToolInputGuardrail,
+    ToolOutputGuardrail,
+    ToolGuardrailChain,
+    build_tool_guardrails,
+    get_tool_guardrail_chain,
+)
 
 __all__ = [
     "GuardrailResult", 
@@ -23,4 +30,10 @@ __all__ = [
     "PolicyGuardrailProtocol", 
     "GuardrailChain",
     "is_guardrail_object",
+    # Per-tool guardrails (declared via @tool(input_guardrails=/output_guardrails=))
+    "ToolInputGuardrail",
+    "ToolOutputGuardrail",
+    "ToolGuardrailChain",
+    "build_tool_guardrails",
+    "get_tool_guardrail_chain",
 ]
