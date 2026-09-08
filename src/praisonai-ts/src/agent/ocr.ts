@@ -83,10 +83,9 @@ export interface OCRAgentConfig {
   /**
    * OCR backend that performs the extraction.
    *
-   * Without one, `extract()` throws. It used to return
-   * `"[OCR extraction from <source> - requires API integration]"` and log
-   * `✓ OCR complete`, so a caller could not tell a fabricated document
-   * from a real one.
+   * Without one, `extract()` throws. It used to return a bracketed
+   * "[OCR extraction from <source> ...]" string and log `✓ OCR complete`, so a
+   * caller could not tell a fabricated document from a real one.
    */
   extractor?: OCRExtractor;
   /** Agent name */
@@ -224,10 +223,9 @@ export class OCRAgent {
     const document = this.buildDocument(source);
 
     // No backend, no result. This deliberately throws instead of returning a
-    // shaped placeholder: the previous code produced
-    // `"[OCR extraction from <source> - requires API integration]"`, logged
-    // `✓ OCR complete`, and handed downstream code something that looked
-    // exactly like a successful extraction.
+    // shaped placeholder: the previous code returned a bracketed "[OCR
+    // extraction from <source> ...]" string, logged `✓ OCR complete`, and handed
+    // downstream code something that looked exactly like a real extraction.
     if (!this.extractor) {
       throw new Error(
         `OCRAgent has no extractor configured, so '${source}' was not read. ` +

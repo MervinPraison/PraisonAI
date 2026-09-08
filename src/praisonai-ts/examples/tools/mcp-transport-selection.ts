@@ -1,4 +1,4 @@
-import { Agent, MCP, TransportType } from 'praisonai-ts';
+import { Agent, MCP, type MCPToolTransportType } from 'praisonai';
 
 async function main() {
   // Example 1: Automatic transport detection (default behavior)
@@ -7,7 +7,10 @@ async function main() {
   console.log(`Auto-detected transport: ${mcpAuto.transportType}`);
 
   // Example 2: Explicit SSE transport
-  const mcpSSE = new MCP('http://127.0.0.1:8080/api', 'sse');
+  // `MCPToolTransportType` is how the barrel re-exports the tool transport
+  // union; importing it as `TransportType` does not compile.
+  const sseTransport: MCPToolTransportType = 'sse';
+  const mcpSSE = new MCP('http://127.0.0.1:8080/api', sseTransport);
   await mcpSSE.initialize();
   console.log(`Explicit SSE transport: ${mcpSSE.transportType}`);
 
@@ -38,7 +41,7 @@ async function main() {
   });
 
   // Use the agent
-  const response = await agent.runSync('What tools are available?');
+  const response = await agent.start('What tools are available?');
   console.log('Agent response:', response);
 
   // Cleanup

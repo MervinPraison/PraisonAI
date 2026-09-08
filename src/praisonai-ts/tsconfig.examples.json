@@ -1,0 +1,21 @@
+{
+  // `tsconfig.json` includes only `src/**/*`, so nothing type-checked `examples/`
+  // and a broken import there could sit in the tree indefinitely. This config
+  // makes the examples check-able:
+  //
+  //   npm run check:examples
+  //
+  // It is deliberately not part of `npm run build`: several examples predate
+  // current signatures and still fail. Fix those and it can become a gate.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "paths": {
+      "praisonai": ["./src/index.ts"],
+      "praisonai/*": ["./src/*"],
+      "*": ["node_modules/*"]
+    }
+  },
+  "include": ["examples/**/*.ts"]
+}
