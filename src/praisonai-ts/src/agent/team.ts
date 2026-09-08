@@ -62,6 +62,8 @@ export type AgentTeamProcess = 'sequential' | 'parallel' | 'workflow' | 'hierarc
  * then this set keeps the constructor from warning about behaviour that exists.
  */
 const HONOURED_HERE: ReadonlySet<string> = new Set([
+  // Honoured: one shared place is handed to every member (see below).
+  'toolsRunOn',
   'memory', 'context', 'hooks', 'planning', 'execution', 'runOn', 'managerLlm',
 ]);
 
@@ -82,7 +84,6 @@ const TEAM_OPTION_NOTES: Readonly<Record<string, string>> = {
   caching: 'Python does not apply it at the team level either; pass caching to individual Agent(...) instances.',
   learn: 'Python does not apply it at the team level either; pass learn to individual Agent(...) instances.',
   autonomy: 'Python propagates it to members that have none of their own; TypeScript Agents have no autonomy to propagate to yet.',
-  toolsRunOn: 'It needs one shared sandbox for the whole team; TypeScript has no compute providers yet, so every tool would still run on the host.',
 };
 
 /**
@@ -323,6 +324,8 @@ export class AgentTeam {
   readonly learn?: unknown;
   /** Python parity: tools_run_on. */
   readonly toolsRunOn?: unknown;
+  /** The one place every member's tools share, when the team set toolsRunOn. */
+  private _sharedToolPlace?: unknown;
   /** Python parity: run_on. Always undefined: a team refuses the option (see the config docs). */
   readonly runOn?: unknown;
 
@@ -444,6 +447,24 @@ export class AgentTeam {
     // Output preset: "silent" / "verbose" override the verbose default.
     const printResults = resolveOutputPreset(config.output, 'AgentTeam');
     if (printResults !== undefined) this.verbose = printResults;
+
+    // A team-wide `toolsRunOn` is ONE place shared by every member: the note
+    // this replaces said it "needs one shared sandbox for the whole team", and
+    // that is exactly what a single ToolPlace instance gives. Members that
+    // declared their own toolsRunOn keep it.
+    if (config.toolsRunOn !== undefined && config.toolsRunOn !== null && config.toolsRunOn !== false) {
+      const { resolvePlacement } = require('./features/placement');
+      const shared = resolvePlacement({
+        owner: 'AgentTeam',
+        toolsRunOn: config.toolsRunOn,
+      }).toolPlace;
+      if (shared) {
+        this._sharedToolPlace = shared;
+        for (const agent of this.agents) {
+          (agent as any).adoptToolPlace?.(shared);
+        }
+      }
+    }
 
     // Accepted for signature parity but not yet honoured on the team surface.
     // The ledger in utils/parity-notice.ts is the single list; see it for why.

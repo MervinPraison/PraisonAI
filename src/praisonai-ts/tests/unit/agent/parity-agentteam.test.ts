@@ -79,7 +79,7 @@ describe('AgentTeam.__init__ parity', () => {
     // accepted-with-notice.
     expect(unhonouredOptions()).toEqual([
       'AgentTeam.autonomy', 'AgentTeam.caching', 'AgentTeam.guardrails', 'AgentTeam.knowledge',
-      'AgentTeam.learn', 'AgentTeam.reflection', 'AgentTeam.toolsRunOn', 'AgentTeam.web',
+      'AgentTeam.learn', 'AgentTeam.reflection', 'AgentTeam.web',
     ]);
   });
 
