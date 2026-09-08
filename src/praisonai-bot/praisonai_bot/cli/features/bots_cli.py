@@ -423,11 +423,34 @@ class BotHandler:
 
         kwargs: Dict[str, Any] = dict(extra)
         if channel is not None:
-            # Only knobs every adapter understands. Anything platform-specific
-            # stays the caller's business rather than being guessed at here.
+            # Forward the validated channel's adapter-specific configuration so
+            # a ``bot start`` YAML routed through this generic facade reaches the
+            # adapter with the same fidelity as the gateway/BotOS path (which
+            # passes every channel key straight to ``Bot(...)`` at
+            # botos.py:1678). Copying only ``webhook_port`` here silently dropped
+            # Signal's ``account``/``bridge_url`` and — the security defect
+            # Greptile flagged — the Webhook adapter's ``verify`` (no env
+            # fallback), so a configured signature verifier was replaced by the
+            # adapter's unverified default. ``Bot`` forwards ``**kwargs`` to the
+            # adapter constructor, so this restores that fidelity.
+            #
+            # ``ChannelConfigSchema`` sets ``extra="allow"`` specifically so an
+            # adapter's own config keys survive validation "instead of being
+            # silently dropped … so they reach the adapter". Those live in
+            # ``model_extra`` — this is where Signal's ``account``/``bridge_url``
+            # and the Webhook adapter's ``path``/``verify`` land — so forward
+            # them verbatim. Nothing declared as a *facade/session* field is
+            # forwarded, so this cannot collide with ``Bot``'s own parameters.
+            extra_cfg = dict(getattr(channel, "model_extra", None) or {})
+            # The one explicit schema field the Webhook adapter also consumes:
+            # ``webhook_port`` (its ``verify``/``path``/``routes`` are extras).
             port = getattr(channel, "webhook_port", None)
             if port is not None:
-                kwargs.setdefault("webhook_port", port)
+                extra_cfg.setdefault("webhook_port", port)
+            for key, value in extra_cfg.items():
+                if key in kwargs or value in (None, ""):
+                    continue
+                kwargs[key] = value
 
         agent = self._load_agent(
             agent_file, capabilities, agent_config_dict=agent_config_dict

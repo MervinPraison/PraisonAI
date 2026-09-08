@@ -23,7 +23,10 @@ import time
 import pytest
 from typer.testing import CliRunner
 
-from praisonai_bot.bots._config_schema import GatewayConfigSchema
+from praisonai_bot.bots._config_schema import (
+    ChannelConfigSchema,
+    GatewayConfigSchema,
+)
 from praisonai_bot.cli.commands.bot import app as bot_app
 from praisonai_bot.cli.features.bots_cli import (
     BotHandler,
@@ -376,3 +379,80 @@ class TestGenericRun:
         BotHandler().start_from_config(str(config_file))
 
         assert seen == ["local"]
+
+
+# ── Generic path must not drop adapter-specific channel config ──────────
+
+
+class _StubGenericBot:
+    """Records the kwargs the generic facade forwarded to the adapter."""
+
+    instances: list["_StubGenericBot"] = []
+
+    def __init__(self, platform, agent=None, token=None, **kwargs):
+        self.platform = platform
+        self.token = token
+        self.kwargs = kwargs
+        self.is_running = False
+        _StubGenericBot.instances.append(self)
+
+    async def start(self):
+        self.is_running = False
+
+    async def stop(self):
+        self.is_running = False
+
+
+class TestGenericForwardsAdapterConfig:
+    """The generic ``bot start`` path forwarded only ``webhook_port``.
+
+    Greptile flagged this: a configured Webhook channel lost its ``verify``
+    (no env fallback) so a signature verifier was silently replaced by the
+    adapter's unverified default, and a Signal channel lost ``account`` /
+    ``bridge_url``. These assert the fields reach the ``Bot`` facade.
+    """
+
+    def test_webhook_verify_and_path_are_forwarded(self, clean_env, monkeypatch):
+        _StubGenericBot.instances.clear()
+        import praisonai_bot.bots as bots_pkg
+
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
+        monkeypatch.setattr(
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
+        )
+
+        channel = ChannelConfigSchema(
+            platform="webhook",
+            path="/hooks",
+            verify={"type": "hmac", "secret": "s"},
+        )
+
+        BotHandler().start_generic(platform="webhook", channel=channel)
+
+        assert len(_StubGenericBot.instances) == 1
+        fwd = _StubGenericBot.instances[0].kwargs
+        assert fwd.get("verify") == {"type": "hmac", "secret": "s"}
+        assert fwd.get("path") == "/hooks"
+
+    def test_signal_account_and_bridge_url_are_forwarded(
+        self, clean_env, monkeypatch
+    ):
+        _StubGenericBot.instances.clear()
+        import praisonai_bot.bots as bots_pkg
+
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
+        monkeypatch.setattr(
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
+        )
+
+        channel = ChannelConfigSchema(
+            platform="signal",
+            account="+15551234567",
+            bridge_url="http://localhost:9090",
+        )
+
+        BotHandler().start_generic(platform="signal", channel=channel)
+
+        fwd = _StubGenericBot.instances[0].kwargs
+        assert fwd.get("account") == "+15551234567"
+        assert fwd.get("bridge_url") == "http://localhost:9090"
