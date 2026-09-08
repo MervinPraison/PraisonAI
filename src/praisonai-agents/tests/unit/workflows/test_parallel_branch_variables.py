@@ -236,17 +236,28 @@ def test_failing_modes_still_raise_and_merge_nothing(mode):
 
 
 # ---------------------------------------------------------------------------
-# Loop: deliberately iteration-scoped, and identical parallel vs sequential
+# Loop: the same data loss, fixed separately - see test_loop_variable_scope.py
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("is_parallel", [False, True])
-def test_loop_iteration_variables_stay_iteration_scoped(is_parallel):
-    """Loop is NOT the same case as Parallel and must not be "fixed" to match.
+def test_loop_body_variables_survive_and_the_two_modes_agree(is_parallel):
+    """Loop had the identical defect and it is fixed the same way.
 
-    N iterations share one step name, so a per-iteration output_variable has N
-    conflicting values; the aggregate is exposed through the Loop's own
-    ``output_variable`` / ``loop_outputs`` instead. Sequential and parallel
-    loops behave identically, and that parity is what this test pins.
+    This test previously asserted the opposite - that ``inner_var`` was
+    deliberately iteration-scoped - on the reasoning that N iterations share one
+    step name so the Loop's ``loop_outputs`` aggregate is the right answer. That
+    reasoning did not survive contact with the rest of the package:
+
+    * ``Repeat`` has exactly the same property (N iterations, one step name) and
+      has always run against the shared scope with the last iteration winning;
+    * ``loop_outputs`` only holds each iteration's *last* step's output, so an
+      earlier step's ``output_variable`` in a multi-step body - and any
+      ``StepResult.variables`` write - was lost with no aggregate to recover it
+      from, silently, while the run reported "completed".
+
+    Loop is now the unrolled sequence it looks like: the body's writes escape,
+    last item wins, and the loop's own control variables stay loop-scoped. The
+    full rule and its mutation gates live in ``test_loop_variable_scope.py``.
     """
     wf = Workflow(steps=[
         loop(steps=[Task(name="inner",
@@ -259,7 +270,8 @@ def test_loop_iteration_variables_stay_iteration_scoped(is_parallel):
 
     assert variables["collected"] == ["X-a", "X-b"]
     assert variables["loop_outputs"] == ["X-a", "X-b"]
-    assert "inner_var" not in variables
+    assert variables.get("inner_var") == "X-b"
+    assert "item" not in variables and "loop_index" not in variables
     assert variables.get("after_output") == "AFTER"  # control
 
 

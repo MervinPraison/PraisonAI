@@ -2933,11 +2933,77 @@ CONCISE SUMMARY:"""
         return {key: branch_variables[key] for key in written if key in branch_variables}
 
     @staticmethod
+    def _loop_control_variables(
+        loop_step: Any, item: Any, idx: int
+    ) -> Dict[str, Any]:
+        """The variables a ``Loop`` injects itself for one iteration.
+
+        ``item`` (or the loop's ``var_name``), ``loop_index`` and the flattened
+        ``item.<key>`` accessors are loop *machinery*, not results the loop body
+        produced, so they stay scoped to the loop in **both** execution modes:
+        the sequential path restores whatever those names held before the loop,
+        and the parallel path drops them from the merged delta. Keeping the two
+        modes identical here is what lets the loop body's own writes - which do
+        escape - be compared between them.
+        """
+        control: Dict[str, Any] = {loop_step.var_name: item, "loop_index": idx}
+        # Also expand nested item properties for template access (e.g., {{item.title}})
+        if isinstance(item, dict):
+            for key, value in item.items():
+                control[f"{loop_step.var_name}.{key}"] = value
+        return control
+
+    @classmethod
+    def _loop_variable_delta(
+        cls, loop_variables: Optional[Dict[str, Any]], control: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Writes one parallel-loop iteration made, minus the loop's control vars."""
+        delta = cls._branch_variable_delta(loop_variables)
+        for key in control:
+            delta.pop(key, None)
+        return delta
+
+    @staticmethod
+    def _restore_loop_scope(
+        all_variables: Dict[str, Any],
+        saved: Dict[str, Any],
+        introduced: set,
+        preexisting_writes: set
+    ) -> None:
+        """Undo a sequential loop's own control variables once the loop is done.
+
+        The sequential loop runs against the shared scope (see ``_execute_loop``),
+        so ``item``/``loop_index`` would otherwise leak out of the loop - and, when
+        the loop sits inside a ``Parallel`` branch, would be merged back into the
+        enclosing workflow as if the branch had written them. Restore the previous
+        value (or remove the name) and un-record the write.
+        """
+        for key in introduced:
+            if key in saved:
+                all_variables[key] = saved[key]
+            else:
+                all_variables.pop(key, None)
+        written = getattr(all_variables, "written_keys", None)
+        if written is not None:
+            for key in introduced:
+                if key not in preexisting_writes:
+                    written.discard(key)
+
+    @staticmethod
     def _merge_branch_variables(
         all_variables: Dict[str, Any],
-        branch_deltas: List[Tuple[int, Dict[str, Any]]]
+        branch_deltas: List[Tuple[int, Dict[str, Any]]],
+        warn_on_collision: bool = True
     ) -> None:
-        """Merge parallel branches' variable writes back into the shared scope.
+        """Merge concurrent branches' variable writes back into the shared scope.
+
+        Used by ``Parallel`` (branch declaration order) and by the parallel
+        ``Loop`` (iteration order). ``warn_on_collision`` is the only difference
+        between them: two *branches* writing one variable is almost certainly an
+        authoring accident worth a warning, whereas N *iterations* of one loop
+        body necessarily write the loop body's ``output_variable`` N times - that
+        is the normal shape of a loop, not a mistake, so the loop passes False
+        rather than emitting a warning per item.
 
         THE MERGE RULE (please do not "simplify" this back into a race):
 
@@ -2967,7 +3033,7 @@ CONCISE SUMMARY:"""
                         conflicting = bool(all_variables[key] != value)
                     except Exception:
                         conflicting = True
-                    if conflicting:
+                    if conflicting and warn_on_collision:
                         logger.warning(
                             f"Parallel branches {previous_idx} and {idx} both wrote "
                             f"variable '{key}' with different values; branch {idx} wins "
@@ -3237,16 +3303,19 @@ CONCISE SUMMARY:"""
                 emitter.set_branch(f"loop_{idx}")
                 
                 try:
-                    # CRITICAL: Deep copy variables to ensure thread isolation (per-branch context isolation)
-                    import copy
-                    loop_vars = copy.deepcopy(all_variables)
-                    loop_vars[loop_step.var_name] = item
-                    loop_vars["loop_index"] = idx
-                    
-                    # Also expand nested item properties for template access (e.g., {{item.title}})
-                    if isinstance(item, dict):
-                        for key, value in item.items():
-                            loop_vars[f"{loop_step.var_name}.{key}"] = value
+                    # CRITICAL: Deep copy variables to ensure thread isolation
+                    # (concurrent iterations writing one dict is a data race).
+                    # Isolation is only half of the design: whatever the iteration
+                    # writes must still be merged back, or every output_variable
+                    # set inside the loop body is silently discarded. The copy is a
+                    # _WriteTrackingDict so the merge (see below) knows exactly
+                    # which keys this iteration assigned. The loop's own control
+                    # variables are seeded at construction time and are therefore
+                    # deliberately not counted as writes.
+                    control = self._loop_control_variables(loop_step, item, idx)
+                    seed = copy.deepcopy(all_variables)
+                    seed.update(control)
+                    loop_vars = _WriteTrackingDict(seed)
                     
                     # Execute all steps sequentially within this iteration
                     iteration_output = opt_prev
@@ -3258,9 +3327,13 @@ CONCISE SUMMARY:"""
                         )
                         iteration_output = step_result.get("output")
                         iteration_results.append(step_result)
-                        # Update variables if step set any
-                        if step_result.get("variables"):
-                            loop_vars.update(step_result["variables"])
+                        # Update variables if step set any. _execute_single_step_internal
+                        # writes into - and returns - the very dict it was handed, so
+                        # ``loop_vars.update(loop_vars)`` would record every key as
+                        # written and defeat the delta detection below.
+                        step_vars = step_result.get("variables")
+                        if step_vars and step_vars is not loop_vars:
+                            loop_vars.update(step_vars)
                         # A failed step with on_error="stop" signals a stop; halt
                         # this iteration instead of feeding later steps forward.
                         if step_result.get("stop"):
@@ -3273,7 +3346,11 @@ CONCISE SUMMARY:"""
                         "step": f"loop_{idx}",
                         "output": iteration_output,
                         "steps": iteration_results,
-                        "stop": iteration_stopped
+                        "stop": iteration_stopped,
+                        # Only what this iteration actually wrote, so untouched
+                        # variables keep the parent's own objects instead of being
+                        # replaced by this iteration's deep-copied clones.
+                        "variable_delta": self._loop_variable_delta(loop_vars, control),
                     }
                     return idx, final_result
                 finally:
@@ -3304,11 +3381,25 @@ CONCISE SUMMARY:"""
                 # Sort by index to maintain order
                 indexed_results.sort(key=lambda x: x[0])
                 
+                iteration_deltas = []  # [(iteration_idx, {var: value}), ...] in item order
                 for idx, step_result in indexed_results:
                     results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
                     outputs.append(step_result["output"])
+                    iteration_deltas.append((idx, step_result.get("variable_delta") or {}))
                     if step_result.get("stop"):
                         loop_stopped = True
+
+            # Merge each iteration's writes back into the shared scope. Without
+            # this every output_variable set inside the loop body was written to a
+            # deep copy discarded when the iteration returned (silent data loss).
+            # Deltas are applied in *item* order, never completion order, so the
+            # surviving value does not depend on thread scheduling - it is the
+            # last item's, exactly what the sequential loop above produces. A
+            # cross-iteration collision is inherent to looping, so unlike Parallel
+            # it is not warned about.
+            self._merge_branch_variables(
+                all_variables, iteration_deltas, warn_on_collision=False
+            )
             
             if verbose:
                 print(f"✅ Parallel loop complete: {len(outputs)} results")
@@ -3318,44 +3409,71 @@ CONCISE SUMMARY:"""
                 step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
                 print(f"🔁 Looping over {num_items} items{step_info}...")
             
-            for idx, item in enumerate(items):
-                # Add current item to variables
-                import copy
-                loop_vars = copy.deepcopy(all_variables)
-                loop_vars[loop_step.var_name] = item
-                loop_vars["loop_index"] = idx
-                
-                # Also expand nested item properties for template access (e.g., {{item.title}})
-                if isinstance(item, dict):
-                    for key, value in item.items():
-                        loop_vars[f"{loop_step.var_name}.{key}"] = value
-                
-                # Execute all steps sequentially within this iteration
-                iteration_output = previous_output
-                iteration_stopped = False
-                for step_idx, step in enumerate(steps_to_run):
-                    step_result = self._execute_single_step_internal(
-                        step, iteration_output, input, loop_vars, model, verbose, step_idx, stream=stream, depth=depth+1
-                    )
-                    iteration_output = step_result.get("output")
-                    # Update variables if step set any
-                    if step_result.get("variables"):
-                        loop_vars.update(step_result["variables"])
-                    # A failed step with on_error="stop" signals a stop; halt this
-                    # iteration instead of feeding later steps the error forward.
-                    if step_result.get("stop"):
-                        iteration_stopped = True
-                        break
-                
-                results.append({"step": f"loop_{idx}", "output": iteration_output})
-                outputs.append(iteration_output)
-                previous_output = iteration_output
+            # A sequential loop is simply its body unrolled, so - like Repeat,
+            # If and Route - it runs against the shared scope. There is no
+            # concurrency to isolate from here, and the per-iteration
+            # ``copy.deepcopy(all_variables)`` that used to sit in this loop
+            # bought no safety while silently discarding every output_variable
+            # the body wrote and hiding iteration N-1's writes from iteration N.
+            # Only the loop's own control variables stay loop-scoped; they are
+            # saved here and restored in the finally below.
+            control_saved: Dict[str, Any] = {}
+            control_introduced = set()
+            preexisting_writes = set(getattr(all_variables, "written_keys", None) or ())
+            prev_control_keys: set = set()
+            try:
+                for idx, item in enumerate(items):
+                    # Add current item (and loop_index / item.<key>) to variables
+                    control = self._loop_control_variables(loop_step, item, idx)
+                    # Drop the previous item's flattened ``item.<key>`` accessors
+                    # that this item does not have. Because the loop runs against
+                    # the shared scope, ``update`` alone would leave a stale
+                    # ``item.k`` visible while iterating an item that only has
+                    # ``item.m`` - the body would read the previous item's value.
+                    # ``_restore_loop_scope`` already cleans these up after the
+                    # loop; this keeps each iteration's view correct too.
+                    for stale_key in prev_control_keys - control.keys():
+                        all_variables.pop(stale_key, None)
+                    prev_control_keys = set(control.keys())
+                    for key in control:
+                        if key not in control_introduced:
+                            control_introduced.add(key)
+                            if key in all_variables:
+                                control_saved[key] = all_variables[key]
+                    all_variables.update(control)
 
-                # Abort the remaining items too: a step that asked to stop the
-                # workflow (on_error="stop") must not silently keep looping.
-                if iteration_stopped:
-                    loop_stopped = True
-                    break
+                    # Execute all steps sequentially within this iteration
+                    iteration_output = previous_output
+                    iteration_stopped = False
+                    for step_idx, step in enumerate(steps_to_run):
+                        step_result = self._execute_single_step_internal(
+                            step, iteration_output, input, all_variables, model, verbose, step_idx, stream=stream, depth=depth+1
+                        )
+                        iteration_output = step_result.get("output")
+                        # Update variables if step set any. The step writes into the
+                        # dict it was handed, so guard against self-update.
+                        step_vars = step_result.get("variables")
+                        if step_vars and step_vars is not all_variables:
+                            all_variables.update(step_vars)
+                        # A failed step with on_error="stop" signals a stop; halt this
+                        # iteration instead of feeding later steps the error forward.
+                        if step_result.get("stop"):
+                            iteration_stopped = True
+                            break
+
+                    results.append({"step": f"loop_{idx}", "output": iteration_output})
+                    outputs.append(iteration_output)
+                    previous_output = iteration_output
+
+                    # Abort the remaining items too: a step that asked to stop the
+                    # workflow (on_error="stop") must not silently keep looping.
+                    if iteration_stopped:
+                        loop_stopped = True
+                        break
+            finally:
+                self._restore_loop_scope(
+                    all_variables, control_saved, control_introduced, preexisting_writes
+                )
         # Store outputs in user-specified variable or default to loop_outputs
         output_var_name = loop_step.output_variable or "loop_outputs"
         all_variables[output_var_name] = outputs
