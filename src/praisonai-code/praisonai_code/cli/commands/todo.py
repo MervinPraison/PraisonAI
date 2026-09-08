@@ -27,8 +27,8 @@ def todo_add(
     """Add a todo."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
     
-    argv = ['todo', 'add', task]
-    
+    argv = ['todo', 'add', task, '--priority', priority]
+
     run_wrapper_command(argv, feature="todo")
 
 

@@ -7,7 +7,12 @@ Provides configuration management with TOML support and precedence handling.
 from .loader import ConfigLoader, get_config, load_config
 from .schema import ConfigSchema
 from .paths import (
+    LEGACY_PROJECT_DATA_DIRNAME,
+    PROJECT_DATA_DIRNAME,
     get_config_paths,
+    get_project_data_dir,
+    get_project_data_path,
+    resolve_project_data_path,
     get_user_config_path,
     get_project_config_path,
     get_project_config_dir,
@@ -19,7 +24,12 @@ __all__ = [
     'ConfigSchema',
     'get_config',
     'load_config',
+    'LEGACY_PROJECT_DATA_DIRNAME',
+    'PROJECT_DATA_DIRNAME',
     'get_config_paths',
+    'get_project_data_dir',
+    'get_project_data_path',
+    'resolve_project_data_path',
     'get_user_config_path',
     'get_project_config_path',
     'get_project_config_dir',

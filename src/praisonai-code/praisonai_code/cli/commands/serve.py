@@ -453,12 +453,23 @@ def serve_ui_gateway(
 
         _mod = import_bot_module("praisonai_bot.integration.gateway_host")
         run_integrated_gateway = getattr(_mod, "run_integrated_gateway")
-        run_integrated_gateway(
-            host=host,
-            port=port,
-            title=title,
-            style=style
-        )
+        kwargs = dict(host=host, port=port, title=title, style=style)
+        # `--agents` was declared (and used in this command's own docstring
+        # example) but never forwarded. Pass it only when supplied, and only
+        # when the gateway host accepts it, so an older praisonai-bot still
+        # starts instead of raising TypeError.
+        if agents_file:
+            import inspect
+
+            if "agents_file" in inspect.signature(run_integrated_gateway).parameters:
+                kwargs["agents_file"] = agents_file
+            else:
+                output.print_error(
+                    "--agents is not supported by the installed praisonai-bot "
+                    "gateway host; upgrade praisonai-bot to use it."
+                )
+                raise typer.Exit(2)
+        run_integrated_gateway(**kwargs)
     except ImportError as e:
         output.print_error(f"UI-Gateway module not available: {e}")
         output.print("Install with: pip install praisonai-bot[gateway]")

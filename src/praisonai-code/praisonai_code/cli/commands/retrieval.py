@@ -15,6 +15,7 @@ from typing import List, Optional
 from contextlib import contextmanager
 import time
 import sys
+from praisonai_code.cli.configuration.paths import get_knowledge_store_path
 
 app = typer.Typer(
     name="retrieval",
@@ -113,7 +114,7 @@ def index_command(
                     "provider": "chroma",
                     "config": {
                         "collection_name": collection,
-                        "path": f"./.praison/knowledge/{collection}",
+                        "path": get_knowledge_store_path(collection),
                     }
                 }
             }
@@ -226,7 +227,7 @@ def query_command(
                 citations=citations,
                 citations_mode=CitationsMode(citations_mode),
                 vector_store_provider="chroma",
-                persist_path=f"./.praison/knowledge/{collection}",
+                persist_path=get_knowledge_store_path(collection),
                 collection_name=collection,
             )
             
@@ -348,7 +349,7 @@ def search_command(
                 "provider": "chroma",
                 "config": {
                     "collection_name": collection,
-                    "path": f"./.praison/knowledge/{collection}",
+                    "path": get_knowledge_store_path(collection),
                 }
             }
         }

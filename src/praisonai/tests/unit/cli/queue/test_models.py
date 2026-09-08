@@ -161,7 +161,12 @@ class TestQueueConfig:
         assert config.max_concurrent_per_agent == 2
         assert config.max_queue_size == 100
         assert config.enable_persistence
-        assert config.db_path == ".praison/queue.db"
+        # Asserted against the shared constant, not a literal: the default
+        # used to be a hard-coded ".praison/queue.db" while the runtime reads
+        # ".praisonai/".
+        from praisonai_code.cli.features.queue.models import DEFAULT_QUEUE_DB_PATH
+
+        assert config.db_path == DEFAULT_QUEUE_DB_PATH
     
     def test_custom_values(self):
         """Test custom values."""

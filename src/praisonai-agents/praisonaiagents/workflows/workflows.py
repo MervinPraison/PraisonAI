@@ -1728,11 +1728,29 @@ class AgentFlow:
             # a failure too, even though no exception was raised. Treat it like
             # step_error so on_error flow control and the final status are honored
             # instead of silently reporting the step "completed".
-            step_failed = bool(step_error) or guardrail_failed
+            #
+            # So is an LLM-backed step that produced no output at all. `chat()`
+            # returns None when the underlying call failed and the agent
+            # swallowed the error (an auth 401 is the common case): the engine
+            # already logs "Output is None" a few lines below, so it knows the
+            # step produced nothing — it just used to report the run
+            # "completed" anyway, and every consumer (CLI, API server, Python
+            # callers) was told the run succeeded. Only agent/action steps are
+            # judged this way: a custom `handler` may legitimately return None,
+            # and a skipped step never reaches here.
+            produced_nothing = (
+                output is None
+                and not step_error
+                and not step.handler
+                and (step.agent is not None or bool(step.action))
+            )
+            step_failed = bool(step_error) or guardrail_failed or produced_nothing
             failure_reason = (
                 str(step_error) if step_error
                 else (f"guardrail validation failed: {validation_feedback}"
-                      if guardrail_failed else None)
+                      if guardrail_failed
+                      else ("agent produced no output (None) — the model call "
+                            "most likely failed" if produced_nothing else None))
             )
 
             # Update step status
@@ -1866,6 +1884,26 @@ class AgentFlow:
             "variables": all_variables,
             "status": self.status
         }
+        # Surface *why* a failed run failed. Callers (the CLI included) read
+        # result["error"]; without it a genuine failure printed
+        # "Workflow failed: Unknown error".
+        if self.status == "failed":
+            reasons = [
+                f"{r.get('step')}: {r.get('error')}"
+                for r in results
+                if r.get("status") == "failed" and r.get("error")
+            ]
+            if reasons:
+                final_result["error"] = "; ".join(reasons)
+            else:
+                failed_names = [
+                    str(r.get("step")) for r in results
+                    if r.get("status") == "failed"
+                ]
+                final_result["error"] = (
+                    "step(s) failed: " + ", ".join(failed_names)
+                    if failed_names else "workflow failed"
+                )
         
         # Call on_workflow_complete callback
         if self.on_workflow_complete:

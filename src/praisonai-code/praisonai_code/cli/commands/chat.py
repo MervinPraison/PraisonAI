@@ -275,11 +275,33 @@ def chat_main(
 
     # `resolved_model` was resolved above (before the onboarding gate) so the
     # gate validated the exact model dispatched here — no re-resolution needed.
+    # `--continue` was declared and dropped, so `praisonai chat -c` silently
+    # started a brand-new session. Resolve the last session id the same way the
+    # bare-TUI launch does.
+    resolved_session_id = session_id
+    if continue_session and not resolved_session_id:
+        try:
+            from praisonai_code.cli.state.project_sessions import find_last_session
+
+            resolved_session_id = find_last_session()
+        except Exception:  # noqa: BLE001 - continuity is best-effort
+            resolved_session_id = None
+        if not resolved_session_id:
+            typer.echo(
+                "No previous sessions found. Starting new session.", err=True
+            )
+
     tui_config = AsyncTUIConfig(
         model=resolved_model,
         show_logo=not compact,
         show_status_bar=not compact,
-        session_id=session_id,
+        session_id=resolved_session_id,
+        resume=bool(resolved_session_id) and (continue_session or bool(session_id)),
+        # `--no-acp`/`--no-lsp` were declared and dropped, so the tools they
+        # name loaded anyway; the AsyncTUIConfig fields for them already exist
+        # and `code` already sets them.
+        enable_acp=not no_acp,
+        enable_lsp=not no_lsp,
         workspace=workspace,
         debug=debug,
         autonomy_mode=autonomy,
@@ -407,6 +429,15 @@ _UNWIRED_CHAT_OPTIONS = {
     "ui_backend": "--ui-backend",
     "no_color": "--no-color",
     "theme": "--theme",
+    # These four were declared and dropped without any warning at all -- the
+    # table only covered the four above, so it was a subset of the real gap.
+    # `--continue`, `--no-acp` and `--no-lsp` are now genuinely wired; these
+    # remain unimplemented and say so rather than being accepted in silence.
+    "tools": "--tools",
+    "toolset": "--toolset",
+    "user_id": "--user-id",
+    "file": "--file",
+    "output": "--output",
 }
 
 

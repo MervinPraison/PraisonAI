@@ -456,6 +456,10 @@ def code_main(
     args.tools = tools
     args.no_acp = no_acp
     args.no_lsp = no_lsp
+    # `--no-autonomy` was declared here and dropped, while `chat` wires the
+    # identical flag onto AsyncTUIConfig.autonomy_mode -- so `praisonai code
+    # --no-autonomy` ran fully autonomous anyway.
+    args.autonomy = autonomy
     args.resume_session = session_id if session_id else ('last' if continue_session else None)
     # Reasoning effort (mapped to the core thinking_budget) and named agent
     # profile (tools + permission/mode scope), consumed when the agent is built.
@@ -570,6 +574,7 @@ def _run_resident_code(prompt, args, *, plan=False, session_id=None):
         plan_mode=plan,
         enable_acp=not getattr(args, "no_acp", False),
         enable_lsp=not getattr(args, "no_lsp", False),
+        autonomy_mode=getattr(args, "autonomy", True),
         execution=getattr(args, "execution", None),
     )
 

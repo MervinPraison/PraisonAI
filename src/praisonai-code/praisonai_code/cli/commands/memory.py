@@ -67,16 +67,45 @@ def memory_search(
 
 @app.command("clear")
 def memory_clear(
+    target: str = typer.Argument(
+        "short",
+        help="What to clear: 'short' (short-term only) or 'all' (everything)",
+    ),
     user_id: str = typer.Option(None, "--user-id", help="User ID for memory isolation"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force clear without confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip the confirmation prompt"),
 ):
-    """Clear all memories."""
+    """Clear memories (short-term by default, everything with 'all').
+
+    `--force` used to be declared and dropped: the command wiped memory with no
+    prompt at all while advertising a safety flag. It now confirms first --
+    matching the `memory learn clear` sibling in this same file -- and only
+    `--force` (or a non-interactive stdin) skips the prompt.
+
+    The `all` target was likewise unreachable: the docstring said "Clear all
+    memories" while the command could only ever clear short-term.
+
+    Examples:
+        praisonai memory clear
+        praisonai memory clear all --force
+    """
     from praisonai_code._wrapper_bridge import run_wrapper_command
-    
-    argv = ['memory', 'clear']
+
+    target = (target or "short").lower()
+    if target not in ("short", "all"):
+        typer.echo(f"Unknown target: {target!r}. Use 'short' or 'all'.", err=True)
+        raise typer.Exit(2)
+
+    if not force:
+        scope = "ALL memories" if target == "all" else "short-term memory"
+        who = f" for user {user_id}" if user_id else ""
+        if not typer.confirm(f"Clear {scope}{who}? This cannot be undone."):
+            typer.echo("Cancelled.")
+            raise typer.Exit(1)
+
+    argv = ['memory', 'clear', target]
     if user_id:
         argv.extend(['--user-id', user_id])
-    
+
     run_wrapper_command(argv, feature="memory")
 
 

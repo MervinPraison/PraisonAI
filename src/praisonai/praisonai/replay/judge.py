@@ -2188,6 +2188,7 @@ REASONING: [brief explanation]
         yaml_file: Optional[str] = None,
         evaluate_tools: bool = True,
         evaluate_context_flow: bool = True,
+        recipe_goal: Optional[str] = None,
     ) -> JudgeReport:
         """
         Judge all agents in a trace with YAML-aware evaluation.
@@ -2198,6 +2199,12 @@ REASONING: [brief explanation]
             yaml_file: Optional path to YAML file for context-aware evaluation
             evaluate_tools: Whether to evaluate individual tool calls
             evaluate_context_flow: Whether to evaluate context flow between agents
+            recipe_goal: Explicit overall goal to evaluate against. Overrides the
+                goal extracted from ``yaml_file``, and supplies one when no YAML
+                is given. This is what ``praisonai recipe judge --goal`` passes;
+                the option was previously declared (and used in that command's
+                own docstring example) but never reached the judge, so the goal
+                evaluation silently ran against "Not specified".
             
         Returns:
             JudgeReport with all agent scores, tool evaluations, and recommendations
@@ -2231,13 +2238,16 @@ REASONING: [brief explanation]
                         all_sources.extend(s.get("sources", []))
                     agent_data[agent_name]["knowledge_sources"] = ", ".join(list(set(all_sources))[:5]) or "None"
         
-        # Load YAML info if provided
+        # Load YAML info if provided. An explicitly supplied goal wins over the
+        # one extracted from the YAML.
         yaml_info = None
-        recipe_goal = ""
+        explicit_goal = (recipe_goal or "").strip()
+        recipe_goal = explicit_goal
         input_context = ""  # Additional context from input images/URLs
         if yaml_file:
             yaml_info = _detect_yaml_structure(yaml_file)
-            recipe_goal = yaml_info.get("recipe_goal", "")
+            if not explicit_goal:
+                recipe_goal = yaml_info.get("recipe_goal", "")
             
             # Extract input variables from YAML for image/URL context
             variables = yaml_info.get("variables", {})
