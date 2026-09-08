@@ -31,6 +31,58 @@ logger = logging.getLogger(__name__)
 _BODY_METHODS = {"post", "put", "patch", "delete"}
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 
+# Keys the framework injects into a tool call rather than the model supplying
+# them. ``OpenAPIOperation.__call__`` takes ``**kwargs``, which is exactly the
+# signature durable execution inspects before adding an idempotency key, so on
+# the free-form-body path below these must not be swept into the payload.
+_FRAMEWORK_KWARGS = frozenset({
+    "idempotency_key", "_idempotency_key", "run_id", "_run_id",
+    "_tool_call_id", "_agent", "_task_id",
+})
+
+# Composition keywords whose subschemas contribute properties to the parent.
+_COMPOSITION_KEYS = ("allOf", "oneOf", "anyOf")
+
+
+def _body_properties(schema: Any) -> Dict[str, Any]:
+    """Collect a body schema's properties, flattening allOf/oneOf/anyOf.
+
+    Composition is how real specs express "this object, plus those fields", and
+    such a schema carries no top-level ``properties`` at all. Reading only the
+    top level therefore found nothing -- which both hid the body arguments from
+    the model and, on the send side, filtered every one of them out.
+
+    For ``oneOf``/``anyOf`` the union is taken: the caller is describing which
+    arguments a tool *may* accept, and a superset is the useful answer there.
+    """
+    if not isinstance(schema, dict):
+        return {}
+    props: Dict[str, Any] = {}
+    direct = schema.get("properties")
+    if isinstance(direct, dict):
+        props.update(direct)
+    for key in _COMPOSITION_KEYS:
+        for sub_schema in schema.get(key) or []:
+            for name, value in _body_properties(sub_schema).items():
+                props.setdefault(name, value)
+    return props
+
+
+def _body_required(schema: Any) -> List[str]:
+    """Required body field names, flattened the same way as the properties.
+
+    Only ``allOf`` contributes: a field required by just one branch of an
+    ``oneOf`` is not required of the request as a whole.
+    """
+    if not isinstance(schema, dict):
+        return []
+    out: List[str] = list(schema.get("required") or [])
+    for sub_schema in schema.get("allOf") or []:
+        for name in _body_required(sub_schema):
+            if name not in out:
+                out.append(name)
+    return out
+
 
 def _resolve_ref(schema: Any, root: Dict[str, Any], _seen: Optional[set] = None) -> Any:
     """Expand local ``$ref`` pointers against the document.
@@ -183,11 +235,19 @@ class OpenAPIOperation:
             # durable-execution ``idempotency_key`` added for ``**kwargs``
             # callables) into the request, breaking strict APIs and any schema
             # with ``additionalProperties: false``.
-            props = (self.body_schema.get("properties")
-                     if isinstance(self.body_schema, dict) else None) or {}
-            allowed = set(props)
+            # A schema that declares properties (directly or through
+            # allOf/oneOf/anyOf) is the filter. A schema that declares none is
+            # a free-form body -- legal, and common as bare {"type": "object"}
+            # or additionalProperties: true -- and filtering against an empty
+            # set would send an empty body for every such operation, which is
+            # the silent-drop this filter exists to prevent.
+            allowed = set(_body_properties(self.body_schema))
             for key, value in kwargs.items():
-                if key in consumed or key not in allowed:
+                if key in consumed or key in _FRAMEWORK_KWARGS:
+                    continue
+                if allowed and key not in allowed:
+                    logger.debug("dropping undeclared body key %r for %s",
+                                 key, self.name)
                     continue
                 body[key] = value
 
@@ -390,11 +450,11 @@ class OpenAPIToolset:
         if body_param:
             # Swagger 2: expose the body as one named object argument.
             properties.setdefault(body_param, body_schema or {"type": "object"})
-        elif isinstance(body_schema, dict) and body_schema.get("properties"):
-            for key, value in body_schema["properties"].items():
+        elif isinstance(body_schema, dict):
+            for key, value in _body_properties(body_schema).items():
                 properties.setdefault(key, value)
-            required.extend(r for r in (body_schema.get("required") or [])
-                            if r not in required)
+            required.extend(r for r in _body_required(body_schema)
+                            if r not in required and r in properties)
 
         schema: Dict[str, Any] = {"type": "object", "properties": properties}
         if required:
