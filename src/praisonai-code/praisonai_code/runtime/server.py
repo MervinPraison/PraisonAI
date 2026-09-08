@@ -75,6 +75,46 @@ class SessionEventHub:
             return bool(self._subscribers.get(session_id))
 
 
+def _apply_cold_path_parity(config: Dict[str, Any]) -> None:
+    """Give a runtime-built agent the context and tools the cold path gives it.
+
+    In-process, ``praisonai run`` registers the AGENTS.md/CLAUDE.md subtree hook
+    and auto-discovers project-local ``.praisonai/tools/*.py``. The warm runtime
+    built a bare ``Agent``, so attaching to a running daemon produced an agent
+    with no project rules and no local tools -- which returns fluent text and
+    exits 0 with nothing done, indistinguishable from success until you check
+    the filesystem.
+
+    ``run_main`` already refuses to attach when ``--tools``/``--toolset``/
+    ``--mcp``/``--instructions`` are supplied, so only the two *implicit*
+    sources were missing here. Both are project-scoped, and the runtime
+    descriptor is project-scoped too, so the daemon resolves the same ones the
+    client would have.
+
+    Best-effort in both halves: parity wiring must never stop the daemon
+    serving a turn.
+    """
+    try:
+        from ..cli.commands.run import (
+            _auto_discover_project_tools,
+            _wire_subtree_context_hook,
+        )
+    except Exception:
+        return
+
+    try:
+        local_tools = _auto_discover_project_tools([])
+        if local_tools:
+            config["tools"] = list(config.get("tools") or []) + local_tools
+    except Exception:
+        pass
+
+    try:
+        _wire_subtree_context_hook(config)
+    except Exception:
+        pass
+
+
 class WarmRuntime:
     """Holds warm agent state and executes prompts for the runtime server."""
 
@@ -115,6 +155,7 @@ class WarmRuntime:
                 resolved = resolved or self._default_model
                 if resolved:
                     config["llm"] = resolved
+                _apply_cold_path_parity(config)
                 agent = Agent(**config)
                 self._agents[key] = agent
             return agent
@@ -166,6 +207,7 @@ class WarmRuntime:
         }
         if resolved:
             config["llm"] = resolved
+        _apply_cold_path_parity(config)
         agent = Agent(**config)
 
         # Rehydrate prior history + wire persistence via the shared CLI helper.

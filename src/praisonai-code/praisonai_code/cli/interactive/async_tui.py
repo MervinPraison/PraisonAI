@@ -508,6 +508,110 @@ class AsyncTUI:
         "move_file", "execute_command", "run_command", "shell", "bash",
     })
 
+    def _persist_turn(self, user_content: str, assistant_content: Optional[str]) -> None:
+        """Write a completed turn to the session store.
+
+        Nothing in the TUI wrote to it, so a fresh ``praisonai chat`` / bare
+        ``praisonai`` / standalone ``praisonai code`` produced zero saved
+        sessions: ``/sessions`` answered "No saved sessions found." and
+        ``/continue`` (and ``--session``/``--continue``) had nothing to resume,
+        so every conversation on the default interactive path was lost on exit.
+        The resume machinery added for Issue #4910 works; there was simply never
+        anything for it to find.
+
+        Best-effort: a storage failure must never break the turn the user just
+        completed, so it degrades to a debug log.
+        """
+        if not self.session_id or not user_content:
+            return
+        try:
+            from praisonai_code.cli.session import get_session_store
+
+            store = get_session_store()
+            session = store.get_or_create(self.session_id)
+            if self.config.model:
+                session.current_model = self.config.model
+            session.add_user_message(user_content)
+            if assistant_content:
+                session.add_assistant_message(assistant_content)
+            store.save(session)
+        except Exception as e:
+            logger.debug(f"Could not persist turn to session store: {e}")
+
+    def _persist_imported_messages(
+        self, session_id: str, messages: List[dict]
+    ) -> None:
+        """Persist an imported transcript to *both* stores.
+
+        The model rehydrates from the project session store (via
+        ``apply_cli_session_continuity``); ``/sessions`` and ``/continue`` list
+        from the flat unified store. Writing only one left the other empty --
+        so the previous pair-stepping loop, which wrote solely to the unified
+        store, imported a transcript the model never received and dropped any
+        trailing or non-alternating message. ``set_chat_history`` replaces the
+        project transcript verbatim (every role preserved, no pairing), and the
+        unified mirror keeps the session discoverable. Best-effort: a storage
+        failure degrades to a debug log rather than aborting the import.
+        """
+        if not session_id or not messages:
+            return
+        # Normalise to {role, content} so the project store restores exactly
+        # what was imported, in order, regardless of alternation.
+        normalised = [
+            {
+                "role": m.get("role", "user"),
+                "content": m.get("content", "") or "",
+            }
+            for m in messages
+        ]
+        try:
+            from praisonai_code.cli.state.project_sessions import (
+                get_project_session_store,
+            )
+
+            get_project_session_store().set_chat_history(session_id, normalised)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not persist import to project store: %s", e)
+
+        # Mirror into the flat unified store so /sessions and /continue list it.
+        try:
+            from praisonai_code.cli.session import get_session_store
+
+            store = get_session_store()
+            session = store.get_or_create(session_id)
+            if self.config.model:
+                session.current_model = self.config.model
+            for msg in normalised:
+                if msg["role"] == "user":
+                    session.add_user_message(msg["content"])
+                elif msg["role"] == "assistant":
+                    session.add_assistant_message(msg["content"])
+            store.save(session)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not persist import to unified store: %s", e)
+
+    def _reset_agent_context(self) -> None:
+        """Drop the model's context too, so /clear and /new mean what they say.
+
+        ``_conversation_history`` drives the transcript pane; the agent keeps
+        its own ``chat_history``, and a resumed session is re-attached to the
+        store on the next build. Clearing only the former left the model still
+        answering from the conversation the user just cleared.
+
+        Rotating ``session_id`` is what actually severs the model context: the
+        rebuilt agent wires continuity from ``self._resume_session_id or
+        self.session_id``, and ``apply_cli_session_continuity`` re-reads the
+        stored turns for that id. Keeping the old id (the ``/clear`` case) meant
+        the next prompt reloaded the exact conversation the user just cleared;
+        assigning a fresh id gives the continuity read an empty history.
+        """
+        import uuid
+
+        self._resume_session_id = None
+        self._agent = None
+        self._review_agent = None
+        self.session_id = str(uuid.uuid4())[:8]
+
     def _get_agent(self, read_only: bool = False):
         """Lazy-load the agent with tools.
 
@@ -622,17 +726,25 @@ class AsyncTUI:
                 # context rather than only redisplaying it (Issue #4910). The
                 # read-only review agent stays stateless. Best-effort: a failure
                 # degrades to the display-only transcript instead of aborting.
-                if not read_only and self._resume_session_id:
-                    try:
-                        from praisonai_code.cli.state.project_sessions import (
-                            apply_cli_session_continuity,
-                        )
+                # A *resumed* session restores prior turns; a fresh one still
+                # needs auto_save wired, or nothing is ever written and there is
+                # no session to resume later -- which is why /sessions reported
+                # "No saved sessions found." on every install (see
+                # ``_persist_turn``, which covers the flat unified store that
+                # /sessions and /continue actually read).
+                if not read_only:
+                    continuity_id = self._resume_session_id or self.session_id
+                    if continuity_id:
+                        try:
+                            from praisonai_code.cli.state.project_sessions import (
+                                apply_cli_session_continuity,
+                            )
 
-                        apply_cli_session_continuity(
-                            agent, self._resume_session_id
-                        )
-                    except Exception as exc:  # pragma: no cover - defensive
-                        logger.debug("Session continuity wiring failed: %s", exc)
+                            apply_cli_session_continuity(
+                                agent, continuity_id, auto_save=continuity_id
+                            )
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.debug("Session continuity wiring failed: %s", exc)
 
                 return agent
         except ImportError as e:
@@ -1119,14 +1231,14 @@ Tips:
         elif cmd == "clear":
             self.messages.clear()
             self._conversation_history.clear()
+            self._reset_agent_context()
             self.messages.append(ChatMessage(role="system", content="Conversation cleared."))
             return True
         
         elif cmd == "new":
             self.messages.clear()
             self._conversation_history.clear()
-            import uuid
-            self.session_id = str(uuid.uuid4())[:8]
+            self._reset_agent_context()
             self.messages.append(ChatMessage(role="system", content=f"New session: {self.session_id}"))
             return True
         
@@ -1250,6 +1362,18 @@ Tips:
                     messages = data.get("messages", [])
                     self._conversation_history = messages
                     self.session_id = data.get("session_id", self.session_id)
+                    # Reported "Imported N messages" and then answered as though
+                    # none of them existed: the pair-stepping loop wrote to the
+                    # flat UnifiedSessionStore, but the rebuilt agent restores
+                    # context from the *project* session store -- so the model
+                    # saw none of the import and any trailing/non-alternating
+                    # message was dropped. Write the full transcript verbatim to
+                    # the same store `apply_cli_session_continuity` reads, then
+                    # route through the resume path so the model actually sees
+                    # every imported turn.
+                    self._persist_imported_messages(self.session_id, messages)
+                    self._resume_session_id = self.session_id
+                    self._agent = None
                     self.messages.append(ChatMessage(
                         role="system",
                         content=f"Imported {len(messages)} messages from {args}"
@@ -1842,9 +1966,11 @@ Example: /handoff code "refactor the auth module" """
                 self.messages.append(ChatMessage(role="system", content=f"Tools used: {tools_used}"))
             
             streamed_msg = streamed["message"]
+            assistant_text: Optional[str] = None
             if error[0]:
                 self.messages.append(ChatMessage(role="assistant", content=f"Error: {error[0]}"))
-                self._conversation_history.append({"role": "assistant", "content": f"Error: {error[0]}"})
+                assistant_text = f"Error: {error[0]}"
+                self._conversation_history.append({"role": "assistant", "content": assistant_text})
             elif result[0]:
                 # If the turn already streamed its narrative into a live
                 # assistant message, reuse it as the finalised turn (updating it
@@ -1856,7 +1982,12 @@ Example: /handoff code "refactor the auth module" """
                         streamed_msg.content = result[0]
                 else:
                     self.messages.append(ChatMessage(role="assistant", content=result[0]))
+                assistant_text = result[0]
                 self._conversation_history.append({"role": "assistant", "content": result[0]})
+
+            # Persist the completed turn so /sessions, /continue and the
+            # --session/--continue flags have something to find.
+            self._persist_turn(prompt, assistant_text)
             
             self._update_output()
             
@@ -2038,11 +2169,18 @@ Example: /handoff code "refactor the auth module" """
                 
                 self.messages.append(ChatMessage(role="user", content=user_input))
                 print("  ⏳ Praison AI is thinking... (Ctrl-C to interrupt)")
+                self._conversation_history.append(
+                    {"role": "user", "content": user_input}
+                )
                 response = self._execute_prompt_interruptible(user_input)
-                
+
                 if response:
                     self.messages.append(ChatMessage(role="assistant", content=response))
+                    self._conversation_history.append(
+                        {"role": "assistant", "content": response}
+                    )
                     print(f"\n● {response}\n")
+                self._persist_turn(user_input, response)
                 
             except KeyboardInterrupt:
                 print("\n  Use /exit to quit")

@@ -208,6 +208,13 @@ def code_main(
     from praisonai_code.cli.utils.append_prompt import apply_append_system_prompt
     apply_append_system_prompt(append_system_prompt)
 
+    # --file/-f attachments are documented in this command's own examples
+    # (`praisonai code "Fix the bug" --file main.py`) but never reached the
+    # agent. Attach here, ahead of every dispatch branch below, so the headless
+    # (-p), profiled, resident-TUI and wrapper paths all receive them.
+    from praisonai_code.cli.interactive.attachments import prepend_attachments
+    prompt = prepend_attachments(prompt, file)
+
     # Validate --thinking up front so an unknown value fails closed before any
     # work is done (consistent with MODE_RULES validation on custom agents).
     from praisonai_code.cli.features.thinking import thinking_to_budget
@@ -458,7 +465,8 @@ def code_main(
     args.no_lsp = no_lsp
     # `--no-autonomy` was declared here and dropped, while `chat` wires the
     # identical flag onto AsyncTUIConfig.autonomy_mode -- so `praisonai code
-    # --no-autonomy` ran fully autonomous anyway.
+    # --no-autonomy` ran fully autonomous anyway. Both dispatch paths now read
+    # it from here.
     args.autonomy = autonomy
     args.resume_session = session_id if session_id else ('last' if continue_session else None)
     # Reasoning effort (mapped to the core thinking_budget) and named agent
