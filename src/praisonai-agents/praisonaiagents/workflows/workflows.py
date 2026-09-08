@@ -4894,7 +4894,21 @@ class WorkflowManager:
                         "continuing at the same step index because --rebase-checkpoint was set."
                     )
                 results = checkpoint_data.get("results", [])
-                all_variables = checkpoint_data.get("variables", all_variables)
+                # Layer, do not replace. The checkpoint's variables used to
+                # overwrite the caller's outright, so a value supplied ON the
+                # resume was accepted and silently thrown away:
+                #
+                #   praisonai workflow run wf --resume --var reviewer_decision=approved
+                #
+                # which is precisely how a human hands their answer back to a
+                # run that paused for review. Precedence is workflow defaults,
+                # then the checkpoint, then whatever the caller supplied now --
+                # the freshest statement of intent wins.
+                all_variables = {
+                    **all_variables,
+                    **(checkpoint_data.get("variables") or {}),
+                    **(variables or {}),
+                }
                 start_step = checkpoint_data.get("completed_steps", 0)
                 resumed_from_step = start_step
                 self._log(f"Resuming workflow from step {start_step + 1}")

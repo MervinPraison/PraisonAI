@@ -60,9 +60,22 @@ class AllowedToolsFilter:
         self.primary_var = env_var_name
         self.legacy_var = "HERMES_ONLY_TOOLS"
         
-        # ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS for backward compatibility
-        self.env_value = os.environ.get(self.primary_var) or os.environ.get(self.legacy_var)
-        self.env_var_name = self.primary_var if os.environ.get(self.primary_var) else self.legacy_var
+        # ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS for backward
+        # compatibility. Presence is tested with `is not None`, never
+        # truthiness: `or` treated ALLOWED_TOOLS="" as absent, fell through to
+        # the legacy variable, and ended at None -- which _parse_whitelist
+        # reads as "unset, allow everything". So the whitelist was silently
+        # switched off by the one value the docstring calls an error, while a
+        # whitespace-only value was correctly refused. `export ALLOWED_TOOLS=`
+        # and ALLOWED_TOOLS="$UNSET_VAR" both produce exactly that empty string.
+        primary = os.environ.get(self.primary_var)
+        legacy = os.environ.get(self.legacy_var)
+        if primary is not None:
+            self.env_value, self.env_var_name = primary, self.primary_var
+        elif legacy is not None:
+            self.env_value, self.env_var_name = legacy, self.legacy_var
+        else:
+            self.env_value, self.env_var_name = None, self.primary_var
         
         self.is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
         self._whitelist: Optional[Set[str]] = self._parse_whitelist()
