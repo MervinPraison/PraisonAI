@@ -96,8 +96,14 @@ def is_edenai_model(model_name: str) -> bool:
     ``<vendor>/<model>`` identifier and is deliberately not inspected: the
     vendor named there is *reached through* Eden AI, not called directly, so it
     must not be read as a direct Anthropic/Gemini/Ollama route.
+
+    A non-string model is not a route, so it returns ``False`` rather than
+    raising: this runs on every request build, and ``_resolve_openai_compatible_model``
+    guards the same way. Without the type check a duck-typed stand-in made
+    ``startswith`` answer with a truthy object, which read as an Eden AI route
+    and then demanded ``EDENAI_API_KEY``.
     """
-    if not model_name:
+    if not isinstance(model_name, str) or not model_name:
         return False
     return model_name.lower().startswith(EDENAI_ROUTE_PREFIX)
 

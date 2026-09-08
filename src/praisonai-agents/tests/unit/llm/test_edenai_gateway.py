@@ -64,6 +64,38 @@ def test_prefix_match_is_case_insensitive_and_scoped():
     assert not is_edenai_model("")
 
 
+@pytest.mark.parametrize(
+    "value",
+    [None, 123, 4.5, True, b"edenai/x", ["edenai/x"], {"model": "edenai/x"}, object()],
+)
+def test_non_string_models_are_not_eden_routes(value):
+    """The predicate runs on every request build, so odd values must not raise.
+
+    ``_resolve_openai_compatible_model`` already guards ``isinstance(model, str)``;
+    this guards the same way and returns a real ``bool``. Before the type check,
+    a duck-typed stand-in answered ``startswith`` with a truthy object, which
+    classified it as an Eden AI route and then demanded ``EDENAI_API_KEY``.
+    """
+    assert is_edenai_model(value) is False
+
+
+def test_a_mock_model_is_not_an_eden_route():
+    """The specific footgun: a mock answers any method with a truthy mock.
+
+    Called out separately from the other non-string values because a test
+    double is the way this would realistically reach the predicate.
+    """
+    from unittest.mock import MagicMock
+
+    assert is_edenai_model(MagicMock()) is False
+
+
+def test_predicate_returns_a_real_bool_on_the_positive_path():
+    """``is`` rather than truthiness, so the ``-> bool`` annotation is enforced."""
+    assert is_edenai_model("edenai/openai/gpt-4.1-mini") is True
+    assert is_edenai_model("openai/gpt-4.1-mini") is False
+
+
 # -------------------------------------------------------- model normalisation
 
 @pytest.mark.parametrize(
