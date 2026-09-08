@@ -112,7 +112,11 @@ async function listProvidersCommand(options: ObservabilityOptions, outputFormat:
     features: tool.features
   }));
 
-  const ready = providers.filter(p => p.hasEnvKey);
+  // "Ready" must mean traces will actually arrive, not merely that a key is set.
+  // A tool that cannot deliver (e.g. weave) is never ready however its key is set;
+  // key-less built-ins are ready because they need no configuration to do their job.
+  // This mirrors the same predicate used by the aggregate doctor command below.
+  const ready = providers.filter(p => p.hasEnvKey && (p.delivers || !p.envKey));
   const builtIn = providers.filter(p => ['console', 'memory', 'noop'].includes(p.name));
   const external = providers.filter(p => !['console', 'memory', 'noop'].includes(p.name));
 
@@ -287,15 +291,36 @@ async function testCommand(toolName: string | undefined, options: ObservabilityO
     await adapter.flush();
 
     const latency = Date.now() - startTime;
-    // The trace above always succeeds locally. What matters is whether the
-    // adapter could deliver it; reporting "passed" regardless would be a lie.
-    const delivered = adapter.isEnabled;
+    const info = OBSERVABILITY_TOOLS[tool as ObservabilityToolName];
+
+    // "delivered" means the trace reached an external backend. That requires a
+    // delivery implementation (registry `delivers`) AND a live transport
+    // (`isEnabled`). The in-process memory adapter reports isEnabled === true,
+    // but it sends nothing anywhere, so isEnabled alone is not proof of delivery.
+    const delivered = info.delivers === true && adapter.isEnabled;
+
+    // A built-in local recorder (console/memory) has no envKey and never
+    // delivers externally, yet it does exactly what it claims: record locally.
+    // That is a genuine pass, distinct from a non-delivering external
+    // integration that silently drops the trace it advertised it would send.
+    const isLocalRecorder = !info.envKey && !info.delivers && adapter.isEnabled;
 
     if (outputFormat === 'json' && delivered) {
       outputJson(formatSuccess({
         tool,
-        status: 'success',
+        status: 'delivered',
         delivered: true,
+        latency_ms: latency,
+        trace_id: trace.traceId
+      }));
+    } else if (outputFormat === 'json' && isLocalRecorder) {
+      // success:true, but delivered:false — the trace was recorded in this
+      // process and never left it. A CI script must be able to tell local
+      // recording apart from real delivery via the `delivered` field.
+      outputJson(formatSuccess({
+        tool,
+        status: 'recorded',
+        delivered: false,
         latency_ms: latency,
         trace_id: trace.traceId
       }));
@@ -310,6 +335,13 @@ async function testCommand(toolName: string | undefined, options: ObservabilityO
     } else if (delivered) {
       await pretty.plain(`\n  ✅ Test Passed`);
       await pretty.plain(`  Tool: ${tool}`);
+      await pretty.plain(`  Delivered: ✅ sent to ${tool}`);
+      await pretty.plain(`  Latency: ${latency}ms`);
+      await pretty.dim(`  Trace ID: ${trace.traceId}`);
+    } else if (isLocalRecorder) {
+      await pretty.plain(`\n  ✅ Test Passed`);
+      await pretty.plain(`  Tool: ${tool}`);
+      await pretty.plain(`  Recorded in memory (built-in). Nothing is sent to an external backend.`);
       await pretty.plain(`  Latency: ${latency}ms`);
       await pretty.dim(`  Trace ID: ${trace.traceId}`);
     } else {

@@ -186,6 +186,22 @@ describe('LangfuseObservabilityAdapter delivery state', () => {
     expect(adapter.isEnabled).toBe(true);
   });
 
+  it('reports disabled again after shutdown() so a reused instance never claims a dead transport', async () => {
+    const { LangfuseObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langfuse'));
+    const adapter = new LangfuseObservabilityAdapter();
+    let shutdownCalled = false;
+    (adapter as any).client = {
+      flushAsync: async () => {},
+      shutdownAsync: async () => { shutdownCalled = true; }
+    };
+    expect(adapter.isEnabled).toBe(true);
+    await adapter.shutdown();
+    expect(shutdownCalled).toBe(true);
+    // The factory caches adapters; a stale client here would let the reused
+    // instance advertise a terminated connection as enabled.
+    expect(adapter.isEnabled).toBe(false);
+  });
+
   it('warns on flush() when the SDK never produced a client', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -264,14 +280,19 @@ describe('observability CLI reports delivery truthfully', () => {
     }
   });
 
-  it('still reports success for a built-in adapter that does what it claims', async () => {
+  it('reports success for a built-in local recorder but does not claim delivery', async () => {
+    // The memory adapter does exactly what it claims — record in process — so
+    // the test passes. But it sends nothing anywhere, so `delivered` must be
+    // false: automation reading `delivered` must not mistake local recording
+    // for telemetry reaching an external backend.
     const { execute } = require('../../../src/cli/commands/observability');
     const { clearAdapterCache } = require('../../../src/observability/adapters');
     clearAdapterCache();
     await execute(['test', 'memory'], { json: true });
     const out = lastJson();
     expect(out.success).toBe(true);
-    expect(out.data.delivered).toBe(true);
+    expect(out.data.delivered).toBe(false);
+    expect(out.data.status).toBe('recorded');
     clearAdapterCache();
   });
 });

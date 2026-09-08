@@ -74,6 +74,11 @@ export class LangfuseObservabilityAdapter implements ObservabilityAdapter {
   async shutdown(): Promise<void> {
     if (this.client) {
       await this.client.shutdownAsync();
+      // Clearing the client is what makes isEnabled report false again: a shut
+      // adapter has no live transport, so it must not keep claiming delivery.
+      // The factory caches adapters, so a stale non-null client here would let
+      // a reused instance advertise a terminated connection as enabled.
+      this.client = null;
     }
   }
   
