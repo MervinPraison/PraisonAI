@@ -84,6 +84,8 @@ __all__ = [
     "GatewayStartInput",
     "GatewayStopInput",
     "ScheduleTriggerInput",
+    "ScheduleAddInput",
+    "ScheduleRemoveInput",
     "JobCompletedInput",
     # Middleware types
     "InvocationContext",
@@ -160,6 +162,8 @@ _LAZY_GROUPS = {
         'GatewayStartInput': ('praisonaiagents.hooks.events', 'GatewayStartInput'),
         'GatewayStopInput': ('praisonaiagents.hooks.events', 'GatewayStopInput'),
         'ScheduleTriggerInput': ('praisonaiagents.hooks.events', 'ScheduleTriggerInput'),
+        'ScheduleAddInput': ('praisonaiagents.hooks.events', 'ScheduleAddInput'),
+        'ScheduleRemoveInput': ('praisonaiagents.hooks.events', 'ScheduleRemoveInput'),
         'JobCompletedInput': ('praisonaiagents.hooks.events', 'JobCompletedInput'),
     },
     'middleware_types': {
