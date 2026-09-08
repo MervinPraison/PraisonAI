@@ -71,7 +71,13 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install -e src/praisonai-agents
+          # The green set selects directories whose tests patch litellm and
+          # construct LLM(...) (workflows/embedding/eval/context) or a real
+          # sandbox backend (sandbox/). Base deps alone make those raise
+          # ImportError at run time, so the extras are part of the green set's
+          # contract -- install them explicitly rather than let the job go red.
+          pip install -e "src/praisonai-agents[llm]"
+          pip install -e src/praisonai-sandbox
           pip install pytest pytest-asyncio pytest-timeout
       - name: Run the directories that pass clean
         working-directory: src/praisonai-agents

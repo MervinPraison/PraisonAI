@@ -69,11 +69,17 @@ def test_conversation_optimizer_with_messages():
     print("✓ ConversationOptimizer with messages test passed!")
 
 
+@pytest.mark.live
 def test_conversation_optimizer_real_agentic():
     """
     Real agentic test - agent calls LLM with conversation compaction enabled.
     
     This test satisfies AGENTS.md §9.4 requirement for real agentic testing.
+
+    Marked ``live`` so the collection hook deselects it in ordinary CI
+    (``PRAISONAI_LIVE_TESTS`` unset). Without the marker a fake ``OPENAI_API_KEY``
+    would let this attempt a real network call and then swallow the failure as a
+    skip -- an outbound request the "offline" job could not see.
     """
     try:
         # Create agent with conversation compaction strategy
