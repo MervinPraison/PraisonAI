@@ -88,10 +88,15 @@ class HookEvent(str, Enum):
     # CLI backend delegation (subprocess, not LiteLLM HTTP)
     CLI_BACKEND_EXECUTE = "cli_backend_execute"
 
-    # Background job lifecycle
+    # Background job lifecycle. Emitted by BackgroundJobManager when a job
+    # reaches a terminal state, so every background job is observable and not
+    # only the ones a gateway installed a delivery callback for.
     JOB_COMPLETED = "job_completed"  # A background job finished (ok or error)
 
-    # Kanban task lifecycle (wrapper dispatcher + tools emit these)
+    # Kanban task lifecycle. Emitted by the kanban store on each committed
+    # transition (it is the chokepoint the CLI, agent tools, dispatcher, HTTP
+    # API and UI all write through); the gateway dispatcher additionally emits
+    # KANBAN_TASK_MOVED for dependency promotions, which bypass move_task().
     KANBAN_TASK_CREATED = "kanban_task_created"
     KANBAN_TASK_CLAIMED = "kanban_task_claimed"
     KANBAN_TASK_MOVED = "kanban_task_moved"

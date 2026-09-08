@@ -90,3 +90,38 @@ def test_promote_ready_handles_missing_method():
 
     assert dispatcher._promote_ready(_NoPromote()) == []
     assert fired == []
+
+
+def test_promote_ready_reaches_a_real_hook_subscriber():
+    """The dispatcher's emission must land on a genuinely registered hook.
+
+    ``_fire_hook_event`` imported a ``fire_hook`` symbol that did not exist,
+    so every dispatcher event died in an ``except ImportError: log.debug``.
+    Use the real emitter (no monkeypatching) against the real registry.
+    """
+    from praisonaiagents.hooks.registry import (
+        HookRegistry,
+        add_hook,
+        get_default_registry,
+        set_default_registry,
+    )
+    from praisonaiagents.hooks.types import HookEvent, HookResult
+
+    previous = get_default_registry()
+    set_default_registry(HookRegistry())
+    try:
+        seen = []
+        add_hook(
+            HookEvent.KANBAN_TASK_MOVED,
+            lambda data: seen.append(data.to_dict()) or HookResult.allow(),
+        )
+
+        dispatcher = KanbanDispatcher()
+        assert dispatcher._promote_ready(_FakeStore(promoted=["t_child"])) == ["t_child"]
+
+        assert len(seen) == 1, "dispatcher promotion never reached a KANBAN_TASK_MOVED hook"
+        assert seen[0]["task_id"] == "t_child"
+        assert seen[0]["to_status"] == "ready"
+        assert seen[0]["event_name"] == "kanban_task_moved"
+    finally:
+        set_default_registry(previous)
