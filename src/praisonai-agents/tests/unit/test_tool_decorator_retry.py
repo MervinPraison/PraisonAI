@@ -2,6 +2,7 @@
 Tests for @tool(retry_policy=...) decorator functionality.
 """
 from praisonaiagents import tool, Agent
+from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.tools.retry import RetryPolicy
 
 
@@ -47,7 +48,7 @@ class TestToolDecoratorRetryPolicy:
             name="test_agent",
             instructions="Test agent",
             tools=[special_tool],
-            tool_retry_policy=agent_retry_policy
+            tool_config=ToolConfig(retry_policy=agent_retry_policy)
         )
         
         # Should get tool-level policy (higher precedence)
@@ -78,7 +79,7 @@ class TestToolDecoratorRetryPolicy:
             name="test_agent",
             instructions="Test agent",
             tools=[tool_a, tool_b, tool_c],
-            tool_retry_policy=agent_policy
+            tool_config=ToolConfig(retry_policy=agent_policy)
         )
         
         # Tool A should use its own policy
