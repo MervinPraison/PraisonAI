@@ -138,8 +138,12 @@ class TestRuntimeResolver:
             assert issubclass(w[0].category, DeprecationWarning)
             assert "deprecated" in str(w[0].message).lower()
             
-            # Check result
-            assert result.metadata["resolution_source"] == "legacy"
+            # A legacy backend NAME does not win: the built-in default
+            # outranks it by documented priority, so the deprecated parameter
+            # warns and is then ignored. (An already-constructed runtime
+            # instance is different and IS honoured -- see
+            # test_resolve_runtime_instance_legacy_instance.)
+            assert result.metadata["resolution_source"] == "default"
     
     def test_resolve_runtime_config_resolution_order(self):
         """Test that resolution follows the correct priority order."""
@@ -318,24 +322,47 @@ class TestRuntimeResolver:
         with pytest.raises(TypeError, match="Runtime configuration must have 'runtime' attribute"):
             resolver.validate_runtime_config(invalid_config)
     
+    def test_config_overrides_rejected_at_construction(self):
+        """AgentRuntimeConfig.__post_init__ rejects a non-dict up front.
+
+        This used to build the bad config and expect validate_runtime_config to
+        raise. The check moved into __post_init__, so the TypeError now fires on
+        the AgentRuntimeConfig(...) line -- outside the pytest.raises block --
+        and the test errored instead of passing.
+        """
+        with pytest.raises(TypeError, match="config_overrides must be a dictionary"):
+            AgentRuntimeConfig(
+                runtime="claude-code",
+                config_overrides="invalid",  # Should be dict
+            )
+
     def test_validate_runtime_config_invalid_config_overrides(self):
-        """Test validation with invalid config_overrides."""
+        """validate_runtime_config still checks, for a config that bypassed it.
+
+        The constructor guard shadows this one, so it is reachable only by
+        mutating an existing config -- which is exactly the defence-in-depth
+        case worth keeping covered.
+        """
         resolver = RuntimeResolver()
-        config = AgentRuntimeConfig(
-            runtime="claude-code",
-            config_overrides="invalid"  # Should be dict
-        )
-        
+        config = AgentRuntimeConfig(runtime="claude-code")
+        config.config_overrides = "invalid"
+
         with pytest.raises(TypeError, match="config_overrides must be a dictionary"):
             resolver.validate_runtime_config(config)
     
+    def test_metadata_rejected_at_construction(self):
+        """Same migration as config_overrides: the check is in __post_init__."""
+        with pytest.raises(TypeError, match="metadata must be a dictionary"):
+            AgentRuntimeConfig(
+                runtime="claude-code",
+                metadata="invalid",  # Should be dict
+            )
+
     def test_validate_runtime_config_invalid_metadata(self):
-        """Test validation with invalid metadata."""
+        """validate_runtime_config still checks metadata too."""
         resolver = RuntimeResolver()
-        config = AgentRuntimeConfig(
-            runtime="claude-code",
-            metadata="invalid"  # Should be dict
-        )
-        
+        config = AgentRuntimeConfig(runtime="claude-code")
+        config.metadata = "invalid"
+
         with pytest.raises(TypeError, match="metadata must be a dictionary"):
             resolver.validate_runtime_config(config)
