@@ -57,6 +57,16 @@ export async function createObservabilityAdapter(
   
   let adapter: ObservabilityAdapter;
   
+  // Vendors with no delivery implementation. These construct an adapter that
+  // records to memory, reports isEnabled === false and warns on construction.
+  const undelivered = UNDELIVERED_ADAPTER_LOADERS[name as string];
+  if (undelivered) {
+    adapter = new (await undelivered())(config);
+    await adapter.initialize?.();
+    adapterCache.set(cacheKey, adapter);
+    return adapter;
+  }
+  
   switch (name) {
     case 'noop':
       adapter = noopAdapter;
@@ -72,58 +82,6 @@ export async function createObservabilityAdapter(
       
     case 'langfuse':
       adapter = await createLangfuseAdapter(config);
-      break;
-      
-    case 'langsmith':
-      adapter = await createLangSmithAdapter(config);
-      break;
-      
-    case 'langwatch':
-      adapter = await createLangWatchAdapter(config);
-      break;
-      
-    case 'arize':
-      adapter = await createArizeAdapter(config);
-      break;
-      
-    case 'axiom':
-      adapter = await createAxiomAdapter(config);
-      break;
-      
-    case 'braintrust':
-      adapter = await createBraintrustAdapter(config);
-      break;
-      
-    case 'helicone':
-      adapter = await createHeliconeAdapter(config);
-      break;
-      
-    case 'laminar':
-      adapter = await createLaminarAdapter(config);
-      break;
-      
-    case 'maxim':
-      adapter = await createMaximAdapter(config);
-      break;
-      
-    case 'patronus':
-      adapter = await createPatronusAdapter(config);
-      break;
-      
-    case 'scorecard':
-      adapter = await createScorecardAdapter(config);
-      break;
-      
-    case 'signoz':
-      adapter = await createSigNozAdapter(config);
-      break;
-      
-    case 'traceloop':
-      adapter = await createTraceloopAdapter(config);
-      break;
-      
-    case 'weave':
-      adapter = await createWeaveAdapter(config);
       break;
       
     default:
@@ -150,146 +108,48 @@ export function clearAdapterCache(): void {
 }
 
 // ============================================================================
-// Lazy-loaded external adapter factories
-// These create wrapper adapters that delegate to external SDKs
+// External adapter factories
 // ============================================================================
+
+/**
+ * Vendors whose adapters do NOT deliver traces anywhere.
+ *
+ * Each entry constructs an adapter that records spans in memory, reports
+ * `isEnabled === false` and warns on construction. They are listed here rather
+ * than given individual factory functions because there is nothing
+ * vendor-specific left to do: none of them contacts its vendor.
+ *
+ * When you implement real delivery for one of these, remove it from this table
+ * and give it its own factory alongside `createLangfuseAdapter`.
+ */
+type ExternalAdapterCtor = new (config?: ObservabilityToolConfig) => ObservabilityAdapter;
+
+const UNDELIVERED_ADAPTER_LOADERS: Record<string, () => Promise<ExternalAdapterCtor>> = {
+  langsmith: async () => (await import('./external/langsmith')).LangSmithObservabilityAdapter,
+  langwatch: async () => (await import('./external/langwatch')).LangWatchObservabilityAdapter,
+  arize: async () => (await import('./external/arize')).ArizeObservabilityAdapter,
+  axiom: async () => (await import('./external/axiom')).AxiomObservabilityAdapter,
+  braintrust: async () => (await import('./external/braintrust')).BraintrustObservabilityAdapter,
+  helicone: async () => (await import('./external/helicone')).HeliconeObservabilityAdapter,
+  laminar: async () => (await import('./external/laminar')).LaminarObservabilityAdapter,
+  maxim: async () => (await import('./external/maxim')).MaximObservabilityAdapter,
+  patronus: async () => (await import('./external/patronus')).PatronusObservabilityAdapter,
+  scorecard: async () => (await import('./external/scorecard')).ScorecardObservabilityAdapter,
+  signoz: async () => (await import('./external/signoz')).SigNozObservabilityAdapter,
+  traceloop: async () => (await import('./external/traceloop')).TraceloopObservabilityAdapter,
+  weave: async () => (await import('./external/weave')).WeaveObservabilityAdapter,
+};
 
 async function createLangfuseAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
   try {
     const { LangfuseObservabilityAdapter } = await import('./external/langfuse');
     return new LangfuseObservabilityAdapter(config);
   } catch (error) {
-    console.warn('Langfuse not available, using memory adapter. Install with: npm install langfuse');
+    // This only fires if the local module itself fails to load. Whether the
+    // optional `langfuse` SDK is installed is decided in initialize(), which
+    // is what makes the adapter report isEnabled true or false.
+    console.warn('[OBSERVABILITY] Failed to load the langfuse adapter module, falling back to the memory adapter (traces are not delivered).');
     return new MemoryObservabilityAdapter();
   }
 }
 
-async function createLangSmithAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { LangSmithObservabilityAdapter } = await import('./external/langsmith');
-    return new LangSmithObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('LangSmith not available, using memory adapter. Install with: npm install langsmith');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createLangWatchAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { LangWatchObservabilityAdapter } = await import('./external/langwatch');
-    return new LangWatchObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('LangWatch not available, using memory adapter. Install with: npm install langwatch');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createArizeAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { ArizeObservabilityAdapter } = await import('./external/arize');
-    return new ArizeObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Arize not available, using memory adapter. Install with: npm install @arizeai/openinference-core');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createAxiomAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { AxiomObservabilityAdapter } = await import('./external/axiom');
-    return new AxiomObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Axiom not available, using memory adapter. Install with: npm install @axiomhq/js');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createBraintrustAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { BraintrustObservabilityAdapter } = await import('./external/braintrust');
-    return new BraintrustObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Braintrust not available, using memory adapter. Install with: npm install braintrust');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createHeliconeAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { HeliconeObservabilityAdapter } = await import('./external/helicone');
-    return new HeliconeObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Helicone not available, using memory adapter. Install with: npm install @helicone/helicone');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createLaminarAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { LaminarObservabilityAdapter } = await import('./external/laminar');
-    return new LaminarObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Laminar not available, using memory adapter. Install with: npm install @lmnr-ai/lmnr');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createMaximAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { MaximObservabilityAdapter } = await import('./external/maxim');
-    return new MaximObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Maxim not available, using memory adapter. Install with: npm install @maximai/maxim-js');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createPatronusAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { PatronusObservabilityAdapter } = await import('./external/patronus');
-    return new PatronusObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Patronus not available, using memory adapter. Install with: npm install patronus');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createScorecardAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { ScorecardObservabilityAdapter } = await import('./external/scorecard');
-    return new ScorecardObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Scorecard not available, using memory adapter. Install with: npm install @scorecard-ai/sdk');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createSigNozAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { SigNozObservabilityAdapter } = await import('./external/signoz');
-    return new SigNozObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('SigNoz not available, using memory adapter. Install with: npm install @opentelemetry/api');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createTraceloopAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { TraceloopObservabilityAdapter } = await import('./external/traceloop');
-    return new TraceloopObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Traceloop not available, using memory adapter. Install with: npm install @traceloop/node-server-sdk');
-    return new MemoryObservabilityAdapter();
-  }
-}
-
-async function createWeaveAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
-  try {
-    const { WeaveObservabilityAdapter } = await import('./external/weave');
-    return new WeaveObservabilityAdapter(config);
-  } catch (error) {
-    console.warn('Weave not available, using memory adapter. Install with: npm install weave');
-    return new MemoryObservabilityAdapter();
-  }
-}

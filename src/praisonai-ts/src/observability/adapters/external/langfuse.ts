@@ -28,7 +28,21 @@ type LangfuseClient = {
  */
 export class LangfuseObservabilityAdapter implements ObservabilityAdapter {
   readonly name = 'langfuse';
-  readonly isEnabled = true;
+
+  /**
+   * Langfuse is the one external adapter with real delivery, but delivery only
+   * happens once initialize() has successfully constructed a client from the
+   * optional `langfuse` SDK. Until then (and forever, if the SDK is not
+   * installed) every span goes to the in-memory adapter and nowhere else, so
+   * `isEnabled` is derived from the live client rather than hardcoded true.
+   */
+  get isEnabled(): boolean {
+    return this.client != null;
+  }
+
+  /** This adapter can deliver, unlike the adapters in ./undelivered.ts. */
+  readonly delivers: boolean = true;
+
   
   private client: any;
   private memory: MemoryObservabilityAdapter;
@@ -60,6 +74,11 @@ export class LangfuseObservabilityAdapter implements ObservabilityAdapter {
   async shutdown(): Promise<void> {
     if (this.client) {
       await this.client.shutdownAsync();
+      // Clearing the client is what makes isEnabled report false again: a shut
+      // adapter has no live transport, so it must not keep claiming delivery.
+      // The factory caches adapters, so a stale non-null client here would let
+      // a reused instance advertise a terminated connection as enabled.
+      this.client = null;
     }
   }
   
@@ -196,6 +215,13 @@ export class LangfuseObservabilityAdapter implements ObservabilityAdapter {
   async flush(): Promise<void> {
     if (this.client) {
       await this.client.flushAsync();
+      return;
     }
+    // No client means nothing was ever sent. Resolving quietly here would
+    // promise a delivery that did not happen.
+    console.warn(
+      '[OBSERVABILITY] flush() on the "langfuse" adapter delivered nothing: the langfuse SDK is not ' +
+        'available, so no client was created. Install it with: npm install langfuse'
+    );
   }
 }
