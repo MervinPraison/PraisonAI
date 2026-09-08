@@ -13,7 +13,7 @@ import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 import { Handoff, promptWithHandoffInstructions } from './handoff';
 import { Memory, type MemoryConfig } from '../memory/memory';
 import { KnowledgeBase, type KnowledgeBaseConfig } from '../knowledge/rag';
-import { Guardrail, type GuardrailConfig, type GuardrailContext, type GuardrailResult } from '../guardrails';
+import { Guardrail, GuardrailRetry, type GuardrailConfig, type GuardrailContext, type GuardrailResult } from '../guardrails';
 import { LLMGuardrail } from '../guardrails/llm-guardrail';
 import { HooksManager, type HookEvent, type HookHandler } from '../hooks/manager';
 import { ContextManager, type ContextManagerConfig } from '../context/manager';
@@ -353,6 +353,15 @@ export interface SimpleAgentConfig {
    * Python parity: guardrails (Optional[Union[bool, str, Callable, 'GuardrailConfig']]).
    */
   guardrails?: AgentGuardrailInput;
+  /**
+   * How many times a rejected answer may be sent back to the model with the
+   * guardrail's reason appended, within the same run. Python parity:
+   * `GuardrailConfig(max_retries=...)` / `max_guardrail_retries`.
+   *
+   * Defaults to 0, which preserves the previous behaviour exactly: a blocking
+   * guardrail throws immediately. Set it to enable in-conversation correction.
+   */
+  maxGuardrailRetries?: number;
   /**
    * Web search tool: `true` (Tavily), a provider name (tavily, exa,
    * perplexity, parallel) or `{ provider, ...providerConfig }`.
@@ -964,6 +973,7 @@ export class Agent {
   private _knowledgeSources: string[] = [];
   private _knowledgeLoaded: boolean = false;
   private guardrails: Guardrail[] = [];
+  private maxGuardrailRetries: number = 0;
   private rules?: RulesManager;
   private hooks?: HooksManager;
   private contextManager?: ContextManager;
@@ -1338,6 +1348,7 @@ export class Agent {
     this.attachHandoffs(config.handoffs);
     this.attachMemory(config.memory);
     this.attachKnowledge(config.knowledge);
+    this.maxGuardrailRetries = Math.max(0, config.maxGuardrailRetries ?? 0);
     this.attachGuardrails(config.guardrails);
     this.attachRules(config.rules);
     this.attachHooks(config.hooks);
@@ -1537,10 +1548,24 @@ export class Agent {
   private async applyOutputGuardrails(response: string): Promise<string> {
     let current = response;
     for (const g of this.guardrails) {
-      const result = await g.run(current, { role: 'output', agentName: this.name, sessionId: this.sessionId });
+      let result;
+      try {
+        result = await g.run(current, { role: 'output', agentName: this.name, sessionId: this.sessionId });
+      } catch (e) {
+        // A guardrail whose check raises GuardrailRetry is asking for another
+        // attempt with a reason, not reporting an error. Let it through so the
+        // turn loop can feed the reason back to the model; every other
+        // exception is still a genuine guardrail failure.
+        if (e instanceof GuardrailRetry) throw e;
+        throw e;
+      }
       if (result.status === 'failed') {
         if (g.onFail === 'block') {
-          throw new Error(`Agent ${this.name}: guardrail "${g.name}" blocked the response${result.message ? `: ${result.message}` : ''}`);
+          // Blocking with a message is the same signal as GuardrailRetry: the
+          // output is not acceptable and here is why. Raise it as a retry so
+          // the model can patch its answer, and let the turn loop convert it
+          // to a hard error once the retry budget is spent.
+          throw new GuardrailRetry(result.message ?? '', g.name);
         }
         if (g.onFail === 'modify' && typeof result.modifiedContent === 'string') {
           current = result.modifiedContent;
@@ -2502,14 +2527,38 @@ export class Agent {
     let emitted = false;
     const countingSink = (token: string) => { emitted = true; sink(token); };
     const abortSignal = signal ?? this.signal;
-    const response = await this.withRetry(
-      () => this.runTurnOnce(turn.prompt, undefined, countingSink, signal, onEvent, turn),
-      // A retry after tokens reached the caller would replay them; a
-      // cancelled run is not a transient failure.
-      () => !emitted && !abortSignal?.aborted,
-    );
-    const reflected = await this.applyReflection(turn, response, signal);
-    return this.finishTurn(turn.userPrompt, reflected, turn.task);
+    // Guardrail retry: a rejected answer goes back to the model with the
+    // reason appended to THIS conversation, so it patches its previous answer
+    // rather than the caller restarting the task. Bounded by
+    // maxGuardrailRetries, which defaults to 0 (throw immediately, the
+    // previous behaviour).
+    let attemptPrompt = turn.prompt;
+    for (let attempt = 0; ; attempt++) {
+      const response = await this.withRetry(
+        () => this.runTurnOnce(attemptPrompt, undefined, countingSink, signal, onEvent, turn),
+        // A retry after tokens reached the caller would replay them; a
+        // cancelled run is not a transient failure.
+        () => !emitted && !abortSignal?.aborted,
+      );
+      const reflected = await this.applyReflection(turn, response, signal);
+      try {
+        return await this.finishTurn(turn.userPrompt, reflected, turn.task);
+      } catch (e) {
+        const isRetry = e instanceof GuardrailRetry;
+        if (!isRetry || attempt >= this.maxGuardrailRetries) {
+          // Budget spent (or never granted): report it the way this agent
+          // always has, so callers and existing tests see the same error.
+          if (isRetry) {
+            throw new Error((e as GuardrailRetry).toBlockedMessage(this.name));
+          }
+          throw e;
+        }
+        attemptPrompt =
+          `${attemptPrompt}\n\nYour previous answer was rejected: ` +
+          `${(e as GuardrailRetry).feedback}\nCorrect it and answer again.`;
+        emitted = false;
+      }
+    }
   }
 
   /**
