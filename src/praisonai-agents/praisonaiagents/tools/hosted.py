@@ -50,9 +50,30 @@ HOSTED_TOOL_TYPES = frozenset({
 })
 
 
+#: Per-type required fields. A tool whose type is allowlisted but is missing a
+#: required field is malformed and must be dropped, not forwarded upstream where
+#: the provider would reject it.
+_REQUIRED_FIELDS: Dict[str, tuple] = {
+    "mcp": ("server_url",),
+}
+
+
 def is_hosted_tool(tool: Any) -> bool:
-    """True for a provider-hosted tool spec."""
-    return isinstance(tool, dict) and tool.get("type") in HOSTED_TOOL_TYPES
+    """True for a well-formed provider-hosted tool spec.
+
+    Allowlisted by ``type`` and, where a type has required fields (e.g. ``mcp``
+    needs ``server_url``), validated for their presence so a malformed hosted
+    dict is still dropped instead of being sent and rejected upstream.
+    """
+    if not isinstance(tool, dict):
+        return False
+    tool_type = tool.get("type")
+    if tool_type not in HOSTED_TOOL_TYPES:
+        return False
+    for field in _REQUIRED_FIELDS.get(tool_type, ()):  # type: ignore[union-attr]
+        if not tool.get(field):
+            return False
+    return True
 
 
 def WebSearchTool(*, search_context_size: Optional[str] = None) -> Dict[str, Any]:

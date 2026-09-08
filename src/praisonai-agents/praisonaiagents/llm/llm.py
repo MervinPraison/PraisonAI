@@ -2434,10 +2434,15 @@ Respond with ONLY a valid JSON tool call in this format:
         # Create a simple hash based on tool names/content
         tool_parts = []
         for tool in tools:
-            # A hosted tool must contribute to the cache key too, or two tool
-            # lists differing only by their hosted tools would share a key.
+            # A hosted tool must contribute its FULL spec to the cache key, or
+            # two tool lists differing only by hosted config (e.g. file_search
+            # over vs_1 vs vs_2, or different MCP server_urls) would share a key
+            # and the second call would reuse the first's formatted definition.
             if isinstance(tool, dict) and is_hosted_tool(tool):
-                tool_parts.append(f"hosted:{tool.get('type')}")
+                try:
+                    tool_parts.append(f"hosted:{json.dumps(tool, sort_keys=True)}")
+                except (TypeError, ValueError):
+                    tool_parts.append(f"hosted:{tool.get('type')}:{id(tool)}")
             elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     tool_parts.append(f"openai:{tool['function']['name']}")

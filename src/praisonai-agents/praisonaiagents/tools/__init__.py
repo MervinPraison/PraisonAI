@@ -452,6 +452,9 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     # Tool profiles (DRY tool sets for autonomy/interactive modes)
     'ToolProfile', 'AUTONOMY_PROFILE', 'BUILTIN_PROFILES',
     'register_profile', 'get_profile', 'resolve_profiles', 'list_profiles',
+    # Provider-hosted tools (run on the provider, usable on any Agent)
+    'WebSearchTool', 'CodeInterpreterTool', 'FileSearchTool', 'HostedMCPTool',
+    'is_hosted_tool',
 ]
 
 from .hosted import (  # noqa: E402

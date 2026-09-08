@@ -60,6 +60,14 @@ class TestRecognition:
         """Allowlisted by type, so a malformed tool is still reported."""
         assert is_hosted_tool({"type": "not_a_real_tool"}) is False
 
+    def test_control_mcp_without_server_url_is_malformed(self):
+        """Allowlisted type but missing a required field is still dropped."""
+        assert is_hosted_tool({"type": "mcp"}) is False
+        assert is_hosted_tool({"type": "mcp", "server_url": ""}) is False
+
+    def test_valid_hosted_mcp_is_recognised(self):
+        assert is_hosted_tool(HostedMCPTool(server_url="https://example.com/mcp")) is True
+
 
 class TestTheyReachTheModel:
     def test_hosted_tools_survive_formatting(self):
@@ -92,3 +100,38 @@ class TestCacheKey:
         a = llm._get_tools_cache_key([WebSearchTool()])
         b = llm._get_tools_cache_key([FileSearchTool()])
         assert a != b
+
+    def test_same_hosted_type_different_config_do_not_share_a_key(self):
+        """file_search over vs_1 must not reuse the cached spec for vs_2."""
+        llm = _llm()
+        a = llm._get_tools_cache_key([FileSearchTool(vector_store_ids=["vs_1"])])
+        b = llm._get_tools_cache_key([FileSearchTool(vector_store_ids=["vs_2"])])
+        assert a != b
+
+
+class TestDefaultAgentPath:
+    """The default Agent formats tools via OpenAIClient.format_tools, not the
+    LLM path. Hosted tools must survive there too, or the headline
+    Agent(tools=[WebSearchTool(), ...]) still silently drops them.
+    """
+
+    def _client(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+        client = OpenAIClient.__new__(OpenAIClient)
+        client._formatted_tools_cache = {}
+        client._max_cache_size = 16
+        return client
+
+    def test_hosted_tools_survive_default_agent_formatting(self):
+        out = self._client().format_tools(
+            [WebSearchTool(), FileSearchTool(vector_store_ids=["vs_1"])]
+        ) or []
+        assert [t["type"] for t in out] == ["web_search_preview", "file_search"]
+
+    def test_control_unknown_dict_still_dropped_on_default_path(self):
+        out = self._client().format_tools([{"type": "not_a_real_tool"}]) or []
+        assert out == []
+
+    def test_hosted_and_local_coexist_on_default_path(self):
+        out = self._client().format_tools([WebSearchTool(), a_function_tool]) or []
+        assert {t.get("type") for t in out} == {"web_search_preview", "function"}
