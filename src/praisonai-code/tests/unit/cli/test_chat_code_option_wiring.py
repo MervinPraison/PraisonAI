@@ -108,6 +108,33 @@ def test_a_missing_attachment_does_not_abort_the_run(tmp_path, tui):
     assert tui.last_prompt == "hi"
 
 
+def test_profiled_chat_still_receives_the_attachment(tmp_path, tui, monkeypatch):
+    """`--profile` returns before the TUI path, so it must get --file too.
+
+    The profiling branch dispatched to `_run_profiled_chat` before attachments
+    were resolved, so `praisonai chat "..." --file notes.md --profile` silently
+    sent only the bare prompt to the model.
+    """
+    captured = {}
+
+    def _fake_profiled(prompt, model=None, verbose=False, profile_deep=False):
+        captured["prompt"] = prompt
+
+    monkeypatch.setattr(chat_module, "_run_profiled_chat", _fake_profiled)
+
+    doc = tmp_path / "notes.md"
+    doc.write_text("the launch code is hunter2")
+
+    result = _invoke(
+        chat_module.chat_main, ["Summarise this", "--file", str(doc), "--profile"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "the launch code is hunter2" in captured.get("prompt", ""), (
+        "profiling dropped the --file attachment"
+    )
+
+
 # --------------------------------------------------------------------------
 # --continue
 # --------------------------------------------------------------------------

@@ -40,6 +40,24 @@ def store(tmp_path, monkeypatch):
     return session_store
 
 
+@pytest.fixture
+def project_store(tmp_path, monkeypatch):
+    """Isolate the project session store the agent rehydrates from.
+
+    ``apply_cli_session_continuity`` reads this store, not the flat unified one,
+    so ``/import`` must write here for the model to actually see the transcript.
+    """
+    from praisonaiagents.session.store import DefaultSessionStore
+
+    proj_store = DefaultSessionStore(session_dir=str(tmp_path / "project_sessions"))
+    import praisonai_code.cli.state.project_sessions as proj_mod
+
+    monkeypatch.setattr(
+        proj_mod, "get_project_session_store", lambda *a, **k: proj_store
+    )
+    return proj_store
+
+
 def _make_tui(tmp_path, session_id):
     # workspace=tmp_path keeps __init__'s file scan off the real repo tree.
     return AsyncTUI(AsyncTUIConfig(
@@ -98,8 +116,12 @@ def test_a_turn_survives_a_storage_failure(tmp_path, store, monkeypatch):
     tui._persist_turn("hello", "hi")  # must not raise
 
 
-def test_import_reaches_the_model_not_only_the_screen(tmp_path, store):
-    """/import reported "Imported N messages" and answered as if none existed."""
+def test_import_reaches_the_model_not_only_the_screen(tmp_path, store, project_store):
+    """/import reported "Imported N messages" and answered as if none existed.
+
+    The rebuilt agent restores from the *project* store, so the imported turns
+    must land there -- not only in the flat unified store /sessions lists.
+    """
     transcript = tmp_path / "conv.json"
     transcript.write_text(
         '{"session_id": "imported", "messages": ['
@@ -113,11 +135,36 @@ def test_import_reaches_the_model_not_only_the_screen(tmp_path, store):
     assert tui._resume_session_id == "imported", (
         "imported turns never reached the agent-rehydration path"
     )
+    # The store the model actually rehydrates from must hold the transcript.
+    project_history = project_store.get_chat_history("imported")
+    assert "the passphrase is oakleaf" in [
+        m["content"] for m in project_history
+    ], "the model would receive none of the imported conversation"
+    # And the flat store keeps it discoverable to /sessions and /continue.
     saved = store.load("imported")
     assert saved is not None
     assert "the passphrase is oakleaf" in [
         m["content"] for m in saved.get_chat_history()
     ]
+
+
+def test_import_preserves_a_trailing_unpaired_message(tmp_path, store, project_store):
+    """The old pair-stepping loop dropped a trailing/non-alternating message."""
+    transcript = tmp_path / "odd.json"
+    transcript.write_text(
+        '{"session_id": "odd", "messages": ['
+        '{"role": "user", "content": "first"},'
+        '{"role": "assistant", "content": "reply"},'
+        '{"role": "user", "content": "trailing question"}]}'
+    )
+
+    tui = _make_tui(tmp_path, "sess-odd")
+    assert tui._handle_command(f"/import {transcript}") is True
+
+    contents = [m["content"] for m in project_store.get_chat_history("odd")]
+    assert "trailing question" in contents, (
+        "the final unpaired turn was dropped before the model saw it"
+    )
 
 
 @pytest.mark.parametrize("command", ["/clear", "/new"])
@@ -135,6 +182,41 @@ def test_clear_and_new_also_drop_the_models_context(tmp_path, store, command):
         f"conversation it just cleared"
     )
     assert tui._resume_session_id is None
+    # Rotating the session id is what severs the model context: the rebuilt
+    # agent wires continuity from the current id and re-reads its stored turns,
+    # so keeping the id would reload the exact conversation just cleared.
+    assert tui.session_id != "sess-six", (
+        f"{command} kept the session id, so the next prompt would reload the "
+        f"cleared conversation from the project store"
+    )
+
+
+def test_clear_does_not_rehydrate_the_cleared_conversation(
+    tmp_path, store, project_store, monkeypatch
+):
+    """After /clear, a rebuilt agent must not restore the cleared turns.
+
+    The project store still holds the pre-clear turns under the *old* id; the
+    fix rotates ``session_id`` so ``apply_cli_session_continuity`` reads an
+    empty history for the new id instead.
+    """
+    project_store.set_chat_history(
+        "sess-clear",
+        [
+            {"role": "user", "content": "secret is orchid"},
+            {"role": "assistant", "content": "noted"},
+        ],
+    )
+
+    tui = _make_tui(tmp_path, "sess-clear")
+    tui._conversation_history = [{"role": "user", "content": "secret is orchid"}]
+
+    tui._handle_command("/clear")
+
+    # The continuity read for the rotated id must be empty.
+    assert project_store.get_chat_history(tui.session_id) == [], (
+        "the cleared conversation is still reachable under the new session id"
+    )
 
 
 def _source_of(func_name: str):

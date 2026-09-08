@@ -285,34 +285,25 @@ def chat_main(
     # than inside the TUI so an explicit --session always wins, and so an empty
     # store degrades to a fresh session instead of an error. The TUI's own
     # resume path (Issue #4910) then rehydrates the agent from this id.
+    # Prefer the project session index (the bare-TUI launch path) and fall back
+    # to the flat unified store so either recorded a session is honoured.
     resolved_session_id = session_id
     if resolved_session_id is None and continue_session:
-        try:
-            from praisonai_code.cli.session import get_session_store
-
-            resolved_session_id = get_session_store().get_last_session_id()
-        except Exception:
-            resolved_session_id = None
-        if resolved_session_id is None:
-            typer.echo("No previous session to continue; starting a new one.", err=True)
-
-    # `resolved_model` was resolved above (before the onboarding gate) so the
-    # gate validated the exact model dispatched here — no re-resolution needed.
-    # `--continue` was declared and dropped, so `praisonai chat -c` silently
-    # started a brand-new session. Resolve the last session id the same way the
-    # bare-TUI launch does.
-    resolved_session_id = session_id
-    if continue_session and not resolved_session_id:
         try:
             from praisonai_code.cli.state.project_sessions import find_last_session
 
             resolved_session_id = find_last_session()
         except Exception:  # noqa: BLE001 - continuity is best-effort
             resolved_session_id = None
-        if not resolved_session_id:
-            typer.echo(
-                "No previous sessions found. Starting new session.", err=True
-            )
+        if resolved_session_id is None:
+            try:
+                from praisonai_code.cli.session import get_session_store
+
+                resolved_session_id = get_session_store().get_last_session_id()
+            except Exception:  # noqa: BLE001 - continuity is best-effort
+                resolved_session_id = None
+        if resolved_session_id is None:
+            typer.echo("No previous session to continue; starting a new one.", err=True)
 
     tui_config = AsyncTUIConfig(
         model=resolved_model,

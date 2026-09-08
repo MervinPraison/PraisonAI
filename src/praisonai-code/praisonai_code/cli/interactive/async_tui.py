@@ -538,6 +538,58 @@ class AsyncTUI:
         except Exception as e:
             logger.debug(f"Could not persist turn to session store: {e}")
 
+    def _persist_imported_messages(
+        self, session_id: str, messages: List[dict]
+    ) -> None:
+        """Persist an imported transcript to *both* stores.
+
+        The model rehydrates from the project session store (via
+        ``apply_cli_session_continuity``); ``/sessions`` and ``/continue`` list
+        from the flat unified store. Writing only one left the other empty --
+        so the previous pair-stepping loop, which wrote solely to the unified
+        store, imported a transcript the model never received and dropped any
+        trailing or non-alternating message. ``set_chat_history`` replaces the
+        project transcript verbatim (every role preserved, no pairing), and the
+        unified mirror keeps the session discoverable. Best-effort: a storage
+        failure degrades to a debug log rather than aborting the import.
+        """
+        if not session_id or not messages:
+            return
+        # Normalise to {role, content} so the project store restores exactly
+        # what was imported, in order, regardless of alternation.
+        normalised = [
+            {
+                "role": m.get("role", "user"),
+                "content": m.get("content", "") or "",
+            }
+            for m in messages
+        ]
+        try:
+            from praisonai_code.cli.state.project_sessions import (
+                get_project_session_store,
+            )
+
+            get_project_session_store().set_chat_history(session_id, normalised)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not persist import to project store: %s", e)
+
+        # Mirror into the flat unified store so /sessions and /continue list it.
+        try:
+            from praisonai_code.cli.session import get_session_store
+
+            store = get_session_store()
+            session = store.get_or_create(session_id)
+            if self.config.model:
+                session.current_model = self.config.model
+            for msg in normalised:
+                if msg["role"] == "user":
+                    session.add_user_message(msg["content"])
+                elif msg["role"] == "assistant":
+                    session.add_assistant_message(msg["content"])
+            store.save(session)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not persist import to unified store: %s", e)
+
     def _reset_agent_context(self) -> None:
         """Drop the model's context too, so /clear and /new mean what they say.
 
@@ -545,10 +597,20 @@ class AsyncTUI:
         its own ``chat_history``, and a resumed session is re-attached to the
         store on the next build. Clearing only the former left the model still
         answering from the conversation the user just cleared.
+
+        Rotating ``session_id`` is what actually severs the model context: the
+        rebuilt agent wires continuity from ``self._resume_session_id or
+        self.session_id``, and ``apply_cli_session_continuity`` re-reads the
+        stored turns for that id. Keeping the old id (the ``/clear`` case) meant
+        the next prompt reloaded the exact conversation the user just cleared;
+        assigning a fresh id gives the continuity read an empty history.
         """
+        import uuid
+
         self._resume_session_id = None
         self._agent = None
         self._review_agent = None
+        self.session_id = str(uuid.uuid4())[:8]
 
     def _get_agent(self, read_only: bool = False):
         """Lazy-load the agent with tools.
@@ -1177,8 +1239,6 @@ Tips:
             self.messages.clear()
             self._conversation_history.clear()
             self._reset_agent_context()
-            import uuid
-            self.session_id = str(uuid.uuid4())[:8]
             self.messages.append(ChatMessage(role="system", content=f"New session: {self.session_id}"))
             return True
         
@@ -1303,17 +1363,15 @@ Tips:
                     self._conversation_history = messages
                     self.session_id = data.get("session_id", self.session_id)
                     # Reported "Imported N messages" and then answered as though
-                    # none of them existed. Persist the imported turns and route
-                    # through the same resume path /continue uses, so the model
-                    # actually sees them.
-                    for i in range(0, len(messages) - 1, 2):
-                        if messages[i].get("role") == "user":
-                            self._persist_turn(
-                                messages[i].get("content", ""),
-                                messages[i + 1].get("content")
-                                if messages[i + 1].get("role") == "assistant"
-                                else None,
-                            )
+                    # none of them existed: the pair-stepping loop wrote to the
+                    # flat UnifiedSessionStore, but the rebuilt agent restores
+                    # context from the *project* session store -- so the model
+                    # saw none of the import and any trailing/non-alternating
+                    # message was dropped. Write the full transcript verbatim to
+                    # the same store `apply_cli_session_continuity` reads, then
+                    # route through the resume path so the model actually sees
+                    # every imported turn.
+                    self._persist_imported_messages(self.session_id, messages)
                     self._resume_session_id = self.session_id
                     self._agent = None
                     self.messages.append(ChatMessage(

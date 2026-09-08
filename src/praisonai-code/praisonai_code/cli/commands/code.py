@@ -584,7 +584,6 @@ def _run_resident_code(prompt, args, *, plan=False, session_id=None):
         enable_lsp=not getattr(args, "no_lsp", False),
         autonomy_mode=getattr(args, "autonomy", True),
         execution=getattr(args, "execution", None),
-        autonomy_mode=getattr(args, "autonomy", True),
     )
 
     tui = AsyncTUI(config=tui_config)
