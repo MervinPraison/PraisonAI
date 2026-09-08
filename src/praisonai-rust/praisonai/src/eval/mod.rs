@@ -779,8 +779,19 @@ impl Judge {
 
     /// Judge an output (placeholder - would use LLM in real implementation).
     pub fn judge(&self, _input: &str, _output: &str, _expected: Option<&str>) -> JudgeResult {
-        // Placeholder implementation
-        JudgeResult::new(0.8, "Placeholder evaluation", true)
+        // Not implemented: no model is consulted and none of the three inputs
+        // is read. This used to return a hardcoded score of 0.8 with
+        // passed=true, ignoring the threshold set by with_threshold() -- a
+        // gate that could not fail, silently passing every output put through
+        // it. The signature returns a bare JudgeResult rather than a Result,
+        // so the honest answer is to fail CLOSED: score 0.0 and passed=false,
+        // with a reasoning string that says why.
+        JudgeResult::new(
+            0.0,
+            "Judge::judge is not implemented: no model is consulted and the \
+             threshold is not applied. Treat this as a failure, not a verdict.",
+            false,
+        )
     }
 }
 
@@ -890,10 +901,18 @@ mod tests {
     }
 
     #[test]
-    fn test_judge() {
+    fn test_judge_fails_closed_while_unimplemented() {
+        // This used to assert `result.passed`, which the hardcoded 0.8/true
+        // placeholder satisfied -- a test of the fake. Until a model is
+        // actually consulted, judging must not report a pass.
         let judge = Judge::new("test-judge").with_threshold(0.5);
         let result = judge.judge("input", "output", Some("expected"));
-        assert!(result.passed);
+        assert!(!result.passed, "an unimplemented judge must not pass an output");
+        assert!(
+            result.reasoning.contains("not implemented"),
+            "the reason must say why: {}",
+            result.reasoning
+        );
     }
 
     #[test]
