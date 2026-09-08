@@ -1787,7 +1787,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3101",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -2842,7 +2842,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2231",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2240",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4646,7 +4646,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:421",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:422",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -6934,11 +6934,11 @@
         "exact": 5,
         "flattened": 0,
         "mismatches": 3,
-        "missing": 0,
-        "params": 11,
+        "missing": 2,
+        "params": 13,
         "ts_only": 3,
         "ts_total": 14,
-        "waived": 3
+        "waived": 5
       },
       "params": [
         {
@@ -7235,10 +7235,50 @@
           "type_text": "Optional[bool]",
           "waived": null,
           "warnings": []
+        },
+        {
+          "canonical": "inputGuardrails",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `inputGuardrails`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "input_guardrails",
+          "required": false,
+          "ts": null,
+          "ts_members": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "tool().input_guardrails",
+          "warnings": []
+        },
+        {
+          "canonical": "outputGuardrails",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputGuardrails`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "output_guardrails",
+          "required": false,
+          "ts": null,
+          "ts_members": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "tool().output_guardrails",
+          "warnings": []
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/tools/decorator.py:235"
+        "location": "src/praisonai-agents/praisonaiagents/tools/decorator.py:257"
       },
       "ts_only": [
         {
@@ -7288,12 +7328,12 @@
     "exact": 123,
     "flattened": 3,
     "mismatches": 28,
-    "missing": 0,
-    "params": 222,
+    "missing": 2,
+    "params": 224,
     "surfaces": 17,
     "ts_only": 84,
     "ts_total": 312,
-    "waived": 28
+    "waived": 30
   },
   "waivers": [
     {
@@ -7486,11 +7526,25 @@
       "reason": "TS execute is required; Python's `func` is optional only so `@tool` can be applied bare, and `FunctionTool.__init__` still requires it."
     },
     {
+      "expires": "2026-12-07",
+      "issue": null,
+      "key": "tool().input_guardrails",
+      "owner": "praisonai-ts",
+      "reason": "NOT an equivalence -- unlike every other waiver in this file, this records a real gap. Per-tool input guardrails were added to Python (praisonaiagents/guardrails/tool_guardrails.py) and have no TypeScript counterpart yet; nothing in praisonai-ts resolves the same behaviour by another route. Waived only to unblock the Python PR, since porting is a praisonai-ts change and the two packages do not share a branch. `expires` is set deliberately so this fails the gate rather than becoming permanent if the port is forgotten."
+    },
+    {
       "expires": null,
       "issue": null,
       "key": "tool().name",
       "owner": "praisonai-ts",
       "reason": "TS cannot infer a name from an anonymous function; Python infers it from __name__"
+    },
+    {
+      "expires": "2026-12-07",
+      "issue": null,
+      "key": "tool().output_guardrails",
+      "owner": "praisonai-ts",
+      "reason": "NOT an equivalence -- the output half of the same missing capability. See tool().input_guardrails above. Same expiry, for the same reason."
     }
   ]
 }
