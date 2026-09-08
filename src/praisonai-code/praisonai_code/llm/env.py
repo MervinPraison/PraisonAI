@@ -39,6 +39,18 @@ _PROVIDER_MAP = {
 # Documented, single precedence list. Add new providers here only.
 _MODEL_VARS = ("MODEL_NAME", "OPENAI_MODEL_NAME")
 _BASE_URL_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OLLAMA_API_BASE")
+
+# Provider key env-var → its dedicated base-URL env-var. When a route resolves
+# to one of these providers, only that provider's own base-URL variable may
+# override the endpoint. This keeps the generic OpenAI/Ollama base-URL variables
+# in ``_BASE_URL_VARS`` from silently capturing a gateway route: an ``edenai/``
+# model must never send its ``EDENAI_API_KEY`` to an ``OPENAI_BASE_URL`` the user
+# set for an unrelated OpenAI call. Eden AI is a separate gateway, so its
+# endpoint is resolved from ``EDENAI_BASE_URL`` (then the Eden default) exactly
+# as the agent-runtime path in llm.py does.
+_KEY_VAR_TO_BASE_URL_VAR = {
+    "EDENAI_API_KEY": "EDENAI_BASE_URL",
+}
 # Single source of truth for the terminal fallback model, used only when no
 # explicit model, recency, env override, or provider credential is available.
 # CLI entry points must route through resolve_default_model() rather than
@@ -224,7 +236,18 @@ def resolve_llm_endpoint(
 
     key_var, provider_base = _provider_from_model(model)
 
-    env_base = _first_set(*_BASE_URL_VARS)
+    # A provider with a dedicated gateway (e.g. Eden AI) resolves its endpoint
+    # only from its own base-URL variable, never from the generic OpenAI/Ollama
+    # ones. Otherwise an unrelated OPENAI_BASE_URL override would capture the
+    # route and receive the provider's own credential. Precedence for such a
+    # route: explicit config base_url > <PROVIDER>_BASE_URL > provider default.
+    # For every other route the historical generic precedence is unchanged.
+    dedicated_base_var = _KEY_VAR_TO_BASE_URL_VAR.get(key_var)
+    if dedicated_base_var:
+        env_base = _first_set(dedicated_base_var)
+    else:
+        env_base = _first_set(*_BASE_URL_VARS)
+
     if env_base:
         base_url = env_base
     elif resolved_config and resolved_config.agent.base_url:
