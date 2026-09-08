@@ -410,15 +410,26 @@ def merge_run_terminal(
 ) -> RunTerminal:
     """Fold a newly-observed terminal into the current one (refine-only).
 
-    Pure and deterministic. Rules, in order:
+    Pure, deterministic, and **order-independent**: folding the same set of
+    observations always yields the same authoritative outcome regardless of the
+    sequence in which they arrive. Rules, in order:
 
     1. No current outcome — the observation becomes authoritative.
     2. Current is sticky — it can never be downgraded; keep it.
-    3. Otherwise keep whichever has the stronger attribution
-       (``aborted`` > ``timeout`` > ``failed`` > ``ok``); ties keep ``current``
-       so the first writer of a given strength wins.
+    3. Observation has strictly stronger attribution
+       (``aborted`` > ``timeout`` > ``failed`` > ``ok``) — refine to it.
+    4. Equal attribution strength but the observation is sticky while the
+       current writer is not — promote to the sticky observation so a later
+       ``run_budget`` / ``external`` / ``superseded`` of the same kind can no
+       longer be silently downgraded by a subsequent weaker signal. Without
+       this, ``timeout/idle`` then ``timeout/run_budget`` would keep the
+       non-sticky idle result and stay downgradeable, so identical signals in
+       the opposite order produced a different final outcome.
+    5. Otherwise keep ``current`` so the first writer of a given strength wins.
 
-    A later, weaker observation therefore never overwrites a stronger one.
+    A later, weaker observation therefore never overwrites a stronger one, and
+    a sticky terminal always wins over an equally-ranked non-sticky one no
+    matter which was observed first.
     """
     if current is None:
         return observed
@@ -427,6 +438,8 @@ def merge_run_terminal(
     current_rank = _TERMINAL_KIND_RANK.get(current.kind, 0)
     observed_rank = _TERMINAL_KIND_RANK.get(observed.kind, 0)
     if observed_rank > current_rank:
+        return observed
+    if observed_rank == current_rank and is_sticky(observed):
         return observed
     return current
 

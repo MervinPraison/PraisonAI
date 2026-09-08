@@ -274,6 +274,35 @@ class TestRunTerminal:
         assert is_sticky(superseded)
         assert merge_run_terminal(superseded, error) == superseded
 
+    def test_equal_kind_sticky_promotes_over_nonsticky(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        idle = RunTerminal("timeout", "idle")
+        run_budget = RunTerminal("timeout", "run_budget")
+        assert merge_run_terminal(idle, run_budget) == run_budget
+
+    def test_equal_kind_nonsticky_does_not_downgrade_sticky(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        run_budget = RunTerminal("timeout", "run_budget")
+        idle = RunTerminal("timeout", "idle")
+        assert merge_run_terminal(run_budget, idle) == run_budget
+
+    def test_same_signals_order_independent(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        idle = RunTerminal("timeout", "idle")
+        run_budget = RunTerminal("timeout", "run_budget")
+        cancel = RunTerminal("aborted", "external")
+
+        forward = merge_run_terminal(
+            merge_run_terminal(merge_run_terminal(None, idle), run_budget), cancel
+        )
+        reverse = merge_run_terminal(
+            merge_run_terminal(merge_run_terminal(None, run_budget), idle), cancel
+        )
+        assert forward == reverse == run_budget
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
