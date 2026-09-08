@@ -1225,3 +1225,10 @@ export type {
   FlowStep, AgentLikeStep, IncludableWorkflow, RecipeResolver, ParallelOnFailure, ParallelBranchError,
 } from './workflows';
 // If, Parallel, Route, when (real classes land in src/workflows/patterns.ts)
+
+// Compute providers: where an agent's tools run (Python parity: praisonai_sandbox.compute).
+export {
+  LocalCompute, DockerCompute, registerComputeProvider, listComputeProviders,
+  resolveComputeProvider, ComputeError,
+  type ComputeProvider, type ComputeConfig, type ComputeInstance, type ExecResult,
+} from './compute';
