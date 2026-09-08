@@ -1036,14 +1036,16 @@ export {
 // SPECIALIZED AGENTS (Python parity: praisonaiagents.agent.{code,ocr,vision,video,realtime,embedding}_agent)
 // ============================================================================
 export {
-  CodeAgent, createCodeAgent,
+  CodeAgent, createCodeAgent, createSubprocessExecutor,
   OCRAgent, createOCRAgent,
   VisionAgent, createVisionAgent,
   VideoAgent, createVideoAgent,
   RealtimeAgent, createRealtimeAgent,
   EmbeddingAgent, createEmbeddingAgent,
   type CodeConfig, type CodeAgentConfig, type CodeExecutionResult,
+  type CodeExecutor, type CodeExecutorContext,
   type OCRConfig, type OCRAgentConfig, type OCRResult, type OCRPage,
+  type OCRExtractor, type OCRExtractRequest,
   type VisionConfig, type VisionAgentConfig, type VisionResult,
   type VideoConfig, type VideoAgentConfig, type VideoResult,
   type RealtimeConfig, type RealtimeAgentConfig, type RealtimeEvent, type RealtimeEventType,

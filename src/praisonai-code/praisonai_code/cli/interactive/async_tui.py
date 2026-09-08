@@ -309,6 +309,8 @@ class AsyncTUI:
         # ids of queued prompts that must run against the read-only review agent
         self._read_only_prompts: set = set()
         self._conversation_history: List[dict] = []  # Full conversation history
+        self._context_manager = None  # Lazily built ContextManagerHandler
+        self._context_manager_model: Optional[str] = None
         # When a session is resumed (bare `praisonai -c/--session` or
         # `/continue`), the id is recorded here so the lazily-built agent is
         # wired to that session's store + prior turns for real conversational
@@ -806,6 +808,11 @@ class AsyncTUI:
             groups.append("acp")
         if self.config.enable_lsp:
             groups.append("lsp")
+        # MCP servers declared in project config were never reachable from the
+        # code session (0 hits for "mcp" across code.py/interactive_tools.py/
+        # async_tui.py, against 65 in the sibling run.py). Opt out with
+        # PRAISON_TOOLS_DISABLE=mcp.
+        groups.append("mcp")
         try:
             from praisonai_code.cli.features.interactive_tools import get_interactive_tools
             tools = get_interactive_tools(
@@ -813,7 +820,11 @@ class AsyncTUI:
                 workspace=self.config.workspace,
             )
             if tools:
-                logger.debug(f"Loaded {len(tools)} tools from interactive_tools: {[t.__name__ for t in tools]}")
+                logger.debug(
+                    "Loaded %d tools from interactive_tools: %s",
+                    len(tools),
+                    [getattr(t, "__name__", getattr(t, "name", repr(t))) for t in tools],
+                )
                 return tools
         except ImportError as e:
             logger.debug(f"interactive_tools import failed: {e}")
@@ -998,12 +1009,19 @@ class AsyncTUI:
         "code-review": "Review the uncommitted diff for bugs (read-only)",
         "security-review": "Audit the uncommitted diff for security issues (read-only)",
         "handoff": "Delegate to specialized agent (code/research/review/docs)",
-        "compact": "Toggle compact output mode",
+        "compact": "Compact the conversation context (free tokens)",
+        "compact-display": "Toggle compact output mode",
         "multiline": "Toggle multiline input mode",
         "files": "List workspace files for @ mentions",
         "queue": "Show pending prompts in queue",
         "undo": "Undo the last turn (files + conversation)",
         "revert": "Revert the last N turns (files + conversation)",
+        "git-status": "Show working-tree status",
+        "git-diff": "Show the uncommitted diff",
+        "git-log": "Show recent commits",
+        "git-commit": "Stage and commit (message auto-generated when omitted)",
+        "git-undo": "Undo the last commit (keeps changes staged)",
+        "map": "Show a ranked repository map (operator overview)",
     }
 
     def _get_registry(self):
@@ -1196,7 +1214,13 @@ class AsyncTUI:
   /code-review [file|--staged]   Review the uncommitted diff for bugs (read-only)
   /security-review [file|--staged]  Audit the uncommitted diff for security issues (read-only)
   /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
-  /compact         Toggle compact output mode
+  /compact         Compact the conversation context (free tokens)
+  /compact-display Toggle compact output mode
+  /git-status      Show working-tree status
+  /git-diff        Show the uncommitted diff
+  /git-log [n]     Show recent commits
+  /git-commit [m]  Stage and commit (message auto-generated when omitted)
+  /git-undo        Undo the last commit (keeps changes staged)
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
   /queue           Show pending prompts in queue
@@ -1293,10 +1317,33 @@ Tips:
             self.messages.append(ChatMessage(role="system", content=stats_info))
             return True
         
+        elif cmd in ("git-status", "git-diff", "git-log", "git-commit", "git-undo"):
+            self._handle_git_command(cmd, args)
+            return True
+
+        elif cmd == "map":
+            # /map was implemented only in the legacy standalone slash-command
+            # registry; the modern TUI builds its registry from _BUILTIN_COMMANDS
+            # and so treated /map as unknown despite the README advertising it.
+            # Wire it here so the primary coding interface reaches the working
+            # repo_map.RepoMap. Operator command, not an agent tool.
+            self._handle_map_command(args)
+            return True
+
         elif cmd == "compact":
+            # /compact used to toggle a *display* flag. Every other coding agent
+            # means "shrink the conversation context" by that command, and the
+            # real implementation (features/context_manager.py: 500+ lines of
+            # budget accounting, optimizer strategies, auto_compact) was
+            # unreachable from this TUI. The display toggle now lives under
+            # /compact-display.
+            self._compact_context(args, manual=True)
+            return True
+
+        elif cmd in ("compact-display", "dense"):
             self.config.compact_mode = not self.config.compact_mode
             mode = "enabled" if self.config.compact_mode else "disabled"
-            self.messages.append(ChatMessage(role="system", content=f"Compact mode {mode}"))
+            self.messages.append(ChatMessage(role="system", content=f"Compact display mode {mode}"))
             return True
         
         elif cmd == "multiline":
@@ -1617,6 +1664,284 @@ Example: /handoff code "refactor the auth module" """
             self.messages.append(ChatMessage(role="system", content=f"Unknown command: /{cmd}. Use /help for available commands."))
             return True
     
+    # ------------------------------------------------------------------
+    # Git
+    # ------------------------------------------------------------------
+
+    def _handle_git_command(self, cmd: str, args: str) -> None:
+        """Surface ``GitIntegrationHandler`` in the session.
+
+        ``GitManager`` implements status, diff, staging, commit, log, undo and
+        AI-generated commit messages, but the only caller in the code session
+        was ``/code-review``, which used it to collect a diff. Everything else
+        it can do was unreachable without leaving the session -- so the agent
+        would write changes and the operator had to drop to a shell to commit
+        them. These commands are deliberately *operator* commands, not agent
+        tools: committing is a decision, not a step the model takes on its own.
+        """
+        try:
+            from praisonai_code.cli.features.git_integration import (
+                GitIntegrationHandler,
+            )
+        except ImportError as exc:
+            self.messages.append(ChatMessage(
+                role="system", content=f"Git integration unavailable: {exc}"
+            ))
+            return
+
+        handler = GitIntegrationHandler()
+        try:
+            git = handler.initialize(repo_path=self.config.workspace or None)
+        except Exception as exc:  # noqa: BLE001
+            self.messages.append(ChatMessage(
+                role="system", content=f"Git unavailable: {exc}"
+            ))
+            return
+
+        if not git.is_repo:
+            self.messages.append(ChatMessage(
+                role="system", content="Not a git repository."
+            ))
+            return
+
+        try:
+            if cmd == "git-status":
+                status = git.get_status()
+                if not status.has_changes:
+                    body = f"On branch {status.branch}. Working tree clean."
+                else:
+                    parts = [f"On branch {status.branch}"]
+                    for label, files in (
+                        ("Staged", status.staged_files),
+                        ("Modified", status.modified_files),
+                        ("Untracked", status.untracked_files),
+                    ):
+                        if files:
+                            parts.append(f"{label}: " + ", ".join(files[:20]))
+                    body = "\n".join(parts)
+
+            elif cmd == "git-diff":
+                diff = git.get_diff_content(staged=args.strip() == "--staged")
+                body = diff.strip() or "No uncommitted changes."
+
+            elif cmd == "git-log":
+                try:
+                    count = int(args.strip()) if args.strip() else 10
+                except ValueError:
+                    count = 10
+                commits = git.get_log(count=max(1, count))
+                if not commits:
+                    body = "No commits yet."
+                else:
+                    body = "\n".join(
+                        f"{c.short_hash or c.hash[:8]}  {c.message.splitlines()[0]}"
+                        for c in commits
+                    )
+
+            elif cmd == "git-commit":
+                message = args.strip() or None
+                commit = handler.commit(message=message)
+                if commit is None:
+                    body = "Nothing to commit (or the commit failed)."
+                else:
+                    short = commit.short_hash or commit.hash[:8]
+                    body = f"Committed {short}: {commit.message.splitlines()[0]}"
+
+            else:  # git-undo
+                ok = handler.undo(soft=True)
+                body = (
+                    "Undid the last commit; changes kept in the working tree."
+                    if ok else "Could not undo the last commit."
+                )
+        except Exception as exc:  # noqa: BLE001
+            body = f"Git command failed: {exc}"
+
+        self.messages.append(ChatMessage(role="system", content=body))
+
+    def _handle_map_command(self, args: str) -> None:
+        """Surface ``repo_map.RepoMap`` in the modern TUI.
+
+        The repository map is an at-a-glance operator overview of an unfamiliar
+        repo. Deliberately not re-exposed as an agent tool: the agent already
+        has grep/glob/ast_grep_search, which is where the field landed for how a
+        model finds code. Never raises -- a missing optional dependency or an
+        unindexable tree degrades to a system message.
+        """
+        root = args.strip() or self.config.workspace or os.getcwd()
+        try:
+            from praisonai_code.cli.features.repo_map import RepoMapHandler
+        except ImportError as exc:
+            self.messages.append(ChatMessage(
+                role="system", content=f"Repository map unavailable: {exc}"
+            ))
+            return
+        try:
+            handler = RepoMapHandler()
+            handler.initialize(root=root)
+            map_str = handler.get_map()
+        except Exception as exc:  # noqa: BLE001
+            self.messages.append(ChatMessage(
+                role="system", content=f"Repository map failed: {exc}"
+            ))
+            return
+        if not map_str or not map_str.strip():
+            self.messages.append(ChatMessage(
+                role="system", content="No indexable source files found."
+            ))
+            return
+        self.messages.append(ChatMessage(role="system", content=map_str))
+
+    # ------------------------------------------------------------------
+    # Context compaction
+    # ------------------------------------------------------------------
+
+    def _get_context_manager(self):
+        """Lazily build the real ``ContextManagerHandler``.
+
+        ``features/context_manager.py`` implements token budgeting, overflow
+        detection, optimizer strategies and ``should_auto_compact``, but nothing
+        in the modern code session imported it -- only the legacy interactive
+        path did. Returns ``None`` (never raises) when the SDK context package
+        is unavailable, so a missing optional dependency degrades to "no
+        compaction" rather than breaking the session.
+        """
+        mgr = getattr(self, "_context_manager", None)
+        current_model = self.config.model
+        if mgr is not None and getattr(self, "_context_manager_model", None) == current_model:
+            return mgr
+        try:
+            from praisonai_code.cli.features.context_manager import ContextManagerHandler
+
+            mgr = ContextManagerHandler(
+                model=current_model or "gpt-4o-mini",
+                session_id=self.session_id or "",
+                agent_name="praisonai-code",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Context manager unavailable: %s", exc)
+            self._context_manager = None
+            self._context_manager_model = current_model
+            return None
+        self._context_manager = mgr
+        self._context_manager_model = current_model
+        return mgr
+
+    def _live_history(self):
+        """The message list the model actually sees, and a setter for it.
+
+        Prefers the agent's own ``chat_history`` -- compacting only the TUI's
+        transcript would change what is *displayed* while leaving the model's
+        context untouched, which is exactly the kind of no-op /compact this
+        change exists to remove.
+        """
+        agent = getattr(self, "_agent", None)
+        if agent is not None and hasattr(agent, "chat_history"):
+            try:
+                history = list(agent.chat_history or [])
+            except Exception:  # noqa: BLE001
+                history = []
+
+            def _set(messages):
+                agent.chat_history = list(messages)
+
+            return history, _set, "agent"
+
+        def _set_local(messages):
+            self._conversation_history = list(messages)
+
+        return list(self._conversation_history), _set_local, "session"
+
+    def _compact_context(self, args: str = "", manual: bool = True) -> bool:
+        """Run real context compaction. Returns True if anything was freed."""
+        mgr = self._get_context_manager()
+        if mgr is None:
+            if manual:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content="Context compaction unavailable (praisonaiagents.context not installed).",
+                ))
+            return False
+
+        history, set_history, source = self._live_history()
+        if len(history) < 4:
+            if manual:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content=f"Not enough history to compact ({len(history)} messages; need at least 4).",
+                ))
+            return False
+
+        strategy = (args or "").strip() or None
+        try:
+            mgr.track_history(history)
+            optimized, result = mgr.optimize(history, strategy=strategy)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Compaction failed: %s", exc, exc_info=True)
+            if manual:
+                self.messages.append(ChatMessage(
+                    role="system", content=f"Compaction failed: {exc}"
+                ))
+            return False
+
+        saved = getattr(result, "tokens_saved", 0) or 0
+        if saved <= 0:
+            if manual:
+                self.messages.append(ChatMessage(
+                    role="system", content="Context is already within budget; nothing to compact.",
+                ))
+            return False
+
+        set_history(optimized)
+        if source == "agent":
+            # Keep the transcript pane in step with the model's context.
+            self._conversation_history = list(optimized)
+
+        strategy_used = getattr(result, "strategy_used", None)
+        strategy_label = getattr(strategy_used, "value", strategy_used) or "smart"
+        self.messages.append(ChatMessage(
+            role="system",
+            content=(
+                f"Compacted context: {result.original_tokens:,} → "
+                f"{result.optimized_tokens:,} tokens "
+                f"(saved {saved:,}, {result.reduction_percent:.1f}%) "
+                f"via {strategy_label}."
+            ),
+        ))
+        return True
+
+    def _maybe_auto_compact(self, pending_prompt: str = "") -> None:
+        """Compact before a turn when the session is near its context budget.
+
+        ``ContextManagerHandler.should_auto_compact()`` existed and was never
+        called from this TUI, so a long session ran until the provider returned
+        a context-length error instead of shrinking first.
+
+        The pending user prompt is included in the budget check: a large
+        incoming message can cross the threshold *after* the accumulated history
+        alone was still under it, and checking history-only would let that turn
+        be rejected by the provider despite auto-compaction being on.
+        """
+        mgr = self._get_context_manager()
+        if mgr is None:
+            return
+        history, _set, _source = self._live_history()
+        if len(history) < 4:
+            return
+        # Count the pending prompt against the budget without mutating the
+        # real history: it is appended to the model context immediately after
+        # this check, so it is part of the next request.
+        check_history = history
+        if pending_prompt:
+            check_history = history + [{"role": "user", "content": pending_prompt}]
+        try:
+            mgr.track_history(check_history)
+            if not mgr.should_auto_compact():
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("auto-compact check failed: %s", exc)
+            return
+        self._compact_context(manual=False)
+
     def _execute_prompt(self, prompt: str, read_only: bool = False) -> Optional[str]:
         """Execute a prompt and return the response (suppresses agent output).
 
@@ -1907,6 +2232,13 @@ Example: /handoff code "refactor the auth module" """
             if not read_only:
                 self._checkpoint_turn(prompt[:60])
             
+            # Shrink the context *before* the turn if it is near the model's
+            # budget, rather than letting the provider reject the request. The
+            # pending prompt is included so a large incoming message that tips
+            # the session over the threshold triggers compaction here instead
+            # of being rejected by the provider.
+            self._maybe_auto_compact(pending_prompt=prompt)
+
             # Add to conversation history
             self._conversation_history.append({"role": "user", "content": prompt})
             
@@ -2169,6 +2501,12 @@ Example: /handoff code "refactor the auth module" """
                 
                 self.messages.append(ChatMessage(role="user", content=user_input))
                 print("  ⏳ Praison AI is thinking... (Ctrl-C to interrupt)")
+                # Shrink context before the turn here too: long fallback-mode
+                # sessions otherwise get no automatic overflow protection and
+                # run until the provider rejects the request. Pending prompt is
+                # included in the budget check for the same reason as the main
+                # loop.
+                self._maybe_auto_compact(pending_prompt=user_input)
                 self._conversation_history.append(
                     {"role": "user", "content": user_input}
                 )

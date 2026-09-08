@@ -1362,7 +1362,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 _hooks_list = _hooks_config
             elif isinstance(_hooks_config, HooksConfig):
                 step_callback = _hooks_config.on_step
-                _hooks_list = _hooks_config.middleware or []
+                _hooks_list = list(_hooks_config.middleware or [])
+                # Route on_step / on_tool_call onto the SAME middleware chain
+                # that already powers ``hooks=[...]`` (MiddlewareManager). Both
+                # keys used to be stored-and-never-called, so the TypeError that
+                # advertises them ("Valid keys: on_step, on_tool_call,
+                # middleware") promised behaviour that did not exist.
+                if _hooks_config.on_step is not None or _hooks_config.on_tool_call is not None:
+                    from ..hooks.middleware import as_step_hook, as_tool_call_hook
+                    if _hooks_config.on_step is not None:
+                        _hooks_list.append(as_step_hook(_hooks_config.on_step))
+                    if _hooks_config.on_tool_call is not None:
+                        _hooks_list.append(as_tool_call_hook(_hooks_config.on_tool_call))
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve SKILLS param - FAST PATH
@@ -2570,6 +2581,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Store ExecutionConfig for context compaction policy access
         self.execution = _exec_config
+
+        # ExecutionConfig(code_execution=True) actually grants the capability.
+        # Before this, the flag only set ``self.allow_code_execution`` and no
+        # code tool was ever produced, so the knob was accepted and ignored.
+        #
+        # The tool is named ``execute_code``, which is registered "critical" in
+        # approval/registry.py, so it is approval-gated under every preset but
+        # ``"full"`` — the privilege-escalation problem that got the old
+        # ``sandbox=``-injects-tools behaviour reverted does not apply here, and
+        # unlike ``sandbox=`` this is an explicit opt-in by the caller.
+        if allow_code_execution:
+            self._attach_code_execution_tools(code_execution_mode, _exec_config)
         # Async-safe chat_history with dual-lock protection
         self.__chat_history_state = AsyncSafeState([])
         
@@ -4030,6 +4053,62 @@ Summary:"""
             return f"Agent {self._agent_index}"
         return "Agent"
     
+    def _attach_code_execution_tools(self, code_execution_mode: str, exec_config: Any) -> None:
+        """Give the model a code-execution tool for ``code_execution=True``.
+
+        ``code_mode`` is a real switch, not a label:
+
+        * ``"safe"``  -> subprocess isolation, no tool access from the code.
+        * ``"unsafe"`` -> same process, restricted builtins, and the
+          ``code_tools_allow`` allow-list injected as callable tool proxies.
+
+        Both expose one tool named ``execute_code``, which the approval registry
+        classes as "critical", so it stays gated under every preset but "full".
+        """
+        from ..tools.python_tools import build_code_execution_tools
+
+        code_tools = bool(getattr(exec_config, "code_tools", False))
+        allowed = list(getattr(exec_config, "code_tools_allow", None) or [])
+        if code_tools and code_execution_mode != "unsafe":
+            import warnings
+            warnings.warn(
+                "ExecutionConfig(code_tools=True) needs code_mode='unsafe': in "
+                "'safe' mode the code runs in a separate process and cannot "
+                "reach the agent's tools, so code_tools_allow is ignored.",
+                UserWarning,
+                stacklevel=3,
+            )
+            code_tools = False
+
+        # In unsafe mode the allow-list must resolve against ONLY the tools this
+        # agent was granted, never the process-global registry (which can hold
+        # plugin/entry-point tools the agent was never given). Build a private
+        # registry from self.tools and pass it down so code-mode inherits the
+        # agent's exact tool boundary.
+        scoped_registry = None
+        if code_tools and code_execution_mode == "unsafe":
+            from ..tools.registry import ToolRegistry
+            scoped_registry = ToolRegistry()
+            for t in (self.tools or []):
+                if callable(t) or hasattr(t, "name"):
+                    try:
+                        scoped_registry.register(t)
+                    except Exception:
+                        pass
+
+        # An unknown code_mode raises out of here rather than silently
+        # producing nothing, which is the failure this whole change is about.
+        new_tools = build_code_execution_tools(
+            code_mode=code_execution_mode,
+            allowed_tools=allowed if code_tools else [],
+            registry=scoped_registry,
+        )
+
+        existing = {getattr(t, "__name__", None) for t in (self.tools or [])}
+        self.tools = list(self.tools or []) + [
+            t for t in new_tools if getattr(t, "__name__", None) not in existing
+        ]
+
     def _init_autonomy(self, autonomy: Any, verification_hooks: Optional[List[Any]] = None) -> None:
         """Initialize autonomy features (agent-centric escalation/doom-loop).
         

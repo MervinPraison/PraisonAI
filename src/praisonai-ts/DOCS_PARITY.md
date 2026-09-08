@@ -33,7 +33,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Chat | 4 | 1 | 100 |
 | ✅ Chunking | 3 | 2 | 298 |
 | ✅ Citations | 3 | 1 | 156 |
-| ✅ Code Execution | 9 | 4 | 464 |
+| ✅ Code Execution | 11 | 4 | 464 |
 | ✅ Conditions | 1 | 1 | 372 |
 | ✅ Configuration | 5 | 1 | 272 |
 | ✅ Context Management | 36 | 2 | 345 |
@@ -59,7 +59,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ MCP | 21 | 4 | 870 |
 | ✅ Memory | 24 | 4 | 840 |
 | ✅ Middleware | 2 | 1 | 162 |
-| ✅ OCR | 5 | 1 | 162 |
+| ✅ OCR | 7 | 1 | 162 |
 | ✅ Observability | 12 | 28 | 2470 |
 | ✅ Optimizer | 2 | 1 | 162 |
 | ✅ Output | 3 | 1 | 220 |

@@ -295,3 +295,30 @@ def test_a_pin_naming_a_vanished_commit_is_not_trusted(tmp_path):
     (pin / "praisonai-root-commit").write_text("0" * 40)
 
     assert get_git_root_commit(str(repo)) == real_root
+
+
+@requires_git
+def test_a_vanished_pin_is_repaired_not_merely_ignored(tmp_path):
+    """A stale pin must be *rewritten*, not just distrusted.
+
+    If a dead pin were only ignored, every later resolve would recompute the
+    root -- reintroducing the same-second tie-break flip the pin exists to
+    prevent. So the first resolve must heal the pin to the freshly chosen root,
+    restoring persistent stability rather than leaving recomputation forever.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    real_root = get_git_root_commit(str(repo))
+
+    pin_file = project_mod._git_meta_path(str(repo), "praisonai-root-commit")
+    assert pin_file is not None
+    pin_file.write_text("0" * 40)
+
+    # First resolve after the pin went stale re-chooses...
+    assert get_git_root_commit(str(repo)) == real_root
+    # ...and repairs the pin on disk so it is trusted from now on.
+    assert pin_file.read_text(encoding="utf-8").strip() == real_root

@@ -29,6 +29,8 @@ Usage:
     agent = Agent(name="Test", hooks=[add_context, retry_on_error])
 """
 
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
 from functools import wraps
@@ -289,6 +291,66 @@ def wrap_tool_call(func: WrapToolCallFn) -> WrapToolCallFn:
     """
     func._hook_type = 'wrap_tool_call'
     return func
+
+
+def _invoke_observer(callback: Callable[[Any], Any], arg: Any) -> None:
+    """Call an observer callback, awaiting it if it returns a coroutine.
+
+    ``HooksConfig(on_step=...)`` / ``on_tool_call=...`` accept any ``Callable``,
+    so an ``async def`` is permitted. Calling it synchronously would create a
+    coroutine that is never awaited (a silent no-op plus a RuntimeWarning), so a
+    returned coroutine is drained here: run to completion on a fresh loop when
+    none is running, otherwise scheduled on the running loop. The return value
+    is always ignored — these are observers.
+    """
+    result = callback(arg)
+    if inspect.iscoroutine(result):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.create_task(result)
+        else:
+            asyncio.run(result)
+
+
+def as_step_hook(callback: Callable[[Any], Any]) -> AfterModelFn:
+    """Adapt a plain ``on_step`` callback into an ``after_model`` middleware hook.
+
+    ``HooksConfig(on_step=...)`` advertises "called once per agent step". An
+    agent step is one model call, so the callback is routed onto the existing
+    ``after_model`` middleware slot: it is invoked with the :class:`ModelResponse`
+    for the step and its return value is ignored (the response passes through
+    unchanged, so an observer can never corrupt the run).
+    """
+
+    @after_model
+    def _on_step(response: ModelResponse) -> ModelResponse:
+        _invoke_observer(callback, response)
+        return response
+
+    _on_step.__name__ = getattr(callback, "__name__", "on_step")
+    return _on_step
+
+
+def as_tool_call_hook(callback: Callable[[Any], Any]) -> BeforeToolFn:
+    """Adapt a plain ``on_tool_call`` callback into a ``before_tool`` hook.
+
+    ``HooksConfig(on_tool_call=...)`` is routed onto the existing ``before_tool``
+    middleware slot, so it fires for every tool the agent executes (sync and
+    async paths both run through :class:`MiddlewareManager`). The callback
+    receives the :class:`ToolRequest`; its return value is ignored so the
+    request passes through unchanged.
+    """
+
+    @before_tool
+    def _on_tool_call(request: ToolRequest) -> ToolRequest:
+        _invoke_observer(callback, request)
+        return request
+
+    _on_tool_call.__name__ = getattr(callback, "__name__", "on_tool_call")
+    return _on_tool_call
 
 
 def get_hook_type(func: Callable) -> Optional[str]:

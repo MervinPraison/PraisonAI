@@ -415,20 +415,133 @@ export class PluginManager {
   }
 
   /**
-   * Auto-discover plugins from default directories.
+   * Auto-discover and load plugins from the default directories.
+   *
+   * Scans `./.praisonai/plugins/` (project level) and `~/.praisonai/plugins/`
+   * (user level), matching Python's `PluginManager.auto_discover_plugins()`.
+   *
+   * Like Python, loading arbitrary files from disk is opt-in: it does nothing
+   * unless `PRAISONAI_ALLOW_PLUGIN_DISCOVERY` is `true`/`1`/`yes`. Unlike the
+   * previous version, "does nothing" is now reported by the return value
+   * instead of being indistinguishable from a successful scan.
+   *
+   * @returns Number of plugins loaded.
    */
-  autoDiscoverPlugins(): void {
-    // In browser/Node.js, this would scan directories
-    // For now, this is a no-op placeholder
+  autoDiscoverPlugins(): number {
+    if (!isNodeRuntime()) {
+      return 0;
+    }
+    const allow = (process.env.PRAISONAI_ALLOW_PLUGIN_DISCOVERY ?? '').trim().toLowerCase();
+    if (!['true', '1', 'yes'].includes(allow)) {
+      return 0;
+    }
+
+    let loaded = 0;
+    for (const dir of defaultPluginDirectories()) {
+      loaded += this.loadFromDirectory(dir);
+    }
+    return loaded;
   }
 
   /**
    * Load plugins from a directory.
+   *
+   * Each candidate file that is not prefixed with `_` is loaded with
+   * synchronous `require()` and inspected for a `createPlugin` factory, a
+   * `plugin` export, or a default export -- the JavaScript analogue of Python's
+   * `create_plugin` convention. Python parity: `PluginManager.load_from_directory()`.
+   *
+   * Only formats `require()` can actually load are considered: `.js`, `.cjs`,
+   * and (under a TypeScript-aware runtime such as ts-node/ts-jest) `.ts`. ESM
+   * `.mjs` files are intentionally skipped rather than advertised and then
+   * failing to load: a synchronous CommonJS loader cannot import them, so
+   * counting them here would report a "load" that never happened. Ship ESM
+   * plugins transpiled to `.cjs`/`.js`.
+   *
+   * @returns Number of plugins loaded.
    */
-  loadFromDirectory(path: string): void {
-    // Placeholder for directory loading
-    // Would use fs in Node.js environment
+  loadFromDirectory(path: string): number {
+    if (!isNodeRuntime()) {
+      return 0;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const nodePath = require('path') as typeof import('path');
+
+    if (!fs.existsSync(path) || !fs.statSync(path).isDirectory()) {
+      return 0;
+    }
+
+    let loaded = 0;
+    for (const entry of fs.readdirSync(path).sort()) {
+      if (entry.startsWith('_') || entry.endsWith('.d.ts')) {
+        continue;
+      }
+      // `.mjs` is omitted on purpose: require() cannot load ESM, so accepting it
+      // would warn-and-skip every such file while still claiming to support it.
+      if (!/\.(js|cjs|ts)$/.test(entry)) {
+        continue;
+      }
+
+      const filePath = nodePath.join(path, entry);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mod = require(filePath);
+        const plugin = instantiatePluginModule(mod);
+        if (plugin) {
+          // Registered as a first-class Plugin, not as single-file metadata:
+          // listPlugins() merges both maps, so writing to both would double-count.
+          this.register(plugin);
+          loaded += 1;
+        }
+      } catch (error) {
+        // A broken plugin file must not abort discovery, but it must be visible.
+        console.warn(
+          `[praisonai] Failed to load plugin from ${filePath}: ` +
+            `${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    return loaded;
   }
+}
+
+/** True when running under Node (where plugin files can be read from disk). */
+function isNodeRuntime(): boolean {
+  return (
+    typeof process !== 'undefined' &&
+    !!process.versions?.node &&
+    typeof require === 'function'
+  );
+}
+
+/** Default directories scanned by {@link PluginManager.autoDiscoverPlugins}. */
+function defaultPluginDirectories(): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const nodePath = require('path') as typeof import('path');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const os = require('os') as typeof import('os');
+  return [
+    nodePath.join(process.cwd(), '.praisonai', 'plugins'),
+    nodePath.join(os.homedir(), '.praisonai', 'plugins'),
+  ];
+}
+
+/**
+ * Turn a required plugin module into a {@link Plugin}, or `null` if it does not
+ * follow any supported convention.
+ */
+function instantiatePluginModule(mod: any): Plugin | null {
+  const candidate = mod?.createPlugin ?? mod?.plugin ?? mod?.default ?? mod;
+
+  if (typeof candidate === 'function') {
+    // Either a `createPlugin()` factory or a Plugin subclass constructor.
+    const produced = candidate.prototype instanceof Plugin ? new candidate() : candidate();
+    return produced instanceof Plugin ? produced : null;
+  }
+  return candidate instanceof Plugin ? candidate : null;
 }
 
 // ============================================================================
@@ -637,8 +750,11 @@ export function enable(plugins?: string[]): void {
   _enabledPluginNames = plugins ?? null;
   
   const manager = getPluginManager();
+  // Previously the return value was discarded because discovery was a no-op,
+  // so `enable()` with no arguments enabled everything in a list that could
+  // never be non-empty.
   manager.autoDiscoverPlugins();
-  
+
   if (plugins) {
     for (const name of plugins) {
       manager.enable(name);

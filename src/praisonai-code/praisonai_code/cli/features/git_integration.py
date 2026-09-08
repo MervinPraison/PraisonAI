@@ -135,12 +135,21 @@ class GitManager:
         # Get status
         result = self._run_git("status", "--porcelain", check=False)
         if result.returncode == 0:
-            for line in result.stdout.strip().split("\n"):
-                if not line:
+            # ``.strip()`` here ate the leading space of the FIRST porcelain
+            # line, so " M a.txt" (modified, unstaged) parsed as status "M "
+            # and path ".txt": the file was reported as *staged* under a
+            # truncated name. Only trailing newlines may be removed.
+            for line in result.stdout.rstrip("\n").split("\n"):
+                if not line.strip():
                     continue
-                
+
                 status_code = line[:2]
-                file_path = line[3:]
+                file_path = line[3:].strip()
+                if not file_path:
+                    continue
+                # Renames are reported as "R  old -> new"; keep the new path.
+                if " -> " in file_path:
+                    file_path = file_path.split(" -> ", 1)[1]
                 
                 if status_code[0] in "MADRCU":
                     status.staged_files.append(file_path)

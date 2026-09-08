@@ -245,7 +245,17 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
         """List available recipes."""
         parser = argparse.ArgumentParser(prog="praisonai mcp list-recipes")
         parser.add_argument("--tags", default=None, help="Filter by tags (comma-separated)")
-        parser.add_argument("--source", default=None, choices=["local", "package", "all"])
+        # Choices must match the source labels discovery actually produces.
+        # ``list_recipes`` delegates to ``TemplateDiscovery.list_templates``,
+        # which filters ``t.source == source_filter`` against labels assigned in
+        # discovery.py: ``custom`` (~/.praison, ~/.config), ``project``
+        # (./.praison), and ``package`` (bundled agent_recipes). ``all`` was
+        # never a value it accepted, and ``local``/``github`` are never emitted
+        # here -- offering them would advertise a filter that silently returns
+        # nothing.
+        parser.add_argument(
+            "--source", default=None, choices=["custom", "project", "package"]
+        )
         parser.add_argument("--json", action="store_true")
         
         try:
@@ -258,7 +268,10 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             list_recipes = wrapper_callable("praisonai.recipe.core", "list_recipes")
             
             tags = parsed.tags.split(",") if parsed.tags else None
-            recipes = list_recipes(tags=tags, source=parsed.source)
+            # The wrapper's list_recipes() names this parameter `source_filter`, not
+            # `source`. Passing the wrong keyword raised TypeError on EVERY
+            # invocation of `list-recipes`, so the command had never worked.
+            recipes = list_recipes(tags=tags, source_filter=parsed.source)
             
             if parsed.json:
                 self._print_json({"recipes": [r.to_dict() for r in recipes]})
