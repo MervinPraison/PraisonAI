@@ -154,7 +154,36 @@ class TestCircuitBreaker:
         # Next call should be rejected
         with pytest.raises(CircuitBreakerException):
             await breaker.acall(failing_async_func)
-    
+
+    @pytest.mark.asyncio
+    async def test_acall_cancelled_by_wait_for_does_not_record(self):
+        """A wait_for timeout cancels acall without counting a failure.
+
+        ``acall`` catches ``except Exception``; the cancellation delivered by
+        ``asyncio.wait_for`` is ``asyncio.CancelledError`` (a BaseException),
+        so ``_on_failure`` never runs. This is *why* the async tool path in
+        ``execution_mixin`` must record the timeout on the breaker itself --
+        otherwise a repeatedly timing-out tool would never open the circuit.
+        This test pins the underlying behaviour so that reasoning stays true.
+        """
+        breaker = CircuitBreaker(
+            "timeout_service", CircuitBreakerConfig(failure_threshold=1)
+        )
+
+        async def slow():
+            await asyncio.sleep(10)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(breaker.acall(slow), timeout=0.05)
+
+        # The breaker did NOT count the cancellation as a failure.
+        assert breaker.stats.failure_count == 0
+        assert breaker.state == CircuitState.CLOSED
+
+        # Recording it explicitly (as the mixin now does) opens the circuit.
+        breaker._on_failure()
+        assert breaker.state == CircuitState.OPEN
+
     def test_health_check_functionality(self):
         """Test health check integration."""
         health_check_call_count = 0

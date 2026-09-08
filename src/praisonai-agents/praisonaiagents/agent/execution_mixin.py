@@ -2029,6 +2029,24 @@ Write the complete compiled report:"""
                         # Fall through (not return) so the loop guard records this
                         # timeout as a failure — repeated timeouts must accumulate
                         # toward the BLOCK/HALT thresholds like any other failure.
+                        #
+                        # A timeout cancels the awaited ``_invoke_guarded``; the
+                        # cancellation surfaces inside ``breaker.acall`` as
+                        # ``asyncio.CancelledError`` (a BaseException, not
+                        # Exception), so ``acall`` never ran ``_on_failure`` for
+                        # it. The fall-through breaker-record block below only
+                        # runs when ``breaker is None``, so without recording it
+                        # here a repeatedly timing-out tool would never open the
+                        # circuit. Record the one failure directly on the breaker
+                        # (the block below stays disabled, so it is counted once).
+                        if breaker is not None:
+                            try:
+                                breaker._on_failure()
+                            except Exception:
+                                logging.debug(
+                                    "Failed to record tool timeout on circuit breaker",
+                                    exc_info=True,
+                                )
                         result = {
                             "error": f"Tool timed out after {tool_timeout}s",
                             "timeout": True,

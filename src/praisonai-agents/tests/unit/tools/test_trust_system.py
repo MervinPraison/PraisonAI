@@ -349,6 +349,20 @@ class TestExternalRegistrationIsVisibleToEarlierImporters:
     and went on treating the tool as trusted.
     """
 
+    @pytest.fixture(autouse=True)
+    def _restore_external_tool_names(self):
+        # The set is now mutated in place, so a registration here would leak
+        # into every later test and make ``is_external_tool`` order-dependent
+        # (AGENTS.md §4.6: deterministic tests). Snapshot and restore its
+        # contents in place -- restoring the *same object*, not a rebind, so an
+        # importer's held reference stays valid.
+        snapshot = set(trust_module.EXTERNAL_TOOL_NAMES)
+        try:
+            yield
+        finally:
+            trust_module.EXTERNAL_TOOL_NAMES.clear()
+            trust_module.EXTERNAL_TOOL_NAMES.update(snapshot)
+
     def test_a_reference_taken_before_the_call_sees_the_addition(self):
         held = trust_module.EXTERNAL_TOOL_NAMES  # as an importer would hold it
         add_external_tool("late_registered_scraper")

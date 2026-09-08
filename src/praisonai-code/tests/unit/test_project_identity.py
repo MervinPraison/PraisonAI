@@ -305,6 +305,7 @@ def test_a_vanished_pin_is_repaired_not_merely_ignored(tmp_path):
     root -- reintroducing the same-second tie-break flip the pin exists to
     prevent. So the first resolve must heal the pin to the freshly chosen root,
     restoring persistent stability rather than leaving recomputation forever.
+    Once re-chosen, adding a later root must not change the pinned identity.
     """
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -322,3 +323,10 @@ def test_a_vanished_pin_is_repaired_not_merely_ignored(tmp_path):
     assert get_git_root_commit(str(repo)) == real_root
     # ...and repairs the pin on disk so it is trusted from now on.
     assert pin_file.read_text(encoding="utf-8").strip() == real_root
+
+    # Adding a later root must not change the (now-valid) pinned identity.
+    _git(repo, "checkout", "--orphan", "later")
+    (repo / "g.txt").write_text("y")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "later")
+    assert get_git_root_commit(str(repo)) == real_root
