@@ -14,7 +14,7 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from praisonaiagents._logging import get_logger
 import asyncio
 import contextvars
@@ -210,6 +210,27 @@ def _pop_handoff() -> Optional[str]:
 def _clear_handoff_chain() -> None:
     """Clear the handoff chain."""
     _handoff_chain_var.set([])
+
+
+def _get_handoff_seed_lock(agent: 'Agent') -> 'DualLock':
+    """Return a per-target-agent lock serializing handoff history seeding.
+
+    Concurrent handoffs (e.g. ``parallel_handoffs``) can target the *same*
+    agent object. ``_seed_target_history`` mutates that shared instance's
+    ``chat_history`` in place, so overlapping seeds would interleave and leak
+    one caller's prior context into another's. Serializing per target agent
+    keeps each seeded chat call atomic without changing the public API.
+    """
+    from .async_safety import DualLock
+    lock = getattr(agent, '_handoff_seed_lock', None)
+    if lock is None:
+        lock = DualLock()
+        try:
+            agent._handoff_seed_lock = lock
+        except Exception:
+            pass
+    return lock
+
 
 @dataclass
 class HandoffInputData:
@@ -470,6 +491,31 @@ class Handoff:
                     return value
         return 'gpt-4o-mini'
 
+    def _apply_seed(self, prior_messages: Optional[List[Any]]):
+        """Prepend ``prior_messages`` to the target's ``chat_history``.
+
+        Returns ``(seeded, original)`` where ``original`` is the list to restore
+        on exit and ``seeded`` indicates a restore is needed. Callers MUST hold
+        the per-agent seed lock around this + the chat call + ``_restore_seed``.
+        """
+        existing = getattr(self.agent, 'chat_history', None)
+        if not prior_messages or not isinstance(existing, list):
+            return False, None
+        try:
+            prior = list(prior_messages)
+        except TypeError:
+            return False, None
+        original = existing
+        # Avoid re-seeding if the context is already at the head.
+        if existing[:len(prior)] != prior:
+            self.agent.chat_history = prior + existing
+        return True, original
+
+    def _restore_seed(self, seeded: bool, original: Optional[List[Any]]) -> None:
+        """Restore the target's original ``chat_history`` after a seeded call."""
+        if seeded:
+            self.agent.chat_history = original
+
     @contextmanager
     def _seed_target_history(self, prior_messages: Optional[List[Any]]):
         """Temporarily seed the filtered handoff context onto the target agent.
@@ -483,25 +529,36 @@ class Handoff:
         restored on exit. This keeps handoff context from leaking into later
         handoffs or ordinary chats that reuse the same target agent, and stops the
         target prompt from growing across sequential handoffs.
-        No shared mutable state is retained between agents.
+
+        Because ``chat_history`` is shared mutable state on the target agent,
+        concurrent handoffs to the *same* target (e.g. via ``parallel_handoffs``)
+        would otherwise interleave and corrupt each other's context. The seed +
+        chat call are serialized per target agent via a ``DualLock`` so each
+        seeded turn stays atomic. This is the synchronous variant.
         """
-        existing = getattr(self.agent, 'chat_history', None)
-        if not prior_messages or not isinstance(existing, list):
-            yield
-            return
-        try:
-            prior = list(prior_messages)
-        except TypeError:
-            yield
-            return
-        original = existing
-        try:
-            # Avoid re-seeding if the context is already at the head.
-            if existing[:len(prior)] != prior:
-                self.agent.chat_history = prior + existing
-            yield
-        finally:
-            self.agent.chat_history = original
+        lock = _get_handoff_seed_lock(self.agent)
+        with lock.sync():
+            seeded, original = self._apply_seed(prior_messages)
+            try:
+                yield
+            finally:
+                self._restore_seed(seeded, original)
+
+    @asynccontextmanager
+    async def _seed_target_history_async(self, prior_messages: Optional[List[Any]]):
+        """Async variant of :meth:`_seed_target_history`.
+
+        Uses the per-target-agent lock's async side so overlapping awaited
+        handoffs to the same agent serialize on the event loop instead of
+        blocking it, keeping each seeded ``achat`` turn atomic.
+        """
+        lock = _get_handoff_seed_lock(self.agent)
+        async with lock.async_lock():
+            seeded, original = self._apply_seed(prior_messages)
+            try:
+                yield
+            finally:
+                self._restore_seed(seeded, original)
 
     def _execute_with_runtime_resolution(
         self, 
@@ -538,7 +595,7 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
-        with self._seed_target_history(prior_messages):
+        async with self._seed_target_history_async(prior_messages):
             async_chat = getattr(self.agent, 'achat', None)
             if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
                 return await async_chat(prompt, tools=effective_tools)

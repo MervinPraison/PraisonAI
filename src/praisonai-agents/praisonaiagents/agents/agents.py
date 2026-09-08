@@ -30,6 +30,11 @@ try:
 except ImportError:
     run_coroutine_safely = None
 
+# Guards lazy creation of each AgentTeam's per-instance _run_lock so two threads
+# that first reach start()/astart() concurrently observe the same lock object
+# (double-checked locking) rather than each minting and acquiring its own.
+_RUN_LOCK_INIT_GUARD = threading.Lock()
+
 # Task status constants
 class TaskStatus(Enum):
     """Enumeration for task status values to ensure consistency"""
@@ -1976,6 +1981,29 @@ class AgentTeam(SpawnAnnounceProtocol):
         finally:
             self._tools_scope_depths.reset(token)
 
+    @property
+    def _execution_lock(self):
+        """Lazily-created re-entrancy lock for start()/astart() (zero overhead until used).
+
+        AgentTeam shares its Task objects and its ``tasks`` dict (aliased, not
+        copied, by ``Process.__init__``) plus instance attributes like
+        ``_last_real_task_id`` across every run. Concurrent runs on the same
+        instance would interleave task status transitions, duplicate
+        ``previous_tasks`` entries, and swap results between callers, so refuse
+        re-entrancy loudly instead of corrupting shared state. Mirrors the guard
+        already used by Workflow. Creation is serialized through a module-level
+        guard (double-checked locking) so two threads racing into start()/astart()
+        observe the same lock object.
+        """
+        lock = getattr(self, '_run_lock', None)
+        if lock is None:
+            with _RUN_LOCK_INIT_GUARD:
+                lock = getattr(self, '_run_lock', None)
+                if lock is None:
+                    lock = threading.Lock()
+                    self._run_lock = lock
+        return lock
+
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
         
@@ -1990,6 +2018,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             with self._shared_tools_scope():
                 return await self.astart(content=content, return_dict=return_dict, **kwargs)
 
+        # Refuse concurrent re-entrancy: shared Task/tasks state is not safe to
+        # run twice at once on the same instance. Acquired after the tools-scope
+        # recursion so the re-invocation (not this outer frame) holds the lock.
+        if not self._execution_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "This AgentTeam instance is already running; an AgentTeam is not "
+                "safe to run concurrently on the same object. Create a separate "
+                "AgentTeam/PraisonAIAgents instance per concurrent run."
+            )
+        try:
+            return await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+        finally:
+            self._execution_lock.release()
+
+    async def _astart_impl(self, content=None, return_dict=False, **kwargs):
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True, async_mode=True)
@@ -2268,6 +2311,22 @@ class AgentTeam(SpawnAnnounceProtocol):
                 return self.start(content=content, return_dict=return_dict,
                                   output=output, **kwargs)
 
+        # Refuse concurrent re-entrancy: shared Task/tasks state is not safe to
+        # run twice at once on the same instance. Acquired after the tools-scope
+        # recursion so the re-invocation (not this outer frame) holds the lock.
+        if not self._execution_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "This AgentTeam instance is already running; an AgentTeam is not "
+                "safe to run concurrently on the same object. Create a separate "
+                "AgentTeam/PraisonAIAgents instance per concurrent run."
+            )
+        try:
+            return self._start_impl(content=content, return_dict=return_dict,
+                                    output=output, **kwargs)
+        finally:
+            self._execution_lock.release()
+
+    def _start_impl(self, content=None, return_dict=False, output=None, **kwargs):
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True)

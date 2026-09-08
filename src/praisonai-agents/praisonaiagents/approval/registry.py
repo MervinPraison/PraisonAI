@@ -408,6 +408,26 @@ class ApprovalRegistry:
         self._approved_context.set(set())
         self._session_scoped_targets.clear()
 
+    def release_scope(self, scope_id: str) -> None:
+        """Drop all grants recorded under a per-instance approval scope id.
+
+        ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval) and
+        ``_persist_scoped_decision`` ("this session" human approvals) both write
+        entries keyed by an Agent's globally-unique ``_approval_scope_id``. Those
+        ids never repeat, so without eviction a long-running process that creates
+        one Agent per request/session grows these dicts/sets without bound.
+        Called from ``Agent.close()``/``aclose()`` to reclaim a dead agent's
+        entries without touching any other agent's grants.
+        """
+        if not scope_id:
+            return
+        self._agent_tool_auto_approve = {
+            k: v for k, v in self._agent_tool_auto_approve.items() if k[0] != scope_id
+        }
+        self._session_scoped_targets = {
+            t for t in self._session_scoped_targets if t[0] != scope_id
+        }
+
     def set_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
         return self._yaml_approved_tools.set(set(tools))
 
