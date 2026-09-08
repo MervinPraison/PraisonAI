@@ -1,23 +1,20 @@
 /**
- * SigNoz Observability Adapter (OpenTelemetry)
+ * SigNoz Observability Adapter
+ *
+ * DELIVERY IS NOT IMPLEMENTED. This adapter records traces in memory and sends
+ * nothing to SigNoz. It therefore reports `isEnabled === false` and warns on
+ * construction; see `./undelivered.ts` for the rationale.
+ *
+ * NOTE: SigNoz ingests OpenTelemetry. This package depends on
+ * `@opentelemetry/api` only, which is the instrumentation API and carries no
+ * SDK, no span processor and no exporter, so it cannot ship spans anywhere on
+ * its own. Real delivery needs an OTLP exporter dependency.
  */
-import type { ObservabilityAdapter, TraceContext, SpanContext, SpanKind, SpanStatus, AttributionContext, ObservabilityToolConfig } from '../../types';
-import { MemoryObservabilityAdapter } from '../memory';
+import type { ObservabilityToolConfig } from '../../types';
+import { UndeliveredObservabilityAdapter } from './undelivered';
 
-export class SigNozObservabilityAdapter implements ObservabilityAdapter {
-  readonly name = 'signoz';
-  readonly isEnabled = true;
-  private memory = new MemoryObservabilityAdapter();
-  private config: ObservabilityToolConfig;
-  
-  constructor(config?: ObservabilityToolConfig) { this.config = config || { name: 'signoz' }; }
-  async initialize(): Promise<void> {}
-  async shutdown(): Promise<void> {}
-  startTrace(name: string, metadata?: Record<string, unknown>, attribution?: AttributionContext): TraceContext { return this.memory.startTrace(name, metadata, attribution); }
-  endTrace(traceId: string, status?: SpanStatus): void { this.memory.endTrace(traceId, status); }
-  startSpan(traceId: string, name: string, kind: SpanKind, parentId?: string): SpanContext { return this.memory.startSpan(traceId, name, kind, parentId); }
-  endSpan(spanId: string, status?: SpanStatus, attributes?: Record<string, unknown>): void { this.memory.endSpan(spanId, status, attributes); }
-  addEvent(spanId: string, name: string, attributes?: Record<string, unknown>): void { this.memory.addEvent(spanId, name, attributes); }
-  recordError(spanId: string, error: Error): void { this.memory.recordError(spanId, error); }
-  async flush(): Promise<void> {}
+export class SigNozObservabilityAdapter extends UndeliveredObservabilityAdapter {
+  constructor(config?: ObservabilityToolConfig) {
+    super('signoz', config);
+  }
 }

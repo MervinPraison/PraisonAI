@@ -108,6 +108,7 @@ async function listProvidersCommand(options: ObservabilityOptions, outputFormat:
     package: tool.package,
     envKey: tool.envKey,
     hasEnvKey: hasObservabilityToolEnvVar(tool.name),
+    delivers: tool.delivers,
     features: tool.features
   }));
 
@@ -134,9 +135,10 @@ async function listProvidersCommand(options: ObservabilityOptions, outputFormat:
 
     await pretty.plain('\n  External Integrations:');
     for (const p of external) {
-      const status = p.hasEnvKey ? '✅' : '⚠️';
+      const status = !p.delivers ? '❌' : (p.hasEnvKey ? '✅' : '⚠️');
       const keyInfo = p.envKey ? ` (${p.envKey})` : '';
-      await pretty.plain(`    ${status} ${p.name.padEnd(12)} ${p.description}${options.verbose ? keyInfo : ''}`);
+      const note = p.delivers ? '' : '  [no delivery - in-memory only]';
+      await pretty.plain(`    ${status} ${p.name.padEnd(12)} ${p.description}${options.verbose ? keyInfo : ''}${note}`);
     }
 
     await pretty.newline();
@@ -155,10 +157,12 @@ async function doctorCommand(toolName: string | undefined, options: Observabilit
       name: tool.name,
       envKey: tool.envKey,
       hasKey: hasObservabilityToolEnvVar(tool.name),
+      delivers: tool.delivers,
       package: tool.package
     }));
 
-    const ready = results.filter(r => r.hasKey);
+    // "Ready" must mean traces will actually arrive, not merely that a key is set.
+    const ready = results.filter(r => r.hasKey && (r.delivers || !r.envKey));
 
     if (outputFormat === 'json') {
       outputJson(formatSuccess({
@@ -210,17 +214,26 @@ async function doctorCommand(toolName: string | undefined, options: Observabilit
       package: tool.package,
       description: tool.description,
       features: tool.features,
-      status: hasKey || !tool.envKey ? 'ready' : 'missing_key'
+      delivers: tool.delivers,
+      status: !tool.delivers && tool.envKey
+        ? 'not_implemented'
+        : (hasKey || !tool.envKey ? 'ready' : 'missing_key')
     }));
   } else {
     await pretty.heading(`Observability Doctor: ${tool.name}`);
     await pretty.plain(`  Description: ${tool.description}`);
+    if (!tool.delivers && tool.envKey) {
+      await pretty.plain(`  Delivery: ❌ NOT IMPLEMENTED - traces are kept in memory and never sent to ${tool.name}.`);
+      await pretty.plain(`            Setting ${tool.envKey} will not change this.`);
+    } else if (tool.delivers) {
+      await pretty.plain(`  Delivery: ✅ Implemented`);
+    }
     if (tool.package) {
       await pretty.plain(`  Package: ${tool.package}`);
     }
     if (tool.envKey) {
       await pretty.plain(`  Environment Variable: ${tool.envKey}`);
-      await pretty.plain(`  Status: ${hasKey ? '✅ Ready' : '❌ Missing API Key'}`);
+      await pretty.plain(`  Status: ${!tool.delivers ? '❌ Not Implemented' : (hasKey ? '✅ Ready' : '❌ Missing API Key')}`);
       if (hasKey) {
         await pretty.dim(`  Key Preview: ${maskedKey}`);
       } else {
@@ -274,17 +287,36 @@ async function testCommand(toolName: string | undefined, options: ObservabilityO
     await adapter.flush();
 
     const latency = Date.now() - startTime;
+    // The trace above always succeeds locally. What matters is whether the
+    // adapter could deliver it; reporting "passed" regardless would be a lie.
+    const delivered = adapter.isEnabled;
 
-    if (outputFormat === 'json') {
+    if (outputFormat === 'json' && delivered) {
       outputJson(formatSuccess({
         tool,
         status: 'success',
+        delivered: true,
         latency_ms: latency,
         trace_id: trace.traceId
       }));
-    } else {
+    } else if (outputFormat === 'json') {
+      // success:false matters here. A CI script doing `... --json | jq .success`
+      // must not be told the tool works when nothing was delivered.
+      outputJson(formatError(
+        ERROR_CODES.RUNTIME_ERROR,
+        `The "${tool}" adapter recorded the trace in memory but did not send it anywhere. This integration has no delivery implementation.`,
+        { tool, status: 'not_delivered', delivered: false, latency_ms: latency, trace_id: trace.traceId }
+      ));
+    } else if (delivered) {
       await pretty.plain(`\n  ✅ Test Passed`);
       await pretty.plain(`  Tool: ${tool}`);
+      await pretty.plain(`  Latency: ${latency}ms`);
+      await pretty.dim(`  Trace ID: ${trace.traceId}`);
+    } else {
+      await pretty.plain(`\n  ⚠️  Not Delivered`);
+      await pretty.plain(`  Tool: ${tool}`);
+      await pretty.plain(`  The trace was recorded in memory but NOT sent to ${tool}.`);
+      await pretty.plain(`  This integration has no delivery implementation (isEnabled is false).`);
       await pretty.plain(`  Latency: ${latency}ms`);
       await pretty.dim(`  Trace ID: ${trace.traceId}`);
     }
