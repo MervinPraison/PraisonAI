@@ -10,12 +10,56 @@ import pytest
 
 # Check if knowledge dependencies are installed
 _KNOWLEDGE_DEPS_INSTALLED = importlib.util.find_spec("chromadb") is not None
-_HAS_OPENAI_KEY = bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_API_KEY") != "not-needed")
-
+# No credential requirement: _offline_embeddings below replaces the embedding
+# call, so these run anywhere chromadb is installed. The old guard excluded one
+# placeholder by value ("not-needed") while CI exports 'sk-not-a-real-key', so it
+# never skipped -- the tests hit the real OpenAI endpoint, got a 401, and failed
+# on "assert 0 > 0" because add() swallows the embedding error into its result
+# rather than raising. The in-test `except ... pytest.skip("api_key")` guards
+# never fired for the same reason: nothing escapes add() to catch.
 requires_knowledge = pytest.mark.skipif(
-    not _KNOWLEDGE_DEPS_INSTALLED or not _HAS_OPENAI_KEY,
-    reason="Knowledge dependencies not installed or OPENAI_API_KEY is missing."
+    not _KNOWLEDGE_DEPS_INSTALLED,
+    reason="Knowledge dependencies (chromadb) not installed."
 )
+
+
+@pytest.fixture(autouse=True)
+def _offline_embeddings(monkeypatch):
+    """Deterministic bag-of-words embeddings, so ingestion and search run offline.
+
+    Not a constant vector: these tests assert that a search for ZEBRA-71 returns
+    the ZEBRA document FIRST, so the stub has to preserve real ranking. Shared
+    tokens raise cosine similarity, which is enough to order two documents whose
+    vocabularies barely overlap. crc32 keeps it stable across processes, where
+    hash() is randomised per run.
+    """
+    import re
+    from zlib import crc32
+
+    DIM = 256
+
+    def _vector(text):
+        vec = [0.0] * DIM
+        for token in re.findall(r"[a-z0-9]+", text.lower()):
+            vec[crc32(token.encode()) % DIM] += 1.0
+        norm = sum(v * v for v in vec) ** 0.5 or 1.0
+        return [v / norm for v in vec]
+
+    class _Result:
+        def __init__(self, texts):
+            self.embeddings = [_vector(t) for t in texts]
+
+    def _fake_embedding(input, **kwargs):
+        texts = [input] if isinstance(input, str) else list(input)
+        return _Result(texts)
+
+    # importlib, not `import praisonaiagents.embedding as _emb`: the package
+    # exposes a lazy proxy under that name which resolves to the FUNCTION, so the
+    # plain import yields the proxy and setattr fails with "has no attribute
+    # 'embedding'". The module object is what both call sites resolve against.
+    import importlib
+    _emb = importlib.import_module("praisonaiagents.embedding")
+    monkeypatch.setattr(_emb, "embedding", _fake_embedding)
 
 
 def _make_knowledge_or_skip():
