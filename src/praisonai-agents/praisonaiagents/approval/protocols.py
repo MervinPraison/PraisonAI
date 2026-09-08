@@ -87,6 +87,14 @@ class ApprovalDecision:
                        course-correction for the next turn instead of a bare
                        "denied" result. ``None`` (default) keeps today's
                        terminal-deny semantics.
+        escalate:      When ``True`` the decision is a *deferral*, not a final
+                       verdict: an autonomous reviewer was uncertain and asks for
+                       a human to decide instead of failing open or blindly
+                       denying. ``approved`` is always ``False`` on an escalation
+                       (fail-closed), so a consumer that ignores this flag keeps
+                       today's safe deny-by-default behaviour; a human-in-the-loop
+                       backend may instead route the request to a person.
+                       ``False`` (default) preserves existing semantics.
     """
 
     approved: bool
@@ -97,6 +105,7 @@ class ApprovalDecision:
     scope: str = "once"
     scope_pattern: Optional[str] = None
     feedback: Optional[str] = None
+    escalate: bool = False
 
 
 @dataclass
