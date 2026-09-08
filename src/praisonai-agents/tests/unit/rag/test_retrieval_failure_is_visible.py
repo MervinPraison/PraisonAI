@@ -2,9 +2,13 @@
 
 SmartRetriever._search used to do `except Exception: return []` with no log
 line, so a store that was unreachable, misconfigured or refusing auth produced
-byte-identical output to a healthy store with no matches. The agent then
-answered from the model's own knowledge and nothing -- not the caller, not the
-log, not the model -- recorded that retrieval had failed.
+byte-identical output to a healthy store with no matches.
+
+Scope: SmartRetriever is exported from praisonaiagents.rag but has no callers
+inside the package. Agent._get_knowledge_context takes a different route --
+Knowledge.search directly, letting the exception propagate -- so the agent path
+already distinguished the two cases. This is a latent defect for direct users
+of the public class, not a live agent failure.
 """
 import logging
 import pytest
@@ -81,3 +85,35 @@ def test_a_later_success_clears_the_previous_error():
     second = r.retrieve("q", top_k=3)
     assert second.retrieval_failed is False
     assert second.error is None
+
+
+class TestAgentPathAlreadyDistinguishes:
+    """The agent's own retrieval route is honest -- lock that in.
+
+    A review of the original fix correctly pointed out that SmartRetriever has
+    no callers inside the package, so fixing it did not change agent behaviour.
+    Agent._get_knowledge_context calls Knowledge.search directly and only
+    catches ImportError, so a store failure propagates. These tests exist so
+    that stays true: wrapping that call in a broad `except Exception` later
+    would reintroduce exactly the bug this file is about, on the path that
+    actually matters.
+    """
+
+    @staticmethod
+    def _agent_with(knowledge):
+        from praisonaiagents import Agent
+        agent = Agent(instructions="answer", llm="gpt-4o")
+        agent.knowledge = knowledge
+        agent._knowledge_sources = None
+        return agent
+
+    def test_broken_store_propagates_rather_than_returning_empty(self):
+        agent = self._agent_with(BrokenStore())
+        with pytest.raises(RuntimeError, match="unreachable"):
+            agent._get_knowledge_context("refund policy", use_rag=False)
+
+    def test_control_empty_store_returns_empty_context(self):
+        agent = self._agent_with(EmptyStore())
+        context, citations = agent._get_knowledge_context("refund policy", use_rag=False)
+        assert context == ""
+        assert citations is None

@@ -190,13 +190,23 @@ class SmartRetriever:
             # Record the failure rather than returning a bare [] that is
             # indistinguishable from "nothing matched". Knowledge.search itself
             # re-raises, so reaching here means the store really is broken --
-            # misconfigured, unreachable, or refusing auth -- and the agent is
-            # about to answer with no context at all.
+            # misconfigured, unreachable, or refusing auth.
+            #
+            # Scope note: Agent._get_knowledge_context does NOT go through this
+            # class -- it calls Knowledge.search directly and lets the exception
+            # propagate, so the agent path is already honest. SmartRetriever is
+            # a public export (praisonaiagents.rag) with no internal callers, so
+            # this is a latent defect for direct users of the class, not a live
+            # agent failure.
             self._last_error = f"{type(e).__name__}: {e}"
+            # The query is deliberately NOT logged: it is caller-supplied text
+            # that can carry personal data, credentials or proprietary content,
+            # and this package redacts such material elsewhere (trace/redact.py).
+            # The exception and the retrieval_failed flag are enough to diagnose.
             logger.error(
-                "Knowledge retrieval failed for query %r: %s. "
-                "Returning no chunks; the answer will not use the knowledge base.",
-                query, self._last_error,
+                "Knowledge retrieval failed: %s. "
+                "Returning no chunks; the caller will see an empty result.",
+                self._last_error,
             )
             return []
     
