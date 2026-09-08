@@ -212,12 +212,20 @@ class TestBusSinkWiring:
         assert len(log.query("s1")) == 1
         log.close()
 
-    def test_no_sink_preserves_fast_path(self):
+    def test_no_sink_skips_dispatch_but_still_records(self):
+        """No subscribers and no sinks: dispatch is skipped, history is not.
+
+        This asserted `get_history() == []`, which contradicted
+        test_event_history and friends in test_event_bus.py. get_history() is
+        documented as "Get recent event history" with no subscriber caveat, and
+        an event log that only records while someone is watching cannot be used
+        for the auditing it exists for. The fast path still avoids subscriber
+        matching and dispatch; only the O(1) append to a capped list remains.
+        """
         bus = EventBus()
-        # No subscribers, no sinks: publish returns an event, stores nothing.
         ev = bus.publish("custom", {"session_id": "s1"})
         assert ev.type == "custom"
-        assert bus.get_history() == []
+        assert [e.type for e in bus.get_history()] == ["custom"]
 
     def test_sink_failure_never_breaks_publish(self):
         bus = EventBus()
