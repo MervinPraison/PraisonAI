@@ -14,7 +14,7 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from praisonaiagents._logging import get_logger
 import asyncio
 import contextvars
@@ -210,6 +210,44 @@ def _pop_handoff() -> Optional[str]:
 def _clear_handoff_chain() -> None:
     """Clear the handoff chain."""
     _handoff_chain_var.set([])
+
+
+# Serializes lazy creation of each target agent's ``_handoff_seed_lock`` so two
+# threads that make the first concurrent handoff to the same target observe the
+# same lock object (double-checked locking) instead of each minting — and then
+# seeding under — its own, which would defeat the per-target serialization.
+_HANDOFF_SEED_LOCK_INIT_GUARD = threading.Lock()
+
+
+def _get_handoff_seed_lock(agent: 'Agent') -> 'DualLock':
+    """Return a per-target-agent lock serializing handoff history seeding.
+
+    Concurrent handoffs (e.g. ``parallel_handoffs``) can target the *same*
+    agent object. ``_seed_target_history`` mutates that shared instance's
+    ``chat_history`` in place, so overlapping seeds would interleave and leak
+    one caller's prior context into another's. Serializing per target agent
+    keeps each seeded chat call atomic without changing the public API.
+
+    Creation is serialized through a module-level guard (double-checked locking)
+    so racing first-handoffs to the same target can't each create a distinct
+    lock and seed concurrently.
+    """
+    from .async_safety import DualLock
+    lock = getattr(agent, '_handoff_seed_lock', None)
+    if lock is None:
+        with _HANDOFF_SEED_LOCK_INIT_GUARD:
+            lock = getattr(agent, '_handoff_seed_lock', None)
+            if lock is None:
+                lock = DualLock()
+                try:
+                    agent._handoff_seed_lock = lock
+                except Exception:
+                    # Target can't hold the attribute (e.g. __slots__). Return a
+                    # transient lock; correctness for that exotic case is no
+                    # worse than before, and the common path is fully guarded.
+                    pass
+    return lock
+
 
 @dataclass
 class HandoffInputData:
@@ -470,6 +508,31 @@ class Handoff:
                     return value
         return 'gpt-4o-mini'
 
+    def _apply_seed(self, prior_messages: Optional[List[Any]]):
+        """Prepend ``prior_messages`` to the target's ``chat_history``.
+
+        Returns ``(seeded, original)`` where ``original`` is the list to restore
+        on exit and ``seeded`` indicates a restore is needed. Callers MUST hold
+        the per-agent seed lock around this + the chat call + ``_restore_seed``.
+        """
+        existing = getattr(self.agent, 'chat_history', None)
+        if not prior_messages or not isinstance(existing, list):
+            return False, None
+        try:
+            prior = list(prior_messages)
+        except TypeError:
+            return False, None
+        original = existing
+        # Avoid re-seeding if the context is already at the head.
+        if existing[:len(prior)] != prior:
+            self.agent.chat_history = prior + existing
+        return True, original
+
+    def _restore_seed(self, seeded: bool, original: Optional[List[Any]]) -> None:
+        """Restore the target's original ``chat_history`` after a seeded call."""
+        if seeded:
+            self.agent.chat_history = original
+
     @contextmanager
     def _seed_target_history(self, prior_messages: Optional[List[Any]]):
         """Temporarily seed the filtered handoff context onto the target agent.
@@ -483,25 +546,49 @@ class Handoff:
         restored on exit. This keeps handoff context from leaking into later
         handoffs or ordinary chats that reuse the same target agent, and stops the
         target prompt from growing across sequential handoffs.
-        No shared mutable state is retained between agents.
+
+        Because ``chat_history`` is shared mutable state on the target agent,
+        concurrent handoffs to the *same* target (e.g. via ``parallel_handoffs``)
+        would otherwise interleave and corrupt each other's context. The seed +
+        chat call are serialized per target agent via a ``DualLock`` so each
+        seeded turn stays atomic. This is the synchronous variant.
         """
-        existing = getattr(self.agent, 'chat_history', None)
-        if not prior_messages or not isinstance(existing, list):
-            yield
-            return
-        try:
-            prior = list(prior_messages)
-        except TypeError:
-            yield
-            return
-        original = existing
-        try:
-            # Avoid re-seeding if the context is already at the head.
-            if existing[:len(prior)] != prior:
-                self.agent.chat_history = prior + existing
-            yield
-        finally:
-            self.agent.chat_history = original
+        lock = _get_handoff_seed_lock(self.agent)
+        with lock.sync():
+            seeded, original = self._apply_seed(prior_messages)
+            try:
+                yield
+            finally:
+                self._restore_seed(seeded, original)
+
+    @asynccontextmanager
+    async def _seed_target_history_async(self, prior_messages: Optional[List[Any]]):
+        """Async variant of :meth:`_seed_target_history`.
+
+        Uses the per-target-agent lock's async side so overlapping awaited
+        handoffs to the same agent serialize on the event loop instead of
+        blocking it, keeping each seeded ``achat`` turn atomic.
+
+        ``DualLock`` keeps its sync (threading ``RLock``) and async (per-loop
+        ``asyncio.Lock``) sides independent, so the async lock alone would NOT
+        exclude a concurrent *synchronous* handoff running on another thread —
+        both could seed/restore the same shared ``chat_history`` at once, and a
+        cross-thread sync seed landing *between* our apply and restore would
+        corrupt the awaited turn. To close that gap we ALSO hold the sync
+        thread-lock for the whole seeded turn. The async lock (acquired first)
+        has already serialized every same-loop async handoff to this target, so
+        the thread-lock here only ever contends with a genuine cross-thread sync
+        handoff to the same agent — exactly the case that must be mutually
+        excluded — which is a rare mixed sync+async fan-out to one shared target.
+        """
+        lock = _get_handoff_seed_lock(self.agent)
+        async with lock.async_lock():
+            with lock.sync():
+                seeded, original = self._apply_seed(prior_messages)
+                try:
+                    yield
+                finally:
+                    self._restore_seed(seeded, original)
 
     def _execute_with_runtime_resolution(
         self, 
@@ -538,7 +625,7 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
-        with self._seed_target_history(prior_messages):
+        async with self._seed_target_history_async(prior_messages):
             async_chat = getattr(self.agent, 'achat', None)
             if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
                 return await async_chat(prompt, tools=effective_tools)

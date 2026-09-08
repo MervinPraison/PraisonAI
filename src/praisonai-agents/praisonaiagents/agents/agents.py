@@ -30,6 +30,11 @@ try:
 except ImportError:
     run_coroutine_safely = None
 
+# Guards lazy creation of each AgentTeam's per-instance _run_lock so two threads
+# that first reach start()/astart() concurrently observe the same lock object
+# (double-checked locking) rather than each minting and acquiring its own.
+_RUN_LOCK_INIT_GUARD = threading.Lock()
+
 # Task status constants
 class TaskStatus(Enum):
     """Enumeration for task status values to ensure consistency"""
@@ -1976,6 +1981,60 @@ class AgentTeam(SpawnAnnounceProtocol):
         finally:
             self._tools_scope_depths.reset(token)
 
+    @property
+    def _execution_lock(self):
+        """Lazily-created re-entrancy lock for start()/astart() (zero overhead until used).
+
+        AgentTeam shares its Task objects and its ``tasks`` dict (aliased, not
+        copied, by ``Process.__init__``) plus instance attributes like
+        ``_last_real_task_id`` across every run. Concurrent runs on the same
+        instance would interleave task status transitions, duplicate
+        ``previous_tasks`` entries, and swap results between callers, so refuse
+        re-entrancy loudly instead of corrupting shared state. Mirrors the guard
+        already used by Workflow. Creation is serialized through a module-level
+        guard (double-checked locking) so two threads racing into start()/astart()
+        observe the same lock object.
+        """
+        lock = getattr(self, '_run_lock', None)
+        if lock is None:
+            with _RUN_LOCK_INIT_GUARD:
+                lock = getattr(self, '_run_lock', None)
+                if lock is None:
+                    lock = threading.Lock()
+                    self._run_lock = lock
+        return lock
+
+    @contextlib.contextmanager
+    def _guard_execution(self):
+        """Refuse concurrent runs on the same instance, re-entrant for one owner.
+
+        A plain non-reentrant ``threading.Lock`` would deadlock when a batch
+        (``start_for_each``) holds the guard for its whole lifecycle and then
+        calls ``start()`` per item. Track the owning thread so nested runs on the
+        *same* thread (batch → item) pass through, while a genuinely concurrent
+        run from a *different* thread is rejected loudly. ``start_for_each`` needs
+        to hold the guard across the whole batch so its shared-state mutations
+        (``variables``/task snapshot) can never interleave with a competing run.
+        """
+        lock = self._execution_lock
+        current = threading.get_ident()
+        if getattr(self, '_run_owner_ident', None) == current:
+            # Re-entrant on the owning thread (e.g. batch → per-item start()).
+            yield
+            return
+        if not lock.acquire(blocking=False):
+            raise RuntimeError(
+                "This AgentTeam instance is already running; an AgentTeam is not "
+                "safe to run concurrently on the same object. Create a separate "
+                "AgentTeam/PraisonAIAgents instance per concurrent run."
+            )
+        self._run_owner_ident = current
+        try:
+            yield
+        finally:
+            self._run_owner_ident = None
+            lock.release()
+
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
         
@@ -1990,6 +2049,15 @@ class AgentTeam(SpawnAnnounceProtocol):
             with self._shared_tools_scope():
                 return await self.astart(content=content, return_dict=return_dict, **kwargs)
 
+        # Refuse concurrent re-entrancy: shared Task/tasks state is not safe to
+        # run twice at once on the same instance. Acquired after the tools-scope
+        # recursion so the re-invocation (not this outer frame) holds the lock.
+        # Re-entrant on the owning thread so batch runs (astart_for_each) can hold
+        # the guard across the whole batch while still calling astart() per item.
+        with self._guard_execution():
+            return await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+
+    async def _astart_impl(self, content=None, return_dict=False, **kwargs):
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True, async_mode=True)
@@ -2268,6 +2336,16 @@ class AgentTeam(SpawnAnnounceProtocol):
                 return self.start(content=content, return_dict=return_dict,
                                   output=output, **kwargs)
 
+        # Refuse concurrent re-entrancy: shared Task/tasks state is not safe to
+        # run twice at once on the same instance. Acquired after the tools-scope
+        # recursion so the re-invocation (not this outer frame) holds the lock.
+        # Re-entrant on the owning thread so batch runs (start_for_each) can hold
+        # the guard across the whole batch while still calling start() per item.
+        with self._guard_execution():
+            return self._start_impl(content=content, return_dict=return_dict,
+                                    output=output, **kwargs)
+
+    def _start_impl(self, content=None, return_dict=False, output=None, **kwargs):
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True)
@@ -2592,27 +2670,32 @@ class AgentTeam(SpawnAnnounceProtocol):
                 )
 
         batch_id = f"batch_{uuid.uuid4().hex[:12]}"
-        saved_variables = self.variables
-        task_snapshot = self._snapshot_task_state()
-        items = []
-        try:
-            for index, item_input in enumerate(inputs):
-                result = {"index": index, "input": item_input, "success": False,
-                          "output": None, "error": None}
-                try:
-                    item_vars = self._validate_batch_input(item_input, index)
-                    self.variables = {**saved_variables, **item_vars}
-                    self._reset_task_state_for_item()
-                    result["output"] = self.start(output=output, **kwargs)
-                    result["success"] = True
-                except Exception as exc:  # noqa: BLE001
-                    if on_error == "fail_fast":
-                        raise
-                    result["error"] = str(exc)
-                items.append(result)
-        finally:
-            self.variables = saved_variables
-            self._restore_task_state(task_snapshot)
+        # Hold the execution guard for the WHOLE batch so the per-item
+        # self.variables / task-state mutations below can never interleave with a
+        # competing run on another thread. The per-item start() re-enters the
+        # guard on this same thread (see _guard_execution) rather than deadlocking.
+        with self._guard_execution():
+            saved_variables = self.variables
+            task_snapshot = self._snapshot_task_state()
+            items = []
+            try:
+                for index, item_input in enumerate(inputs):
+                    result = {"index": index, "input": item_input, "success": False,
+                              "output": None, "error": None}
+                    try:
+                        item_vars = self._validate_batch_input(item_input, index)
+                        self.variables = {**saved_variables, **item_vars}
+                        self._reset_task_state_for_item()
+                        result["output"] = self.start(output=output, **kwargs)
+                        result["success"] = True
+                    except Exception as exc:  # noqa: BLE001
+                        if on_error == "fail_fast":
+                            raise
+                        result["error"] = str(exc)
+                    items.append(result)
+            finally:
+                self.variables = saved_variables
+                self._restore_task_state(task_snapshot)
 
         return self._build_batch_result(batch_id, items)
 
@@ -2635,27 +2718,31 @@ class AgentTeam(SpawnAnnounceProtocol):
                 )
 
         batch_id = f"batch_{uuid.uuid4().hex[:12]}"
-        saved_variables = self.variables
-        task_snapshot = self._snapshot_task_state()
-        items = []
-        try:
-            for index, item_input in enumerate(inputs):
-                result = {"index": index, "input": item_input, "success": False,
-                          "output": None, "error": None}
-                try:
-                    item_vars = self._validate_batch_input(item_input, index)
-                    self.variables = {**saved_variables, **item_vars}
-                    self._reset_task_state_for_item()
-                    result["output"] = await self.astart(**kwargs)
-                    result["success"] = True
-                except Exception as exc:  # noqa: BLE001
-                    if on_error == "fail_fast":
-                        raise
-                    result["error"] = str(exc)
-                items.append(result)
-        finally:
-            self.variables = saved_variables
-            self._restore_task_state(task_snapshot)
+        # Hold the execution guard across the whole batch (see start_for_each).
+        # astart_for_each runs items sequentially on this event-loop thread, so
+        # the per-item astart() re-enters the guard on the same thread ident.
+        with self._guard_execution():
+            saved_variables = self.variables
+            task_snapshot = self._snapshot_task_state()
+            items = []
+            try:
+                for index, item_input in enumerate(inputs):
+                    result = {"index": index, "input": item_input, "success": False,
+                              "output": None, "error": None}
+                    try:
+                        item_vars = self._validate_batch_input(item_input, index)
+                        self.variables = {**saved_variables, **item_vars}
+                        self._reset_task_state_for_item()
+                        result["output"] = await self.astart(**kwargs)
+                        result["success"] = True
+                    except Exception as exc:  # noqa: BLE001
+                        if on_error == "fail_fast":
+                            raise
+                        result["error"] = str(exc)
+                    items.append(result)
+            finally:
+                self.variables = saved_variables
+                self._restore_task_state(task_snapshot)
 
         return self._build_batch_result(batch_id, items)
 

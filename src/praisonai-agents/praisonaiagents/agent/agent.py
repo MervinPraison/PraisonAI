@@ -7849,8 +7849,25 @@ Answer:"""
         except Exception as e:
             logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
 
+        # Approval scope cleanup — evict this agent's process-global approval
+        # grants (skill auto-approvals + "this session" decisions) keyed by the
+        # per-instance _approval_scope_id, which never repeats and is otherwise
+        # never removed. Prevents unbounded growth in per-request/session agents.
+        self._release_approval_scope()
+
         # Always set closed flag
         self._closed = True
+
+    def _release_approval_scope(self) -> None:
+        """Drop this agent's approval-registry grants (best-effort)."""
+        scope_id = getattr(self, '_approval_scope_id', None)
+        if not scope_id:
+            return
+        try:
+            from ..approval import get_approval_registry
+            get_approval_registry().release_scope(scope_id)
+        except Exception as e:
+            logger.warning(f"Approval scope cleanup failed: {e}")
     
     async def aclose(self) -> None:
         """Async version of close() for async context managers."""
@@ -7912,7 +7929,10 @@ Answer:"""
                         lambda: self._tool_executor.shutdown(wait=False)
                     )
                 delattr(self, '_tool_executor')
-            
+
+            # Approval scope cleanup (see close()).
+            self._release_approval_scope()
+
             self._closed = True
             
         except Exception as e:
@@ -7973,6 +7993,11 @@ Answer:"""
                         logging.debug(
                             f"Failed to cleanup artifacts for agent {self.name}: {e}"
                         )
+
+                # Evict this agent's process-global approval grants so a
+                # per-request/session agent that is only ever GC'd (never
+                # close()'d) does not leak registry entries forever.
+                self._release_approval_scope()
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):
