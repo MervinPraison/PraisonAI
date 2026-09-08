@@ -15,8 +15,18 @@ class HookEvent(str, Enum):
     
     This enum is also aliased as PluginHook for backward compatibility.
     All plugin lifecycle events are included here for DRY compliance.
+
+    Invariant: every member declared here must have a real emission site, or be
+    an explicit alias of a member that does. A member that is neither makes
+    ``registry.on(HookEvent.X)`` succeed and then never fire -- silence on a
+    plausible-looking registration. ``BEFORE_MESSAGE``, ``AFTER_MESSAGE`` and
+    ``TOOL_RESULT_PERSIST`` are aliases (same value => same member); everything
+    else is emitted somewhere in the monorepo, which
+    ``tests/unit/hooks/test_dead_hook_events.py`` enforces.
     """
-    # Plugin/System lifecycle
+    # Plugin/System lifecycle. Emitted by ``PluginManager.register()`` /
+    # ``PluginManager.unregister()`` so an observability plugin can watch the
+    # plugin set change at runtime (payload: ``PluginLifecycleInput``).
     ON_INIT = "on_init"
     ON_SHUTDOWN = "on_shutdown"
     
@@ -57,12 +67,20 @@ class HookEvent(str, Enum):
     ON_RETRY = "on_retry"
     
     # Message lifecycle (for bot/channel integrations)
-    BEFORE_MESSAGE = "before_message"
-    AFTER_MESSAGE = "after_message"
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_SENDING = "message_sending"
     MESSAGE_SENT = "message_sent"
     MESSAGE_UNDELIVERED = "message_undelivered"  # Reply permanently undeliverable
+    # ``BEFORE_MESSAGE``/``AFTER_MESSAGE`` are *aliases* of the two live events
+    # above, not separate slots. The plugin-facing method names
+    # ``Plugin.before_message`` / ``Plugin.after_message`` have always routed to
+    # MESSAGE_RECEIVED / MESSAGE_SENDING (see ``plugins/manager.py``), so an
+    # identically named enum member that nothing emitted meant the obvious
+    # registration -- ``@registry.on(HookEvent.BEFORE_MESSAGE)`` -- was silently
+    # never called. Same value => same enum member => the registration lands on
+    # the event that is actually emitted.
+    BEFORE_MESSAGE = "message_received"
+    AFTER_MESSAGE = "message_sending"
     
     # Gateway lifecycle
     GATEWAY_START = "gateway_start"
@@ -72,8 +90,13 @@ class HookEvent(str, Enum):
     BEFORE_COMPACTION = "before_compaction"
     AFTER_COMPACTION = "after_compaction"
     
-    # Tool result persistence (for modifying tool results before storage)
-    TOOL_RESULT_PERSIST = "tool_result_persist"
+    # Tool result persistence (for modifying tool results before storage).
+    # Alias of AFTER_TOOL: that hook already receives the tool result *before*
+    # it is written into the conversation and its in-place rewrite of
+    # ``tool_output`` is what gets stored (see ``agent/tool_execution.py``).
+    # There is no second persistence chokepoint, so a distinct member could
+    # only ever be dead.
+    TOOL_RESULT_PERSIST = "after_tool"
     
     # Permission/Config/Auth hooks
     ON_PERMISSION_ASK = "on_permission_ask"
@@ -99,11 +122,51 @@ class HookEvent(str, Enum):
     KANBAN_TASK_BLOCKED = "kanban_task_blocked"
     KANBAN_TASK_FAILED = "kanban_task_failed"
 
-    # Claude Code parity events
-    USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
-    NOTIFICATION = "notification"              # When notification is sent
-    SUBAGENT_STOP = "subagent_stop"           # When subagent completes
-    SETUP = "setup"                           # On initialization/maintenance
+    # Claude Code parity events.
+    # Emitted when a subagent spawned via ``spawn_subagent`` reaches a terminal
+    # state -- synchronous, background, success or failure
+    # (see ``tools/subagent_tool.py``; payload: ``SubagentStopInput``).
+    SUBAGENT_STOP = "subagent_stop"
+    #
+    # USER_PROMPT_SUBMIT / NOTIFICATION / SETUP used to be declared here. They
+    # were aspirational Claude-Code parity names with no emission site anywhere
+    # in this codebase, and registering on one succeeded and then never fired.
+    # They are deliberately NOT aliases:
+    #   * ``user_prompt_submit`` is not BEFORE_AGENT -- BEFORE_AGENT also fires
+    #     for internal/sub-agent invocations no user ever submitted, so an
+    #     alias would over-report rather than report.
+    #   * there is no notification subsystem to fire ``notification`` from.
+    #   * ``setup`` never had a defined meaning at all.
+    # Removing them turns a silent no-op into a loud AttributeError (attribute
+    # form) or ValueError listing the valid events (string form).
+
+    @classmethod
+    def _missing_(cls, value):
+        """Resolve legacy string values whose member is now an alias.
+
+        Aliasing ``BEFORE_MESSAGE = "message_received"`` makes the *attribute*
+        work, but drops ``"before_message"`` from the value lookup table -- so
+        ``HookEvent("before_message")`` (hooks config files, ``add_hook()``
+        with a string) would start raising. Map the historical values onto the
+        live members instead, so both spellings reach the same emitted event.
+
+        Anything else still raises ``ValueError``: the removed events
+        (``user_prompt_submit``, ``notification``, ``setup``) must fail loudly.
+        """
+        if isinstance(value, str):
+            legacy = _LEGACY_EVENT_VALUES.get(value)
+            if legacy is not None:
+                return cls(legacy)
+        return None
+
+
+# Historical ``HookEvent`` values that are now aliases of a live event.
+# Kept resolvable so existing string-based registrations keep working.
+_LEGACY_EVENT_VALUES = {
+    "before_message": "message_received",
+    "after_message": "message_sending",
+    "tool_result_persist": "after_tool",
+}
 
 
 # Decision types for hook outputs
