@@ -207,6 +207,31 @@ class SQLiteKanbanStore:
         """Generate unique task ID."""
         return f"task_{uuid.uuid4().hex[:12]}"
 
+    def _emit_hook(self, event: str, task_id: str, **payload: Any) -> None:
+        """Emit a kanban lifecycle hook event for a committed transition.
+
+        The store is the single chokepoint every writer goes through (CLI,
+        agent tools, the gateway dispatcher, the HTTP API and the UI), so it is
+        where ``HookEvent.KANBAN_TASK_*`` subscribers are actually served.
+
+        Call this *after* the transaction commits: a subscriber must never see
+        a state that a later rollback erases, and must never hold the write
+        lock. Best-effort by contract -- a missing hooks package or a raising
+        subscriber never fails the board write that produced the event.
+        """
+        try:
+            from praisonaiagents.hooks import fire_hook
+        except Exception:  # praisonaiagents not installed / too old
+            return
+        try:
+            fire_hook(event, {
+                'task_id': task_id,
+                'board': self.board or 'default',
+                **payload,
+            })
+        except Exception as e:  # noqa: BLE001 - observability is never fatal
+            _logger.debug("kanban hook %s for %s failed (non-fatal): %s", event, task_id, e)
+
     def _log_event(self, conn: sqlite3.Connection, task_id: str, event_type: str, data: Dict[str, Any]):
         """Log audit event."""
         event_id = f"event_{uuid.uuid4().hex[:12]}"
@@ -391,6 +416,16 @@ class SQLiteKanbanStore:
 
             self._log_event(conn, task_id, 'created', task.to_dict())
 
+        # Committed: a KANBAN_TASK_CREATED subscriber now sees a real task.
+        # Deliberately unreachable from the idempotent-replay returns above,
+        # which create nothing and so must not announce a creation.
+        self._emit_hook(
+            'kanban_task_created', task_id,
+            status=task.status.value,
+            to_status=task.status.value,
+            assignee=task.assignee or None,
+            task=task.to_dict(),
+        )
         return task
 
     def get_task(self, task_id: str) -> Optional[Task]:
@@ -596,8 +631,32 @@ class SQLiteKanbanStore:
                 'old_status': task.status.value,
                 'new_status': status
             })
-            
-            return updated_task
+            old_status = task.status.value
+
+        # Committed. Every status change announces KANBAN_TASK_MOVED; the two
+        # terminal-ish destinations also announce their dedicated event so a
+        # plugin can subscribe to just "done" or just "blocked".
+        self._emit_hook(
+            'kanban_task_moved', task_id,
+            status=status, from_status=old_status, to_status=status,
+            assignee=updated_task.assignee or None,
+            task=updated_task.to_dict(),
+        )
+        if new_status == TaskStatus.DONE:
+            self._emit_hook(
+                'kanban_task_done', task_id,
+                status=status, from_status=old_status, to_status=status,
+                assignee=updated_task.assignee or None,
+                task=updated_task.to_dict(),
+            )
+        elif new_status == TaskStatus.BLOCKED:
+            self._emit_hook(
+                'kanban_task_blocked', task_id,
+                status=status, from_status=old_status, to_status=status,
+                assignee=updated_task.assignee or None,
+                task=updated_task.to_dict(),
+            )
+        return updated_task
 
     def recompute_ready(self) -> List[str]:
         """Promote dependent tasks to 'ready' once all parents are terminal.
@@ -664,6 +723,10 @@ class SQLiteKanbanStore:
                     })
                     promoted.append(task_id)
 
+        # No KANBAN_TASK_MOVED emitted here on purpose: recompute_ready is
+        # dispatcher-private machinery and KanbanDispatcher._promote_ready
+        # announces each promotion itself (with the task body attached).
+        # Emitting from both layers would deliver every promotion twice.
         return promoted
 
     def get_ready_children(self, parent_id: str) -> List[str]:
@@ -897,15 +960,24 @@ class SQLiteKanbanStore:
                 now.isoformat(), now.isoformat(), task_id,
             ))
             
-            if result.rowcount > 0:
+            claimed = result.rowcount > 0
+            if claimed:
                 self._log_event(conn, task_id, 'claimed', {
                     'worker_id': worker_id,
                     'worker_pid': worker_pid,
                     'claim_expires': expires.isoformat(),
                 })
-                return True
-            
-            return False
+
+        # Only a *won* CAS is a claim; the loser of a race announces nothing.
+        if claimed:
+            self._emit_hook(
+                'kanban_task_claimed', task_id,
+                status='running', from_status='ready', to_status='running',
+                assignee=worker_id,
+                worker_pid=worker_pid,
+                claim_expires=expires.isoformat(),
+            )
+        return claimed
 
     def heartbeat(
         self,
@@ -1005,6 +1077,7 @@ class SQLiteKanbanStore:
         """
         from datetime import timezone, timedelta
         reclaimed: List[str] = []
+        reclaim_details: Dict[str, Dict[str, Any]] = {}
         now = datetime.now(timezone.utc)
 
         def _parse(value: Any) -> Optional[datetime]:
@@ -1062,12 +1135,25 @@ class SQLiteKanbanStore:
 
                 if result.rowcount > 0:
                     reclaimed.append(row['id'])
-                    self._log_event(conn, row['id'], 'reclaimed', {
+                    reason = 'dead' if not worker_alive else 'stale_heartbeat'
+                    reclaim_details[row['id']] = {
                         'worker_id': row['claim_lock'],
                         'worker_pid': pid,
-                        'reason': 'dead' if not worker_alive else 'stale_heartbeat',
-                    })
+                        'reason': reason,
+                    }
+                    self._log_event(conn, row['id'], 'reclaimed', reclaim_details[row['id']])
 
+        # Reclamation is a real running -> ready transition, so it announces
+        # KANBAN_TASK_MOVED like any other move (tagged with why it happened).
+        for task_id in reclaimed:
+            detail = reclaim_details.get(task_id, {})
+            self._emit_hook(
+                'kanban_task_moved', task_id,
+                status='ready', from_status='running', to_status='ready',
+                assignee=detail.get('worker_id'),
+                reclaimed=True,
+                reason=detail.get('reason'),
+            )
         return reclaimed
 
     # ------------------------------------------------------------------
@@ -1252,7 +1338,31 @@ class SQLiteKanbanStore:
                     'consecutive_failures': failures,
                     'max_retries': limit,
                 })
-            return blocked
+            old_status = row['status'] or ''
+
+        # Committed. Every recorded attempt failure announces KANBAN_TASK_FAILED;
+        # tripping the circuit breaker additionally moves the task to 'blocked'
+        # in-place (it does not route through move_task), so announce that too.
+        self._emit_hook(
+            'kanban_task_failed', task_id,
+            status='blocked' if blocked else old_status,
+            from_status=old_status,
+            to_status='blocked' if blocked else old_status,
+            consecutive_failures=failures,
+            max_retries=limit,
+            circuit_broken=blocked,
+            error=(error or '')[:500],
+        )
+        if blocked:
+            self._emit_hook(
+                'kanban_task_blocked', task_id,
+                status='blocked', from_status=old_status, to_status='blocked',
+                consecutive_failures=failures,
+                max_retries=limit,
+                circuit_broken=True,
+                error=(error or '')[:500],
+            )
+        return blocked
 
     def get_retry_context(self, task_id: str) -> List[Dict[str, Any]]:
         """Prior attempts' outcomes/summaries/errors for a retrying worker.

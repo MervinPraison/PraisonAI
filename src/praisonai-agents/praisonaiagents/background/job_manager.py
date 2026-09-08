@@ -206,7 +206,46 @@ class BackgroundJobManager:
         # and first run still leaves a recoverable trace (reconciled as LOST).
         self._persist(job_info)
         
+        def _emit_job_completed() -> None:
+            """Emit the JOB_COMPLETED hook for a job that reached a terminal state.
+
+            Fired for every background job, not only the ones carrying a
+            ``deliver`` target: ``on_complete`` is a delivery callback the
+            gateway may or may not install, whereas ``HookEvent.JOB_COMPLETED``
+            is the observability contract plugins subscribe to. Best-effort --
+            a missing hooks package or a raising subscriber never affects the
+            job's own result.
+            """
+            with self._lock:
+                info = self._jobs.get(job_id)
+            if info is None:
+                return
+            try:
+                from praisonaiagents.hooks import fire_hook
+
+                fire_hook(
+                    "job_completed",
+                    {
+                        "job_id": info.job_id,
+                        "status": getattr(info.status, "value", str(info.status)),
+                        "result": info.result,
+                        "error": info.error,
+                        "agent_name": "background",
+                        "session_id": str(info.origin.get("session_id", "") or ""),
+                        "deliver": str(info.origin.get("deliver", "") or ""),
+                        "platform": str(info.origin.get("platform", "") or ""),
+                        "chat_id": str(info.origin.get("chat_id", "") or ""),
+                        "thread_id": str(info.origin.get("thread_id", "") or ""),
+                    },
+                )
+            except Exception as e:  # noqa: BLE001 - observability must not break the job
+                logger.debug(
+                    "JOB_COMPLETED hook emit for job %s failed (non-fatal): %s",
+                    job_id, e,
+                )
+
         def _fire_complete() -> None:
+            _emit_job_completed()
             if on_complete is None:
                 return
             with self._lock:
