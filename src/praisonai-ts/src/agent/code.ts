@@ -444,30 +444,56 @@ export function createSubprocessExecutor(
     }
 
     const { spawn } = await import('child_process');
-    const truncate = (text: string) =>
-      text.length > context.maxOutputLength ? text.slice(0, context.maxOutputLength) : text;
+    const limit = context.maxOutputLength;
 
     return await new Promise<CodeExecutionResult>((resolve) => {
+      // `detached` puts the child in its own process group so a timeout can
+      // signal the whole tree (negative pid), not just the interpreter. Runners
+      // like `bash -c` and `sh -c` spawn descendants that would otherwise
+      // outlive the timeout and keep consuming host resources.
       const child = spawn(interpreter.command, [...interpreter.args, code], {
         cwd: context.workingDirectory,
         env: { ...process.env, ...context.environment },
+        detached: process.platform !== 'win32',
       });
 
+      // Output is capped as it arrives, not after the process closes: a program
+      // that prints without pause could otherwise buffer unbounded data and
+      // exhaust host memory before the timeout or the final truncation ran.
+      // One extra character past the limit is retained only as a "was
+      // truncated" marker, then sliced back on settle.
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      const capped = (buf: string, chunk: string) =>
+        buf.length > limit ? buf : buf + chunk;
+
+      const killTree = (signal: NodeJS.Signals) => {
+        if (child.pid !== undefined && process.platform !== 'win32') {
+          try {
+            process.kill(-child.pid, signal);
+            return;
+          } catch {
+            // Group already gone or never created; fall back to the child.
+          }
+        }
+        child.kill(signal);
+      };
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGKILL');
+        killTree('SIGKILL');
       }, context.timeout * 1000);
 
       child.stdout?.on('data', (chunk) => {
-        stdout += String(chunk);
+        stdout = capped(stdout, String(chunk));
       });
       child.stderr?.on('data', (chunk) => {
-        stderr += String(chunk);
+        stderr = capped(stderr, String(chunk));
       });
+
+      const truncate = (text: string) =>
+        text.length > limit ? text.slice(0, limit) : text;
 
       const settle = (exitCode: number, error?: string) => {
         clearTimeout(timer);

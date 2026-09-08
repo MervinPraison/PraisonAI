@@ -73,9 +73,12 @@ export interface EmbeddingAgentConfig {
 // Default Configuration
 // ============================================================================
 
-const DEFAULT_EMBEDDING_CONFIG: Required<EmbeddingConfig> = {
+// `dimensions` is deliberately absent: leaving it undefined means "use the
+// model's native size", and it is only forwarded to the provider when a caller
+// asks for a specific value. Defaulting it to 1536 here would silently request
+// a truncation for every model, including ones whose native size differs.
+const DEFAULT_EMBEDDING_CONFIG: Omit<Required<EmbeddingConfig>, 'dimensions'> = {
   model: 'text-embedding-3-small',
-  dimensions: 1536,
   batchSize: 100,
   timeout: 60,
 };
@@ -107,7 +110,7 @@ export class EmbeddingAgent {
   readonly name: string;
   private readonly model: string;
   private readonly verbose: boolean;
-  private readonly embeddingConfig: Required<EmbeddingConfig>;
+  private readonly embeddingConfig: EmbeddingConfig;
 
   constructor(config: EmbeddingAgentConfig) {
     this.name = config.name || 'EmbeddingAgent';
@@ -120,6 +123,17 @@ export class EmbeddingAgent {
     } else {
       this.embeddingConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config.embedding };
     }
+  }
+
+  /**
+   * Options forwarded to the embedding provider. `dimensions` is included only
+   * when a caller configured one, so a default model keeps its native size and
+   * the provider call is not padded with a value it may reject.
+   */
+  private embedOptions(): { model: string; dimensions?: number } {
+    return this.embeddingConfig.dimensions === undefined
+      ? { model: this.model }
+      : { model: this.model, dimensions: this.embeddingConfig.dimensions };
   }
 
   private log(message: string): void {
@@ -143,7 +157,7 @@ export class EmbeddingAgent {
     // them was noise that looked like a successful result. There is no random
     // fallback: if the provider cannot be reached the error propagates.
     const { embed: embedAsync } = await import('../llm/embeddings');
-    const result = await embedAsync(text, { model: this.model });
+    const result = await embedAsync(text, this.embedOptions());
 
     return {
       embedding: result.embedding,
@@ -166,7 +180,7 @@ export class EmbeddingAgent {
     // One batched provider call rather than N sequential ones. Same honesty
     // rule as embed(): a provider failure throws, it never degrades to noise.
     const { embedMany: embedManyAsync } = await import('../llm/embeddings');
-    const result = await embedManyAsync(texts, { model: this.model });
+    const result = await embedManyAsync(texts, this.embedOptions());
 
     return {
       embeddings: result.embeddings,

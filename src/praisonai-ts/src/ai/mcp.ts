@@ -220,8 +220,13 @@ async function createNativeTransport(config: MCPTransportConfig): Promise<any> {
     }
     case 'sse': {
       const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
+      // `authProvider` is forwarded to the SDK so OAuth-protected servers can
+      // obtain and refresh credentials; dropping it here made every such
+      // connection fail. Cast: our narrow OAuthClientProvider is a structural
+      // subset of the SDK's, which is all the SDK reads from it.
       return new SSEClientTransport(new URL(config.url), {
         requestInit: config.headers ? { headers: config.headers } : undefined,
+        authProvider: config.authProvider as any,
       });
     }
     case 'http': {
@@ -230,6 +235,7 @@ async function createNativeTransport(config: MCPTransportConfig): Promise<any> {
       );
       return new StreamableHTTPClientTransport(new URL(config.url), {
         requestInit: config.headers ? { headers: config.headers } : undefined,
+        authProvider: config.authProvider as any,
       });
     }
     case 'websocket': {

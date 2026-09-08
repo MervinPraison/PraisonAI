@@ -446,10 +446,17 @@ export class PluginManager {
   /**
    * Load plugins from a directory.
    *
-   * Each `*.js`/`*.cjs`/`*.ts` file that is not prefixed with `_` is required
-   * and inspected for a `createPlugin` factory, a `plugin` export, or a default
-   * export -- the JavaScript analogue of Python's `create_plugin` convention.
-   * Python parity: `PluginManager.load_from_directory()`.
+   * Each candidate file that is not prefixed with `_` is loaded with
+   * synchronous `require()` and inspected for a `createPlugin` factory, a
+   * `plugin` export, or a default export -- the JavaScript analogue of Python's
+   * `create_plugin` convention. Python parity: `PluginManager.load_from_directory()`.
+   *
+   * Only formats `require()` can actually load are considered: `.js`, `.cjs`,
+   * and (under a TypeScript-aware runtime such as ts-node/ts-jest) `.ts`. ESM
+   * `.mjs` files are intentionally skipped rather than advertised and then
+   * failing to load: a synchronous CommonJS loader cannot import them, so
+   * counting them here would report a "load" that never happened. Ship ESM
+   * plugins transpiled to `.cjs`/`.js`.
    *
    * @returns Number of plugins loaded.
    */
@@ -472,7 +479,9 @@ export class PluginManager {
       if (entry.startsWith('_') || entry.endsWith('.d.ts')) {
         continue;
       }
-      if (!/\.(js|cjs|mjs|ts)$/.test(entry)) {
+      // `.mjs` is omitted on purpose: require() cannot load ESM, so accepting it
+      // would warn-and-skip every such file while still claiming to support it.
+      if (!/\.(js|cjs|ts)$/.test(entry)) {
         continue;
       }
 
