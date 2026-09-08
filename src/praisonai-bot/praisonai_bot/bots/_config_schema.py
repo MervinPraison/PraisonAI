@@ -11,7 +11,14 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -819,7 +826,14 @@ class GatewayConfigSchema(BaseModel):
     # Top-level fields for single-bot compatibility
     platform: Optional[str] = None
     token: Optional[str] = None
-    
+
+    # Set by the single-bot migration when a top-level ``platform:`` was
+    # declared. Credential-presence autofill uses it to refuse to bring up any
+    # *other* platform behind the operator's back (a ``platform: telegram``
+    # config must never start a Discord bot because ``DISCORD_BOT_TOKEN``
+    # happened to be exported).
+    _explicit_single_platform: Optional[str] = PrivateAttr(default=None)
+
     # Agent configuration (single or multiple)
     agent: Optional[AgentConfigSchema] = None
     agents: Optional[Dict[str, AgentConfigSchema]] = None
@@ -896,15 +910,36 @@ class GatewayConfigSchema(BaseModel):
                     ScheduleConfigSchema(**_spec)
                 except Exception as _e:
                     _log.warning("Ignoring invalid schedule %r: %s", _name, _e)
-        # Migrate single-bot format (platform + token at top level)
-        if self.platform and self.token and not self.channels:
+        # Migrate single-bot format (``platform:`` at top level).
+        #
+        # ``token:`` is deliberately NOT required here. Supplying the token via
+        # the environment (``export TELEGRAM_BOT_TOKEN=...``) is the documented
+        # way to run a single-bot ``bot.yaml``, and the old ``and self.token``
+        # guard dropped the declared platform entirely in that case — leaving
+        # ``channels`` empty so ``_autofill_channels_from_env`` below invented
+        # channels from whatever unrelated credentials happened to be in the
+        # environment. A config saying ``platform: telegram`` could therefore
+        # start a *Discord* bot with no warning. The declared platform now
+        # always wins, wherever its token comes from.
+        if self.platform and not self.channels:
+            declared_platform = self.platform.lower().strip()
+            token = self.token
+            if not token:
+                # No inline token: point the channel at the declared platform's
+                # own credential env var. This narrows nothing and widens
+                # nothing — it resolves exactly the variable this platform
+                # already documents, and an unset one degrades through the
+                # existing "channel skipped" path rather than silently
+                # switching platforms.
+                token = self._credential_env_ref(declared_platform)
             self.channels = {
-                self.platform: ChannelConfigSchema(
-                    platform=self.platform,
-                    token=self.token
+                declared_platform: ChannelConfigSchema(
+                    platform=declared_platform,
+                    token=token,
                 )
             }
-            
+            self._explicit_single_platform = declared_platform
+
         # Migrate BotOS platforms format to channels
         if self.platforms and not self.channels:
             for platform_name, platform_config in self.platforms.items():
@@ -1066,6 +1101,13 @@ class GatewayConfigSchema(BaseModel):
             return
 
         default_agent = self._default_agent_id()
+        # A single-bot config that names one ``platform:`` has *declared* what
+        # it wants to run. Auto-enabling a second platform from an unrelated
+        # credential that happens to be in the environment would silently widen
+        # the config beyond what the operator wrote, so it is refused — loudly,
+        # naming each platform that was skipped and how to opt in.
+        explicit_single = self._explicit_single_platform
+        skipped_for_explicit: List[str] = []
         for platform in platforms:
             key = platform.lower()
             if key in declared:
@@ -1077,6 +1119,9 @@ class GatewayConfigSchema(BaseModel):
             if not cred_vars:
                 continue
             if not all(os.environ.get(v) for v in cred_vars):
+                continue
+            if explicit_single is not None and key != explicit_single:
+                skipped_for_explicit.append(key)
                 continue
             self.channels[key] = ChannelConfigSchema(
                 platform=key,
@@ -1090,6 +1135,34 @@ class GatewayConfigSchema(BaseModel):
             logger.info(
                 "Auto-enabled channel %r from %s", key, cred_vars[0]
             )
+
+        if skipped_for_explicit:
+            logger.warning(
+                "Config declares 'platform: %s'; NOT auto-enabling %s despite "
+                "their credentials being present in the environment. The "
+                "declared platform wins. To run them too, list them under "
+                "'channels:' explicitly.",
+                explicit_single,
+                ", ".join(sorted(skipped_for_explicit)),
+            )
+
+    @staticmethod
+    def _credential_env_ref(platform: str) -> str:
+        """``"${ENV}"`` for a platform's primary credential var, else ``""``.
+
+        Used by the single-bot migration when ``platform:`` is declared without
+        an inline ``token:``. Resolves only the variable that *this* platform
+        already documents — it discovers nothing new from the environment.
+        """
+        try:
+            from ._registry import get_platform_credential_env
+
+            cred_vars = get_platform_credential_env(platform)
+        except Exception:
+            return ""
+        if not cred_vars:
+            return ""
+        return "${%s}" % cred_vars[0]
 
     def _register_adapter_refs(self) -> None:
         """Import & self-register any channel declaring an ``adapter:`` ref.

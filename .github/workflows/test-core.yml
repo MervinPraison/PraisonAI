@@ -91,11 +91,17 @@ jobs:
             extra_ignore: --ignore=tests/unit/cli/test_message_queue.py
           - shard: bots-gateway
             workdir: src/praisonai-bot
+            # tests/unit/test_bots_cli.py sat at the top level and was collected
+            # by no workflow at all, which is why a TypeError that made
+            # `praisonai bot slack` unstartable shipped unnoticed. Named
+            # explicitly rather than adding the whole top-level directory, which
+            # carries suites with pre-existing env-dependent failures.
             paths: >-
               tests/unit/bots/
               tests/unit/gateway/
               tests/unit/cli/
               tests/unit/daemon/
+              tests/unit/test_bots_cli.py
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
