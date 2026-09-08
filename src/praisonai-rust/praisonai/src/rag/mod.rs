@@ -7,6 +7,14 @@
 //! - `Citation` - Source citation
 //! - `SmartRetriever` - Intelligent document retrieval
 //!
+//! # Status
+//!
+//! `RAG::query` is **not implemented**. It returns an error rather than a
+//! result: it previously returned a fabricated answer, a fabricated chunk with
+//! a 0.95 confidence score and a fabricated citation, which a caller could not
+//! distinguish from real retrieval. The surrounding types (chunking, context
+//! packing, citation formatting) are real and usable.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -23,7 +31,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 // =============================================================================
 // CITATION
@@ -490,35 +498,27 @@ impl RAG {
     }
 
     /// Query the RAG pipeline (placeholder)
-    pub fn query(&self, question: &str) -> Result<RAGResult> {
-        // This is a placeholder - actual implementation would:
-        // 1. Retrieve relevant chunks from knowledge base
-        // 2. Build context from chunks
-        // 3. Generate answer with LLM
-        // 4. Extract citations
-
-        let context = ContextPack {
-            chunks: vec![ContextChunk::new(
-                "Sample retrieved content for the query.",
-                "knowledge_base",
-                0.95,
-            )],
-            total_tokens: 50,
-            query: question.to_string(),
-        };
-
-        let mut result = RAGResult::new(
-            format!("Answer to: {} (based on retrieved context)", question),
-            context,
-        );
-
-        result.add_citation(Citation::new(
-            "[1]",
-            "knowledge_base",
-            "Sample retrieved content",
-        ));
-
-        Ok(result)
+    pub fn query(&self, _question: &str) -> Result<RAGResult> {
+        // Retrieval is not implemented yet. This used to return Ok(..) with a
+        // fabricated answer ("Answer to: {question}"), a fabricated chunk
+        // ("Sample retrieved content for the query.") carrying a 0.95
+        // confidence score, and a fabricated citation pointing at
+        // "knowledge_base". A caller had no way to tell that apart from a real
+        // retrieval -- the score and the citation are exactly what one would
+        // inspect to decide whether to trust the answer.
+        //
+        // Failing is the honest answer until this does what its name says:
+        // 1. retrieve relevant chunks from the knowledge base
+        // 2. build context from those chunks
+        // 3. generate an answer with the LLM
+        // 4. extract real citations
+        Err(Error::Config(
+            "RAG::query is not implemented: retrieval, generation and citation \
+             are all unbuilt. It previously returned a fabricated answer with a \
+             0.95-confidence chunk and a citation, which was indistinguishable \
+             from a real result."
+                .to_string(),
+        ))
     }
 
     /// Add a knowledge source
@@ -743,12 +743,16 @@ mod tests {
     }
 
     #[test]
-    fn test_rag_query() {
+    fn test_rag_query_reports_that_it_is_unimplemented() {
+        // This used to assert `!answer.is_empty() && !citations.is_empty()`,
+        // which the fabricated placeholder satisfied. It was a test of the
+        // fake, not of retrieval.
         let rag = RAG::new().build().unwrap();
-        let result = rag.query("What is the answer?").unwrap();
-
-        assert!(!result.answer.is_empty());
-        assert!(!result.citations.is_empty());
+        let err = rag.query("What is the answer?").unwrap_err();
+        assert!(
+            err.to_string().contains("not implemented"),
+            "query must say it is unimplemented, not invent an answer: {err}"
+        );
     }
 
     #[test]
