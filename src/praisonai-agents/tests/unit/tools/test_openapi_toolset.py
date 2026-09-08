@@ -381,6 +381,24 @@ class TestBodySchemasWithoutTopLevelProperties:
                            "properties": {"name": {"type": "string"}}})
         assert tool.build_request(name="Rex", hallucinated="x")["json"] == {"name": "Rex"}
 
+    def test_a_closed_empty_schema_forbids_all_keys(self):
+        """additionalProperties:false with no properties is closed, not free-form.
+
+        A free-form body forwards its arguments; a closed empty object permits
+        only an empty object, so model-supplied keys must be dropped rather
+        than sent to a strict API that would reject them.
+        """
+        tool = self._tool({"type": "object", "additionalProperties": False})
+        assert "json" not in tool.build_request(hallucinated="x")
+
+    def test_a_closed_allof_branch_closes_the_whole_body(self):
+        """A closed constraint composed via allOf closes the whole body."""
+        tool = self._tool({"allOf": [
+            {"type": "object", "properties": {"name": {"type": "string"}}},
+            {"type": "object", "additionalProperties": False},
+        ]})
+        assert tool.build_request(name="Rex", hallucinated="x")["json"] == {"name": "Rex"}
+
     def test_a_self_referential_composition_does_not_hang(self):
         toolset = OpenAPIToolset(spec_dict={
             "openapi": "3.0.0",

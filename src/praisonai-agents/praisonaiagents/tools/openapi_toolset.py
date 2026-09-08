@@ -68,6 +68,26 @@ def _body_properties(schema: Any) -> Dict[str, Any]:
     return props
 
 
+def _body_is_closed(schema: Any) -> bool:
+    """True when a schema forbids properties it did not declare.
+
+    A body schema with no declared properties is normally treated as
+    free-form so its arguments still pass. But ``additionalProperties: false``
+    means the exact opposite -- the object is closed -- so an empty allow-set
+    there really does forbid everything, and forwarding model-supplied keys
+    would build a request a strict API rejects. ``allOf`` branches are
+    followed because a closed constraint in a composed branch closes the whole.
+    """
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("additionalProperties") is False:
+        return True
+    for sub_schema in schema.get("allOf") or []:
+        if _body_is_closed(sub_schema):
+            return True
+    return False
+
+
 def _body_required(schema: Any) -> List[str]:
     """Required body field names, flattened the same way as the properties.
 
@@ -240,12 +260,16 @@ class OpenAPIOperation:
             # a free-form body -- legal, and common as bare {"type": "object"}
             # or additionalProperties: true -- and filtering against an empty
             # set would send an empty body for every such operation, which is
-            # the silent-drop this filter exists to prevent.
+            # the silent-drop this filter exists to prevent. The one exception
+            # is a *closed* empty schema (additionalProperties: false): that
+            # forbids every property, so an empty allow-set there is honoured
+            # rather than read as free-form.
             allowed = set(_body_properties(self.body_schema))
+            closed = _body_is_closed(self.body_schema)
             for key, value in kwargs.items():
                 if key in consumed or key in _FRAMEWORK_KWARGS:
                     continue
-                if allowed and key not in allowed:
+                if (allowed or closed) and key not in allowed:
                     logger.debug("dropping undeclared body key %r for %s",
                                  key, self.name)
                     continue
