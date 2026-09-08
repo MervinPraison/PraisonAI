@@ -21,3 +21,24 @@ export {
   resetHarnessRegistry,
 } from './profiles';
 export type { HarnessProfileConfig, HarnessResolverProtocol, HarnessRegistryEntry } from './profiles';
+
+// ---------------------------------------------------------------------------
+// Offline testing helpers
+//
+// Python parity: praisonaiagents/model_harness/{scripted,guard}.py -- a
+// scriptable model double and a global switch that blocks real provider calls,
+// so an agent can be unit-tested without a network or an API key.
+// ---------------------------------------------------------------------------
+export {
+  ScriptedModel,
+  ScriptExhausted,
+  type RecordedRequest,
+  type ScriptEntry,
+} from './scripted';
+export {
+  allowModelRequests,
+  noModelRequests,
+  modelRequestsAllowed,
+  checkModelRequest,
+  ModelRequestBlocked,
+} from './guard';
