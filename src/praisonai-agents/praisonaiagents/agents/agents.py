@@ -1491,6 +1491,65 @@ class AgentTeam(SpawnAnnounceProtocol):
         task_result = _process_task_result(self, context, agent_output)
         return task_result.task_output
 
+    def _apply_human_review(self, task, task_id, task_output):
+        """Ask a person to approve this task's OUTPUT before the next task uses it.
+
+        Fills a real gap between the two things that already existed: the
+        approval system gates a TOOL CALL, and guardrails validate
+        automatically. Neither let an orchestrator say "a person must sign this
+        off". Python parity target: CrewAI's ``Task(human_input=True)``.
+
+        Reuses the approval backends rather than prompting directly, so this
+        works wherever approvals already do -- console, callback, bot, UI --
+        instead of hard-wiring input() and breaking every non-TTY caller.
+
+        Returns:
+            tuple: (task_output, should_retry)
+        """
+        if not getattr(task, "human_input", False):
+            return task_output, False
+
+        try:
+            from ..approval import ApprovalRequest, get_approval_registry
+        except ImportError:
+            # Never silently skip a review a caller asked for: a task that was
+            # supposed to be signed off and simply was not is the failure this
+            # feature exists to prevent.
+            raise RuntimeError(
+                f"Task {task_id} sets human_input=True but praisonaiagents.approval "
+                f"is unavailable, so the output cannot be reviewed. Install it, or "
+                f"remove human_input."
+            )
+
+        backend = get_approval_registry().get_backend()
+        prompt = task.human_review_prompt or (
+            f"Approve the output of task {getattr(task, 'name', None) or task_id}?"
+        )
+        request = ApprovalRequest(
+            tool_name=f"task_output:{getattr(task, 'name', None) or task_id}",
+            arguments={"output": str(getattr(task_output, "raw", task_output))[:4000]},
+            risk_level="high",
+            agent_name=getattr(getattr(task, "agent", None), "name", None),
+            context={"kind": "task_output_review", "prompt": prompt},
+        )
+        decision = backend.request_approval_sync(request)
+
+        if getattr(decision, "approved", False):
+            return task_output, False
+
+        reason = getattr(decision, "reason", None) or "a reviewer rejected this output"
+        if task.retry_count >= task.max_retries:
+            raise Exception(
+                f"Task {task_id} was rejected by a reviewer after "
+                f"{task.max_retries} retries. Last reason: {reason}"
+            )
+        task.retry_count += 1
+        task.status = "in progress"
+        # Reuse the slot the guardrail retry already fills, so the reviewer's
+        # reason reaches the re-run's prompt through machinery that exists.
+        task.validation_feedback = reason
+        return task_output, True
+
     def _apply_task_guardrail(self, task, task_id, task_output):
         """Apply guardrail validation to task output.
         
@@ -2182,6 +2241,12 @@ class AgentTeam(SpawnAnnounceProtocol):
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper
                     task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if not should_retry:
+                        # A person reviews only what already passed the automatic
+                        # checks: waking someone to reject output a guardrail
+                        # would have caught wastes the one resource this feature
+                        # spends.
+                        task_output, should_retry = self._apply_human_review(task, task_id, task_output)
                     if should_retry:
                         retries += 1
                         continue
