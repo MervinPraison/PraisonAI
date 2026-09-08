@@ -453,3 +453,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'ToolProfile', 'AUTONOMY_PROFILE', 'BUILTIN_PROFILES',
     'register_profile', 'get_profile', 'resolve_profiles', 'list_profiles',
 ]
+
+from .hosted import (  # noqa: E402
+    WebSearchTool, CodeInterpreterTool, FileSearchTool, HostedMCPTool, is_hosted_tool,
+)

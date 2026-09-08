@@ -125,6 +125,9 @@ except ImportError:
 # NOTE: The custom-LLM path (Agent.chat → get_response) and OpenAI path
 # (Agent.chat → _chat_completion) are separate code paths, not duplicate
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
+from ..tools.hosted import is_hosted_tool  # noqa: E402
+
+
 class LLMResponseError(Exception):
     """Raised when the LLM tool-calling loop fails and cannot produce a response.
 
@@ -2431,7 +2434,11 @@ Respond with ONLY a valid JSON tool call in this format:
         # Create a simple hash based on tool names/content
         tool_parts = []
         for tool in tools:
-            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+            # A hosted tool must contribute to the cache key too, or two tool
+            # lists differing only by their hosted tools would share a key.
+            if isinstance(tool, dict) and is_hosted_tool(tool):
+                tool_parts.append(f"hosted:{tool.get('type')}")
+            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     tool_parts.append(f"openai:{tool['function']['name']}")
             elif callable(tool) and hasattr(tool, '__name__'):
@@ -2472,7 +2479,16 @@ Respond with ONLY a valid JSON tool call in this format:
         formatted_tools = []
         for tool in tools:
             # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+            # Provider-hosted tools (web search, code interpreter, file search,
+            # hosted MCP) have no local callable: the provider runs them, so
+            # they carry no 'function' block and fell through to the "malformed"
+            # branch below -- the tool vanished from the request and the model
+            # simply never had it. Forward them untouched, allowlisted by type
+            # so a genuinely malformed tool is still reported.
+            if isinstance(tool, dict) and is_hosted_tool(tool):
+                logging.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
+                formatted_tools.append(tool)
+            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 # Validate nested dictionary structure before accessing
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
@@ -2486,7 +2502,10 @@ Respond with ONLY a valid JSON tool call in this format:
             # Handle lists of tools (e.g. from MCP.to_openai_tool())
             elif isinstance(tool, list):
                 for subtool in tool:
-                    if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                    if isinstance(subtool, dict) and is_hosted_tool(subtool):
+                        logging.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
+                        formatted_tools.append(subtool)
+                    elif isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
                         # Validate nested dictionary structure before accessing
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
