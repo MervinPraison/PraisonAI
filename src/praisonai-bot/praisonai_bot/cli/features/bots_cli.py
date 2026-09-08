@@ -19,9 +19,76 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NoReturn, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class BotStartupError(SystemExit):
+    """A bot could not be started — the CLI must exit non-zero.
+
+    Subclasses :class:`SystemExit` so every existing call site (the Typer
+    commands, the legacy argparse dispatcher, a supervisor invoking the CLI)
+    gets a real non-zero process exit with no rewiring, while tests can still
+    assert on it by name and read ``.message``. Previously each of these paths
+    printed ``Error: ...`` and ``return``\\ ed, so ``praisonai bot start
+    --config /nope.yaml`` exited **0** and any script or systemd unit treating
+    exit 0 as success was misled.
+    """
+
+    def __init__(self, message: str, code: int = 1) -> None:
+        self.message = message
+        super().__init__(code)
+
+
+def _fail(message: str, *hints: str) -> NoReturn:
+    """Print an operator-facing error (plus hints) and exit non-zero."""
+    print(message)
+    for hint in hints:
+        print(hint)
+    raise BotStartupError(message)
+
+
+async def _serve_bot(bot: Any) -> None:
+    """Start ``bot`` and stay up until its inbound source stops.
+
+    Adapters split into two shapes. Telegram/Discord/Slack block inside
+    ``start()`` for the life of the connection. Linear, Webhook, Email,
+    AgentMail and WhatsApp-cloud instead arm a server or spawn a background
+    task and *return* — so a bare ``asyncio.run(bot.start())`` closed the loop
+    and tore the listening socket down immediately, and the command exited 0
+    having printed "Press Ctrl+C to stop". Mirrors the fix already applied to
+    ``Bot.start()`` (Issue #2869): once ``start()`` returns, hold the loop open
+    while the adapter still reports ``is_running``.
+    """
+    await bot.start()
+    try:
+        for attr in ("_poll_task", "_run_task", "_serve_task"):
+            task = getattr(bot, attr, None)
+            if task is not None and hasattr(task, "__await__"):
+                await task
+                return
+        while getattr(bot, "is_running", False):
+            await asyncio.sleep(0.5)
+    finally:
+        if getattr(bot, "is_running", False):
+            try:
+                await bot.stop()
+            except Exception:  # pragma: no cover - best-effort shutdown
+                # e.g. WhatsApp-web's neonize Go threads may already be gone.
+                logger.debug("Error during bot shutdown", exc_info=True)
+
+
+def _run_bot(bot: Any) -> None:
+    """Synchronous entry point: serve ``bot`` until stopped or interrupted."""
+    try:
+        asyncio.run(_serve_bot(bot))
+    except KeyboardInterrupt:
+        print("\nStopping bot...")
+        try:
+            asyncio.run(bot.stop())
+        except Exception:  # pragma: no cover - best-effort shutdown
+            logger.debug("Error during bot shutdown", exc_info=True)
 
 
 @dataclass
@@ -179,8 +246,7 @@ class BotHandler:
         self._load_dotenv()
         
         if not os.path.exists(config_file):
-            print(f"Error: Config file not found: {config_file}")
-            return
+            _fail(f"Error: Config file not found: {config_file}")
         
         try:
             # Use the canonical loader
@@ -189,16 +255,13 @@ class BotHandler:
             validated_config = load_and_validate_gateway_yaml(config_file)
             
         except ValueError as e:
-            print(f"Error: Invalid config: {e}")
-            return
+            _fail(f"Error: Invalid config: {e}")
         except Exception as e:
-            print(f"Error loading config: {e}")
-            return
+            _fail(f"Error loading config: {e}")
             
         # Get first channel from validated config
         if not validated_config.channels:
-            print("Error: No channels configured in bot config")
-            return
+            _fail("Error: No channels configured in bot config")
             
         # Pick first channel to start
         channel_name = next(iter(validated_config.channels))
@@ -290,7 +353,116 @@ class BotHandler:
                 inbox_id=channel.inbox_id or "",
                 domain=channel.domain or "",
             )
-    
+        else:
+            # Every other registered platform — the built-ins with an adapter
+            # but no bespoke CLI verb (``signal``, ``webhook``, ``local``),
+            # entry-point plugin channels, and ``adapter:`` drop-ins. Previously
+            # this if/elif chain simply fell off the end: the command printed
+            # nothing and exited 0 without starting anything.
+            self.start_generic(
+                platform=platform,
+                token=token or None,
+                capabilities=capabilities,
+                agent_config_dict=agent_config_dict,
+                channel=channel,
+            )
+
+    def start_generic(
+        self,
+        platform: str,
+        token: Optional[str] = None,
+        agent_file: Optional[str] = None,
+        capabilities: Optional[BotCapabilities] = None,
+        agent_config_dict: Optional[Dict[str, Any]] = None,
+        channel: Optional[Any] = None,
+        **extra: Any,
+    ) -> None:
+        """Start any registered platform through the generic ``Bot`` facade.
+
+        Gives ``signal``, ``webhook`` and ``local`` — which ship adapters but
+        never got a hand-written CLI verb — and every entry-point/drop-in plugin
+        channel a first-class way in, without a ninth near-identical 90-line
+        copy of ``start_telegram``. ``Bot`` already resolves the adapter from
+        the platform registry, fills platform tokens from their documented env
+        vars, and holds non-blocking adapters open under supervision.
+
+        Args:
+            platform: Registered platform name.
+            token: Explicit token; falls back to the platform's own env var.
+            agent_file: Optional path to an agent configuration file.
+            capabilities: Optional capabilities configuration.
+            agent_config_dict: Optional agent config dict from bot YAML.
+            channel: Optional validated channel schema to source extra kwargs.
+            **extra: Additional platform-specific adapter kwargs.
+        """
+        self._load_dotenv()
+        platform = (platform or "").lower().strip()
+        if not platform:
+            _fail("Error: No platform given")
+
+        try:
+            from praisonai_bot.bots._registry import list_platforms
+
+            known = {p.lower() for p in list_platforms()}
+        except Exception:
+            known = set()
+        if known and platform not in known:
+            _fail(
+                f"Error: Unknown platform '{platform}'",
+                f"Registered platforms: {', '.join(sorted(known))}",
+            )
+
+        if capabilities and capabilities.auto_approve:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
+
+        try:
+            from praisonai_bot.bots import Bot
+        except ImportError as e:
+            _fail(f"Error: Bot adapter import failed. {e}")
+
+        kwargs: Dict[str, Any] = dict(extra)
+        if channel is not None:
+            # Forward the validated channel's adapter-specific configuration so
+            # a ``bot start`` YAML routed through this generic facade reaches the
+            # adapter with the same fidelity as the gateway/BotOS path (which
+            # passes every channel key straight to ``Bot(...)`` at
+            # botos.py:1678). Copying only ``webhook_port`` here silently dropped
+            # Signal's ``account``/``bridge_url`` and — the security defect
+            # Greptile flagged — the Webhook adapter's ``verify`` (no env
+            # fallback), so a configured signature verifier was replaced by the
+            # adapter's unverified default. ``Bot`` forwards ``**kwargs`` to the
+            # adapter constructor, so this restores that fidelity.
+            #
+            # ``ChannelConfigSchema`` sets ``extra="allow"`` specifically so an
+            # adapter's own config keys survive validation "instead of being
+            # silently dropped … so they reach the adapter". Those live in
+            # ``model_extra`` — this is where Signal's ``account``/``bridge_url``
+            # and the Webhook adapter's ``path``/``verify`` land — so forward
+            # them verbatim. Nothing declared as a *facade/session* field is
+            # forwarded, so this cannot collide with ``Bot``'s own parameters.
+            extra_cfg = dict(getattr(channel, "model_extra", None) or {})
+            # The one explicit schema field the Webhook adapter also consumes:
+            # ``webhook_port`` (its ``verify``/``path``/``routes`` are extras).
+            port = getattr(channel, "webhook_port", None)
+            if port is not None:
+                extra_cfg.setdefault("webhook_port", port)
+            for key, value in extra_cfg.items():
+                if key in kwargs or value in (None, ""):
+                    continue
+                kwargs[key] = value
+
+        agent = self._load_agent(
+            agent_file, capabilities, agent_config_dict=agent_config_dict
+        )
+        try:
+            bot = Bot(platform, agent=agent, token=token or None, **kwargs)
+        except Exception as e:
+            _fail(f"Error: Could not build the '{platform}' channel. {e}")
+
+        self._print_startup_info(platform.capitalize(), capabilities)
+        _run_bot(bot)
+
     def start_telegram(
         self,
         token: Optional[str] = None,
@@ -309,9 +481,10 @@ class BotHandler:
         self._load_dotenv()
         token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
         if not token:
-            print("Error: Telegram bot token required")
-            print("Provide via --token or TELEGRAM_BOT_TOKEN environment variable")
-            return
+            _fail(
+                "Error: Telegram bot token required",
+                "Provide via --token or TELEGRAM_BOT_TOKEN environment variable",
+            )
         
         # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
@@ -321,9 +494,10 @@ class BotHandler:
         try:
             from praisonai_bot.bots import TelegramBot
         except ImportError as e:
-            print(f"Error: TelegramBot requires python-telegram-bot. {e}")
-            print("Install with: pip install python-telegram-bot")
-            return
+            _fail(
+                f"Error: TelegramBot requires python-telegram-bot. {e}",
+                "Install with: pip install python-telegram-bot",
+            )
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         
@@ -342,11 +516,7 @@ class BotHandler:
         
         self._print_startup_info("Telegram", capabilities)
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
     
     def start_discord(
         self,
@@ -365,9 +535,10 @@ class BotHandler:
         self._load_dotenv()
         token = token or os.environ.get("DISCORD_BOT_TOKEN")
         if not token:
-            print("Error: Discord bot token required")
-            print("Provide via --token or DISCORD_BOT_TOKEN environment variable")
-            return
+            _fail(
+                "Error: Discord bot token required",
+                "Provide via --token or DISCORD_BOT_TOKEN environment variable",
+            )
         
         # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
@@ -377,9 +548,10 @@ class BotHandler:
         try:
             from praisonai_bot.bots import DiscordBot
         except ImportError as e:
-            print(f"Error: DiscordBot requires discord.py. {e}")
-            print("Install with: pip install discord.py")
-            return
+            _fail(
+                f"Error: DiscordBot requires discord.py. {e}",
+                "Install with: pip install discord.py",
+            )
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         
@@ -396,11 +568,7 @@ class BotHandler:
         
         self._print_startup_info("Discord", capabilities)
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
     
     def start_slack(
         self,
@@ -424,9 +592,22 @@ class BotHandler:
         app_token = app_token or os.environ.get("SLACK_APP_TOKEN")
         
         if not token:
-            print("Error: Slack bot token required")
-            print("Provide via --token or SLACK_BOT_TOKEN environment variable")
-            return
+            _fail(
+                "Error: Slack bot token required",
+                "Provide via --token or SLACK_BOT_TOKEN environment variable",
+            )
+
+        # Socket Mode is the only inbound transport this command wires up, and
+        # it needs an app token. Without one ``SlackBot.start()`` logs a warning
+        # and returns having subscribed to nothing — the bot could send but
+        # never receive. Fail here instead of pretending to run.
+        if not app_token:
+            _fail(
+                "Error: Slack app token required (Socket Mode)",
+                "Provide via --app-token or SLACK_APP_TOKEN environment variable",
+                "Create one at https://api.slack.com/apps -> Basic Information "
+                "-> App-Level Tokens (scope: connections:write)",
+            )
         
         # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
@@ -436,17 +617,25 @@ class BotHandler:
         try:
             from praisonai_bot.bots import SlackBot
         except ImportError as e:
-            print(f"Error: SlackBot requires slack-bolt. {e}")
-            print("Install with: pip install slack-bolt")
-            return
+            _fail(
+                f"Error: SlackBot requires slack-bolt. {e}",
+                "Install with: pip install slack-bolt",
+            )
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         
         # Create bot config with group and silence settings
         from praisonaiagents.bots import BotConfig
+        # NOTE: ``app_token`` is deliberately NOT passed to ``BotConfig`` — it
+        # is not one of its fields and doing so raised
+        # ``TypeError: BotConfig.__init__() got an unexpected keyword argument
+        # 'app_token'``, so ``praisonai bot slack`` (and ``bot start`` on any
+        # Slack channel) could not start at all. Adding the field would have
+        # been the same defect one layer along: nothing reads it. Socket Mode
+        # reads ``SlackBot._app_token``, which the adapter's own constructor
+        # parameter below sets.
         bot_config = BotConfig(
             token=token,
-            app_token=app_token,
             group_policy=capabilities.group_policy if capabilities else "mention_only",
             allow_silence=capabilities.allow_silence if capabilities else False,
             silence_token=capabilities.silence_token if capabilities else None,
@@ -456,11 +645,7 @@ class BotHandler:
         
         self._print_startup_info("Slack", capabilities)
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
     
     def start_whatsapp(
         self,
@@ -507,16 +692,18 @@ class BotHandler:
             verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
             
             if not token:
-                print("Error: WhatsApp access token required (Cloud mode)")
-                print("Provide via --token or WHATSAPP_ACCESS_TOKEN environment variable")
-                print("Or use --mode web for token-free QR scan mode")
-                return
+                _fail(
+                    "Error: WhatsApp access token required (Cloud mode)",
+                    "Provide via --token or WHATSAPP_ACCESS_TOKEN environment variable",
+                    "Or use --mode web for token-free QR scan mode",
+                )
             
             if not phone_number_id:
-                print("Error: WhatsApp phone number ID required (Cloud mode)")
-                print("Provide via --phone-id or WHATSAPP_PHONE_NUMBER_ID environment variable")
-                print("Or use --mode web for token-free QR scan mode")
-                return
+                _fail(
+                    "Error: WhatsApp phone number ID required (Cloud mode)",
+                    "Provide via --phone-id or WHATSAPP_PHONE_NUMBER_ID environment variable",
+                    "Or use --mode web for token-free QR scan mode",
+                )
         
         # Set auto-approve if enabled
         if capabilities and capabilities.auto_approve:
@@ -526,12 +713,12 @@ class BotHandler:
         try:
             from praisonai_bot.bots import WhatsAppBot
         except ImportError as e:
-            print(f"Error: WhatsAppBot import failed. {e}")
-            if mode == "web":
-                print("Install with: pip install 'praisonai[bot-whatsapp-web]'")
-            else:
-                print("Install with: pip install aiohttp")
-            return
+            _fail(
+                f"Error: WhatsAppBot import failed. {e}",
+                "Install with: pip install 'praisonai[bot-whatsapp-web]'"
+                if mode == "web"
+                else "Install with: pip install aiohttp",
+            )
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         bot = WhatsAppBot(
@@ -564,14 +751,7 @@ class BotHandler:
             self._print_startup_info("WhatsApp", capabilities)
             print(f"Webhook server on port {webhook_port}")
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            try:
-                asyncio.run(bot.stop())
-            except Exception:
-                pass  # neonize Go threads may already be gone
+        _run_bot(bot)
 
     def start_linear(
         self,
@@ -599,10 +779,11 @@ class BotHandler:
         signing_secret = signing_secret or os.environ.get("LINEAR_WEBHOOK_SECRET", "")
         
         if not token:
-            print("Error: Linear token required")
-            print("Provide via --token or LINEAR_OAUTH_TOKEN environment variable")
-            print("For personal API key, set LINEAR_API_KEY instead")
-            return
+            _fail(
+                "Error: Linear token required",
+                "Provide via --token or LINEAR_OAUTH_TOKEN environment variable",
+                "For personal API key, set LINEAR_API_KEY instead",
+            )
         
         if not signing_secret:
             print("Warning: LINEAR_WEBHOOK_SECRET not set - webhook signatures will not be verified")
@@ -615,9 +796,10 @@ class BotHandler:
         try:
             from praisonai_bot.bots import LinearBot
         except ImportError as e:
-            print(f"Error: LinearBot import failed. {e}")
-            print("Install with: pip install aiohttp")
-            return
+            _fail(
+                f"Error: LinearBot import failed. {e}",
+                "Install with: pip install aiohttp",
+            )
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         bot = LinearBot(
@@ -635,11 +817,7 @@ class BotHandler:
         else:
             print("Webhook signature verification: disabled (set LINEAR_WEBHOOK_SECRET)")
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
 
     def start_email(
         self,
@@ -665,9 +843,10 @@ class BotHandler:
         self._load_dotenv()
         token = token or os.environ.get("EMAIL_APP_PASSWORD")
         if not token:
-            print("Error: Email app password required")
-            print("Provide via --token or EMAIL_APP_PASSWORD environment variable")
-            return
+            _fail(
+                "Error: Email app password required",
+                "Provide via --token or EMAIL_APP_PASSWORD environment variable",
+            )
         
         if capabilities and capabilities.auto_approve:
             os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
@@ -675,8 +854,7 @@ class BotHandler:
         try:
             from praisonai_bot.bots import EmailBot
         except ImportError as e:
-            print(f"Error: EmailBot import failed. {e}")
-            return
+            _fail(f"Error: EmailBot import failed. {e}")
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         bot = EmailBot(
@@ -689,11 +867,7 @@ class BotHandler:
         
         self._print_startup_info("Email (IMAP/SMTP)", capabilities)
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
 
     def start_agentmail(
         self,
@@ -717,9 +891,10 @@ class BotHandler:
         self._load_dotenv()
         token = token or os.environ.get("AGENTMAIL_API_KEY")
         if not token:
-            print("Error: AgentMail API key required")
-            print("Provide via --token or AGENTMAIL_API_KEY environment variable")
-            return
+            _fail(
+                "Error: AgentMail API key required",
+                "Provide via --token or AGENTMAIL_API_KEY environment variable",
+            )
         
         if capabilities and capabilities.auto_approve:
             os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
@@ -727,9 +902,10 @@ class BotHandler:
         try:
             from praisonai_bot.bots import AgentMailBot
         except ImportError as e:
-            print(f"Error: AgentMailBot import failed. {e}")
-            print("Install with: pip install agentmail")
-            return
+            _fail(
+                f"Error: AgentMailBot import failed. {e}",
+                "Install with: pip install agentmail",
+            )
         
         inbox_id = inbox_id or os.environ.get("AGENTMAIL_INBOX_ID")
         domain = domain or os.environ.get("AGENTMAIL_DOMAIN")
@@ -746,11 +922,7 @@ class BotHandler:
         if inbox_id:
             print(f"Inbox: {inbox_id}")
         
-        try:
-            asyncio.run(bot.start())
-        except KeyboardInterrupt:
-            print("\nStopping bot...")
-            asyncio.run(bot.stop())
+        _run_bot(bot)
 
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
         """Extract Agent constructor kwargs from BotCapabilities (DRY).
@@ -1167,6 +1339,20 @@ def _build_capabilities_from_args(args) -> BotCapabilities:
 
 
 def handle_bot_command(args) -> int:
+    """Handle bot CLI command, returning an exit code (0 ok, non-zero error).
+
+    Thin wrapper that turns a :class:`BotStartupError` raised anywhere in the
+    dispatch below back into the integer exit code this function's callers
+    expect, so the legacy argparse path reports failure the same way the Typer
+    path does.
+    """
+    try:
+        return _handle_bot_command(args)
+    except BotStartupError as exc:
+        return int(exc.code or 1)
+
+
+def _handle_bot_command(args) -> int:
     """Handle bot CLI command.
     
     Args:
