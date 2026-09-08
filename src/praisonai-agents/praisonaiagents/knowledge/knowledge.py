@@ -469,14 +469,21 @@ class Knowledge:
                 f"{type(self.memory).__name__} does not support delete_all()"
             )
 
-    def reset(self):
-        """Reset all memories."""
+    def reset(self) -> bool:
+        """Reset all memories.
+
+        Returns:
+            True if the backend actually reset, False if it has no ``reset``
+            and the call was a no-op. Callers that report this operation to a
+            user must not claim success on a False return: nothing was erased.
+        """
         if hasattr(self.memory, "reset"):
             self.memory.reset()
-        else:
-            logger.warning(
-                f"{type(self.memory).__name__} does not support reset(); no-op"
-            )
+            return True
+        logger.warning(
+            f"{type(self.memory).__name__} does not support reset(); no-op"
+        )
+        return False
 
     def normalize_content(self, content):
         """Normalize content for consistent storage."""
