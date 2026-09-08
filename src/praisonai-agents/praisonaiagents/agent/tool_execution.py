@@ -451,6 +451,24 @@ class ToolExecutionMixin:
             return None
         return getattr(controller, 'event', None)
 
+    def _current_turn_liveness(self):
+        """Return a zero-arg predicate that is ``True`` while the turn is live.
+
+        Binds :class:`ApprovalRequest.liveness` to the run's cooperative
+        cancellation signal so an approval that resolves *after* the originating
+        turn was stopped/superseded is dropped fail-closed at the
+        resolution boundary (a stale human ``approve`` never fires an effectful
+        tool nor persists a durable ``session``/``always`` grant for an
+        abandoned turn).
+
+        Returns ``None`` when no interrupt controller is attached, which keeps
+        today's behaviour (the request is treated as always live).
+        """
+        event = self._current_cancel_event()
+        if event is None:
+            return None
+        return lambda: not event.is_set()
+
     def _build_agent_state(self):
         """Construct the AgentState injected into tools for the current call.
 
@@ -1741,6 +1759,7 @@ class ToolExecutionMixin:
                     ),
                     agent_name=getattr(self, 'name', None),
                     context={"diff": diff_preview} if diff_preview else {},
+                    liveness=self._current_turn_liveness(),
                 )
                 
                 # Record a backend decision back into the registry so a
@@ -1752,6 +1771,23 @@ class ToolExecutionMixin:
                 # call for the rest of the run. Best-effort: a bookkeeping error
                 # must never change or block the returned decision.
                 def _remember(decision):
+                    # Live-authority gate: if the originating turn was stopped or
+                    # superseded while awaiting the human, drop the resolution
+                    # fail-closed. The tool must not run and no durable
+                    # session/always grant may be persisted for an abandoned turn.
+                    live = getattr(request, "liveness", None)
+                    if live is not None:
+                        try:
+                            still_live = live()
+                        except Exception:  # noqa: BLE001 - a liveness probe must
+                            # never crash the approval path; treat a failing probe
+                            # as live so we fall back to today's behaviour.
+                            still_live = True
+                        if not still_live:
+                            return ApprovalDecision(
+                                approved=False,
+                                reason="Turn no longer live (stopped or superseded)",
+                            )
                     try:
                         if getattr(decision, "approved", False):
                             approval_registry.mark_approved(
@@ -1852,6 +1888,7 @@ class ToolExecutionMixin:
                     force=manager_forces_approval,
                     auto_approve_scope=auto_approve_scope,
                     scope_id=auto_approve_scope,
+                    liveness=self._current_turn_liveness(),
                 )
             else:
                 return get_approval_registry().approve_sync(
@@ -1859,6 +1896,7 @@ class ToolExecutionMixin:
                     force=manager_forces_approval,
                     auto_approve_scope=auto_approve_scope,
                     scope_id=auto_approve_scope,
+                    liveness=self._current_turn_liveness(),
                 )
 
     def _doom_loop_approved(self, function_name, arguments, verdict) -> bool:
