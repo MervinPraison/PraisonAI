@@ -2012,13 +2012,43 @@ class AgentFlow:
                 step_vars = step_result_internal.get("variables", {})
                 all_variables.update(step_vars)
                 
+                # An LLM-backed step that produced nothing is a failure here
+                # too, exactly as in the sequential path: `chat()` returns None
+                # when the model call failed and the agent swallowed the error.
+                # This loop used to mark every non-raising step "completed"
+                # before the manager ever saw it.
+                produced_nothing = (
+                    output is None
+                    and not getattr(step, 'handler', None)
+                    and (getattr(step, 'agent', None) is not None
+                         or bool(getattr(step, 'action', None)))
+                )
+
                 step_result = {
                     "step": step_name,
                     "output": output,
-                    "status": "completed"
+                    "status": "failed" if produced_nothing else "completed"
                 }
                 results.append(step_result)
-                
+
+                if produced_nothing:
+                    failure_reason = (
+                        f"Step '{step_name}' produced no output (None) -- the "
+                        f"model call most likely failed"
+                    )
+                    logger.error(failure_reason)
+                    self.status = "failed"
+                    if hasattr(step, 'status'):
+                        step.status = "failed"
+                    self.step_statuses[step_name] = "failed"
+                    step_result["failure_reason"] = failure_reason
+                    if self.on_step_error:
+                        try:
+                            self.on_step_error(self, step, Exception(failure_reason))
+                        except Exception as callback_e:
+                            logger.error(f"on_step_error callback failed: {callback_e}")
+                    break
+
                 if hasattr(step, 'status'):
                     step.status = "completed"
                 self.step_statuses[step_name] = "completed"
@@ -2077,16 +2107,26 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
                         output_json=True
                     )
                     
-                    if isinstance(validation_response, str):
-                        import json
-                        try:
-                            decision_data = json.loads(validation_response)
-                        except json.JSONDecodeError:
-                            decision_data = {"approved": True, "reason": "Could not parse response, assuming success"}
-                    elif isinstance(validation_response, dict):
-                        decision_data = validation_response
-                    else:
-                        decision_data = {"approved": True, "reason": "Unknown response format, assuming success"}
+                    # Parse the manager's verdict with the module's own JSON
+                    # helper, which already strips the ```json fences models
+                    # routinely emit. A bare json.loads() raised JSONDecodeError
+                    # on every fenced reply, and the handler then FAILED OPEN --
+                    # turning "approved": false into "assuming success". A
+                    # manager rejection was therefore silently discarded and the
+                    # run reported completed, which is the same class of defect
+                    # as an all-None run reporting success.
+                    decision_data = _parse_json_output(
+                        validation_response, step_name
+                    )
+                    if not isinstance(decision_data, dict):
+                        # Fail CLOSED: an unreadable verdict is not approval.
+                        decision_data = {
+                            "approved": False,
+                            "reason": (
+                                "Manager validation response could not be "
+                                f"parsed: {str(validation_response)[:200]!r}"
+                            ),
+                        }
                     
                     approved = decision_data.get("approved", True)
                     reason = decision_data.get("reason", "No reason provided")
@@ -2112,8 +2152,31 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
                         break
                         
                 except Exception as e:
-                    logger.warning(f"Manager validation failed for step '{step_name}': {e}. Continuing workflow.")
-                
+                    # The manager is a GATE. If it could not run, it has not
+                    # passed -- reporting "completed successfully" because the
+                    # quality check itself failed is the same lie as approving a
+                    # rejection. This block already fails closed on an
+                    # unparseable verdict two lines up, so failing open here
+                    # would be incoherent. Hierarchical mode is opt-in: a caller
+                    # who asked for manager validation wants it enforced.
+                    failure_reason = (
+                        f"Manager validation could not run for step "
+                        f"'{step_name}': {e}"
+                    )
+                    logger.error(failure_reason)
+                    self.status = "failed"
+                    if hasattr(step, 'status'):
+                        step.status = "failed"
+                    self.step_statuses[step_name] = "failed"
+                    step_result["status"] = "failed"
+                    step_result["failure_reason"] = failure_reason
+                    if self.on_step_error:
+                        try:
+                            self.on_step_error(self, step, e)
+                        except Exception as callback_e:
+                            logger.error(f"on_step_error callback failed: {callback_e}")
+                    break
+
                 previous_output = output
                 
                 # Store output in variables for next step's variable substitution
@@ -2160,6 +2223,10 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         
         if failure_reason:
             final_result["failure_reason"] = failure_reason
+            # Also expose it as `error`, the key every caller (the CLI
+            # included) reads. Without it a genuine hierarchical failure
+            # printed "Workflow failed: Unknown error".
+            final_result.setdefault("error", failure_reason)
         
         if self.on_workflow_complete:
             try:
