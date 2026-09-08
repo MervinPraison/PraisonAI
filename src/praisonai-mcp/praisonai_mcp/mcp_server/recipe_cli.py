@@ -280,7 +280,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                     print("No recipes found")
                     return self.EXIT_SUCCESS
                 
-                print(f"\n[bold]Available Recipes ({len(recipes)}):[/bold]\n")
+                self._print_rich(f"\n[bold]Available Recipes ({len(recipes)}):[/bold]\n")
                 for recipe in recipes:
                     print(f"  • {recipe.name} (v{recipe.version})")
                     print(f"    {recipe.description}")
@@ -306,7 +306,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                         print("No recipes found")
                         return self.EXIT_SUCCESS
                     
-                    print(f"\n[bold]Available Recipes ({len(templates)}):[/bold]\n")
+                    self._print_rich(f"\n[bold]Available Recipes ({len(templates)}):[/bold]\n")
                     for template in templates:
                         print(f"  • {template.name}")
                         if template.description:
@@ -378,12 +378,12 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                     self._print_error(f"Recipe '{parsed.recipe_name}' has validation errors")
                 
                 if errors:
-                    print("\n[bold red]Errors:[/bold red]")
+                    self._print_rich("\n[bold red]Errors:[/bold red]")
                     for error in errors:
                         print(f"  ✗ {error}")
                 
                 if warnings:
-                    print("\n[bold yellow]Warnings:[/bold yellow]")
+                    self._print_rich("\n[bold yellow]Warnings:[/bold yellow]")
                     for warning in warnings:
                         print(f"  ⚠ {warning}")
             
@@ -437,11 +437,11 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             if parsed.json:
                 self._print_json(result)
             else:
-                print(f"\n[bold cyan]Recipe: {parsed.recipe_name}[/bold cyan]\n")
+                self._print_rich(f"\n[bold cyan]Recipe: {parsed.recipe_name}[/bold cyan]\n")
                 
                 if "metadata" in result:
                     meta = result["metadata"]
-                    print("[bold]Metadata:[/bold]")
+                    self._print_rich("[bold]Metadata:[/bold]")
                     print(f"  Version: {meta.get('version', 'unknown')}")
                     print(f"  Description: {meta.get('description', 'N/A')}")
                     if meta.get('tags'):
@@ -450,7 +450,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                 
                 if "tools" in result:
                     tools = result["tools"]
-                    print(f"[bold]Tools ({len(tools)}):[/bold]")
+                    self._print_rich(f"[bold]Tools ({len(tools)}):[/bold]")
                     for tool in tools:
                         print(f"  • {tool['name']}")
                         print(f"    {tool.get('description', 'No description')}")
@@ -458,7 +458,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                 
                 if "resources" in result:
                     resources = result["resources"]
-                    print(f"[bold]Resources ({len(resources)}):[/bold]")
+                    self._print_rich(f"[bold]Resources ({len(resources)}):[/bold]")
                     for res in resources:
                         print(f"  • {res['uri']}")
                         print(f"    {res.get('description', 'No description')}")
@@ -466,7 +466,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                 
                 if "prompts" in result:
                     prompts = result["prompts"]
-                    print(f"[bold]Prompts ({len(prompts)}):[/bold]")
+                    self._print_rich(f"[bold]Prompts ({len(prompts)}):[/bold]")
                     for prompt in prompts:
                         print(f"  • {prompt['name']}")
                         print(f"    {prompt.get('description', 'No description')}")
@@ -551,7 +551,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                 f.write(config_json)
             self._print_success(f"Config written to {parsed.output}")
         else:
-            print(f"\n[bold]{parsed.client} Configuration for {parsed.recipe_name}:[/bold]\n")
+            self._print_rich(f"\n[bold]{parsed.client} Configuration for {parsed.recipe_name}:[/bold]\n")
             print(config_json)
             print()
         
@@ -611,7 +611,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                     "expires_at": api_key.expires_at,
                 })
             else:
-                print("\n[bold green]Generated API Key:[/bold green]")
+                self._print_rich("\n[bold green]Generated API Key:[/bold green]")
                 print(f"  Key: {raw_key}")
                 print(f"  ID: {api_key.key_id}")
                 if api_key.name:
@@ -620,7 +620,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                     print(f"  Scopes: {', '.join(api_key.scopes)}")
                 if api_key.expires_at:
                     print(f"  Expires: {api_key.expires_at}")
-                print("\n[yellow]Save this key securely - it cannot be retrieved later.[/yellow]")
+                self._print_rich("\n[yellow]Save this key securely - it cannot be retrieved later.[/yellow]")
             
             return self.EXIT_SUCCESS
             
@@ -683,7 +683,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             if parsed.json:
                 self._print_json(config.to_dict())
             else:
-                print(f"\n[bold]OIDC Configuration for {parsed.issuer}:[/bold]\n")
+                self._print_rich(f"\n[bold]OIDC Configuration for {parsed.issuer}:[/bold]\n")
                 print(f"  Issuer: {config.issuer}")
                 print(f"  Authorization: {config.authorization_endpoint}")
                 print(f"  Token: {config.token_endpoint}")
@@ -749,7 +749,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
                     print("No tasks found")
                     return self.EXIT_SUCCESS
                 
-                print(f"\n[bold]Tasks ({len(tasks)}):[/bold]\n")
+                self._print_rich(f"\n[bold]Tasks ({len(tasks)}):[/bold]\n")
                 for task in tasks:
                     print(f"  • {task.id} [{task.state.value}]")
                     print(f"    Method: {task.method}")
@@ -787,7 +787,7 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             if parsed.json:
                 self._print_json(task.to_dict())
             else:
-                print(f"\n[bold]Task: {task.id}[/bold]\n")
+                self._print_rich(f"\n[bold]Task: {task.id}[/bold]\n")
                 print(f"  State: {task.state.value}")
                 print(f"  Method: {task.method}")
                 print(f"  Created: {task.created_at}")
