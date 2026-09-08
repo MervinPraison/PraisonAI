@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +191,30 @@ class OpenAPIOperation:
                     continue
                 body[key] = value
 
-        url = urljoin(self.base_url.rstrip("/") + "/", path.lstrip("/")) \
-            if self.base_url else path
+        if self.base_url:
+            url = urljoin(self.base_url.rstrip("/") + "/", path.lstrip("/"))
+            # Percent-encoding above closes the *model-supplied* route to an
+            # off-origin request. This closes the remaining one: a spec is
+            # itself untrusted input in the "point your agent at this OpenAPI
+            # URL" case, and an absolute path in the spec would otherwise
+            # relocate a request that carries this toolset's credentials.
+            configured, built = urlsplit(self.base_url), urlsplit(url)
+            if configured.netloc and built.netloc != configured.netloc:
+                raise ValueError(
+                    f"{self.name}: refusing to send credentialed request to "
+                    f"{built.netloc or '(no host)'}; configured origin is "
+                    f"{configured.netloc}")
+        else:
+            url = path
+        if not urlsplit(url).netloc:
+            # A relative `servers:` entry ("/v1") is valid OpenAPI and is
+            # resolved against spec_url when there is one. When there is not,
+            # this produced a hostless URL and every operation failed with an
+            # opaque transport error instead of naming the cause.
+            raise ValueError(
+                f"{self.name}: no host to send to -- the spec's server URL is "
+                f"relative ({self.base_url!r}) and could not be resolved. Pass "
+                f"an absolute base_url= to OpenAPIToolset.")
         request: Dict[str, Any] = {"method": self.method.upper(), "url": url,
                                    "headers": headers}
         if query:
@@ -208,7 +230,12 @@ class OpenAPIOperation:
             import httpx
         except ImportError:
             return ("openapi tools need httpx: pip install httpx")
-        request = self.build_request(**kwargs)
+        try:
+            request = self.build_request(**kwargs)
+        except ValueError as exc:
+            # Returned, not raised, for the same reason as the transport errors
+            # below: a raising tool ends the turn.
+            return f"{self.name} failed: {exc}"
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.request(**request)

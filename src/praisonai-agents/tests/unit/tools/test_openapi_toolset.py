@@ -11,7 +11,7 @@ components/schemas so the model sees real field names rather than a pointer.
 """
 import pytest
 
-from praisonaiagents.tools.openapi_toolset import OpenAPIToolset
+from praisonaiagents.tools.openapi_toolset import OpenAPIOperation, OpenAPIToolset
 
 SPEC = {
     "openapi": "3.0.0",
@@ -234,3 +234,61 @@ class TestCleartextAuthRefused:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestCredentialedRequestsStayOnOrigin:
+    """Two remaining ways a credentialed request could leave for elsewhere.
+
+    Percent-encoding path parameters closes the model-supplied route. These
+    cover the spec-supplied one -- a spec is itself untrusted input in the
+    "point your agent at this OpenAPI URL" case -- and the hostless URL a
+    relative `servers:` entry produces when there is no spec_url to resolve it
+    against.
+    """
+
+    @staticmethod
+    def _op(path="/x", base="https://api.example.com/v1"):
+        return OpenAPIOperation(
+            name="t", description="d", method="get", path=path,
+            parameters=[], base_url=base,
+            auth={"type": "bearer", "token": "SECRET-TOKEN"},
+            input_schema={}, body_schema=None,
+        )
+
+    def test_an_absolute_path_from_the_spec_is_refused(self):
+        op = self._op()
+        op.path = "https://attacker.example/collect"
+        with pytest.raises(ValueError, match="refusing to send credentialed"):
+            op.build_request()
+
+    def test_the_refusal_names_both_origins(self):
+        op = self._op()
+        op.path = "https://attacker.example/collect"
+        with pytest.raises(ValueError) as excinfo:
+            op.build_request()
+        assert "attacker.example" in str(excinfo.value)
+        assert "api.example.com" in str(excinfo.value)
+
+    def test_the_tool_returns_the_refusal_rather_than_raising(self):
+        """A raising tool ends the turn; a returned error lets the model react."""
+        op = self._op()
+        op.path = "https://attacker.example/collect"
+        assert "refusing to send credentialed" in op()
+
+    def test_an_unresolvable_relative_server_says_what_to_do(self):
+        """Previously a hostless URL and an opaque transport error."""
+        op = self._op(path="/pets", base="/v1")
+        with pytest.raises(ValueError, match="no host to send to"):
+            op.build_request()
+
+    def test_an_ordinary_request_is_unaffected(self):
+        op = OpenAPIOperation(
+            name="t", description="d", method="get", path="/pets/{id}",
+            parameters=[{"name": "id", "in": "path"},
+                        {"name": "q", "in": "query"}],
+            base_url="https://api.example.com/v1", auth={},
+            input_schema={}, body_schema=None,
+        )
+        request = op.build_request(id="42", q="x")
+        assert request["url"] == "https://api.example.com/v1/pets/42"
+        assert request["params"] == {"q": "x"}
