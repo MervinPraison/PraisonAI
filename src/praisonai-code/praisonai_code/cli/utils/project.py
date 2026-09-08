@@ -167,6 +167,12 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
                 pinned = pinned_path.read_text(encoding="utf-8").strip()
                 if pinned in available:
                     return pinned
+                # A pin naming a commit that is no longer a root here (rewritten
+                # history, shallow/partial clone) can't be trusted. Re-pin the
+                # freshly chosen root so subsequent resolves stay stable rather
+                # than recomputing -- and flipping on same-second ties -- every
+                # time. Atomic replace keeps concurrent healers agreeing.
+                _atomic_write(pinned_path, chosen)
             else:
                 # Exclusive create, like the cached id below: concurrent first
                 # runs must agree rather than each pinning its own choice.
@@ -177,11 +183,32 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
                     other = pinned_path.read_text(encoding="utf-8").strip()
                     if other in available:
                         return other
+                    _atomic_write(pinned_path, chosen)
                 except OSError:
                     pass
         except OSError:
             pass
     return chosen
+
+
+def _atomic_write(target: Path, content: str) -> None:
+    """Best-effort atomic overwrite of ``target`` with ``content``.
+
+    Writes to a unique temp file in the same directory and ``os.replace``s it
+    into place so a concurrent reader never sees a half-written pin and racing
+    healers converge on one file rather than corrupting each other. Failures are
+    swallowed: the caller already has the value it will return.
+    """
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, target)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _git_meta_path(path: Optional[str], name: str) -> Optional[Path]:
