@@ -44,6 +44,7 @@ export class ComputeToolPlace implements ToolPlaceLike {
   private provider: ComputeProvider;
   private instance: ComputeInstance | null = null;
   private commands: Record<string, string>;
+  private warnedHostFallback = new Set<string>();
 
   constructor(provider: ComputeProvider, commands: Record<string, string> = {}) {
     this.provider = provider;
@@ -79,6 +80,18 @@ export class ComputeToolPlace implements ToolPlaceLike {
     if (!template) {
       // No command declared: a JS closure cannot cross the boundary. Run it
       // locally and SAY so, rather than implying isolation that is not there.
+      // A silent fallback is the exact "asked for a sandbox, ran on the host"
+      // trap this file warns about elsewhere -- so a non-local place makes the
+      // gap visible (once per tool, so a hot loop does not spam).
+      if (this.placeName !== 'local' && !this.warnedHostFallback.has(toolName)) {
+        this.warnedHostFallback.add(toolName);
+        console.warn(
+          `[praisonai] tool '${toolName}' has no command mapping for place ` +
+            `'${this.placeName}', so it runs on the HOST, not in the sandbox. ` +
+            `Give it a shell command (place.setCommand('${toolName}', '...')) to ` +
+            `run it there.`
+        );
+      }
       return localImplementation();
     }
     const instance = await this.ensureInstance();

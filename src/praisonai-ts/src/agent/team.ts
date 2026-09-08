@@ -834,6 +834,19 @@ export class AgentTeam {
    * constructed agent is assigned back onto the task.
    */
   private agentFor(entry: TeamTask, index: number): Agent {
+    const chosen = this.resolveAgentFor(entry, index);
+    // A team-wide toolsRunOn is ONE place shared by EVERY member -- including
+    // an agent that lives on a task or is built from `agentConfig`, which never
+    // passes through `config.agents` at construction. adoptToolPlace is a no-op
+    // for an agent that already has a place (its own toolsRunOn or the one it
+    // adopted earlier), so this both fills the gap and stays idempotent.
+    if (this._sharedToolPlace) {
+      (chosen as any).adoptToolPlace?.(this._sharedToolPlace);
+    }
+    return chosen;
+  }
+
+  private resolveAgentFor(entry: TeamTask, index: number): Agent {
     if (entry.assignedAgent) return entry.assignedAgent;
     const fallback = entry.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
     if (!entry.task) return fallback;

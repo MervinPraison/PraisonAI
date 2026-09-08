@@ -119,15 +119,17 @@ export class DockerCompute implements ComputeProvider {
   async shutdown(instanceId: string): Promise<void> {
     const instance = this.containers.get(instanceId);
     if (!instance) return;
+    // `docker rm -f` can fail -- the daemon may have gone away. Recording the
+    // container as stopped when it may still be running would leak the resource
+    // and hand the caller wrong lifecycle state, so a failed removal marks the
+    // instance errored and throws rather than resolving as success.
     const result = await this.runOnHost(`docker rm -f ${shellQuote(instanceId)}`, 60);
-    // Do NOT claim the container is gone if `docker rm -f` failed: a container
-    // reported stopped while still running is the silent-wrongness this package
-    // guards against. Mark it errored and raise so the caller can retry.
     if (result.exitCode !== 0) {
       instance.status = 'error';
       throw new ComputeError(
         `Could not remove container ${instanceId}: ` +
-          `${result.stderr.trim() || result.stdout.trim() || 'docker gave no output'}`,
+          `${result.stderr.trim() || result.stdout.trim() || 'docker gave no output'}. ` +
+          `The container may still be running.`,
         'docker'
       );
     }

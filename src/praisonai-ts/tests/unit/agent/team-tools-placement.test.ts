@@ -53,4 +53,17 @@ describe('team-wide tool placement', () => {
   it('an unknown place is refused rather than silently ignored', () => {
     expect(() => new AgentTeam({ agents: [agent()], toolsRunOn: 'nowhere' } as any)).toThrow();
   });
+
+  it('a task-owned agent that never passed through config.agents still adopts the place', () => {
+    // agentFor can hand back an agent that lives on a task or was built from
+    // agentConfig -- neither is in config.agents, so the constructor loop never
+    // reached it. Resolving it must place it in the SAME shared sandbox.
+    const member = agent();
+    const team = new AgentTeam({ agents: [member], toolsRunOn: 'local' } as any);
+    const taskOnly = agent();
+    expect(taskOnly.getToolPlace()).toBeUndefined();
+    const chosen = (team as any).agentFor({ agent: taskOnly, prompt: 'x' }, 0);
+    expect(chosen).toBe(taskOnly);
+    expect(taskOnly.getToolPlace()).toBe(member.getToolPlace());
+  });
 });

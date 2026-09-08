@@ -10,6 +10,8 @@
 import { ComputeError, type ComputeProvider } from './types';
 import { LocalCompute } from './local';
 import { DockerCompute } from './docker';
+import { ComputeToolPlace } from './tool-place';
+import { registerToolPlace } from '../agent/features/placement';
 
 export * from './types';
 export { LocalCompute } from './local';
@@ -23,9 +25,19 @@ const registry = new Map<string, Factory>([
   ['docker', () => new DockerCompute()],
 ]);
 
-/** Add a provider. Lets a remote one be supplied without changing this file. */
+/**
+ * Add a provider. Lets a remote one be supplied without changing this file.
+ *
+ * The name is ALSO registered as a `toolsRunOn` place, so a caller who
+ * registers 'e2b' can immediately write `new Agent({ toolsRunOn: 'e2b' })`.
+ * Without this bridge the two registries drift: the provider exists here but
+ * `resolvePlacement` validates against a separate place registry and still
+ * rejects the name as "not a known place".
+ */
 export function registerComputeProvider(name: string, factory: Factory): void {
-  registry.set(name.toLowerCase(), factory);
+  const key = name.toLowerCase();
+  registry.set(key, factory);
+  registerToolPlace(key, () => new ComputeToolPlace(factory()));
 }
 
 /** Provider names available in this build. */

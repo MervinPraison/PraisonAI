@@ -92,6 +92,17 @@ describe('the registry', () => {
     expect(listComputeProviders()).toContain('fake');
   });
 
+  it('a registered custom provider is also selectable through toolsRunOn', () => {
+    // The two registries used to drift: registerComputeProvider filled the
+    // compute registry, but toolsRunOn validated against a SEPARATE place
+    // registry, so `new Agent({ toolsRunOn: 'e2b' })` still threw "not a known
+    // place". Registering a provider now bridges both.
+    const custom: any = { name: 'e2b', execute: async () => ({}) };
+    registerComputeProvider('e2b', () => custom);
+    const { toolPlaceNames } = require('../../../src/agent/features/placement');
+    expect(toolPlaceNames()).toContain('e2b');
+  });
+
   it('an object implementing execute() is accepted directly', () => {
     const provider: any = { name: 'inline', execute: async () => ({}) };
     expect(resolveComputeProvider(provider)).toBe(provider);
