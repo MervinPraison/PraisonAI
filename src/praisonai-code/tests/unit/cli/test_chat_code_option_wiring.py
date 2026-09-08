@@ -198,6 +198,30 @@ def test_continue_falls_back_to_the_unified_store(tui, sessions, tmp_path,
     assert tui.last_config.session_id == "only-in-unified"
 
 
+def test_project_store_wins_over_the_unified_fallback(tui, tmp_path, monkeypatch):
+    """Both stores hold a session -- the canonical project one must be chosen.
+
+    The fallback exists only for when the project index is empty; if the order
+    ever reversed, ``--continue`` would resume the wrong conversation. Distinct
+    ids in each store make that regression fail here instead of silently passing.
+    """
+    from praisonai_code.cli.session import UnifiedSessionStore
+    import praisonai_code.cli.session as session_pkg
+    import praisonai_code.cli.state.project_sessions as project_sessions
+
+    store = UnifiedSessionStore(session_dir=tmp_path / "unified")
+    store.get_or_create("from-unified")
+    monkeypatch.setattr(session_pkg, "get_session_store", lambda: store)
+    monkeypatch.setattr(project_sessions, "find_last_session",
+                        lambda *a, **k: "from-project", raising=False)
+
+    _invoke(chat_module.chat_main, ["hi", "--continue"])
+
+    assert tui.last_config.session_id == "from-project", (
+        "--continue resumed the unified fallback while the project store had one"
+    )
+
+
 def test_an_explicit_session_beats_continue(tui, sessions):
     sessions("earlier-one")
 
