@@ -43,6 +43,9 @@ class EvalSuiteResult:
     overall_score: float = 0.0
     success: bool = False
     errors: List[str] = field(default_factory=list)
+    #: Identifies the setup this run was scored under. Two results may only be
+    #: compared when their fingerprints match -- see eval/fingerprint.py.
+    fingerprint: str = ""
     
     @property
     def duration(self) -> float:
@@ -54,6 +57,7 @@ class EvalSuiteResult:
         """Summary of all evaluation results."""
         return {
             "suite_name": self.suite_name,
+            "fingerprint": self.fingerprint,
             "duration": self.duration,
             "overall_score": self.overall_score,
             "success": self.success,
@@ -114,6 +118,28 @@ class EvalSuite:
         if not evaluators:
             raise ValueError("At least one evaluator must be provided")
     
+    def _fingerprint(self) -> str:
+        """Identify this suite's setup. Best-effort: a fingerprint must never be
+        the reason an evaluation fails to run, so anything unreadable is simply
+        left out rather than raised."""
+        from .fingerprint import run_fingerprint
+        model = prompt = tools = None
+        for evaluator in self.evaluators or []:
+            agent = getattr(evaluator, "agent", None) or getattr(evaluator, "llm", None)
+            if agent is not None:
+                model = model or getattr(agent, "llm", None) or getattr(agent, "model", None)
+                prompt = prompt or getattr(agent, "instructions", None)
+                tools = tools or getattr(agent, "tools", None)
+        try:
+            return run_fingerprint(
+                model=model,
+                prompt=prompt,
+                tools=tools,
+                evaluators=[type(e).__name__ for e in (self.evaluators or [])],
+            )
+        except Exception:  # pragma: no cover - never block a run on this
+            return ""
+
     def run(self, print_summary: bool = True) -> EvalSuiteResult:
         """
         Run all evaluators and aggregate results.
@@ -130,7 +156,11 @@ class EvalSuite:
         result = EvalSuiteResult(
             suite_name=self.name,
             start_time=start_time,
-            end_time=0.0  # Will be set at completion
+            end_time=0.0,  # Will be set at completion
+            # Stamp the setup this run was scored under, so a later comparison
+            # can refuse numbers produced by a different model, prompt or tool
+            # set instead of silently plotting them on the same axis.
+            fingerprint=self._fingerprint(),
         )
         
         try:
