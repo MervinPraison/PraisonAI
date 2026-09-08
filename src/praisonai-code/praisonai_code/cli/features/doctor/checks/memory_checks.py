@@ -18,20 +18,55 @@ from ..registry import register_check
 
 
 def _find_memory_dirs() -> list:
-    """Find memory storage directories."""
-    locations = [
-        Path.cwd() / ".praison" / "memory",
-        Path.cwd() / ".praison" / "sessions",
+    """Find the memory/session directories the *runtime* actually uses.
+
+    This hard-coded ``~/.praison/...`` and ignored ``PRAISONAI_HOME`` entirely,
+    so with ``PRAISONAI_HOME`` set the runtime stored memory in one place while
+    doctor inspected another -- the same defect as the skills check. The
+    canonical locations come from ``praisonaiagents.paths``, the same helpers
+    the memory store itself resolves through, so the two cannot disagree.
+
+    The legacy ``~/.praison`` entries are kept only as an additional read
+    location, after the canonical ones, so an existing install still reports.
+    """
+    locations = []
+    try:
+        from praisonaiagents.paths import (
+            get_memory_dir,
+            get_project_data_dir,
+            get_sessions_dir,
+        )
+
+        locations = [
+            get_project_data_dir() / "memory",
+            get_project_data_dir() / "sessions",
+            get_memory_dir(),
+            get_sessions_dir(),
+        ]
+    except Exception:  # noqa: BLE001 - core package is optional
+        from praisonai_code.cli.configuration.paths import (
+            PROJECT_DATA_DIRNAME,
+            home_root,
+        )
+
+        locations = [
+            Path.cwd() / PROJECT_DATA_DIRNAME / "memory",
+            Path.cwd() / PROJECT_DATA_DIRNAME / "sessions",
+            home_root() / "memory",
+            home_root() / "sessions",
+        ]
+
+    # Legacy locations, read-only, after the canonical ones.
+    locations += [
         Path.home() / ".praison" / "memory",
         Path.home() / ".praison" / "sessions",
-        Path.home() / ".config" / "praison" / "memory",
     ]
-    
+
     found = []
     for loc in locations:
-        if loc.exists() and loc.is_dir():
+        if loc.exists() and loc.is_dir() and str(loc) not in found:
             found.append(str(loc))
-    
+
     return found
 
 

@@ -266,3 +266,46 @@ class TestFileHistoryUsesTheSdkDataRoot:
         assert file_history._default_history_dir() == str(
             core_paths.get_data_dir() / "history"
         )
+
+
+class TestDoctorMemoryChecksScanWhatTheRuntimeUses:
+    """`doctor`'s memory check hard-coded ~/.praison and ignored PRAISONAI_HOME.
+
+    Same defect as the skills check: with PRAISONAI_HOME set, the runtime stored
+    memory in one place while doctor inspected another, so the check reported on
+    directories nothing reads (and missed the ones that matter).
+    """
+
+    def test_the_project_memory_dir_is_the_canonical_one(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_HOME", str(project / "home"))
+        (project / PROJECT_DATA_DIRNAME / "memory").mkdir(parents=True)
+        (project / LEGACY_PROJECT_DATA_DIRNAME / "memory").mkdir(parents=True)
+
+        from praisonai_code.cli.features.doctor.checks import memory_checks
+
+        dirs = memory_checks._find_memory_dirs()
+        assert str(project / PROJECT_DATA_DIRNAME / "memory") in dirs
+        assert str(project / LEGACY_PROJECT_DATA_DIRNAME / "memory") not in dirs
+
+    def test_it_honours_praisonai_home(self, project, monkeypatch):
+        home = project / "home"
+        monkeypatch.setenv("PRAISONAI_HOME", str(home))
+        import praisonaiagents.paths as core_paths
+
+        core_paths._clear_cache()
+        (home / "memory").mkdir(parents=True)
+
+        from praisonai_code.cli.features.doctor.checks import memory_checks
+
+        assert str(home / "memory") in memory_checks._find_memory_dirs(), (
+            "doctor ignored PRAISONAI_HOME and looked at the legacy dir instead"
+        )
+
+    def test_no_duplicates_are_reported(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_HOME", str(project / "home"))
+        (project / PROJECT_DATA_DIRNAME / "memory").mkdir(parents=True)
+
+        from praisonai_code.cli.features.doctor.checks import memory_checks
+
+        dirs = memory_checks._find_memory_dirs()
+        assert len(dirs) == len(set(dirs))
