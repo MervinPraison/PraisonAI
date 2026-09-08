@@ -596,10 +596,18 @@ class OpenAIClient:
         if cache_key in self._formatted_tools_cache:
             return self._formatted_tools_cache[cache_key]
             
+        from ..tools.hosted import is_hosted_tool
         formatted_tools = []
         for tool in tools:
+            # Provider-hosted tools (web search, code interpreter, file search,
+            # hosted MCP) have no local callable: the provider runs them, so
+            # they carry no 'function' block. Forward them untouched, allowlisted
+            # by type so a genuinely malformed tool is still dropped.
+            if isinstance(tool, dict) and is_hosted_tool(tool):
+                logging.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
+                formatted_tools.append(tool)
             # Check if the tool is already in OpenAI format
-            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
                     # Fix array schemas in the tool parameters
@@ -612,7 +620,10 @@ class OpenAIClient:
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
-                    if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                    if isinstance(subtool, dict) and is_hosted_tool(subtool):
+                        logging.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
+                        formatted_tools.append(subtool)
+                    elif isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
                             # Fix array schemas in the tool parameters
