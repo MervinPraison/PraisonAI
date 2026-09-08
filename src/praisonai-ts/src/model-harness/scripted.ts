@@ -20,6 +20,15 @@
  * boundary swapped out.
  */
 import { BaseLLM, type LLMConfig, type LLMResponse, type LLMGenerateOptions } from '../llm';
+import type {
+  LLMProvider,
+  GenerateTextOptions,
+  GenerateTextResult,
+  StreamTextOptions,
+  StreamChunk,
+  GenerateObjectOptions,
+  GenerateObjectResult,
+} from '../llm/providers/types';
 
 /** Thrown when the script runs out of replies. */
 export class ScriptExhausted extends Error {
@@ -43,7 +52,7 @@ export interface RecordedRequest {
 /** A scripted reply: a plain string, or a function of the request. */
 export type ScriptEntry = string | ((request: RecordedRequest) => string);
 
-export class ScriptedModel extends BaseLLM {
+export class ScriptedModel extends BaseLLM implements LLMProvider {
   private readonly script: ScriptEntry[];
   private cursor = 0;
   /** Every request the agent sent, in order. */
@@ -98,4 +107,61 @@ export class ScriptedModel extends BaseLLM {
     const text = this.next({ prompt, systemPrompt: options?.systemPrompt, options });
     yield text;
   }
+
+  // -------------------------------------------------------------------------
+  // LLMProvider: what Agent actually drives (via getBackend()). Implementing
+  // both surfaces means the same double works for a direct model call and for
+  // a full agent run.
+  // -------------------------------------------------------------------------
+
+  readonly providerId = 'scripted';
+
+  get modelId(): string {
+    return this.config.model ?? 'scripted/test-model';
+  }
+
+  /** The last user message, which is the prompt the agent is asking about. */
+  private static lastUserText(options: GenerateTextOptions): string {
+    for (let i = options.messages.length - 1; i >= 0; i--) {
+      const m: any = options.messages[i];
+      if (m?.role === 'user') return typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+    }
+    return '';
+  }
+
+  private static systemText(options: GenerateTextOptions): string | undefined {
+    const m: any = options.messages.find((x: any) => x?.role === 'system');
+    return m ? (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) : undefined;
+  }
+
+  async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+    const text = this.next({
+      prompt: ScriptedModel.lastUserText(options),
+      systemPrompt: ScriptedModel.systemText(options),
+    });
+    return {
+      text,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: 'stop',
+    };
+  }
+
+  async streamText(options: StreamTextOptions): Promise<AsyncIterable<StreamChunk>> {
+    const result = await this.generateText(options);
+    options.onToken?.(result.text);
+    async function* once(): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: result.text } as unknown as StreamChunk;
+    }
+    return once();
+  }
+
+  async generateObject<T = any>(options: GenerateObjectOptions<T>): Promise<GenerateObjectResult<T>> {
+    const text = this.next({ prompt: ScriptedModel.lastUserText(options as any) });
+    return {
+      object: JSON.parse(text) as T,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: 'stop',
+    } as GenerateObjectResult<T>;
+  }
+
 }

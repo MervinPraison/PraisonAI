@@ -24,12 +24,12 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2046 |
-| **Gap Count** | **1** |
+| TypeScript Features | 2047 |
+| **Gap Count** | **0** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
-| P2 (Medium) | 1 |
+| P2 (Medium) | 0 |
 | P3 (Low) | 0 |
 
 ## Gap Matrix
@@ -123,11 +123,10 @@
 | `route` | ✅ | ✅ | low | ✅ exported |
 | `when` | ✅ | ✅ | low | ✅ exported |
 
-### P2_CLI (47 exported, 0 stub, 1 missing)
+### P2_CLI (48 exported, 0 stub, 0 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `GuardrailRetry` | ✅ | ❌ | high | ⏳ missing |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ exported |
 | `Citation` | ✅ | ✅ | high | ✅ exported |
 | `CitationsMode` | ✅ | ✅ | high | ✅ exported |
@@ -139,6 +138,7 @@
 | `FastContextResult` | ✅ | ✅ | low | ✅ exported |
 | `FileMatch` | ✅ | ✅ | high | ✅ exported |
 | `GuardrailResult` | ✅ | ✅ | low | ✅ exported |
+| `GuardrailRetry` | ✅ | ✅ | high | ✅ exported |
 | `LLMGuardrail` | ✅ | ✅ | high | ✅ exported |
 | `LineRange` | ✅ | ✅ | high | ✅ exported |
 | `MCP` | ✅ | ✅ | low | ✅ exported |
@@ -822,10 +822,10 @@ import { AgentEventBus, AgentEvents, Event, EventEmitterPubSub, EventHandler, Pu
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (16 exports)</summary>
+<summary><strong>guardrails</strong> (17 exports)</summary>
 
 ```typescript
-import { Guardrail, GuardrailConfig, GuardrailContext, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailStatus, GuardrailValidationResult, LLMGuardrail, LLMGuardrailConfig... } from 'praisonai';
+import { Guardrail, GuardrailConfig, GuardrailContext, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailRetry, GuardrailStatus, GuardrailValidationResult, LLMGuardrail... } from 'praisonai';
 ```
 
 </details>

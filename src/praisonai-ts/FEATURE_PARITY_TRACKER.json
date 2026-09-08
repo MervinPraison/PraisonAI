@@ -6,12 +6,12 @@
   "summary": {
     "pythonCoreFeatures": 417,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 2046,
-    "gapCount": 1,
+    "typescriptFeatures": 2047,
+    "gapCount": 0,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
-    "priorityP2": 1,
+    "priorityP2": 0,
     "priorityP3": 0
   },
   "pythonCoreSDK": {
@@ -1152,6 +1152,7 @@
       "Guardrail",
       "GuardrailAction",
       "GuardrailManager",
+      "GuardrailRetry",
       "HTMLReader",
       "Handoff",
       "HandoffCycleError",
@@ -2757,6 +2758,7 @@
         "GuardrailFunction",
         "GuardrailManager",
         "GuardrailResult",
+        "GuardrailRetry",
         "GuardrailStatus",
         "GuardrailValidationResult",
         "LLMGuardrail",
@@ -4970,10 +4972,10 @@
       {
         "feature": "GuardrailRetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "guardrails"
       },
       {

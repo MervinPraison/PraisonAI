@@ -302,3 +302,5 @@ export const builtinGuardrails = {
     });
   },
 };
+
+export { GuardrailRetry } from './retry';
