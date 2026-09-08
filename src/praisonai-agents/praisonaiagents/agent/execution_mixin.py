@@ -2047,7 +2047,18 @@ Write the complete compiled report:"""
                 # NOT counted as tool failures (same exclusions the sync wrapper
                 # applies in _execute_tool_with_circuit_breaker_impl), so a gated
                 # tool never trips the breaker.
-                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                #
+                # Only when the breaker wrapper did not already run. When
+                # ``breaker`` is set, ``breaker.acall`` above has already called
+                # _on_success/_on_failure for this invocation, and recording
+                # again counted every outcome twice -- halving the configured
+                # failure_threshold (a breaker set to 5 opened after 3) and, on
+                # the success side, closing a HALF_OPEN circuit in half the
+                # required successes.
+                breaker_record = (
+                    getattr(self, '_circuit_breaker_record', None)
+                    if breaker is None else None
+                )
                 if breaker_record is not None:
                     is_breaker_failure = (
                         isinstance(result, dict)
@@ -2099,13 +2110,18 @@ Write the complete compiled report:"""
                 logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
                 # Circuit breaker (failure on raised exception) — a raised tool
                 # exception is a failure just like an error-dict result, and the
-                # sync path's ``breaker.call`` counts it. Record it here so the
-                # breaker still opens after repeated raises; otherwise the
-                # post-invoke record block above is skipped and raised failures
-                # never trip the breaker. Approval/permission/policy/guardrail
-                # denials surface as error dicts (handled above), not raises, so
-                # this path only ever sees genuine tool failures.
-                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                # sync path's ``breaker.call`` counts it. Approval/permission/
+                # policy/guardrail denials surface as error dicts (handled
+                # above), not raises, so this path only ever sees genuine tool
+                # failures.
+                #
+                # Again only when the breaker wrapper did not run: ``acall``
+                # records the failure and re-raises, so the exception arriving
+                # here has already been counted once.
+                breaker_record = (
+                    getattr(self, '_circuit_breaker_record', None)
+                    if breaker is None else None
+                )
                 if breaker_record is not None:
                     breaker_record(function_name, False)
                 # Record the failed invocation so repeated identical failures
