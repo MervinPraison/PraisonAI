@@ -3420,10 +3420,21 @@ CONCISE SUMMARY:"""
             control_saved: Dict[str, Any] = {}
             control_introduced = set()
             preexisting_writes = set(getattr(all_variables, "written_keys", None) or ())
+            prev_control_keys: set = set()
             try:
                 for idx, item in enumerate(items):
                     # Add current item (and loop_index / item.<key>) to variables
                     control = self._loop_control_variables(loop_step, item, idx)
+                    # Drop the previous item's flattened ``item.<key>`` accessors
+                    # that this item does not have. Because the loop runs against
+                    # the shared scope, ``update`` alone would leave a stale
+                    # ``item.k`` visible while iterating an item that only has
+                    # ``item.m`` - the body would read the previous item's value.
+                    # ``_restore_loop_scope`` already cleans these up after the
+                    # loop; this keeps each iteration's view correct too.
+                    for stale_key in prev_control_keys - control.keys():
+                        all_variables.pop(stale_key, None)
+                    prev_control_keys = set(control.keys())
                     for key in control:
                         if key not in control_introduced:
                             control_introduced.add(key)

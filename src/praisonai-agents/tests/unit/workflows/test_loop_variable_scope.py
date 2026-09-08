@@ -416,3 +416,36 @@ def test_a_body_step_writing_the_control_name_still_does_not_leak_it(is_parallel
     )
     assert variables["loop_outputs"] == ["X-a", "X-b"]  # control: the body did run
     assert variables.get("control") == "AFTER"  # control
+
+
+def test_sequential_flattened_item_keys_do_not_leak_between_differently_shaped_items():
+    """A later item that omits a key must not see the previous item's ``item.<key>``.
+
+    The sequential loop runs against the shared scope, so ``item.k`` written for
+    ``{"k": "a"}`` would linger while iterating ``{"m": "b"}`` (which only sets
+    ``item.m``) unless the stale accessor is cleared - the body would then read a
+    stale ``{{item.k}}`` from the previous item. The parallel loop is immune (a
+    fresh deep copy per iteration); this is a sequential-only regression.
+    """
+    seen = []
+
+    def observe(ctx: WorkflowContext) -> StepResult:
+        seen.append((ctx.variables.get("item.k"), ctx.variables.get("item.m")))
+        return StepResult(output="ok")
+
+    wf = Workflow(
+        steps=[
+            loop(steps=[Task(name="observe", handler=observe, max_retries=0)],
+                 over="items", parallel=False),
+            _after(),
+        ],
+        variables={"items": [{"k": "a"}, {"m": "b"}]},
+    )
+    variables = wf.start("go")["variables"]
+
+    assert seen == [("a", None), (None, "b")], (
+        f"a stale flattened item key leaked between iterations: {seen}"
+    )
+    assert "item.k" not in variables
+    assert "item.m" not in variables
+    assert variables.get("control") == "AFTER"  # control
