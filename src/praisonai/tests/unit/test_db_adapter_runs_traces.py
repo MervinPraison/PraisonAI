@@ -79,11 +79,14 @@ class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
 
         self.assertIn("get", PraisonAIDB._READ_OPS)
 
-    def test_on_run_end_state_get_fails_loudly_in_running_loop(self):
-        """Regression (Greptile P1): a sync completion hook whose ``get`` returns
-        a coroutine must not silently return ``None`` inside a running loop.
-        With ``get`` now a read op it fails loudly (steering to ``aon_*``) rather
-        than merging into ``{}`` and clobbering run_id/started_at/input_content."""
+    def test_on_run_end_merges_and_persists_in_running_loop(self):
+        """Regression (#4945): a sync completion hook reached from inside a
+        running loop must NOT be silently dropped. Previously ``get`` (a read
+        op) raised ``RuntimeError`` inside the loop, the core caller swallowed
+        it, and the ``set`` never ran — leaving the run stuck ``status="running"``
+        forever. The fix runs the whole get+merge+set as one coroutine on the
+        bridge, so the completion actually persists while preserving the
+        pre-existing run_id/started_at/input_content fields."""
         from praisonai.db.adapter import PraisonAIDB
 
         db = PraisonAIDB()
@@ -93,12 +96,18 @@ class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
         db._initialized = True
 
         async def _main():
-            with self.assertRaises(RuntimeError):
-                db.on_run_end("s1", "r1", output_content="done")
+            # Must not raise inside a running loop.
+            db.on_run_end("s1", "r1", output_content="done", status="completed")
+            # The write is a tracked fire-and-forget on the bridge; flush it.
+            await asyncio.to_thread(db.flush_pending_writes)
 
         asyncio.run(_main())
-        # The persisted record was left intact — not overwritten with a partial dict.
-        self.assertEqual(
-            db._state_store._data["run:s1:r1"],
-            {"run_id": "r1", "started_at": 10, "input_content": "hi"},
-        )
+
+        record = db._state_store._data["run:s1:r1"]
+        # Pre-existing fields preserved; completion fields merged in.
+        self.assertEqual(record["run_id"], "r1")
+        self.assertEqual(record["started_at"], 10)
+        self.assertEqual(record["input_content"], "hi")
+        self.assertEqual(record["output_content"], "done")
+        self.assertEqual(record["status"], "completed")
+        self.assertIn("ended_at", record)

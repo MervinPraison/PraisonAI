@@ -10,6 +10,7 @@ import sys
 import inspect
 import logging
 import threading
+import contextvars
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, List, Optional
@@ -41,14 +42,21 @@ class ObservabilityRun:
     _agentops_mode: Optional[str] = None
 
 
-# Thread-local LIFO stack of the runs started on the current thread. ``init``
+# Context-local LIFO stack of the runs started in the current context. ``init``
 # and ``finalize`` are called separately (init in the generator, finalize in
-# each adapter) but on the same thread per run, so a per-thread stack lets
-# finalize tear down exactly the run it belongs to — even when the void-
-# returning legacy signatures are used. This replaces the previous single
-# process-wide ``_installed_sinks`` list that made concurrent runs trample
-# each other.
-_run_stack = threading.local()
+# each adapter) but within the same run, so a per-context stack lets finalize
+# tear down exactly the run it belongs to — even when the void-returning legacy
+# signatures are used.
+#
+# A ``ContextVar`` (not ``threading.local``) is used deliberately: asyncio
+# copies the context per task, so N concurrent ``arun()`` tasks multiplexed onto
+# ONE worker thread each get their own stack copy. A ``threading.local`` slot is
+# shared by all tasks on a thread, so a void-signature ``finalize_observability``
+# in task A would pop and tear down task B's run (closing B's sinks mid-run and
+# restoring another tenant's emitter). See #4945.
+_run_stack: "contextvars.ContextVar[Optional[List[ObservabilityRun]]]" = (
+    contextvars.ContextVar("praisonai_obs_run_stack", default=None)
+)
 
 # Process-wide guard for the global trace emitter swap/restore. The emitter set
 # via ``set_default_emitter`` is a single process-global slot, so concurrent
@@ -71,10 +79,10 @@ _agentops_lock = threading.Lock()
 
 
 def _get_run_stack() -> List[ObservabilityRun]:
-    stack = getattr(_run_stack, "runs", None)
+    stack = _run_stack.get()
     if stack is None:
         stack = []
-        _run_stack.runs = stack
+        _run_stack.set(stack)
     return stack
 
 
