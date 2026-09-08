@@ -139,13 +139,39 @@ def test_profiled_chat_still_receives_the_attachment(tmp_path, tui, monkeypatch)
 # --continue
 # --------------------------------------------------------------------------
 
-def test_chat_continue_resumes_the_last_session(tmp_path, tui, monkeypatch):
+@pytest.fixture
+def sessions(tmp_path, monkeypatch):
+    """Isolate BOTH session stores `--continue` consults.
+
+    It prefers the canonical project store (``find_last_session``) and falls
+    back to the flat unified store. Stubbing only the latter left these tests
+    reading the developer's real ``~/.praisonai`` -- they passed or failed
+    depending on whose machine ran them, and asserted against a live session id.
+
+    Returns a setter so a test states the last session id it wants, rather than
+    inheriting whatever happens to be on disk.
+    """
     from praisonai_code.cli.session import UnifiedSessionStore
     import praisonai_code.cli.session as session_pkg
+    import praisonai_code.cli.state.project_sessions as project_sessions
 
     store = UnifiedSessionStore(session_dir=tmp_path / "sessions")
-    store.get_or_create("earlier-one")
     monkeypatch.setattr(session_pkg, "get_session_store", lambda: store)
+
+    def set_last(session_id):
+        monkeypatch.setattr(
+            project_sessions, "find_last_session",
+            lambda *a, **k: session_id, raising=False,
+        )
+        if session_id:
+            store.get_or_create(session_id)
+
+    set_last(None)          # default: no history anywhere
+    return set_last
+
+
+def test_chat_continue_resumes_the_last_session(tui, sessions):
+    sessions("earlier-one")
 
     _invoke(chat_module.chat_main, ["hi", "--continue"])
 
@@ -154,26 +180,33 @@ def test_chat_continue_resumes_the_last_session(tmp_path, tui, monkeypatch):
     )
 
 
-def test_an_explicit_session_beats_continue(tmp_path, tui, monkeypatch):
+def test_continue_falls_back_to_the_unified_store(tui, sessions, tmp_path,
+                                                  monkeypatch):
+    """The project store is preferred, but must not be the only one tried."""
     from praisonai_code.cli.session import UnifiedSessionStore
     import praisonai_code.cli.session as session_pkg
+    import praisonai_code.cli.state.project_sessions as project_sessions
 
-    store = UnifiedSessionStore(session_dir=tmp_path / "sessions")
-    store.get_or_create("earlier-one")
+    store = UnifiedSessionStore(session_dir=tmp_path / "unified")
+    store.get_or_create("only-in-unified")
     monkeypatch.setattr(session_pkg, "get_session_store", lambda: store)
+    monkeypatch.setattr(project_sessions, "find_last_session",
+                        lambda *a, **k: None, raising=False)
+
+    _invoke(chat_module.chat_main, ["hi", "--continue"])
+
+    assert tui.last_config.session_id == "only-in-unified"
+
+
+def test_an_explicit_session_beats_continue(tui, sessions):
+    sessions("earlier-one")
 
     _invoke(chat_module.chat_main, ["hi", "--continue", "--session", "chosen"])
 
     assert tui.last_config.session_id == "chosen"
 
 
-def test_continue_with_no_history_says_so_and_carries_on(tmp_path, tui, monkeypatch):
-    from praisonai_code.cli.session import UnifiedSessionStore
-    import praisonai_code.cli.session as session_pkg
-
-    store = UnifiedSessionStore(session_dir=tmp_path / "sessions")
-    monkeypatch.setattr(session_pkg, "get_session_store", lambda: store)
-
+def test_continue_with_no_history_says_so_and_carries_on(tui, sessions):
     result = _invoke(chat_module.chat_main, ["hi", "--continue"])
 
     assert result.exit_code == 0
