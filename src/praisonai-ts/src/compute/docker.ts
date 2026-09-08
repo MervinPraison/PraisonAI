@@ -85,21 +85,54 @@ export class DockerCompute implements ComputeProvider {
     if (!instance) {
       throw new ComputeError(`No such container: ${instanceId}`, 'docker');
     }
+    if (instance.status !== 'running') {
+      throw new ComputeError(
+        `Container ${instanceId} is ${instance.status}, not running.`,
+        'docker'
+      );
+    }
     const workdir = config.workdir ?? (instance.metadata?.workdir as string) ?? '/workspace';
     const envFlags = Object.entries(config.env ?? {})
       .map(([key, value]) => `-e ${shellQuote(`${key}=${value}`)}`)
       .join(' ');
+    const timeoutSeconds = config.timeoutSeconds ?? 60;
+    // Enforce the timeout INSIDE the container, not just on the host-side
+    // `docker exec` client. Killing the client would leave the command still
+    // running in the container -- the public contract says a provider kills the
+    // command at `timeoutSeconds`, so we wrap it in the container's own
+    // `timeout`, which sends SIGKILL 5s after the deadline (`-k 5`). `timeout`
+    // exiting 124 is mapped back to a real timeout outcome below. Give the host
+    // client a small margin so the in-container timeout fires first.
+    const inner = `timeout -k 5 ${timeoutSeconds} sh -c ${shellQuote(command)}`;
     const wrapped =
       `docker exec -w ${shellQuote(workdir)} ${envFlags} ${shellQuote(instanceId)} ` +
-      `sh -c ${shellQuote(command)}`;
-    return this.runOnHost(wrapped, config.timeoutSeconds ?? 60);
+      `sh -c ${shellQuote(inner)}`;
+    const result = await this.runOnHost(wrapped, timeoutSeconds + 10);
+    // `timeout` reports 124 when it killed the command; surface that as the
+    // provider's timeout outcome rather than a plain non-zero exit.
+    if (!result.timedOut && result.exitCode === 124) {
+      return { ...result, exitCode: null, timedOut: true };
+    }
+    return result;
   }
 
   async shutdown(instanceId: string): Promise<void> {
     const instance = this.containers.get(instanceId);
     if (!instance) return;
-    await this.runOnHost(`docker rm -f ${shellQuote(instanceId)}`, 60);
+    const result = await this.runOnHost(`docker rm -f ${shellQuote(instanceId)}`, 60);
+    // Do NOT claim the container is gone if `docker rm -f` failed: a container
+    // reported stopped while still running is the silent-wrongness this package
+    // guards against. Mark it errored and raise so the caller can retry.
+    if (result.exitCode !== 0) {
+      instance.status = 'error';
+      throw new ComputeError(
+        `Could not remove container ${instanceId}: ` +
+          `${result.stderr.trim() || result.stdout.trim() || 'docker gave no output'}`,
+        'docker'
+      );
+    }
     instance.status = 'stopped';
+    this.containers.delete(instanceId);
   }
 
   async listInstances(): Promise<ComputeInstance[]> {

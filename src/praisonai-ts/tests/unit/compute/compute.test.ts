@@ -114,4 +114,54 @@ describe('DockerCompute', () => {
   it('refuses to exec against a container it never started', async () => {
     await expect(new DockerCompute().execute('nope', 'echo hi')).rejects.toThrow(/No such container/);
   });
+
+  // The next cases exercise the host-side `docker` calls without a real daemon
+  // by stubbing the one seam every docker command flows through: `runOnHost`.
+  function fakeDocker(hostResponses: (cmd: string) => any): DockerCompute {
+    const docker = new DockerCompute();
+    (docker as any).runOnHost = async (command: string) => hostResponses(command);
+    return docker;
+  }
+  const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, timedOut: false, durationMs: 1 });
+
+  it('a failed `docker rm -f` raises instead of reporting success', async () => {
+    // A container reported stopped while still running is exactly the silent
+    // wrongness this package guards against.
+    const docker = fakeDocker((cmd) =>
+      cmd.startsWith('docker run')
+        ? ok('container123')
+        : cmd.startsWith('docker rm')
+          ? { stdout: '', stderr: 'daemon error', exitCode: 1, timedOut: false, durationMs: 1 }
+          : ok()
+    );
+    const instance = await docker.provision();
+    await expect(docker.shutdown(instance.id)).rejects.toThrow(/Could not remove container/);
+    expect((await docker.getStatus(instance.id))?.status).toBe('error');
+  });
+
+  it('a container-side timeout (exit 124) is surfaced as timedOut, not a plain non-zero exit', async () => {
+    // The timeout is enforced INSIDE the container via `timeout`; its 124 exit
+    // must map back to the provider's timeout outcome.
+    const docker = fakeDocker((cmd) =>
+      cmd.startsWith('docker run')
+        ? ok('container123')
+        : { stdout: '', stderr: '', exitCode: 124, timedOut: false, durationMs: 1 }
+    );
+    const instance = await docker.provision();
+    const result = await docker.execute(instance.id, 'sleep 100', { timeoutSeconds: 1 });
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBeNull();
+  });
+
+  it('wraps the in-container command in `timeout` so the process is killed, not just the host client', async () => {
+    let seen = '';
+    const docker = fakeDocker((cmd) => {
+      if (cmd.startsWith('docker run')) return ok('container123');
+      seen = cmd;
+      return ok('done');
+    });
+    const instance = await docker.provision();
+    await docker.execute(instance.id, 'echo hi', { timeoutSeconds: 7 });
+    expect(seen).toContain('timeout -k 5 7');
+  });
 });
