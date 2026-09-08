@@ -411,6 +411,14 @@ def test_agent_panel_descriptor_forwards_connection_settings(monkeypatch):
 
     monkeypatch.setattr(panel_mod, "create_panel_llm", fake_create_panel_llm)
 
+    # Agent.__init__ resolves subscription credentials eagerly for auth=, by
+    # design ("missing credentials must fail at construction, not at request
+    # time"). This test is about whether auth reaches the panel, not about
+    # credential discovery, so give the resolver the token it documents in its
+    # own error message -- otherwise it raises AuthError on any machine without
+    # Claude Code logged in, which is every CI runner.
+    monkeypatch.setenv("ANTHROPIC_TOKEN", "test-token")
+
     agent = Agent(
         instructions="x",
         llm={"provider": "panel", "references": ["a"], "aggregator": "c"},

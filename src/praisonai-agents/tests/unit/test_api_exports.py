@@ -195,12 +195,16 @@ class TestNamespaceStyle:
 class TestAllSizeLimited:
     """Test that __all__ is limited to core symbols."""
     
-    def test_all_size_under_29(self):
-        """__all__ should have fewer than 29 items (minimal for clean IDE)."""
+    def test_all_size_under_32(self):
+        """__all__ should have fewer than 32 items (minimal for clean IDE)."""
         import praisonaiagents
-        # Updated from 27 to 29 to accommodate AutonomyConfig, AutonomyLevel exports
-        assert len(praisonaiagents.__all__) < 29, \
-            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 29"
+        # 27 -> 29 for AutonomyConfig, AutonomyLevel.
+        # 29 -> 32 for RetryBackoffConfig (#2082) and RunOutcome (#3406), both
+        # canonical public types. This is a deliberate ratchet, not a formality:
+        # raise it only for a symbol that genuinely belongs in the top-level
+        # namespace, so the bound keeps doing its job of limiting IDE noise.
+        assert len(praisonaiagents.__all__) < 32, \
+            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 32"
     
     def test_all_contains_core(self):
         """__all__ contains core symbols."""

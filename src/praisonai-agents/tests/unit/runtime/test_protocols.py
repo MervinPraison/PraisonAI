@@ -2,12 +2,32 @@
 
 import pytest
 from typing import AsyncIterator
+from praisonaiagents.runtime.capabilities import RuntimeCapabilityMatrix
 from praisonaiagents.runtime.protocols import AgentRuntimeProtocol, RuntimeConfig, RuntimeResult, RuntimeDelta
 
 
 class MockRuntime:
-    """Mock runtime implementation for testing protocol compliance."""
-    
+    """Mock runtime implementation for testing protocol compliance.
+
+    AgentRuntimeProtocol is @runtime_checkable, so isinstance() checks that
+    EVERY member is present. runtime_name, runtime_version and capabilities were
+    added to the protocol after this mock was written, so
+    test_protocol_compliance failed on a bare "assert False" -- the mock had
+    stopped implementing the protocol it exists to demonstrate.
+    """
+
+    @property
+    def runtime_name(self) -> str:
+        return "mock"
+
+    @property
+    def runtime_version(self) -> str:
+        return "1.0.0"
+
+    @property
+    def capabilities(self) -> "RuntimeCapabilityMatrix":
+        return RuntimeCapabilityMatrix(basic_chat=True, simple_tools=True)
+
     def supports(self, model_ref: str = None) -> bool:
         return True
     
@@ -33,6 +53,21 @@ class MockRuntime:
         words = f"Response to: {prompt}".split()
         for word in words:
             yield RuntimeDelta(type="text", content=word + " ")
+
+    async def execute_agent(
+        self, agent_config: dict, prompt: str, **kwargs
+    ) -> dict:
+        return {"content": f"Response to: {prompt}", "metadata": agent_config}
+
+    async def stream_agent(self, agent_config: dict, prompt: str, **kwargs):
+        async for delta in self.stream_turn(prompt, **kwargs):
+            yield delta
+
+    async def validate_config(self, agent_config: dict) -> list:
+        return []
+
+    async def health_check(self) -> dict:
+        return {"status": "ok", "latency_ms": 0, "errors": []}
 
 
 def test_runtime_config():
