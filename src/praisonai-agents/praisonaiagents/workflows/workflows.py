@@ -1202,6 +1202,19 @@ class AgentFlow:
         finally:
             self._execution_lock.release()
 
+    def to_mermaid(self) -> str:
+        """Render this flow's DEFINITION as a mermaid diagram.
+
+        Unlike the telemetry diagrams, which need a captured execution trace,
+        this reads the step list -- so a flow can be checked before it is run
+        and before it costs anything. Mermaid needs no extra dependency and
+        renders inline on GitHub and in the docs.
+
+            print(flow.to_mermaid())
+        """
+        from .diagram import flow_to_mermaid
+        return flow_to_mermaid(self)
+
     def __repr__(self):
         """Show where this workflow's steps run.
 
