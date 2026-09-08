@@ -16,7 +16,7 @@ GitHub and the docs render it inline.
       ...
 """
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 __all__ = ["to_mermaid", "flow_to_mermaid"]
 
@@ -57,8 +57,37 @@ class _Builder:
         self.lines.append(f"  {src}{arrow}{dst}")
 
 
-def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[str]:
-    """Render one step, returning the node the next step should follow."""
+def _branch(steps: Any, b: "_Builder") -> Optional[Tuple[str, str]]:
+    """Render a sub-sequence of steps in isolation.
+
+    Returns the ``(entry, exit)`` pair for the whole sub-sequence, or ``None``
+    when it is empty. Parents wire the labelled edge to ``entry`` -- never to a
+    nested composite's exit -- so a nested ``If``/``Route``/``Parallel`` stays
+    connected to its own decision/fork instead of being bypassed.
+    """
+    entry: Optional[str] = None
+    tail: Optional[str] = None
+    for inner in steps or []:
+        rendered = _render(inner, b, tail)
+        if rendered is None:
+            continue
+        inner_entry, inner_exit = rendered
+        if entry is None:
+            entry = inner_entry
+        tail = inner_exit
+    if entry is None or tail is None:
+        return None
+    return entry, tail
+
+
+def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Render one step, returning its ``(entry, exit)`` nodes.
+
+    ``entry`` is what an incoming edge should point at; ``exit`` is what the
+    next step should follow. For a plain step the two are identical; for a
+    composite they differ (e.g. an ``If`` enters at its decision and exits at
+    its join).
+    """
     cls = type(step).__name__
     name = _escape(_label(step))
 
@@ -68,19 +97,15 @@ def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[str]:
             b.edge(prev, decision)
         ends = []
         for branch, edge_label in (("then_steps", "true"), ("else_steps", "false")):
-            steps = getattr(step, branch, None) or []
-            tail = decision
-            for i, inner in enumerate(steps):
-                nxt = _render(inner, b, None)
-                if nxt:
-                    b.edge(tail, nxt, edge_label if i == 0 else None)
-                    tail = nxt
-            if tail is not decision:
-                ends.append(tail)
+            rendered = _branch(getattr(step, branch, None), b)
+            if rendered:
+                branch_entry, branch_exit = rendered
+                b.edge(decision, branch_entry, edge_label)
+                ends.append(branch_exit)
         join = b.node('(("join"))')
         for end in ends or [decision]:
             b.edge(end, join)
-        return join
+        return decision, join
 
     if cls == "Route":
         router = b.node(f'{{"route"}}')
@@ -89,23 +114,23 @@ def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[str]:
         ends = []
         routes = getattr(step, "routes", None) or {}
         for key, steps in routes.items():
-            tail = router
-            for i, inner in enumerate(steps or []):
-                nxt = _render(inner, b, None)
-                if nxt:
-                    b.edge(tail, nxt, key if i == 0 else None)
-                    tail = nxt
-            if tail is not router:
-                ends.append(tail)
-        for inner in getattr(step, "default", None) or []:
-            nxt = _render(inner, b, None)
-            if nxt:
-                b.edge(router, nxt, "default")
-                ends.append(nxt)
+            rendered = _branch(steps, b)
+            if rendered:
+                branch_entry, branch_exit = rendered
+                b.edge(router, branch_entry, key)
+                ends.append(branch_exit)
+        # ``Route.__init__`` mirrors ``routes["default"]`` into ``.default``;
+        # only render ``.default`` when it was not already drawn as a key above.
+        if "default" not in routes:
+            rendered = _branch(getattr(step, "default", None), b)
+            if rendered:
+                branch_entry, branch_exit = rendered
+                b.edge(router, branch_entry, "default")
+                ends.append(branch_exit)
         join = b.node('(("join"))')
         for end in ends or [router]:
             b.edge(end, join)
-        return join
+        return router, join
 
     if cls == "Parallel":
         fork = b.node('(("fork"))')
@@ -113,14 +138,15 @@ def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[str]:
             b.edge(prev, fork)
         ends = []
         for inner in getattr(step, "steps", None) or []:
-            nxt = _render(inner, b, None)
-            if nxt:
-                b.edge(fork, nxt)
-                ends.append(nxt)
+            rendered = _render(inner, b, None)
+            if rendered:
+                branch_entry, branch_exit = rendered
+                b.edge(fork, branch_entry)
+                ends.append(branch_exit)
         join = b.node('(("join"))')
         for end in ends or [fork]:
             b.edge(end, join)
-        return join
+        return fork, join
 
     if cls in ("Loop", "Repeat"):
         inner_steps = getattr(step, "steps", None) or (
@@ -129,21 +155,37 @@ def _render(step: Any, b: _Builder, prev: Optional[str]) -> Optional[str]:
         tail = prev
         first = None
         for inner in inner_steps:
-            nxt = _render(inner, b, tail)
-            if nxt:
-                first = first or nxt
-                tail = nxt
+            rendered = _render(inner, b, tail)
+            if rendered:
+                inner_entry, inner_exit = rendered
+                first = first or inner_entry
+                tail = inner_exit
         if first and tail:
             over = getattr(step, "over", None)
             iterations = getattr(step, "max_iterations", None)
             back = f"over {over}" if over else (f"up to {iterations}x" if iterations else "repeat")
             b.edge(tail, first, back)
-        return tail
+        if first is None or tail is None:
+            return None
+        return first, tail
+
+    if cls == "Include":
+        # An included workflow's steps are known at definition time, so render
+        # them inline rather than as an opaque node. A recipe include (by name)
+        # is only resolvable at runtime, so it stays a single node.
+        workflow = getattr(step, "workflow", None)
+        if workflow is not None:
+            rendered = _branch(getattr(workflow, "steps", None), b)
+            if rendered:
+                branch_entry, branch_exit = rendered
+                if prev:
+                    b.edge(prev, branch_entry)
+                return branch_entry, branch_exit
 
     node = b.node(f'["{name}"]')
     if prev:
         b.edge(prev, node)
-    return node
+    return node, node
 
 
 def to_mermaid(steps: Any, name: Optional[str] = None) -> str:
@@ -152,7 +194,9 @@ def to_mermaid(steps: Any, name: Optional[str] = None) -> str:
     start = b.node('([" start "])' if not name else f'(["{_escape(name)}"])')
     prev: Optional[str] = start
     for step in (steps or []):
-        prev = _render(step, b, prev) or prev
+        rendered = _render(step, b, prev)
+        if rendered:
+            prev = rendered[1]
     end = b.node('([" end "])')
     if prev:
         b.edge(prev, end)
