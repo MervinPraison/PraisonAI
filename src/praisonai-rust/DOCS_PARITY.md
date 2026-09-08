@@ -38,7 +38,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Display | 12 | 1 | 64 |
 | ✅ Documents | 1 | 1 | 71 |
 | ✅ Embeddings | 8 | 2 | 143 |
-| ✅ Evaluation | 5 | 1 | 96 |
+| ✅ Evaluation | 5 | 1 | 100 |
 | ✅ Events | 3 | 1 | 114 |
 | ✅ Execution | 3 | 1 | 105 |
 | ✅ Failover | 3 | 1 | 115 |
@@ -64,10 +64,10 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Prompts | 4 | 1 | 80 |
 | ✅ Providers | 3 | 1 | 74 |
 | ✅ Query | 5 | 1 | 57 |
-| ✅ RAG | 6 | 1 | 73 |
+| ✅ RAG | 6 | 1 | 78 |
 | ✅ Realtime | 3 | 1 | 66 |
 | ✅ Reflection | 4 | 1 | 129 |
-| ✅ Retrieval | 4 | 1 | 68 |
+| ✅ Retrieval | 4 | 1 | 72 |
 | ✅ Routing | 1 | 1 | 78 |
 | ✅ Sandbox | 7 | 2 | 130 |
 | ✅ Security | 2 | 1 | 74 |

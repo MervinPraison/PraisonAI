@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 57 | 18181 |
+| ✅ Agent | 22 | 57 | 18193 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 7 | 3644 |
@@ -27,17 +27,17 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2794 |
 | ✅ Bots | 7 | 33 | 13928 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 123 | 38327 |
+| ✅ CLI | 5 | 123 | 38396 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4974 |
+| ✅ Code Execution | 2 | 14 | 4977 |
 | ✅ Conditions | 1 | 3 | 1386 |
-| ✅ Configuration | 3 | 8 | 3323 |
+| ✅ Configuration | 3 | 8 | 3341 |
 | ✅ Context Management | 16 | 36 | 14151 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 844 |
 | ✅ Embeddings | 6 | 23 | 2051 |
-| ✅ Evaluation | 1 | 8 | 3220 |
+| ✅ Evaluation | 1 | 8 | 3224 |
 | ✅ Events | 1 | 2 | 767 |
 | ✅ Execution | 3 | 4 | 1631 |
 | ✅ Failover | 2 | 1 | 480 |
@@ -52,9 +52,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5917 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 62 | 14489 |
-| ✅ Memory | 6 | 19 | 7588 |
+| ✅ Memory | 6 | 19 | 7614 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2815 |
+| ✅ Observability | 2 | 23 | 2842 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1273 |
 | ✅ Parallel Execution | 3 | 2 | 528 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2807 |
-| ✅ Workflows | 5 | 18 | 7674 |
+| ✅ Workflows | 5 | 18 | 7736 |
 
 ## Documentation Without Features
 
