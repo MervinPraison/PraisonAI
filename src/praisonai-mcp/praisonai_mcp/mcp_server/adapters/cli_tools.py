@@ -21,6 +21,31 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _resolve_todo_store() -> str:
+    """Where PraisonAI actually keeps todos.
+
+    These tools previously hardcoded ``~/.praison/todo.json`` -- the wrong
+    directory AND the wrong filename. The real store is owned by
+    praisonaiagents.tools.todo_tools: ``<workspace>/todos.json`` when a
+    workspace is active, else ``~/.praisonai/todos.json``.
+
+    The mismatch meant ``praisonai.todo.list`` answered "No todos found" -- a
+    success string, not an error -- to a user who had todos, and
+    ``praisonai.todo.add`` then started a second, invisible list.
+
+    Resolved through the owning module rather than a corrected literal, so the
+    two cannot drift apart again.
+    """
+    import os
+
+    try:
+        from praisonaiagents.tools.todo_tools import TodoTools
+
+        return TodoTools()._get_todo_file()
+    except Exception:
+        return os.path.expanduser("~/.praisonai/todos.json")
+
+
 def _resolve_cwd_yaml_path(file_path: str) -> "Path":
     """Resolve a YAML path strictly inside the current working directory."""
     from pathlib import Path
@@ -275,7 +300,7 @@ def register_cli_tools() -> None:
         try:
             import os
             import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
+            todo_path = _resolve_todo_store()
             if not os.path.exists(todo_path):
                 return "No todos found"
             with open(todo_path, 'r') as f:
@@ -291,7 +316,7 @@ def register_cli_tools() -> None:
             import os
             import json
             import uuid
-            todo_path = os.path.expanduser("~/.praison/todo.json")
+            todo_path = _resolve_todo_store()
             os.makedirs(os.path.dirname(todo_path), exist_ok=True)
             
             todos = []
@@ -320,7 +345,7 @@ def register_cli_tools() -> None:
         try:
             import os
             import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
+            todo_path = _resolve_todo_store()
             if not os.path.exists(todo_path):
                 return "No todos found"
             
@@ -347,7 +372,7 @@ def register_cli_tools() -> None:
         try:
             import os
             import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
+            todo_path = _resolve_todo_store()
             if not os.path.exists(todo_path):
                 return "No todos found"
             

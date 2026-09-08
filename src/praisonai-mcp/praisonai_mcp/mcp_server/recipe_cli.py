@@ -245,7 +245,10 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
         """List available recipes."""
         parser = argparse.ArgumentParser(prog="praisonai mcp list-recipes")
         parser.add_argument("--tags", default=None, help="Filter by tags (comma-separated)")
-        parser.add_argument("--source", default=None, choices=["local", "package", "all"])
+        # Choices must match what the wrapper actually accepts (see
+        # praisonai/recipe/core.py: "local, package, github"). "all" was never
+        # a real value; github was missing.
+        parser.add_argument("--source", default=None, choices=["local", "package", "github"])
         parser.add_argument("--json", action="store_true")
         
         try:
@@ -258,7 +261,10 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             list_recipes = wrapper_callable("praisonai.recipe.core", "list_recipes")
             
             tags = parsed.tags.split(",") if parsed.tags else None
-            recipes = list_recipes(tags=tags, source=parsed.source)
+            # The wrapper's list_recipes() names this parameter `source_filter`, not
+            # `source`. Passing the wrong keyword raised TypeError on EVERY
+            # invocation of `list-recipes`, so the command had never worked.
+            recipes = list_recipes(tags=tags, source_filter=parsed.source)
             
             if parsed.json:
                 self._print_json({"recipes": [r.to_dict() for r in recipes]})
