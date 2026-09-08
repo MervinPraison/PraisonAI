@@ -55,19 +55,35 @@ class TestPluginHook:
         assert PluginHook.ON_RETRY.value == "on_retry"
     
     def test_tool_result_persist_hook(self):
-        """Test tool_result_persist hook (moltbot parity)."""
-        assert PluginHook.TOOL_RESULT_PERSIST.value == "tool_result_persist"
+        """TOOL_RESULT_PERSIST is an alias of the live AFTER_TOOL event.
+
+        AFTER_TOOL already receives the tool result before it is persisted and
+        its in-place rewrite of ``tool_output`` is what gets stored, so a
+        separate member could only ever be a dead slot that swallowed hooks.
+        """
+        assert PluginHook.TOOL_RESULT_PERSIST is PluginHook.AFTER_TOOL
     
+    def test_message_lifecycle_aliases(self):
+        """BEFORE_/AFTER_MESSAGE are the live inbound/outbound events.
+
+        ``Plugin.before_message`` / ``Plugin.after_message`` have always routed
+        to MESSAGE_RECEIVED / MESSAGE_SENDING, so the identically named enum
+        members must resolve to the same events rather than to dead slots.
+        """
+        assert PluginHook.BEFORE_MESSAGE is PluginHook.MESSAGE_RECEIVED
+        assert PluginHook.AFTER_MESSAGE is PluginHook.MESSAGE_SENDING
+
     def test_claude_code_parity_hooks(self):
-        """Test Claude Code parity hooks (new additions)."""
-        # USER_PROMPT_SUBMIT - when user submits a prompt
-        assert PluginHook.USER_PROMPT_SUBMIT.value == "user_prompt_submit"
-        # NOTIFICATION - when notification is sent
-        assert PluginHook.NOTIFICATION.value == "notification"
-        # SUBAGENT_STOP - when subagent completes
+        """Only the parity hook with a real emission site survives.
+
+        SUBAGENT_STOP is emitted by ``tools/subagent_tool.py``.
+        USER_PROMPT_SUBMIT / NOTIFICATION / SETUP had no emission site anywhere
+        and were removed, so reaching for one now fails loudly instead of
+        registering a hook that silently never fires.
+        """
         assert PluginHook.SUBAGENT_STOP.value == "subagent_stop"
-        # SETUP - on initialization/maintenance
-        assert PluginHook.SETUP.value == "setup"
+        for removed in ("USER_PROMPT_SUBMIT", "NOTIFICATION", "SETUP"):
+            assert not hasattr(PluginHook, removed)
 
 
 class TestPluginInfo:

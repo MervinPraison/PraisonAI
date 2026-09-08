@@ -178,6 +178,13 @@ class PluginManager:
                 
                 # Initialize plugin
                 plugin.on_init({})
+
+                # Make the initialization observable to the hook system
+                # too. ``plugin.on_init`` is the plugin's *own* callback;
+                # ON_INIT is the runtime event other listeners
+                # (metrics/audit plugins, gateways) subscribe to. Without
+                # this emit the enum member was declared but never fired.
+                _emit_plugin_init(plugin)
                 
                 logger.info(f"Registered plugin: {info.name} v{info.version}")
                 return True
@@ -198,11 +205,15 @@ class PluginManager:
         if name not in self._plugins:
             return False
         
+        plugin = self._plugins[name]
         try:
-            plugin = self._plugins[name]
             plugin.on_shutdown()
         except Exception as e:
             logger.warning(f"Error during plugin shutdown: {e}")
+
+        # Counterpart to the ON_INIT emit in register(): the plugin is going
+        # away, and a listener that saw it arrive must be able to see it leave.
+        _emit_plugin_shutdown(plugin)
         
         del self._plugins[name]
         del self._enabled[name]
@@ -688,6 +699,65 @@ class PluginManager:
             except Exception:
                 pass
             return removed
+
+
+def _emit_plugin_init(plugin: Plugin) -> None:
+    """Emit ON_INIT for a plugin that has just been registered."""
+    from ..hooks.types import HookEvent
+
+    _emit_plugin_lifecycle(HookEvent.ON_INIT, plugin)
+
+
+def _emit_plugin_shutdown(plugin: Plugin) -> None:
+    """Emit ON_SHUTDOWN for a plugin that is being unregistered."""
+    from ..hooks.types import HookEvent
+
+    _emit_plugin_lifecycle(HookEvent.ON_SHUTDOWN, plugin)
+
+
+def _emit_plugin_lifecycle(event: "HookEvent", plugin: Plugin) -> None:
+    """Best-effort emit of ON_INIT / ON_SHUTDOWN for a plugin.
+
+    Fully guarded and skipped entirely when nothing is listening, so plugin
+    registration keeps working (and stays cheap) whether or not the hook
+    system is in use. Observability must never break plugin lifecycle.
+    """
+    try:
+        import os
+        from datetime import datetime, timezone
+
+        from ..hooks.registry import get_default_registry
+
+        registry = get_default_registry()
+        if not registry.has_hooks(event):
+            return
+
+        from ..hooks.events import PluginLifecycleInput
+        from ..hooks.runner import HookRunner
+
+        try:
+            info = plugin.info
+            name = getattr(info, "name", "") or ""
+            version = getattr(info, "version", "") or ""
+            description = getattr(info, "description", "") or ""
+        except Exception:
+            name, version, description = "", "", ""
+
+        HookRunner(registry).execute_sync(
+            event,
+            PluginLifecycleInput(
+                session_id="plugin-manager",
+                cwd=os.getcwd(),
+                event_name=event.value,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                plugin_name=name,
+                plugin_version=version,
+                plugin_description=description,
+            ),
+        )
+    except Exception:  # pragma: no cover - observability must never break loading
+        logger.debug("Plugin lifecycle hook failed", exc_info=True)
+
 
 def _write_back(data, attr: str, new_value: dict) -> None:
     """Write a plugin's returned dict back onto the hook payload.
