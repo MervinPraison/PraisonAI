@@ -215,10 +215,13 @@ class TestAgentIntegration:
 class TestAgenticExecution:
     """Test real agentic execution with toolsets (requires LLM)."""
     
-    @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "test-key",
-        reason="Real LLM test requires OPENAI_API_KEY environment variable"
-    )
+    # Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
+    # PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
+    # key ('sk-not-a-real-key') because some modules bail at import without one,
+    # so a presence check never skipped and the test ran against a fake
+    # credential. Excluding one known placeholder by value does not help -- the
+    # next harness uses a different string.
+    @pytest.mark.live
     def test_agent_real_agentic_execution_with_toolsets(self):
         """
         Real agentic test: Agent runs end-to-end with LLM using toolsets.
@@ -249,10 +252,13 @@ class TestAgenticExecution:
         print(f"\n🤖 Agent Response: {result}")
         print(f"✅ Real agentic test passed - Agent successfully used toolsets and called LLM")
     
-    @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "test-key",
-        reason="Real LLM test requires OPENAI_API_KEY environment variable"
-    )
+    # Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
+    # PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
+    # key ('sk-not-a-real-key') because some modules bail at import without one,
+    # so a presence check never skipped and the test ran against a fake
+    # credential. Excluding one known placeholder by value does not help -- the
+    # next harness uses a different string.
+    @pytest.mark.live
     def test_agent_with_research_toolset_real(self):
         """
         Test agent with research toolset in real execution.
