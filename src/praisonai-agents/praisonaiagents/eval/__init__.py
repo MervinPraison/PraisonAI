@@ -117,6 +117,13 @@ __all__ = [
     "TrialScore",
     "TrialAttempt",
     "TrialReport",
+    # Run fingerprinting: scores are comparable only when the setup did not move.
+    "FINGERPRINT_VERSION",
+    "run_fingerprint",
+    "fingerprint_parts",
+    "compare_fingerprints",
+    "assert_comparable",
+    "FingerprintMismatch",
 ]
 
 from .._lazy import create_lazy_getattr
@@ -213,6 +220,13 @@ _LAZY_IMPORTS = {
     "TrialScore": ("praisonaiagents.eval.trials", "TrialScore"),
     "TrialAttempt": ("praisonaiagents.eval.trials", "TrialAttempt"),
     "TrialReport": ("praisonaiagents.eval.trials", "TrialReport"),
+    # Run fingerprinting: scores are comparable only when the setup did not move.
+    "FINGERPRINT_VERSION": ("praisonaiagents.eval.fingerprint", "FINGERPRINT_VERSION"),
+    "run_fingerprint": ("praisonaiagents.eval.fingerprint", "run_fingerprint"),
+    "fingerprint_parts": ("praisonaiagents.eval.fingerprint", "fingerprint_parts"),
+    "compare_fingerprints": ("praisonaiagents.eval.fingerprint", "compare_fingerprints"),
+    "assert_comparable": ("praisonaiagents.eval.fingerprint", "assert_comparable"),
+    "FingerprintMismatch": ("praisonaiagents.eval.fingerprint", "FingerprintMismatch"),
 }
 
 __getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
