@@ -14,6 +14,7 @@ import { DockerCompute } from './docker';
 export * from './types';
 export { LocalCompute } from './local';
 export { DockerCompute } from './docker';
+export { ComputeToolPlace, registerComputeToolPlaces } from './tool-place';
 
 type Factory = () => ComputeProvider;
 
@@ -57,3 +58,8 @@ export function resolveComputeProvider(target: string | ComputeProvider | undefi
   }
   return factory();
 }
+
+// Populate the toolsRunOn registry by the act of having providers, rather than
+// by a caller remembering a setup step.
+import { registerComputeToolPlaces } from './tool-place';
+registerComputeToolPlaces();
