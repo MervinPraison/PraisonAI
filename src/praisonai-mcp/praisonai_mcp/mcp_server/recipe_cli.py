@@ -245,10 +245,17 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
         """List available recipes."""
         parser = argparse.ArgumentParser(prog="praisonai mcp list-recipes")
         parser.add_argument("--tags", default=None, help="Filter by tags (comma-separated)")
-        # Choices must match what the wrapper actually accepts (see
-        # praisonai/recipe/core.py: "local, package, github"). "all" was never
-        # a real value; github was missing.
-        parser.add_argument("--source", default=None, choices=["local", "package", "github"])
+        # Choices must match the source labels discovery actually produces.
+        # ``list_recipes`` delegates to ``TemplateDiscovery.list_templates``,
+        # which filters ``t.source == source_filter`` against labels assigned in
+        # discovery.py: ``custom`` (~/.praison, ~/.config), ``project``
+        # (./.praison), and ``package`` (bundled agent_recipes). ``all`` was
+        # never a value it accepted, and ``local``/``github`` are never emitted
+        # here -- offering them would advertise a filter that silently returns
+        # nothing.
+        parser.add_argument(
+            "--source", default=None, choices=["custom", "project", "package"]
+        )
         parser.add_argument("--json", action="store_true")
         
         try:
