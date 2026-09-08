@@ -946,6 +946,7 @@ export type { JitteredBackoffOptions, RetryBackoffConfigOptions } from "./agent/
 export { RouterAgent, createRouter, routeConditions } from "./agent/router";
 export { AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
 export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, TerminalReason } from "./agent/run-outcome";
+export { reviewTaskOutput } from "./agent/task-review";
 export { // Agent loop
   createAgentLoop, // DevTools
   enableDevTools, // MCP
