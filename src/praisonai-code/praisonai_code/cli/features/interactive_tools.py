@@ -222,11 +222,20 @@ def _load_basic_tools() -> Dict[str, Callable]:
     except ImportError:
         logger.debug("list_files not available")
     
+    # ``praisonaiagents.tools.execute_command`` runs shlex.split + shell=False,
+    # which silently drops shell operators and then reports exit 0 / success
+    # True -- "echo x > f" produced no file and no error. Register the wrapper
+    # that either honours shell syntax (PRAISON_SHELL=sandboxed, real /bin/sh
+    # inside OS containment) or fails loudly, never both.
     try:
-        from praisonaiagents.tools import execute_command
-        tools["execute_command"] = execute_command
+        from .shell_exec import execute_command as _shell_execute_command
+        tools["execute_command"] = _shell_execute_command
     except ImportError:
-        logger.debug("execute_command not available")
+        try:
+            from praisonaiagents.tools import execute_command
+            tools["execute_command"] = execute_command
+        except ImportError:
+            logger.debug("execute_command not available")
     
     try:
         from praisonaiagents.tools import internet_search
