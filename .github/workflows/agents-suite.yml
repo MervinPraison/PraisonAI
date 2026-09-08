@@ -1,0 +1,108 @@
+# Why this exists
+#
+# praisonai-agents has ~11,900 tests. Until this gate, CI executed 15 of them:
+# one smoke step in test-optimized.yml naming two files. Everything else was
+# collected by nobody.
+#
+# The cost of that showed up as two test modules that could not even be
+# IMPORTED -- they referenced symbols moved or replaced months earlier, so 19
+# tests silently contributed nothing while still appearing to exist. A failing
+# test is loud; a test that never collects is not.
+#
+# This job does not run the suite. Running all 11,900 on every PR is a real
+# decision about Actions compute, and it would go red on arrival because there
+# are pre-existing failures nothing has been enforcing. A job that is red the
+# day it lands teaches people to ignore it.
+#
+# Collection alone takes ~40s, costs almost nothing, and would have caught both
+# dead modules the day they broke. It is the honest ratchet: it cannot pass
+# while a test file is unimportable.
+name: agents-suite
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-suite.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-suite.yml'
+
+jobs:
+  collect:
+    name: every praisonai-agents test file imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Collect the whole suite
+        working-directory: src/praisonai-agents
+        env:
+          # A key must be present or some modules bail at import; it is never
+          # used, because collection does not execute test bodies.
+          OPENAI_API_KEY: 'sk-collect-only-not-a-real-key'
+        run: |
+          set -euo pipefail
+          # No pipe here: piping pytest into tail discards its exit code, which
+          # is how a gate silently stops gating.
+          python -m pytest tests/ --collect-only -q --disable-warnings
+
+  unit:
+    name: praisonai-agents unit tests (green set)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Run the directories that pass clean
+        working-directory: src/praisonai-agents
+        env:
+          # Never used: PRAISONAI_ALLOW_NETWORK=0 and the live marker keep these
+          # offline. Present because some modules bail at import without a key.
+          OPENAI_API_KEY: 'sk-not-a-real-key'
+          PRAISONAI_ALLOW_NETWORK: '0'
+        run: |
+          set -euo pipefail
+          # An EXPLICIT list, not `tests/unit`. 297 of ~9,300 unit tests fail on
+          # main today; enabling everything would land red, and a job that is red
+          # on arrival teaches people to ignore it -- which is how this package
+          # ended up running 15 tests in the first place.
+          #
+          # These 35 directories pass clean (3002 tests, ~60s). The list is a
+          # RATCHET: fix a failing area, add it here, and it can never silently
+          # regress. Areas still failing, by count:
+          #   tools(54) provider_matrix(38) gateway_routing(22) tool_guardrails(18)
+          #   gateway_server(17) managed_backend(16) session(12) runtime(12)
+          #   knowledge(12) agent(9) ...and a long tail.
+          # No pipe: piping pytest into anything discards its exit code.
+          python -m pytest \
+            tests/unit/agents tests/unit/app tests/unit/auth tests/unit/background \
+            tests/unit/checkpoints tests/unit/cli tests/unit/compaction \
+            tests/unit/conditions tests/unit/config tests/unit/context \
+            tests/unit/embedding tests/unit/eval tests/unit/gateway tests/unit/goal \
+            tests/unit/hooks tests/unit/lsp tests/unit/mcp tests/unit/memory \
+            tests/unit/permissions tests/unit/policy tests/unit/process tests/unit/rag \
+            tests/unit/runs tests/unit/sandbox tests/unit/security tests/unit/server \
+            tests/unit/snapshot tests/unit/storage tests/unit/task tests/unit/telemetry \
+            tests/unit/thinking tests/unit/trace tests/unit/utils tests/unit/workflows \
+            tests/unit/workspace \
+            -q -p no:randomly --timeout=60 --disable-warnings
