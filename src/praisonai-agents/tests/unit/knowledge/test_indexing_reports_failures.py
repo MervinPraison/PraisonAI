@@ -127,3 +127,62 @@ class TestFailuresReachTheCaller:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestIndexResultSuccessReflectsErrors:
+    """IndexResult.success must not be True when every file failed.
+
+    `success: bool = True` was a dataclass default that NOTHING ever assigned --
+    no `result.success = ...` existed anywhere in the package. So index()
+    returned success=True unconditionally: a directory whose every file failed
+    to embed (revoked key, wrong model, exhausted quota) came back as
+    IndexResult(success=True, files_indexed=0, errors=[...3 entries...]).
+
+    Nothing read the field either, which is why no test caught it -- the bug was
+    invisible until you believed the flag instead of the counts.
+    """
+
+    def _knowledge(self, add_fn):
+        k = Knowledge.__new__(Knowledge)
+        k._verbose = 0
+        k.add = add_fn
+        k._emit_knowledge_event = lambda *a, **kw: None
+        return k
+
+    def test_success_is_false_when_every_file_fails(self, docs_dir):
+        def _fail(filepath, **kw):
+            raise RuntimeError("embedding backend unreachable")
+
+        result = self._knowledge(_fail).index(docs_dir, incremental=False)
+
+        assert result.files_indexed == 0
+        assert len(result.errors) == 3
+        assert result.success is False, (
+            "index() reported success while every file failed to embed"
+        )
+
+    def test_success_is_false_on_partial_failure(self, docs_dir):
+        seen = []
+
+        def _flaky(filepath, **kw):
+            seen.append(filepath)
+            if len(seen) == 1:
+                raise RuntimeError("embedding backend unreachable")
+            return {"results": [{"id": "x"}]}
+
+        result = self._knowledge(_flaky).index(docs_dir, incremental=False)
+
+        assert result.files_indexed == 2
+        assert len(result.errors) == 1
+        assert result.success is False
+
+    def test_success_is_true_when_nothing_failed(self, docs_dir):
+        """The control: without this, `success = not errors` could just be False."""
+        def _ok_add(filepath, **kw):
+            return {"results": [{"id": "x"}]}
+
+        result = self._knowledge(_ok_add).index(docs_dir, incremental=False)
+
+        assert result.files_indexed == 3
+        assert result.errors == []
+        assert result.success is True

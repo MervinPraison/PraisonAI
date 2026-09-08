@@ -8,6 +8,8 @@ import os
 import tempfile
 import time
 
+import pytest
+
 
 class TestCorpusStats:
     """Tests for CorpusStats dataclass."""
@@ -282,6 +284,24 @@ class TestFileTracker:
 
 class TestKnowledgeIndex:
     """Tests for Knowledge.index() method."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_embedding_backend(self, monkeypatch):
+        """Cover the file walk and bookkeeping without an embedding backend.
+
+        These tests assert file counts, ignore patterns, glob filters and corpus
+        stats -- none of which involve embedding. But they called the real
+        Knowledge.add(), which reaches OpenAI's embeddings endpoint: without live
+        credentials the whole class failed on a 401, and with them it spent money
+        and network time on a unit test. Worse, index() swallows the per-file
+        exception into result.errors, so the failure surfaced as a bare
+        "assert 0 >= 1" that looked like broken traversal.
+        """
+        from praisonaiagents.knowledge import Knowledge
+        monkeypatch.setattr(
+            Knowledge, "add",
+            lambda self, filepath, **kw: {"results": [{"id": "stub"}]},
+        )
     
     def test_knowledge_has_index_method(self):
         """Knowledge should have an index() method."""

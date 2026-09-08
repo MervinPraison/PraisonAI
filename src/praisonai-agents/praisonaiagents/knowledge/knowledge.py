@@ -960,7 +960,12 @@ class Knowledge:
         
         # Store corpus stats for later retrieval
         self._corpus_stats = result.corpus_stats
-        
+
+        # success defaults to True on the dataclass and was never assigned, so
+        # index() reported success even when every file failed to embed and
+        # result.errors was full. Derive it from the errors already collected.
+        result.success = not result.errors
+
         return result
     
     def get_corpus_stats(self):
