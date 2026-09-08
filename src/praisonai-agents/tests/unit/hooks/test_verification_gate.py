@@ -15,6 +15,7 @@ Covers:
 import json
 import os
 
+import sys
 from unittest.mock import patch
 
 from praisonaiagents.hooks.verification import (
@@ -98,6 +99,8 @@ class TestFileCheckHook:
 
 class TestCommandHookParsing:
     def test_string_command_is_split(self):
+        # Parsing only -- this never executes the command, so the literal
+        # "python" is the point of the assertion and must stay.
         hook = CommandVerificationHook(name="t", command="python -c pass")
         assert hook.command == ["python", "-c", "pass"]
 
@@ -263,7 +266,10 @@ class TestGoalLoopEvidence:
         # the next continuation prompt (not just a bare label).
         hook = CommandVerificationHook(
             name="fails",
-            command="python -c \"import sys; sys.stderr.write('boom-detail'); sys.exit(1)\"",
+            command=(
+                f"{sys.executable} -c "
+                "\"import sys; sys.stderr.write('boom-detail'); sys.exit(1)\""
+            ),
         )
         agent = _make_agent([hook])
         prompts = []

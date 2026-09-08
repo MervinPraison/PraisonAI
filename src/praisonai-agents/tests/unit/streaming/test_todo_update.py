@@ -115,7 +115,11 @@ class TestAsyncToolExecutionChannel:
             async def _check_tool_approval_async(self, function_name, arguments):
                 return (function_name, arguments)
 
-            def _check_tool_policy_and_guardrails(self, function_name, arguments):
+            # Mirrors the real signature, which gained ``tools`` for the
+            # policy/guardrail gate. Without it the async path raised
+            # "takes 3 positional arguments but 4 were given" and the
+            # result came back as an error dict instead of 'ok'.
+            def _check_tool_policy_and_guardrails(self, function_name, arguments, tools=None):
                 return (function_name, arguments)
 
         def my_tool():

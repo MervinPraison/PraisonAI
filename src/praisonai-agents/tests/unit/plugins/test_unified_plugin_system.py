@@ -9,6 +9,8 @@ TDD tests for:
 5. Thread safety
 """
 
+import pathlib
+
 import pytest
 import threading
 import asyncio
@@ -32,17 +34,41 @@ class TestPathCentralization:
         for d in dirs:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
-    def test_skills_discovery_uses_paths_module(self):
-        """skills/discovery.py should use paths.get_skills_dir()."""
+    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch):
+        """skills/discovery.py should use paths.get_skills_dir().
+
+        This asserted every returned directory is named "skills". Remote-skill
+        caching later added entries like
+        ``~/.praisonai/cache/remote-skills/<hash>/current``, so the assertion
+        stopped holding -- and because it ran against the real home it was
+        checking whatever the developer happened to have cached (84 such
+        directories on this machine, none of them named "skills").
+
+        HOME is redirected and the paths cache cleared, so the result depends
+        only on the paths module. The original intent -- discovery derives its
+        location from paths rather than hardcoding one -- is asserted directly.
+        """
+        from praisonaiagents import paths as paths_mod
         from praisonaiagents.skills.discovery import get_default_skill_dirs
-        from praisonaiagents.paths import get_skills_dir
-        
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        paths_mod._clear_cache()
+        monkeypatch.chdir(tmp_path)
+
+        # discovery only returns directories that exist, so create the one the
+        # paths module designates.
+        skills_dir = paths_mod.get_skills_dir()
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
         dirs = get_default_skill_dirs()
-        
-        # Should return paths that end with 'skills'
-        for d in dirs:
-            assert d.name == "skills", f"Expected 'skills' dir, got {d}"
-    
+
+        assert skills_dir in dirs, (
+            f"discovery does not include paths.get_skills_dir(): {dirs}"
+        )
+        stray = [d for d in dirs if tmp_path not in d.parents and d != tmp_path]
+        assert not stray, f"discovery returned paths outside the paths module: {stray}"
+
     def test_paths_module_returns_praisonai_dir(self):
         """paths.py should return ~/.praisonai/ as default."""
         from praisonaiagents.paths import get_data_dir, DEFAULT_DIR_NAME
