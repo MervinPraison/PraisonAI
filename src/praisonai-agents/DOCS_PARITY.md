@@ -48,10 +48,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2748 |
 | ✅ Hooks | 2 | 9 | 4696 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 18 | 5562 |
+| ✅ Knowledge | 4 | 18 | 5581 |
 | ✅ LLM | 3 | 15 | 5917 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 63 | 14747 |
+| ✅ MCP | 1 | 63 | 14751 |
 | ✅ Memory | 6 | 19 | 7614 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2842 |
