@@ -1,6 +1,8 @@
 # Files with GENUINE failures (fail in isolation, clean HOME, monorepo siblings installed).
 # Re-measure with: pytest <file> -q -p no:randomly
 # count  file
+# PLATFORM: unit/memory/test_prefetch.py passes on macOS, fails on Linux CI.
+#           Excluded from the green set in the workflow, not counted below.
    16  unit/test_managed_backend.py
    11  unit/session/test_bot_session_persistence.py
     6  unit/runtime/test_resolver.py
