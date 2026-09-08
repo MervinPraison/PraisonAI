@@ -1841,6 +1841,23 @@ export class Agent {
   }
 
   /**
+   * Take a team's autonomy settings, unless this agent declared its own.
+   *
+   * Python's AgentTeam propagates autonomy to members that have none of their
+   * own; this is that. A member's explicit setting wins, because an autonomy
+   * level is a permission boundary -- silently widening one an agent declared
+   * for itself is the direction that causes harm.
+   */
+  adoptAutonomy(config: AutonomyConfig): boolean {
+    if (this._autonomyConfig) return false;
+    this._autonomyConfig = config;
+    // Only when this agent has an approval manager: autonomy levels widen what
+    // runs without asking, and there is nothing to widen otherwise.
+    if (this.approvalManager) applyAutonomyToApproval(config, this.approvalManager);
+    return true;
+  }
+
+  /**
    * Queue live guidance for the next turn (Python `Agent.steer`). Returns the
    * message id, or `''` when steering is off or the queue is full.
    */
