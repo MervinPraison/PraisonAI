@@ -981,6 +981,7 @@ export { // Autonomy Mode
   SandboxExecutor, // Scheduler
   Scheduler, // Slash Commands
   SlashCommandHandler, AiderAgent, ClaudeCodeAgent, CodexCliAgent, CommandValidator, CostTokenUsage, DEFAULT_BLOCKED_COMMANDS, DEFAULT_BLOCKED_PATHS, DEFAULT_IGNORE_PATTERNS, DiffViewer, FileCheckpointStorage, FileJobStorage, GeminiCliAgent, GenericExternalAgent, HistoryManager, MODEL_PRICING, MODE_POLICIES, MemoryCheckpointStorage, MemoryJobStorage, StatusDisplay, addLineRangeToFileMatch, cliApprovalPrompt, createAutonomyManager, createCheckpointManager, createCostTracker, createDiffViewer, createExternalAgent, createFastContext, createFileCheckpointStorage, createFileJobStorage, createFileMatch, createFlowDisplay, createGitManager, createHistoryManager, createInteractiveTUI, createJobQueue, createLineRange, createN8NIntegration, createRepoMap, createSandboxExecutor, createScheduler, createSlashCommandHandler, createStatusDisplay, cronExpressions, estimateTokens, executeSlashCommand, externalAgentAsTool, formatCost, getExternalAgentRegistry, getLineCount, getQuickContext, getRepoTree, getTotalLines, isSlashCommand, mergeRanges, parseSlashCommand, rangesOverlap, registerCommand, renderWorkflow, sandboxExec, triggerN8NWebhook } from "./cli/features";
+export { ComputeError, DockerCompute, LocalCompute, listComputeProviders, registerComputeProvider, resolveComputeProvider } from "./compute";
 export { // Classes
   DictCondition, // Functions
   evaluateCondition, // Types
