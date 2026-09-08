@@ -1826,6 +1826,21 @@ export class Agent {
   }
 
   /**
+   * Put this agent's tools somewhere, sharing ONE place with other agents.
+   *
+   * A team-wide `toolsRunOn` means one sandbox for the whole team, not one per
+   * member -- separate instances would multiply the cost and lose any state
+   * tools leave for each other. An agent that declared its OWN toolsRunOn keeps
+   * it: an explicit choice on the member is more specific than the team's
+   * default, and silently overriding it would be the surprising direction.
+   */
+  adoptToolPlace(place: ToolPlaceLike): boolean {
+    if (this._toolPlace) return false;
+    this._toolPlace = place;
+    return true;
+  }
+
+  /**
    * Queue live guidance for the next turn (Python `Agent.steer`). Returns the
    * message id, or `''` when steering is off or the queue is full.
    */
