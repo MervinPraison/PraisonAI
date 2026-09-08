@@ -193,10 +193,14 @@ class SmartRetriever:
             # misconfigured, unreachable, or refusing auth -- and the agent is
             # about to answer with no context at all.
             self._last_error = f"{type(e).__name__}: {e}"
+            # Do not log the raw query: it may carry personal data, credentials
+            # or proprietary text, and this line lands at ERROR in application
+            # logs. The exception text is enough to diagnose the store; the
+            # query length is enough to tell an empty probe from a real one.
             logger.error(
-                "Knowledge retrieval failed for query %r: %s. "
+                "Knowledge retrieval failed (query length %d): %s. "
                 "Returning no chunks; the answer will not use the knowledge base.",
-                query, self._last_error,
+                len(query or ""), self._last_error,
             )
             return []
     
