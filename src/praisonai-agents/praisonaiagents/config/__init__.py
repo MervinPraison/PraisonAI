@@ -37,6 +37,17 @@ __all__ = [
     "WebConfig",
     "OutputConfig",
     "ExecutionConfig",
+    # Configuration objects for public parameters that were defined in
+    # feature_configs but never exported here, so the usage their own
+    # docstrings show -- Agent(tool_config=ToolConfig(...)) -- could not be
+    # written with the natural import.
+    "ToolConfig",
+    "AutonomyConfig",
+    "LearnConfig",
+    "MultiAgentExecutionConfig",
+    "MultiAgentHooksConfig",
+    "MultiAgentMemoryConfig",
+    "MultiAgentOutputConfig",
     "PreCompactionMemoryFlushConfig",
     "TemplateConfig",
     "CachingConfig",
@@ -127,6 +138,13 @@ _MODULE_MAP = {
     "WebConfig": "feature_configs",
     "OutputConfig": "feature_configs",
     "ExecutionConfig": "feature_configs",
+    "ToolConfig": "feature_configs",
+    "AutonomyConfig": "feature_configs",
+    "LearnConfig": "feature_configs",
+    "MultiAgentExecutionConfig": "feature_configs",
+    "MultiAgentHooksConfig": "feature_configs",
+    "MultiAgentMemoryConfig": "feature_configs",
+    "MultiAgentOutputConfig": "feature_configs",
     "PreCompactionMemoryFlushConfig": "feature_configs",
     "TemplateConfig": "feature_configs",
     "CachingConfig": "feature_configs",

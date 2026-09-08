@@ -880,6 +880,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
                 ),
+                "tool_retry_policy": (
+                    "tool retry moved into tool_config=; use "
+                    "tool_config=ToolConfig(retry_policy=RetryPolicy(...))."
+                ),
+                "tool_timeout": (
+                    "tool timeout moved into tool_config=; use "
+                    "tool_config=ToolConfig(timeout=...)."
+                ),
             }
             _hint = "".join(
                 f"\n  {name}: {_HINTS[name]}" for name in sorted(_unknown) if name in _HINTS
