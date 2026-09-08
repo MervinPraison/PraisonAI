@@ -13,6 +13,18 @@ import typer
 
 app = typer.Typer(help="Context management")
 
+# ``praisonaiagents.context.get_global_store()`` is an in-memory, PROCESS-LOCAL
+# singleton. Nothing in the agent runtime writes to it, and even if something
+# did, a separate ``praisonai`` CLI process could never see it. These commands
+# must therefore never report success on an empty store - that is exactly the
+# "did nothing, said it worked" failure they used to produce.
+_EMPTY_STORE_MESSAGE = (
+    "The context store is empty in this process.\n"
+    "praisonaiagents.context.get_global_store() is an in-memory, process-local "
+    "store: it is not populated by agent runs, and a CLI process can never see "
+    "another process's store. Nothing was done."
+)
+
 
 @app.command("show")
 def context_show(
@@ -156,7 +168,11 @@ def context_compact(
         
         store = get_global_store()
         stats = store.get_stats()
-        
+
+        if not stats.get("agents"):
+            typer.echo(_EMPTY_STORE_MESSAGE)
+            raise typer.Exit(1)
+
         if dry_run:
             typer.echo("[Dry Run] Current store stats:")
             typer.echo(f"  Agents: {stats['agent_count']}")
@@ -165,13 +181,19 @@ def context_compact(
                 typer.echo(f"  {agent_id}: {agent_stats['message_count']} messages, {agent_stats['effective_count']} effective")
         else:
             # Cleanup orphaned parents for all agents
+            cleaned = 0
             for agent_id in stats.get("agents", {}).keys():
                 if agent and agent_id != agent:
                     continue
                 store.cleanup_agent(agent_id)
+                cleaned += 1
                 typer.echo(f"Cleaned up agent: {agent_id}")
-            
-            typer.echo("Compaction complete.")
+
+            if cleaned:
+                typer.echo(f"Compaction complete ({cleaned} agent(s)).")
+            else:
+                typer.echo(f"No agent matching {agent!r} in the context store; nothing compacted.")
+                raise typer.Exit(1)
             
     except ImportError as e:
         typer.echo(f"Error: Context module not available: {e}", err=True)
@@ -194,7 +216,11 @@ def context_export(
         from pathlib import Path
         
         store = get_global_store()
-        
+
+        if not store.get_stats().get("agents"):
+            typer.echo(_EMPTY_STORE_MESSAGE)
+            raise typer.Exit(1)
+
         if format == "json":
             data = store.snapshot()
             output_path = Path(output)

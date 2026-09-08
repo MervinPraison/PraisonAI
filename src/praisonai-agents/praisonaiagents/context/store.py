@@ -463,7 +463,23 @@ _global_store: Optional[ContextStoreImpl] = None
 _store_lock = threading.Lock()
 
 def get_global_store(validate_schema: bool = False) -> ContextStoreImpl:
-    """Get or create global context store."""
+    """Get or create the process-local context store.
+
+    IMPORTANT - what this is *not*:
+
+    * It is an **in-memory singleton scoped to the current process**. It is not
+      persisted and it is not shared with any other process, so a separate CLI
+      invocation can never observe a store an agent run populated.
+    * **Nothing in the agent runtime writes to it.** ``Agent.chat_history`` and
+      the session/memory subsystems keep their own state; this store is an
+      opt-in structure that a caller must populate itself via
+      ``get_mutator(agent_id).append(...)`` + ``commit()`` or
+      :meth:`ContextStoreImpl.add_shared_context`.
+
+    A freshly obtained store is therefore always empty. Callers that report on
+    it (stats/compaction/export) must say so rather than reporting success on
+    an empty store.
+    """
     global _global_store
     
     with _store_lock:
