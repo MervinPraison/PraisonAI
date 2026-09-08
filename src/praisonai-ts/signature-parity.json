@@ -3968,7 +3968,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/knowledge/knowledge.py:54",
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/knowledge.py:58",
         "resolved_class": "Knowledge"
       },
       "ts_only": [],
@@ -4646,7 +4646,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:422",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:425",
         "resolved_class": "LLM"
       },
       "ts_only": [
