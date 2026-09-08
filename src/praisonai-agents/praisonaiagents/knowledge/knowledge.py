@@ -1,4 +1,5 @@
 import os
+import tempfile
 import logging
 from praisonaiagents._logging import get_logger
 from datetime import datetime
@@ -49,6 +50,9 @@ class CustomMemory:
 
 # MongoDBMemory has been moved to adapters/mongodb_adapter.py
 # This maintains backward compatibility while following protocol-driven architecture
+
+from .cloud import is_cloud_source, fetch_cloud_source  # noqa: E402
+
 
 class Knowledge:
     def __init__(self, config=None, verbose=None):
@@ -532,6 +536,31 @@ class Knowledge:
                 else:
                     all_extensions.append(exts)
             all_extensions = tuple(all_extensions)
+
+            # Cloud object storage (s3://, gs://, az://, Azure blob URL).
+            # Checked BEFORE the http branch, because an Azure blob URL is https
+            # and would otherwise be handed to the web fetcher. The object is
+            # downloaded to a local temp file and then read by the SAME readers
+            # as any local file, so PDF/DOCX parsing is not reimplemented per
+            # provider.
+            if isinstance(input_path, str) and is_cloud_source(input_path):
+                self._log(f"Fetching cloud source: {input_path}")
+                # Download into a TemporaryDirectory so the fetched document is
+                # removed after indexing rather than accumulating on disk.
+                with tempfile.TemporaryDirectory(prefix="praisonai-kb-") as tmp_dir:
+                    local_path = fetch_cloud_source(input_path, dest_dir=tmp_dir)
+                    # Persist the ORIGINAL uri in the stored chunk metadata, not
+                    # the temp filename -- a temp path is meaningless in a
+                    # citation, and two objects with the same basename would
+                    # otherwise be indistinguishable.
+                    cloud_metadata = dict(metadata or {})
+                    cloud_metadata['source'] = input_path
+                    result = self._process_single_input(
+                        local_path, user_id, agent_id, run_id, cloud_metadata
+                    )
+                if isinstance(result, dict):
+                    result['source'] = input_path
+                return result
 
             # Check if input is URL
             if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
