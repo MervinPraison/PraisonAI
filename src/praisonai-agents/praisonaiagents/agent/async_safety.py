@@ -12,6 +12,44 @@ from contextlib import contextmanager, asynccontextmanager
 from weakref import WeakKeyDictionary
 
 
+def run_async_in_sync_context(coro):
+    """
+    Run an async coroutine to completion from a sync context with proper
+    event loop handling.
+
+    Handles the common cases:
+    1. No event loop exists - use asyncio.run()
+    2. Event loop already running - avoid deadlock by running the coroutine
+       to completion in a dedicated thread with its own event loop.
+
+    This is a live production helper on the sync tool-calling path (see
+    ``tool_execution.py``): it bridges ``async def`` tool bodies into the sync
+    tool loop, otherwise a bare un-awaited coroutine would be handed to the
+    model as the tool result and the tool body would never run (silent data
+    loss).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop - safe to use asyncio.run()
+        return asyncio.run(coro)
+
+    # Event loop exists - avoid deadlock by running in dedicated thread
+    import concurrent.futures
+
+    def run_in_thread():
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            new_loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(run_in_thread)
+        return future.result(timeout=300)  # 5 minute timeout
+
+
 class DualLock:
     """
     A dual-lock abstraction that automatically selects threading.Lock or asyncio.Lock

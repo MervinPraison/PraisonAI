@@ -3051,9 +3051,11 @@ class ToolExecutionMixin:
                 # sync tool-calling path we must await it, otherwise a bare
                 # un-awaited coroutine is handed to the model as the tool result
                 # and the tool body never runs (silent data loss).
+                from .async_safety import run_async_in_sync_context
+
                 def _resolve_result(value):
                     if inspect.iscoroutine(value):
-                        return self._run_async_in_sync_context(value)
+                        return run_async_in_sync_context(value)
                     return value
 
                 # BaseTool instances (plugin system) - call run() method

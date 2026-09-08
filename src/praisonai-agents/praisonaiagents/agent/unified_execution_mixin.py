@@ -2,14 +2,22 @@
 Unified Execution Mixin - implements Gap 1 from Issue #1392.
 
 .. deprecated::
-    UnifiedExecutionMixin is unused and scheduled for removal (Issue #2644).
-    None of its methods are invoked by production code: the live execution paths
-    use ``_chat_impl`` / ``_execute_unified_chat_completion`` (in ``chat_mixin.py``)
-    and ``execute_tool`` (in ``tool_execution.py``), which are distinct from this
-    mixin's methods despite the similar names. This module remains importable and
-    emits a ``DeprecationWarning`` from its public methods during the deprecation
-    window; it will be removed from the ``Agent`` MRO after the cycle completes.
+    UnifiedExecutionMixin's *public* methods (``unified_chat``, ``unified_achat``,
+    ``unified_execute_tool``/``_async``, ``_unified_chat_impl``,
+    ``_apply_guardrails_async``) are unused by production code and scheduled for
+    removal (Issue #2644): the live execution paths use ``_chat_impl`` /
+    ``_execute_unified_chat_completion`` (in ``chat_mixin.py``) and ``execute_tool``
+    (in ``tool_execution.py``), which are distinct despite the similar names. These
+    public methods emit a ``DeprecationWarning`` during the deprecation window and
+    the mixin will be removed from the ``Agent`` MRO after the cycle completes.
     Use ``Agent.chat()`` / ``Agent.achat()`` / ``Agent.execute_tool()`` instead.
+
+    NOTE: The event-loop bridge previously defined here as
+    ``_run_async_in_sync_context`` **is** live production code (the sync
+    tool-calling path in ``tool_execution.py`` depends on it). It has been
+    relocated to the stable ``async_safety.run_async_in_sync_context`` so that
+    removing this deprecated mixin from the MRO is a true no-op. The method here
+    is now only a thin shim kept for the deprecated public methods above.
 
 This module consolidates sync/async execution paths into a single async-first 
 implementation with a thin sync bridge, eliminating code duplication between
@@ -28,12 +36,9 @@ Design principles:
 - Async-safe: handles event loop management correctly
 """
 
-import asyncio
 import logging
-import threading
 import warnings
 from typing import List, Optional, Any, Dict, Union
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -354,34 +359,14 @@ class UnifiedExecutionMixin:
     def _run_async_in_sync_context(self, coro):
         """
         Run async coroutine in sync context with proper event loop handling.
-        
-        Handles the common cases:
-        1. No event loop exists - use asyncio.run()
-        2. Event loop exists on main thread - use dedicated thread with new loop
-        3. Event loop exists on worker thread - create new event loop
+
+        Thin shim delegating to :func:`async_safety.run_async_in_sync_context`,
+        which is the stable, non-deprecated home for this helper. Retained so
+        this mixin's own (deprecated) sync entry points keep working during the
+        deprecation window.
         """
-        try:
-            # Try to get the current event loop
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No event loop - safe to use asyncio.run()
-            return asyncio.run(coro)
-        
-        # Event loop exists - avoid deadlock by running in dedicated thread
-        import concurrent.futures
-        
-        def run_in_thread():
-            # Create new event loop in dedicated thread
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                return new_loop.run_until_complete(coro)
-            finally:
-                new_loop.close()
-        
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            return future.result(timeout=300)  # 5 minute timeout
+        from .async_safety import run_async_in_sync_context
+        return run_async_in_sync_context(coro)
 
     def unified_chat(self, *args, **kwargs) -> Optional[str]:
         """
