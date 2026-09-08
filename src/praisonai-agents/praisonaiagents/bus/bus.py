@@ -328,13 +328,25 @@ class EventBus:
     ) -> List[Event]:
         """
         Get recent event history.
-        
+
+        Only events published while at least one subscriber was registered are
+        recorded. #2066 added a fast path that skips history (and the lock, and
+        Event construction) when ``has_subscribers`` is False, because memory
+        and sub-agent lifecycle publishes were paying uuid4 + lock + append on
+        every call with nothing listening.
+
+        The consequence is worth stating plainly, because it is surprising in
+        the case you would most want history -- debugging after the fact, with
+        nothing subscribed: publishing three events to a bus with no
+        subscribers and then calling this returns an empty list, not three
+        events. Subscribe (even a no-op) before publishing if you need a record.
+
         Args:
             event_type: Optional filter by event type
             limit: Maximum number of events to return
-            
+
         Returns:
-            List of recent events
+            List of recent events published while subscribers existed
         """
         with self._lock:
             events = self._event_history.copy()
