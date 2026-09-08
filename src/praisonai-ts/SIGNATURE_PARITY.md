@@ -99,7 +99,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 
 ### `AgentTeam.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:842`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:911`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:91` (ctor `src/praisonai-ts/src/agent/team.ts:377`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
@@ -245,7 +245,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2308`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2385`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1076`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
