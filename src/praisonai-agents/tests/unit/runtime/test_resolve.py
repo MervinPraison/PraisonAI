@@ -88,7 +88,10 @@ class TestRuntimeResolvers:
         assert runtime.model_ref == "gpt-4o"
         mock_llm_class.assert_called_once_with(model="gpt-4o")
     
-    @patch('praisonaiagents.runtime.resolve.LLM', side_effect=ImportError("LLM not available"))
+    # ``resolve()`` imports LLM inside the function from ..llm.llm, so there is
+    # no ``resolve.LLM`` to patch -- the decorator raised AttributeError before
+    # the test body ran. Patch the source module and make the import itself fail.
+    @patch('praisonaiagents.llm.llm.LLM', side_effect=ImportError("LLM not available"))
     def test_default_resolver_fallback(self, mock_llm_class):
         """Test DefaultRuntimeResolver fallback when LLM is not available."""
         resolver = DefaultRuntimeResolver()
@@ -106,7 +109,11 @@ class TestRuntimeWrappers:
     
     def test_llm_runtime_wrapper(self):
         """Test LLMRuntimeWrapper functionality."""
-        mock_llm = Mock()
+        # spec= matters: LLMRuntimeWrapper.provider returns self.llm.provider
+        # when the LLM has one, and a bare Mock() answers hasattr for *every*
+        # name -- so the model-name inference this test asserts was never
+        # reached, and provider came back as a Mock.
+        mock_llm = Mock(spec=["chat"])
         mock_llm.chat.return_value = "Hello response"
         
         wrapper = LLMRuntimeWrapper(
@@ -128,7 +135,7 @@ class TestRuntimeWrappers:
     @pytest.mark.asyncio
     async def test_llm_runtime_wrapper_async(self):
         """Test LLMRuntimeWrapper async functionality."""
-        mock_llm = Mock()
+        mock_llm = Mock(spec=["achat"])   # no `provider`, so it is inferred
         mock_llm.achat = Mock(return_value=asyncio.Future())
         mock_llm.achat.return_value.set_result("Async response")
         
@@ -148,9 +155,12 @@ class TestRuntimeWrappers:
     @pytest.mark.asyncio  
     async def test_llm_runtime_wrapper_async_fallback(self):
         """Test LLMRuntimeWrapper async fallback to sync execution."""
-        mock_llm = Mock()
+        # "No achat method" only holds with a spec: a bare Mock() has one, so
+        # aexecute took the async branch and awaited a plain Mock
+        # ("object Mock can't be used in 'await' expression") instead of
+        # exercising the sync fallback this test is named for.
+        mock_llm = Mock(spec=["chat"])
         mock_llm.chat.return_value = "Sync response"
-        # No achat method - should fall back to sync in executor
         
         wrapper = LLMRuntimeWrapper(
             llm=mock_llm,
