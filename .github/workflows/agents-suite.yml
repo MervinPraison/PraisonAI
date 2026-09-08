@@ -77,9 +77,13 @@ jobs:
           # ImportError at run time, so the extras are part of the green set's
           # contract -- install them explicitly rather than let the job go red.
           pip install -e "src/praisonai-agents[llm]"
+          # praisonai-sandbox is a MONOREPO sibling, not a third-party optional.
+          # Without it 47 tests fail with "No module named
+          # praisonai_sandbox.compute" -- an install gap reported as 47 code
+          # failures. Installing it took the suite from 297 failures to 250.
           pip install -e src/praisonai-sandbox
           pip install pytest pytest-asyncio pytest-timeout
-      - name: Run the directories that pass clean
+      - name: Run the paths that pass clean
         working-directory: src/praisonai-agents
         env:
           # Never used: PRAISONAI_ALLOW_NETWORK=0 and the live marker keep these
@@ -88,48 +92,28 @@ jobs:
           PRAISONAI_ALLOW_NETWORK: '0'
         run: |
           set -euo pipefail
-          # An EXPLICIT list, not `tests/unit`. 297 of ~9,300 unit tests fail on
-          # main today; enabling everything would land red, and a job that is red
-          # on arrival teaches people to ignore it -- which is how this package
-          # ended up running 15 tests in the first place.
+          # The list lives in tests/green-set.txt so it can be edited without
+          # touching CI, and so the reasoning travels with it.
           #
-          # These 35 directories pass clean (3002 tests, ~60s). The list is a
-          # RATCHET: fix a failing area, add it here, and it can never silently
-          # regress.
-          #
-          # The 297 are NOT 297 broken tests. Every failing file was re-run in
-          # isolation:
-          #     94 failures (18 files) PASS ALONE  -> test pollution
-          #    203 failures (47 files) fail alone  -> genuine
+          # The 250 remaining failures are NOT 250 broken tests. Every failing
+          # file was re-run in isolation:
+          #     94 failures (18 files) PASS ALONE  -> shared-state pollution
+          #    156 failures (44 files) fail alone  -> genuine
           # tests/unit/tools shows it starkly: 54 failures in a full run, 5 when
           # that directory runs by itself.
           #
-          # Genuine clusters (isolated counts):
-          #   provider_matrix(44) gateway_routing(22) tool_guardrails(18)
-          #   gateway_server(17) managed_backend(16) session(12) runtime(12)
-          #   knowledge(12)
-          #
-          # On the pollution, so the next person does not repeat the search:
+          # On the pollution, so nobody repeats the search:
           #   - It is CUMULATIVE. Neither the first 18 directories nor the last
           #     28, nor all top-level test_*.py files, reproduce it; only the
           #     whole suite does.
-          #   - The symptom for one victim is arguments not reaching the tool:
+          #   - Its symptom for one victim is arguments not reaching the tool:
           #     "fn() missing 1 required positional argument: 'x'" even though
           #     execute_tool was passed {"x": "v"}.
           #   - Resetting the approval and tool registries in an autouse fixture
-          #     changed nothing (still exactly 297), so neither is the leak.
-          #   Those 94 are likely cheap once the shared state is found; chasing
-          #   them as individual test failures would be the wrong approach.
-          # No pipe: piping pytest into anything discards its exit code.
-          python -m pytest \
-            tests/unit/agents tests/unit/app tests/unit/auth tests/unit/background \
-            tests/unit/checkpoints tests/unit/cli tests/unit/compaction \
-            tests/unit/conditions tests/unit/config tests/unit/context \
-            tests/unit/embedding tests/unit/eval tests/unit/gateway tests/unit/goal \
-            tests/unit/hooks tests/unit/lsp tests/unit/mcp tests/unit/memory \
-            tests/unit/permissions tests/unit/policy tests/unit/process tests/unit/rag \
-            tests/unit/runs tests/unit/sandbox tests/unit/security tests/unit/server \
-            tests/unit/snapshot tests/unit/storage tests/unit/task tests/unit/telemetry \
-            tests/unit/thinking tests/unit/trace tests/unit/utils tests/unit/workflows \
-            tests/unit/workspace \
-            -q -p no:randomly --timeout=60 --disable-warnings
+          #     changed NOTHING (still exactly 297 at the time), so neither is
+          #     the leak. That fixture was removed rather than shipped.
+          #
+          # No pipe: piping pytest into anything discards its exit code, which is
+          # how a gate silently stops gating.
+          grep -v '^#' tests/green-set.txt | grep -v '^$' > /tmp/green.txt
+          xargs < /tmp/green.txt python -m pytest -q -p no:randomly --timeout=60 --disable-warnings
