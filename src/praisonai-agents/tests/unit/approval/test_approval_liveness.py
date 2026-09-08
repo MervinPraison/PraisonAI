@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from praisonaiagents.agent.tool_execution import ToolExecutionMixin
 from praisonaiagents.approval.protocols import ApprovalDecision, ApprovalRequest
 from praisonaiagents.approval.registry import ApprovalRegistry
 
@@ -148,3 +149,80 @@ class TestApproveAsyncLiveness:
         )
 
         assert decision.approved is True
+
+
+# ── _current_turn_liveness (effective per-turn authority) ────────────────────
+
+
+class _StubToken:
+    """Stand-in for the ``_TurnCancelToken`` a ``chat``/``achat`` turn owns."""
+
+    def __init__(self, cancelled: bool = False):
+        self._cancelled = cancelled
+
+    def is_set(self) -> bool:
+        return self._cancelled
+
+
+class _FakeEvent:
+    def __init__(self, is_set: bool = False):
+        self._set = is_set
+
+    def is_set(self) -> bool:
+        return self._set
+
+
+class _FakeController:
+    def __init__(self, event):
+        self.event = event
+
+
+class _LivenessAgent(ToolExecutionMixin):
+    """Minimal carrier exposing the attrs ``_current_turn_liveness`` reads."""
+
+    def __init__(self, token=None, controller=None):
+        self._active_turn_token = token
+        self.interrupt_controller = controller
+
+
+class TestCurrentTurnLiveness:
+    """The predicate must observe the *effective* per-turn cancel authority.
+
+    Regression for the Greptile P1: an explicit ``cancel_token=`` selected by
+    ``chat``/``achat`` is not the agent-level ``interrupt_controller``. The
+    liveness predicate must follow the registered per-turn token so a ``/stop``
+    on that token is seen at the approval-resolution boundary.
+    """
+
+    def test_prefers_active_token_and_reports_stale_when_cancelled(self):
+        agent = _LivenessAgent(token=_StubToken(cancelled=True))
+        predicate = agent._current_turn_liveness()
+        assert predicate is not None
+        assert predicate() is False  # turn no longer live
+
+    def test_active_token_live_reports_live(self):
+        agent = _LivenessAgent(token=_StubToken(cancelled=False))
+        predicate = agent._current_turn_liveness()
+        assert predicate is not None
+        assert predicate() is True
+
+    def test_active_token_takes_precedence_over_controller(self):
+        # Explicit token cancelled, controller still live → must report stale.
+        agent = _LivenessAgent(
+            token=_StubToken(cancelled=True),
+            controller=_FakeController(_FakeEvent(is_set=False)),
+        )
+        predicate = agent._current_turn_liveness()
+        assert predicate() is False
+
+    def test_falls_back_to_controller_event_when_no_token(self):
+        agent = _LivenessAgent(
+            token=None, controller=_FakeController(_FakeEvent(is_set=True))
+        )
+        predicate = agent._current_turn_liveness()
+        assert predicate is not None
+        assert predicate() is False
+
+    def test_none_when_no_token_and_no_controller(self):
+        agent = _LivenessAgent(token=None, controller=None)
+        assert agent._current_turn_liveness() is None

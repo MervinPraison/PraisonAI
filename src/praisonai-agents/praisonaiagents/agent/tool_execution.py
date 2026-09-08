@@ -461,9 +461,23 @@ class ToolExecutionMixin:
         tool nor persists a durable ``session``/``always`` grant for an
         abandoned turn).
 
-        Returns ``None`` when no interrupt controller is attached, which keeps
-        today's behaviour (the request is treated as always live).
+        Prefers the **effective per-turn cancellation token** set by
+        ``chat``/``achat`` (``self._active_turn_token``): that is the authority
+        an explicit ``cancel_token=`` selects, which the agent-level
+        ``interrupt_controller`` does not observe. Its ``is_set()`` reports
+        cancellation whether the source is an explicit token or the interrupt
+        controller, so a ``/stop`` on the real per-turn authority is seen here.
+        Falls back to the interrupt controller's ``event`` when no per-turn
+        token is registered.
+
+        Returns ``None`` when neither is attached, which keeps today's behaviour
+        (the request is treated as always live).
         """
+        token = getattr(self, '_active_turn_token', None)
+        if token is not None:
+            is_set = getattr(token, 'is_set', None)
+            if callable(is_set):
+                return lambda: not is_set()
         event = self._current_cancel_event()
         if event is None:
             return None
