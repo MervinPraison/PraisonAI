@@ -15,10 +15,46 @@ The tests stub the *actual* runtime chat_main dispatches to -- the credential
 gate and the async TUI -- so a supplied option exercises the warning without
 depending on external state (an API key, a local endpoint, or a real TTY).
 """
+import ast
+from pathlib import Path
+
 import typer
 from typer.testing import CliRunner
 
 import praisonai_code.cli.commands.chat as chat_module
+
+
+# ``--pure``/``--no-plugins`` is consumed by the @scopes_no_plugins decorator
+# rather than by the body, so it is wired despite never being named inside.
+_WIRED_BY_DECORATOR = {"ctx", "pure"}
+
+
+def _chat_main_ast():
+    module = ast.parse(Path(chat_module.__file__).read_text())
+    return next(
+        n for n in ast.walk(module)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and n.name == "chat_main"
+    )
+
+
+def _chat_main_params():
+    a = _chat_main_ast().args
+    return [x.arg for x in a.posonlyargs + a.args + a.kwonlyargs]
+
+
+def _names_read_by_chat_main():
+    """Names actually loaded somewhere in chat_main's body.
+
+    Only the body -- a parameter's default is a ``typer.Option(...)`` call that
+    mentions the flag string, not a read of the value.
+    """
+    return {
+        node.id
+        for stmt in _chat_main_ast().body
+        for node in ast.walk(stmt)
+        if isinstance(node, ast.Name)
+    }
 
 
 class _StubTUI:
@@ -100,35 +136,18 @@ class TestUnwiredChatOptions:
         """A warning must not become a failure."""
         assert _run(monkeypatch, "--theme", "dark").exit_code == 0
 
-    def test_every_listed_option_really_is_unread(self, monkeypatch):
-        """Guards the list itself against drifting as options get wired up.
+    def test_every_listed_option_really_is_unread(self):
+        """Guards the list against drifting as options get wired up.
 
-        If someone implements one of these, this test fails and tells them to
-        drop it from the table rather than leaving a false warning behind.
-
-        Uses the AST rather than a line regex: a regex also matched the option
-        name appearing in a *comment*, which made wiring a neighbouring option
-        fail this test for the wrong reason.
+        Uses the AST, not a regex over source lines: the line-matching version
+        failed the moment the word "output" appeared in one of chat_main's own
+        comments, which is the same class of bug it exists to catch.
         """
-        import ast
-        import inspect
-        import textwrap
-
-        src = textwrap.dedent(inspect.getsource(chat_module.chat_main))
-        tree = ast.parse(src)
-        fn = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "chat_main"
+        wired = set(chat_module._UNWIRED_CHAT_OPTIONS) & _names_read_by_chat_main()
+        assert not wired, (
+            f"now read by chat_main; drop from _UNWIRED_CHAT_OPTIONS so the "
+            f"warning stops lying: {sorted(wired)}"
         )
-        read = {
-            n.id for n in ast.walk(fn)
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-        }
-        for name in chat_module._UNWIRED_CHAT_OPTIONS:
-            assert name not in read, (
-                f"{name} is now read by chat_main; remove it from "
-                f"_UNWIRED_CHAT_OPTIONS so the warning stops lying"
-            )
 
     def test_every_dropped_option_is_named_in_the_table(self):
         """The table must cover the WHOLE gap, not a subset of it.

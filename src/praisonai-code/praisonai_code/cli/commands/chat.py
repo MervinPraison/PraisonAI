@@ -171,6 +171,14 @@ def chat_main(
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
 
+    # --file/-f attachments appear in this command's own docstring examples
+    # (`praisonai chat "Summarize this" --file README.md`). Resolve them here,
+    # before the credential gate and the --profile branch return, so both the
+    # profiled and non-profiled single-prompt paths receive the attachment
+    # instead of silently dropping it.
+    from praisonai_code.cli.interactive.attachments import prepend_attachments
+    prompt = prepend_attachments(prompt, file)
+
     # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
     # decorator, which sets PRAISONAI_NO_PLUGINS for the duration of this call
     # and always restores the prior value on return, so it never leaks into a
@@ -273,6 +281,21 @@ def chat_main(
     # a full interactive chat session with no `praisonai` wrapper required.
     from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
+    # --continue resumes the most recent stored session. Resolved here rather
+    # than inside the TUI so an explicit --session always wins, and so an empty
+    # store degrades to a fresh session instead of an error. The TUI's own
+    # resume path (Issue #4910) then rehydrates the agent from this id.
+    resolved_session_id = session_id
+    if resolved_session_id is None and continue_session:
+        try:
+            from praisonai_code.cli.session import get_session_store
+
+            resolved_session_id = get_session_store().get_last_session_id()
+        except Exception:
+            resolved_session_id = None
+        if resolved_session_id is None:
+            typer.echo("No previous session to continue; starting a new one.", err=True)
+
     # `resolved_model` was resolved above (before the onboarding gate) so the
     # gate validated the exact model dispatched here — no re-resolution needed.
     # `--continue` was declared and dropped, so `praisonai chat -c` silently
@@ -297,15 +320,15 @@ def chat_main(
         show_status_bar=not compact,
         session_id=resolved_session_id,
         resume=bool(resolved_session_id) and (continue_session or bool(session_id)),
-        # `--no-acp`/`--no-lsp` were declared and dropped, so the tools they
-        # name loaded anyway; the AsyncTUIConfig fields for them already exist
-        # and `code` already sets them.
-        enable_acp=not no_acp,
-        enable_lsp=not no_lsp,
         workspace=workspace,
         debug=debug,
         autonomy_mode=autonomy,
         no_rules=no_rules,
+        # --no-acp/--no-lsp were parsed and dropped, so there was no way to
+        # turn the ACP/LSP runtimes off from `chat` (`code` already passes
+        # these through to the same config).
+        enable_acp=not no_acp,
+        enable_lsp=not no_lsp,
         # Consolidated capability options: thread the supplied flags onto the
         # same Agent params `run`/YAML/Python use so interactive sessions honour
         # them instead of dropping them (issue #4890). Unset flags stay None so
@@ -321,7 +344,7 @@ def chat_main(
     )
     
     tui = AsyncTUI(config=tui_config)
-    
+
     if prompt:
         # Single prompt mode - direct response, no streaming
         response = tui.run_single(prompt)
@@ -423,20 +446,26 @@ def _run_profiled_chat(
 # --no-color, --theme) are not honoured by the async TUI. Saying so is one line,
 # and stops the CLI making a promise it does not keep.
 # test_every_listed_option_really_is_unread pins this list against the body so it
-# cannot rot once an option is genuinely wired.
+# cannot rot once an option is genuinely wired, and
+# test_every_dropped_option_really_is_listed pins the other direction.
+#
+# The four below the blank line were dropped just as silently but were never
+# declared: they are the ones whose values `_run_legacy_terminal_chat` consumes
+# -- a function this module defines and never calls -- which is why they read as
+# wired to a grep and are not.
 _UNWIRED_CHAT_OPTIONS = {
     "hooks": "--hooks",
     "ui_backend": "--ui-backend",
     "no_color": "--no-color",
     "theme": "--theme",
-    # These four were declared and dropped without any warning at all -- the
-    # table only covered the four above, so it was a subset of the real gap.
-    # `--continue`, `--no-acp` and `--no-lsp` are now genuinely wired; these
-    # remain unimplemented and say so rather than being accepted in silence.
+    # These were declared and dropped without any warning at all -- the table
+    # only covered the four above, so it was a subset of the real gap.
+    # `--continue`, `--no-acp`, `--no-lsp` and `--file` are now genuinely wired;
+    # these remain unimplemented and say so rather than being accepted in
+    # silence.
     "tools": "--tools",
     "toolset": "--toolset",
     "user_id": "--user-id",
-    "file": "--file",
     "output": "--output",
 }
 
