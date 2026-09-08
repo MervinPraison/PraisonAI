@@ -204,5 +204,76 @@ class TestExhaustiveMatching:
             assert handled, f"Status {outcome.status} was not handled"
 
 
+class TestRunTerminal:
+    """Test the canonical terminal-outcome merge contract."""
+
+    def test_no_current_takes_observation(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        observed = RunTerminal("failed", "provider")
+        assert merge_run_terminal(None, observed) == observed
+
+    def test_cancel_not_overwritten_by_late_error(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal, collapse
+
+        cancel = RunTerminal("aborted", "external")
+        error = RunTerminal("failed", "provider")
+        merged = merge_run_terminal(cancel, error)
+        assert merged == cancel
+        assert collapse(merged) == "cancelled"
+
+    def test_hard_timeout_is_sticky(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal, is_sticky, collapse
+
+        timeout = RunTerminal("timeout", "run_budget")
+        error = RunTerminal("failed", "provider")
+        assert is_sticky(timeout)
+        assert merge_run_terminal(timeout, error) == timeout
+        assert collapse(timeout) == "timeout"
+
+    def test_refine_toward_stronger(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        ok = RunTerminal("ok", "completion")
+        error = RunTerminal("failed", "provider")
+        assert merge_run_terminal(ok, error) == error
+
+    def test_weaker_never_downgrades(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        timeout = RunTerminal("timeout", "idle")
+        ok = RunTerminal("ok", "completion")
+        assert merge_run_terminal(timeout, ok) == timeout
+
+    def test_tie_keeps_current(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal
+
+        first = RunTerminal("failed", "provider")
+        second = RunTerminal("failed", "idle")
+        assert merge_run_terminal(first, second) == first
+
+    def test_collapse_covers_all_kinds(self):
+        from praisonaiagents.run_outcome import RunTerminal, collapse
+
+        assert collapse(RunTerminal("ok", "completion")) == "success"
+        assert collapse(RunTerminal("failed", "provider")) == "failure"
+        assert collapse(RunTerminal("timeout", "idle")) == "timeout"
+        assert collapse(RunTerminal("aborted", "external")) == "cancelled"
+
+    def test_round_trip_serialisation(self):
+        from praisonaiagents.run_outcome import RunTerminal
+
+        outcome = RunTerminal("aborted", "external", detail="user /stop")
+        assert RunTerminal.from_dict(outcome.to_dict()) == outcome
+
+    def test_superseded_is_sticky(self):
+        from praisonaiagents.run_outcome import RunTerminal, merge_run_terminal, is_sticky
+
+        superseded = RunTerminal("aborted", "superseded")
+        error = RunTerminal("failed", "provider")
+        assert is_sticky(superseded)
+        assert merge_run_terminal(superseded, error) == superseded
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
