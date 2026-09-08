@@ -884,7 +884,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription required", "subscription expired",
+            "plan limit"
         ]):
             return "billing"
         
@@ -912,15 +913,16 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Empty or malformed responses
         if any(indicator in error_str for indicator in [
-            "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "empty response", "no response", "no content", "blank output",
+            "null response", "json decode error", "unexpected end of json"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "try again later", "server busy",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -933,8 +935,9 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Format errors
         if any(indicator in error_str for indicator in [
-            "validation error", "invalid format", "parse error",
-            "malformed", "invalid json", "schema error"
+            "validation error", "invalid format", "invalid response format",
+            "parse error", "parsing error", "decode error", "malformed", "malformed response", "invalid json",
+            "schema error"
         ]):
             return "format_error"
         
@@ -1027,6 +1030,18 @@ Respond with ONLY a valid JSON tool call in this format:
                 reason=error_kind,
                 backoff_ms=1000,  # Brief delay before trying new profile
                 is_retryable=True
+            )
+
+        # Auth error with NOTHING to rotate to: surface it. Retrying a rejected
+        # credential cannot succeed -- there is no other profile to try and the
+        # attempt-0 refresh path has already had its chance -- so a retry only
+        # spends calls and delays the one message that tells the caller their
+        # key is wrong. Previously this fell through to the generic retry below.
+        if error_kind == "auth":
+            return FailoverDecision(
+                action="surface_error",
+                reason=error_kind,
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
