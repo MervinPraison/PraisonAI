@@ -107,6 +107,18 @@ class ApprovalDecision:
     feedback: Optional[str] = None
     escalate: bool = False
 
+    def __post_init__(self) -> None:
+        """Enforce the fail-closed escalation invariant.
+
+        An escalation is a *deferral to a human*, never an authorisation, so
+        ``escalate=True`` always forces ``approved=False``. This guarantees a
+        consumer that inspects only ``approved`` can never execute an escalated
+        request, upholding the deny-by-default compatibility guarantee even if a
+        backend constructs ``ApprovalDecision(approved=True, escalate=True)``.
+        """
+        if self.escalate:
+            self.approved = False
+
 
 @dataclass
 class ApprovalConfig:
