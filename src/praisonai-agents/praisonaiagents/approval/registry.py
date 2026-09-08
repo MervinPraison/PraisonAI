@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import threading
 from praisonaiagents._logging import get_logger
 import os
 from typing import Dict, List, Optional, Set
@@ -114,6 +115,13 @@ class ApprovalRegistry:
         # by ``_agent_backends`` / ``_agent_tool_auto_approve``.
         self._agent_required_tools: Dict[str, Set[str]] = {}
         self._agent_risk_levels: Dict[tuple[str, str], str] = {}
+
+        # Guards the process-global scoped grant collections
+        # (``_agent_tool_auto_approve`` and ``_session_scoped_targets``) so a
+        # concurrent ``release_scope`` (Agent shutdown) cannot drop another
+        # agent's grant that is being written at the same time. Only wraps these
+        # small in-memory mutations, so it adds no hot-path cost.
+        self._scope_lock = threading.Lock()
 
         # Per-agent, per-tool auto-approval (G-A fix)
         self._agent_tool_auto_approve: Dict[tuple[str, str], bool] = {}
@@ -233,7 +241,8 @@ class ApprovalRegistry:
         """Pre-approve a single tool for a specific agent."""
         if not agent_name:
             raise ValueError("Skill auto-approval requires a stable agent/session scope")
-        self._agent_tool_auto_approve[(agent_name, tool_name)] = True
+        with self._scope_lock:
+            self._agent_tool_auto_approve[(agent_name, tool_name)] = True
 
     def is_auto_approved(self, tool_name: str, agent_name: str) -> bool:
         """Check if a tool is auto-approved for a specific agent."""
@@ -360,7 +369,8 @@ class ApprovalRegistry:
                 from .utils import build_permission_target
 
                 target = build_permission_target(tool_name, arguments)
-                self._session_scoped_targets.add((session_key, target))
+                with self._scope_lock:
+                    self._session_scoped_targets.add((session_key, target))
             except Exception as e:  # noqa: BLE001 — best-effort, in-memory only
                 logger.debug(
                     "Could not record session approval for tool '%s': %s",
@@ -379,9 +389,9 @@ class ApprovalRegistry:
             try:
                 from .utils import build_permission_target
 
-                self._session_scoped_targets.add(
-                    (session_key, build_permission_target(tool_name, arguments))
-                )
+                target = build_permission_target(tool_name, arguments)
+                with self._scope_lock:
+                    self._session_scoped_targets.add((session_key, target))
             except Exception:  # noqa: BLE001
                 pass
             return
@@ -406,27 +416,49 @@ class ApprovalRegistry:
 
     def clear_approved(self) -> None:
         self._approved_context.set(set())
-        self._session_scoped_targets.clear()
+        with self._scope_lock:
+            self._session_scoped_targets.clear()
 
     def release_scope(self, scope_id: str) -> None:
         """Drop all grants recorded under a per-instance approval scope id.
 
-        ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval) and
-        ``_persist_scoped_decision`` ("this session" human approvals) both write
-        entries keyed by an Agent's globally-unique ``_approval_scope_id``. Those
-        ids never repeat, so without eviction a long-running process that creates
-        one Agent per request/session grows these dicts/sets without bound.
-        Called from ``Agent.close()``/``aclose()`` to reclaim a dead agent's
+        ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval),
+        ``_persist_scoped_decision`` ("this session" human approvals) and
+        ``mark_approved`` (per-context approval cache) all write entries keyed by
+        an Agent's globally-unique ``_approval_scope_id``. Those ids never repeat,
+        so without eviction a long-running process that creates one Agent per
+        request/session grows these dicts/sets without bound. Called from
+        ``Agent.close()``/``aclose()``/``__del__`` to reclaim a dead agent's
         entries without touching any other agent's grants.
+
+        Mutates the shared collections **in place under ``_scope_lock``** (rather
+        than rebuilding-and-replacing) so a concurrent writer's grant for a
+        *different* scope can never be lost to a read-modify-write race, and
+        iteration can't observe a half-swapped collection.
         """
         if not scope_id:
             return
-        self._agent_tool_auto_approve = {
-            k: v for k, v in self._agent_tool_auto_approve.items() if k[0] != scope_id
-        }
-        self._session_scoped_targets = {
-            t for t in self._session_scoped_targets if t[0] != scope_id
-        }
+        with self._scope_lock:
+            for key in [k for k in self._agent_tool_auto_approve if k[0] == scope_id]:
+                self._agent_tool_auto_approve.pop(key, None)
+            for entry in [t for t in self._session_scoped_targets if t[0] == scope_id]:
+                self._session_scoped_targets.discard(entry)
+
+        # Evict this scope's per-context approval-cache keys. ``mark_approved``
+        # stores ``"{scope_id}:{tool}:{hash}"`` entries in the ``_approved_context``
+        # ContextVar; a long-lived context that creates/closes many short-lived
+        # agents would otherwise retain one key per approved call forever. This
+        # only touches the *current* context's set (ContextVars are per
+        # coroutine/thread), which is the context the closing agent ran in.
+        prefix = f"{scope_id}:"
+        try:
+            approved = self._approved_context.get(set())
+            if approved:
+                remaining = {k for k in approved if not k.startswith(prefix)}
+                if len(remaining) != len(approved):
+                    self._approved_context.set(remaining)
+        except Exception:  # noqa: BLE001 — cache eviction is best-effort
+            pass
 
     def set_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
         return self._yaml_approved_tools.set(set(tools))
