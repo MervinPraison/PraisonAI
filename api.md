@@ -928,7 +928,7 @@ Methods:
 
 Types/Exports:
 ```ts
-export { Agent, AgentTeam, Agents, CodeAgent, EmbeddingAgent, OCRAgent, PraisonAIAgents, RealtimeAgent, Router, TASK_STATUS, VideoAgent, VisionAgent, createCodeAgent, createEmbeddingAgent, createOCRAgent, createRealtimeAgent, createVideoAgent, createVisionAgent } from "./agent";
+export { Agent, AgentTeam, Agents, CodeAgent, EmbeddingAgent, OCRAgent, PraisonAIAgents, RealtimeAgent, Router, TASK_STATUS, VideoAgent, VisionAgent, createCodeAgent, createEmbeddingAgent, createOCRAgent, createRealtimeAgent, createSubprocessExecutor, createVideoAgent, createVisionAgent } from "./agent";
 export type { AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput, AgentMemoryStore, AgentMessage, AgentRetryConfig, AgentStreamOptions, AgentTaskLike, AgentTeamConfig, AgentTeamProcess, AgentTeamStartDictOptions, AgentTeamStartOptions, AgentTeamStartOptionsInput, AgentWebConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason, TaskCallback, TaskGuardrail, TaskOnError } from "./agent";
 export { AudioAgent, createAudioAgent } from "./agent/audio";
 export type { AudioAgentConfig, AudioConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
