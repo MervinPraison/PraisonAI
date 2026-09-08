@@ -130,8 +130,17 @@ def test_custom_agent_verbose_maps_to_output_preset(monkeypatch):
         verbose=True,
     )
 
-    real_params = set(inspect.signature(RealAgent.__init__).parameters)
-    assert set(captured) <= real_params
+    # Construct a real Agent with exactly these kwargs. Checking them against
+    # the signature does not work in either direction: Agent.__init__ takes
+    # **kwargs, so ``inspect.signature().bind`` accepts even the ``verbose``
+    # this test exists to catch, while a "subset of named parameters" check
+    # rejects legitimate extras like ``auto_save`` (stored as an attribute by
+    # the session wiring). Only the constructor knows -- it validates kwargs
+    # itself and raises for names that have moved.
+    try:
+        RealAgent(**{**captured, "llm": captured.get("llm") or "gpt-4o-mini"})
+    except TypeError as exc:  # pragma: no cover - the regression
+        pytest.fail(f"the real Agent constructor rejects these kwargs: {exc}")
     assert "verbose" not in captured
     assert captured["output"] == "verbose"
 

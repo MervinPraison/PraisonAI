@@ -74,11 +74,79 @@ def test_train_command_reaches_trainer_not_direct_prompt(monkeypatch, tmp_path):
     assert calls["config"] is not None
     assert calls["config"]["dataset"] == [{"name": str(dataset)}]
     assert calls["config"]["model_name"] == "llama-3.1"
-    # The trainer subprocess was actually dispatched.
+    # The trainer subprocess was actually dispatched, at the module the
+    # dispatcher chose for this environment.
     assert calls["train_argv"] is not None
-    assert "praisonai_train.train.llm.trainer" in calls["train_argv"]
+    assert any(
+        a in calls["train_argv"]
+        for a in ("praisonai_train.train.llm.trainer",
+                  "praisonai.train.llm.trainer")
+    ), calls["train_argv"]
     assert "train" in calls["train_argv"]
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+
+@pytest.mark.parametrize("available,expected", [
+    (True, "praisonai_train.train.llm.trainer"),
+    (False, "praisonai.train.llm.trainer"),
+])
+def test_the_trainer_module_follows_the_installed_package(
+    monkeypatch, tmp_path, available, expected
+):
+    """Which trainer module is invoked must follow ``train_package_available``.
+
+    ``praisonai_train`` is the owner package since the C10 extraction;
+    ``praisonai.train.*`` is a compatibility shim. The dispatcher picks the
+    owner when it is importable and the shim otherwise -- correct, but the
+    assertion above only ever exercised whichever branch the *developer's*
+    environment happened to select, so it was red on a checkout without
+    ``praisonai-train`` on the path and green with it. Both branches are now
+    driven explicitly.
+    """
+    pa = _load_module()
+    try:
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
+    except ImportError as exc:  # pragma: no cover - depends on optional wrapper
+        pytest.skip(f"wrapper argparse builder unavailable: {exc}")
+
+    calls = {"train_argv": None}
+
+    monkeypatch.setattr(pa, "TRAIN_AVAILABLE", True)
+    monkeypatch.setattr(pa.PraisonAI, "handle_direct_prompt",
+                        lambda self, *a, **k: "PROMPTED")
+    monkeypatch.setattr(pa, "stream_subprocess",
+                        lambda cmd, env=None: calls.__setitem__("train_argv", list(cmd)))
+    monkeypatch.setattr(pa, "_get_generate_config",
+                        lambda: (lambda **kw: {"model_name": kw.get("model_name") or ""}))
+    # Imported inside the dispatch function from _train_bridge, so it must
+    # be patched at its source module rather than on the loaded module.
+    import praisonai_code._train_bridge as train_bridge
+    monkeypatch.setattr(train_bridge, "train_package_available",
+                        lambda: available)
+
+    import subprocess as _sp
+    monkeypatch.setattr(
+        _sp, "check_output",
+        lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+
+    dataset = tmp_path / "my_sft.jsonl"
+    dataset.write_text('{"instruction": "x"}\n')
+    monkeypatch.chdir(tmp_path)
+
+    import sys as _sys
+    monkeypatch.setattr(
+        _sys, "argv",
+        ["praisonai", "train", "--dataset", str(dataset), "--model", "llama-3.1"],
+    )
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    pa.PraisonAI().main()
+
+    assert calls["train_argv"] is not None
+    assert expected in calls["train_argv"], calls["train_argv"]
