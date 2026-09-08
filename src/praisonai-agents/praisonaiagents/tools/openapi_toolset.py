@@ -199,11 +199,22 @@ class OpenAPIOperation:
             # URL" case, and an absolute path in the spec would otherwise
             # relocate a request that carries this toolset's credentials.
             configured, built = urlsplit(self.base_url), urlsplit(url)
-            if configured.netloc and built.netloc != configured.netloc:
+            # Compare scheme as well as host: a same-host value that only
+            # downgrades https:// to http:// (an absolute path from an
+            # untrusted spec) would otherwise pass a host-only check and send
+            # this toolset's credentials in the clear.
+            if configured.netloc and (
+                built.netloc != configured.netloc
+                or built.scheme != configured.scheme
+            ):
+                configured_origin = (f"{configured.scheme}://{configured.netloc}"
+                                     if configured.scheme else configured.netloc)
+                built_origin = (f"{built.scheme}://{built.netloc}"
+                                if built.scheme else (built.netloc or "(no host)"))
                 raise ValueError(
                     f"{self.name}: refusing to send credentialed request to "
-                    f"{built.netloc or '(no host)'}; configured origin is "
-                    f"{configured.netloc}")
+                    f"{built_origin}; configured origin is "
+                    f"{configured_origin}")
         else:
             url = path
         if not urlsplit(url).netloc:

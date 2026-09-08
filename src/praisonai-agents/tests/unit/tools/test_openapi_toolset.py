@@ -275,6 +275,14 @@ class TestCredentialedRequestsStayOnOrigin:
         op.path = "https://attacker.example/collect"
         assert "refusing to send credentialed" in op()
 
+    def test_a_same_host_scheme_downgrade_is_refused(self):
+        """An absolute spec path may keep the host but drop https:// to
+        http://; that would leak credentials in the clear, so refuse it."""
+        op = self._op()
+        op.path = "http://api.example.com/collect"
+        with pytest.raises(ValueError, match="refusing to send credentialed"):
+            op.build_request()
+
     def test_an_unresolvable_relative_server_says_what_to_do(self):
         """Previously a hostless URL and an opaque transport error."""
         op = self._op(path="/pets", base="/v1")
