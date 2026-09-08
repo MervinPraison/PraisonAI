@@ -380,6 +380,49 @@ class Loop:
         self.max_workers = max_workers
         self.output_variable = output_variable
 
+class Discussion:
+    """N agents take turns on the same thread until a criterion is met.
+
+    PraisonAI had no N-agent conversation loop at all -- no round-robin, no
+    speaker selection -- so having three agents debate for a few turns meant
+    writing the loop by hand. ``repeat([a, b])`` was the obvious workaround and
+    silently misbehaved until it was fixed, which is what made this worth
+    building rather than documenting around.
+
+        Discussion([critic, author], rounds=3,
+                   until=lambda ctx: "AGREED" in (ctx.previous_result or ""))
+
+    Each speaker sees the transcript so far, so this is a conversation rather
+    than N independent answers. ``rounds`` counts full passes over the
+    speakers, and is required -- an unbounded debate is a bill, not a feature.
+    """
+
+    def __init__(
+        self,
+        agents=None,
+        rounds: int = 3,
+        until=None,
+        select=None,
+        name: str = "discussion",
+    ):
+        speakers = list(agents or [])
+        if not speakers:
+            raise ValueError(
+                "Discussion needs at least one speaker; an empty discussion would "
+                "run zero turns and report success."
+            )
+        if rounds < 1:
+            raise ValueError("Discussion rounds must be >= 1.")
+        self.agents = speakers
+        self.rounds = rounds
+        #: Stop early when this returns True, checked after every turn.
+        self.until = until
+        #: Choose the next speaker: (turn_index, context) -> agent. Defaults to
+        #: round-robin, which is the behaviour people expect from "discussion".
+        self.select = select
+        self.name = name
+
+
 @dataclass
 class Repeat:
     """
@@ -1258,6 +1301,9 @@ class AgentFlow:
                 visit(step.step)
                 visit(step.steps)
                 return
+            if isinstance(step, Discussion):
+                visit(step.agents)
+                return
             if isinstance(step, Repeat):
                 visit(step.step)
                 return
@@ -1432,6 +1478,16 @@ class AgentFlow:
                 i += 1
                 continue
                 
+            elif isinstance(step, Discussion):
+                discussion_result = self._execute_discussion(
+                    step, previous_output, input, all_variables, model, verbose, stream
+                )
+                results.extend(discussion_result["steps"])
+                previous_output = discussion_result["output"]
+                all_variables.update(discussion_result.get("variables", {}))
+                i += 1
+                continue
+
             elif isinstance(step, Repeat):
                 # Repeat until condition
                 repeat_result = self._execute_repeat(
@@ -3704,6 +3760,80 @@ CONCISE SUMMARY:"""
         # 4. Fallback: wrap as single item
         return [text]
     
+    def _execute_discussion(
+        self, discussion, previous_output, input, all_variables, model, verbose, stream=True, depth=0
+    ):
+        """Run a round-robin discussion and return the same shape as the other patterns."""
+        results = []
+        output = previous_output
+        transcript = []
+        stopped = False
+
+        if verbose:
+            names = [getattr(a, "name", getattr(a, "__name__", str(a))) for a in discussion.agents]
+            print(f"💬 Discussion: {' → '.join(names)} for {discussion.rounds} round(s)")
+
+        turn = 0
+        for round_index in range(discussion.rounds):
+            for position in range(len(discussion.agents)):
+                context = WorkflowContext(
+                    input=input,
+                    previous_result=str(output) if output else None,
+                    current_step=f"{discussion.name}_r{round_index}",
+                    variables=all_variables.copy(),
+                )
+                # A custom selector may repeat or skip a speaker; round-robin is
+                # only the default, not an assumption baked into the loop.
+                speaker = (
+                    discussion.select(turn, context) if discussion.select
+                    else discussion.agents[position]
+                )
+                step_result = self._execute_single_step_internal(
+                    speaker, output, input, all_variables, model, verbose,
+                    turn, stream=stream, depth=depth + 1,
+                )
+                output = step_result["output"]
+                speaker_name = getattr(speaker, "name", getattr(speaker, "__name__", step_result["step"]))
+                # The transcript is what makes this a conversation rather than N
+                # independent answers: each speaker is handed what came before.
+                transcript.append(f"{speaker_name}: {output}")
+                all_variables.update(step_result.get("variables", {}))
+                all_variables["discussion_transcript"] = "\n".join(transcript)
+                results.append({
+                    "step": f"{discussion.name}_r{round_index}_{speaker_name}",
+                    "output": output,
+                })
+                turn += 1
+
+                if discussion.until:
+                    check = WorkflowContext(
+                        input=input,
+                        previous_result=str(output) if output else None,
+                        current_step=discussion.name,
+                        variables=all_variables.copy(),
+                    )
+                    try:
+                        if discussion.until(check):
+                            stopped = True
+                            break
+                    except Exception as exc:
+                        # A broken until() must not silently mean "never stop":
+                        # that turns a bounded discussion into rounds of spend.
+                        raise ValueError(
+                            f"Discussion until() raised {type(exc).__name__}: {exc}. "
+                            f"It is checked after every turn, so a failing "
+                            f"condition would run the full round budget."
+                        ) from exc
+            if stopped:
+                break
+
+        return {
+            "steps": results,
+            "output": output,
+            "variables": {"discussion_transcript": "\n".join(transcript)},
+            "stop": False,
+        }
+
     def _execute_repeat(
         self,
         repeat_step: Repeat,

@@ -22,6 +22,7 @@ from .workflows import (
     Parallel,
     Loop,
     Repeat,
+    Discussion,
     Include,
     If,
     
