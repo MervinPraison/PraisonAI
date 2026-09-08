@@ -5,7 +5,11 @@ import os
 import tempfile
 import pytest
 
-from praisonai_bot.bots.media import split_media_from_output, is_audio_file
+from praisonai_bot.bots.media import (
+    split_media_from_output,
+    split_media_from_output_async,
+    is_audio_file,
+)
 
 
 class TestSplitMediaFromOutput:
@@ -111,6 +115,95 @@ class TestSplitMediaFromOutput:
             assert "\n\n" in result["text"]
         finally:
             os.unlink(temp_path)
+
+
+class _StubResolver:
+    """Minimal RemoteMediaResolver stub for the async media tests."""
+
+    def __init__(self, owned_prefix, local_map=None, fetch_error=False):
+        self._owned_prefix = owned_prefix
+        self._local_map = local_map or {}
+        self._fetch_error = fetch_error
+        self.fetched = []
+
+    def owns_path(self, path):
+        return path.startswith(self._owned_prefix)
+
+    async def fetch_to_local(self, remote_path):
+        self.fetched.append(remote_path)
+        if self._fetch_error:
+            raise RuntimeError("boom")
+        return self._local_map.get(remote_path, "")
+
+
+class TestSplitMediaFromOutputAsync:
+    """Tests for the remote-sandbox-aware async variant (Issue #4951)."""
+
+    @pytest.mark.asyncio
+    async def test_local_path_unchanged_without_resolver(self):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            temp_path = f.name
+        try:
+            result = await split_media_from_output_async(
+                f"Chart\nMEDIA:{temp_path}"
+            )
+            assert temp_path in result["media_urls"]
+            assert "Chart" in result["text"]
+        finally:
+            os.unlink(temp_path)
+
+    @pytest.mark.asyncio
+    async def test_http_url_unchanged(self):
+        result = await split_media_from_output_async(
+            "MEDIA:https://example.com/a.png"
+        )
+        assert "https://example.com/a.png" in result["media_urls"]
+
+    @pytest.mark.asyncio
+    async def test_remote_path_dropped_without_resolver(self):
+        result = await split_media_from_output_async(
+            "Here it is.\nMEDIA:/workspace/report.pdf"
+        )
+        assert result["media_urls"] == []
+        assert "Here it is." in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_remote_path_fetched_with_resolver(self):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            local_path = f.name
+        try:
+            resolver = _StubResolver(
+                owned_prefix="/workspace/",
+                local_map={"/workspace/sales.png": local_path},
+            )
+            result = await split_media_from_output_async(
+                "Here's the chart.\nMEDIA:/workspace/sales.png",
+                remote_resolver=resolver,
+            )
+            assert resolver.fetched == ["/workspace/sales.png"]
+            assert os.path.realpath(local_path) in result["media_urls"]
+            assert "Here's the chart." in result["text"]
+        finally:
+            os.unlink(local_path)
+
+    @pytest.mark.asyncio
+    async def test_remote_fetch_failure_degrades_to_drop(self):
+        resolver = _StubResolver(owned_prefix="/workspace/", fetch_error=True)
+        result = await split_media_from_output_async(
+            "MEDIA:/workspace/broken.png",
+            remote_resolver=resolver,
+        )
+        assert result["media_urls"] == []
+
+    @pytest.mark.asyncio
+    async def test_unowned_remote_path_dropped(self):
+        resolver = _StubResolver(owned_prefix="/other/")
+        result = await split_media_from_output_async(
+            "MEDIA:/workspace/x.png",
+            remote_resolver=resolver,
+        )
+        assert result["media_urls"] == []
+        assert resolver.fetched == []
 
 
 class TestIsAudioFile:
