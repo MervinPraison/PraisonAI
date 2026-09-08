@@ -151,3 +151,11 @@ Approval is unchanged — the real-shell path is gated by the same
 
 MCP servers declared under `mcp.servers` in project config are loaded into the
 code session's tool set. Disable with `PRAISON_TOOLS_DISABLE=mcp`.
+
+**Trust gate.** Project-declared **local (stdio)** MCP servers spawn a
+subprocess on the host, so a cloned repository could run a repo-controlled
+script the moment the session opens. They are therefore **not** started
+automatically: set `PRAISONAI_MCP_TRUST=1` to allow the current workspace to
+start its local MCP subprocesses. Remote (URL) servers spawn no local process
+and are unaffected. Config is resolved from the selected `--workspace`, not the
+process working directory.

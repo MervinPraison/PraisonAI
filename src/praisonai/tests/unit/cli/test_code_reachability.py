@@ -193,6 +193,9 @@ def test_mcp_server_from_project_config_reaches_the_code_session(tmp_path, monke
     (tmp_path / "tiny_mcp_server.py").write_text(_TINY_MCP_SERVER)
     (tmp_path / "praisonai.yaml").write_text(_TINY_MCP_CONFIG)
     monkeypatch.chdir(tmp_path)
+    # Local (stdio) servers require an explicit workspace-trust opt-in, since a
+    # cloned repo could otherwise auto-start a repo-controlled subprocess.
+    monkeypatch.setenv("PRAISONAI_MCP_TRUST", "1")
     # The config resolver is a process-wide singleton with a cache; a prior test
     # in this file may already have resolved a config for a different cwd.
     from praisonai_code.cli.configuration.resolver import get_resolver
@@ -222,6 +225,67 @@ def test_mcp_group_honours_the_standard_disable_flag(monkeypatch):
     monkeypatch.setenv("PRAISON_TOOLS_DISABLE", "mcp")
     cfg = it.ToolConfig()
     assert cfg.enable_mcp is False
+
+
+@pytest.mark.timeout(120)
+def test_local_mcp_server_is_not_started_without_trust(tmp_path, monkeypatch):
+    """A project-declared local (stdio) server must NOT auto-start.
+
+    Starting it on session open is host code execution the operator did not
+    consent to; it requires an explicit ``PRAISONAI_MCP_TRUST`` opt-in.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
+    it = pytest.importorskip("praisonai_code.cli.features.interactive_tools")
+
+    (tmp_path / "tiny_mcp_server.py").write_text(_TINY_MCP_SERVER)
+    (tmp_path / "praisonai.yaml").write_text(_TINY_MCP_CONFIG)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PRAISONAI_MCP_TRUST", raising=False)
+    monkeypatch.delenv("PRAISONAI_MCP", raising=False)
+    from praisonai_code.cli.configuration.resolver import get_resolver
+
+    get_resolver(tmp_path, reset=True)
+
+    loaded = it._load_mcp_tools()
+    assert "tiny_add" not in loaded, (
+        "untrusted local MCP server was started without an opt-in"
+    )
+
+
+def test_mcp_config_resolves_from_selected_workspace(monkeypatch):
+    """MCP config must be read from the workspace, not the process cwd."""
+    import inspect
+
+    it = pytest.importorskip("praisonai_code.cli.features.interactive_tools")
+    src = inspect.getsource(it._load_mcp_tools)
+    # The resolver call must be workspace-aware, not a bare resolve_config().
+    assert "PRAISONAI_WORKSPACE" in src
+    assert "resolve_config(cwd=" in src
+
+
+# ---------------------------------------------------------------------------
+# /map -- reachable from the modern TUI, not just the legacy registry
+# ---------------------------------------------------------------------------
+
+def test_map_is_a_builtin_command_in_the_tui():
+    mod = _tui()
+    assert "map" in mod.AsyncTUI._BUILTIN_COMMANDS
+
+
+def test_map_dispatches_from_the_tui(tmp_path, monkeypatch):
+    mod = _tui()
+    tui = mod.AsyncTUI()
+    (tmp_path / "sample.py").write_text(
+        "class Widget:\n    def spin(self):\n        return 1\n"
+    )
+    tui.config.workspace = str(tmp_path)
+    handled = tui._handle_command("/map")
+    assert handled is True
+    # A system message must carry the map (or an honest failure), never treat
+    # /map as an unknown command.
+    assert any(m.role == "system" for m in tui.messages), [
+        (m.role, m.content) for m in tui.messages
+    ]
 
 
 # ---------------------------------------------------------------------------

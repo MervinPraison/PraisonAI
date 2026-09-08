@@ -51,10 +51,34 @@ def _clean_env(monkeypatch):
         ('echo "a > b"', None),
         ("git commit -m 'fix: a && b'", None),
         ('grep -r "foo|bar" .', None),
+        # ...but POSIX command substitution stays ACTIVE inside double quotes,
+        # so it must still be caught or the false-success bug returns.
+        ('echo "$(id)"', "$("),
+        ('echo "`id`"', "`"),
+        ('echo "value is $(whoami) here"', "$("),
+        # Single quotes suppress substitution, so these are inert.
+        ("echo '$(id)'", None),
+        ("echo '`id`'", None),
     ],
 )
 def test_find_shell_syntax(command, expected):
     assert shell_exec.find_shell_syntax(command) == expected
+
+
+def test_quoted_command_substitution_is_refused_not_falsely_successful(tmp_path):
+    """``echo "$(touch pwned)"`` must not be waved through to shell=False.
+
+    The shell=False executor would print the literal ``$(touch pwned)`` and
+    report success while the substitution silently did not run -- exactly the
+    false-success this module exists to kill.
+    """
+    target = tmp_path / "pwned"
+    result = shell_exec.execute_command(
+        f'echo "$(touch {target.name})"', cwd=str(tmp_path)
+    )
+    assert not target.exists()
+    assert result["success"] is False
+    assert result["shell_syntax"] == "$("
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +187,29 @@ def test_real_shell_path_is_approval_gated(tmp_path, monkeypatch):
         assert seen[0][1] == "critical"
     finally:
         approval.set_approval_callback(previous)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group kill is POSIX-only")
+@pytest.mark.timeout(30)
+def test_timeout_kills_backgrounded_descendants(tmp_path):
+    """A timed-out shell must not leave a descendant mutating the workspace.
+
+    ``(sleep 3; write) & wait`` times out at 1s; without a process-group kill
+    the immediate /bin/sh dies but the backgrounded sleep survives and writes
+    its marker after the tool has reported the command stopped.
+    """
+    import time
+
+    marker = tmp_path / "late.txt"
+    cmd = f"(sleep 3; printf late > {marker.name}) & echo started; wait"
+    result = shell_exec._run_real_shell(
+        cmd, str(tmp_path), 1, None, 10000, contained=False
+    )
+    assert result["exit_code"] == 124
+    assert result["success"] is False
+    # Give the (killed) descendant more than its own sleep to prove it is gone.
+    time.sleep(3.5)
+    assert not marker.exists(), "backgrounded descendant survived the timeout"
 
 
 # ---------------------------------------------------------------------------

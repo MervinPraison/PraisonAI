@@ -286,8 +286,19 @@ def _load_mcp_tools(verbose: bool = False) -> Dict[str, Callable]:
         logger.debug("MCP tools unavailable: %s", exc)
         return tools
 
+    # Resolve project config from the *selected workspace*, not the process cwd.
+    # ``praisonai code --workspace project-b`` run from project A must load
+    # project B's MCP servers, not A's. The workspace env var is set by code.py
+    # for the ``--workspace`` flag; fall back to cwd when unset.
+    from pathlib import Path
+
+    workspace = (
+        os.environ.get("PRAISONAI_WORKSPACE")
+        or os.environ.get("PRAISON_WORKSPACE")
+        or None
+    )
     try:
-        config = resolve_config()
+        config = resolve_config(cwd=Path(workspace) if workspace else None)
     except Exception as exc:  # noqa: BLE001
         logger.debug("MCP config could not be resolved: %s", exc)
         return tools
@@ -297,6 +308,35 @@ def _load_mcp_tools(verbose: bool = False) -> Dict[str, Callable]:
     except Exception as exc:  # noqa: BLE001
         logger.debug("MCP server collection failed: %s", exc)
         return tools
+
+    # Trust gate for project-declared local (stdio) servers. A cloned repo can
+    # declare an allowed interpreter running a repo-controlled script; starting
+    # that automatically on session open is host code execution the operator did
+    # not consent to. The executable allowlist limits *which* binary runs, not
+    # *whose* script -- so local servers from project config require an explicit
+    # opt-in. Remote (URL) servers do not spawn local processes and are left as
+    # is; the ad-hoc ``PRAISONAI_MCP`` env is operator-supplied and so trusted.
+    trust = os.environ.get("PRAISONAI_MCP_TRUST", "").strip().lower()
+    trusted = trust in ("1", "true", "yes", "on")
+    if servers and not trusted:
+        untrusted_local = [
+            s for s in servers
+            if not (s.get("type") == "remote" or s.get("url"))
+        ]
+        if untrusted_local:
+            names = ", ".join(
+                str(s.get("name", "?")) for s in untrusted_local
+            )
+            logger.warning(
+                "Skipping %d project-configured local MCP server(s) [%s]: set "
+                "PRAISONAI_MCP_TRUST=1 to allow this workspace to start local "
+                "MCP subprocesses.",
+                len(untrusted_local), names,
+            )
+        servers = [
+            s for s in servers
+            if (s.get("type") == "remote" or s.get("url"))
+        ]
 
     env_mcp = os.environ.get("PRAISONAI_MCP") or None
     env_mcp_env = os.environ.get("PRAISONAI_MCP_ENV") or None

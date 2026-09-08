@@ -74,10 +74,17 @@ _ONE_CHAR_OPS = ("|", ">", "<", ";", "&", "`")
 
 
 def find_shell_syntax(command: str) -> Optional[str]:
-    """Return the first *unquoted* shell operator in ``command``, else ``None``.
+    """Return the first *active* shell operator in ``command``, else ``None``.
 
     Quote-aware on purpose: ``echo "a > b"`` contains no redirect, and calling
     it one would break commit messages, grep patterns and JSON payloads.
+
+    But POSIX command substitution stays *active inside double quotes*:
+    ``echo "$(id)"`` and ``echo "`id`"`` both run the inner command. Reporting
+    those as inert would reintroduce the false-success bug this module exists to
+    kill -- the ``shell=False`` executor would print the literal ``$(id)`` and
+    claim success. So ``$(`` and the backtick are detected even within double
+    quotes; single quotes still suppress everything.
     """
     if not command:
         return None
@@ -90,6 +97,12 @@ def find_shell_syntax(command: str) -> Optional[str]:
             if ch == "\\" and quote == '"':
                 i += 2
                 continue
+            # Command substitution is not suppressed by double quotes.
+            if quote == '"':
+                if command[i:i + 2] == "$(":
+                    return "$("
+                if ch == "`":
+                    return "`"
             if ch == quote:
                 quote = None
             i += 1
@@ -185,6 +198,30 @@ def _delegate(command: str, **kwargs) -> Dict:
     return _base(command, **kwargs)
 
 
+def _kill_process_tree(proc: "subprocess.Popen") -> None:
+    """Terminate a timed-out shell and every descendant it spawned.
+
+    The child was started with ``start_new_session=True`` (POSIX), so it leads
+    its own process group; killing the group reaches backgrounded descendants
+    (``& wait``) that a plain ``proc.kill()`` would orphan and leave running.
+    Falls back to killing just the process where a process group is unavailable
+    (Windows, or a session that could not be created).
+    """
+    import signal
+
+    if os.name == "posix":
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):  # pragma: no cover - already gone
+        pass
+
+
 def _run_real_shell(
     command: str,
     cwd: Optional[str],
@@ -212,30 +249,53 @@ def _run_real_shell(
     if env:
         proc_env.update(env)
 
+    # Run the shell in its own process group so a timeout can kill the whole
+    # tree, not just the immediate ``/bin/sh``. Without this a command like
+    # ``(sleep 60; mutate) & wait`` times out, loses only the top shell, and
+    # leaves the backgrounded descendant running and mutating files after the
+    # tool has reported that execution stopped.
+    popen_kwargs = {}
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+
+    proc = None
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             argv,
             cwd=cwd or None,
             env=proc_env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            **popen_kwargs,
         )
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "command": command,
-            "stdout": (exc.stdout or "") if isinstance(exc.stdout, str) else "",
-            "stderr": f"Command timed out after {timeout}s",
-            "exit_code": 124,
-            "success": False,
-            "error": f"Command timed out after {timeout}s",
-            "sandbox": backend,
-        }
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            out, err = proc.communicate()
+            return {
+                "command": command,
+                "stdout": out or "",
+                "stderr": f"Command timed out after {timeout}s",
+                "exit_code": 124,
+                "success": False,
+                "error": f"Command timed out after {timeout}s",
+                "sandbox": backend,
+            }
     except OSError as exc:
         return _refusal(command, "", f"Failed to start shell: {exc}")
     finally:
         if wrapper is not None:
             wrapper.cleanup()
+
+    class _Completed:
+        pass
+
+    completed = _Completed()
+    completed.stdout = out
+    completed.stderr = err
+    completed.returncode = proc.returncode
 
     def _cap(text: str) -> str:
         if max_output_size and len(text) > max_output_size:

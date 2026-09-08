@@ -1021,6 +1021,7 @@ class AsyncTUI:
         "git-log": "Show recent commits",
         "git-commit": "Stage and commit (message auto-generated when omitted)",
         "git-undo": "Undo the last commit (keeps changes staged)",
+        "map": "Show a ranked repository map (operator overview)",
     }
 
     def _get_registry(self):
@@ -1318,6 +1319,15 @@ Tips:
         
         elif cmd in ("git-status", "git-diff", "git-log", "git-commit", "git-undo"):
             self._handle_git_command(cmd, args)
+            return True
+
+        elif cmd == "map":
+            # /map was implemented only in the legacy standalone slash-command
+            # registry; the modern TUI builds its registry from _BUILTIN_COMMANDS
+            # and so treated /map as unknown despite the README advertising it.
+            # Wire it here so the primary coding interface reaches the working
+            # repo_map.RepoMap. Operator command, not an agent tool.
+            self._handle_map_command(args)
             return True
 
         elif cmd == "compact":
@@ -1748,6 +1758,39 @@ Example: /handoff code "refactor the auth module" """
 
         self.messages.append(ChatMessage(role="system", content=body))
 
+    def _handle_map_command(self, args: str) -> None:
+        """Surface ``repo_map.RepoMap`` in the modern TUI.
+
+        The repository map is an at-a-glance operator overview of an unfamiliar
+        repo. Deliberately not re-exposed as an agent tool: the agent already
+        has grep/glob/ast_grep_search, which is where the field landed for how a
+        model finds code. Never raises -- a missing optional dependency or an
+        unindexable tree degrades to a system message.
+        """
+        root = args.strip() or self.config.workspace or os.getcwd()
+        try:
+            from praisonai_code.cli.features.repo_map import RepoMapHandler
+        except ImportError as exc:
+            self.messages.append(ChatMessage(
+                role="system", content=f"Repository map unavailable: {exc}"
+            ))
+            return
+        try:
+            handler = RepoMapHandler()
+            handler.initialize(root=root)
+            map_str = handler.get_map()
+        except Exception as exc:  # noqa: BLE001
+            self.messages.append(ChatMessage(
+                role="system", content=f"Repository map failed: {exc}"
+            ))
+            return
+        if not map_str or not map_str.strip():
+            self.messages.append(ChatMessage(
+                role="system", content="No indexable source files found."
+            ))
+            return
+        self.messages.append(ChatMessage(role="system", content=map_str))
+
     # ------------------------------------------------------------------
     # Context compaction
     # ------------------------------------------------------------------
@@ -1866,12 +1909,17 @@ Example: /handoff code "refactor the auth module" """
         ))
         return True
 
-    def _maybe_auto_compact(self) -> None:
+    def _maybe_auto_compact(self, pending_prompt: str = "") -> None:
         """Compact before a turn when the session is near its context budget.
 
         ``ContextManagerHandler.should_auto_compact()`` existed and was never
         called from this TUI, so a long session ran until the provider returned
         a context-length error instead of shrinking first.
+
+        The pending user prompt is included in the budget check: a large
+        incoming message can cross the threshold *after* the accumulated history
+        alone was still under it, and checking history-only would let that turn
+        be rejected by the provider despite auto-compaction being on.
         """
         mgr = self._get_context_manager()
         if mgr is None:
@@ -1879,8 +1927,14 @@ Example: /handoff code "refactor the auth module" """
         history, _set, _source = self._live_history()
         if len(history) < 4:
             return
+        # Count the pending prompt against the budget without mutating the
+        # real history: it is appended to the model context immediately after
+        # this check, so it is part of the next request.
+        check_history = history
+        if pending_prompt:
+            check_history = history + [{"role": "user", "content": pending_prompt}]
         try:
-            mgr.track_history(history)
+            mgr.track_history(check_history)
             if not mgr.should_auto_compact():
                 return
         except Exception as exc:  # noqa: BLE001
@@ -2179,8 +2233,11 @@ Example: /handoff code "refactor the auth module" """
                 self._checkpoint_turn(prompt[:60])
             
             # Shrink the context *before* the turn if it is near the model's
-            # budget, rather than letting the provider reject the request.
-            self._maybe_auto_compact()
+            # budget, rather than letting the provider reject the request. The
+            # pending prompt is included so a large incoming message that tips
+            # the session over the threshold triggers compaction here instead
+            # of being rejected by the provider.
+            self._maybe_auto_compact(pending_prompt=prompt)
 
             # Add to conversation history
             self._conversation_history.append({"role": "user", "content": prompt})
@@ -2444,6 +2501,12 @@ Example: /handoff code "refactor the auth module" """
                 
                 self.messages.append(ChatMessage(role="user", content=user_input))
                 print("  ⏳ Praison AI is thinking... (Ctrl-C to interrupt)")
+                # Shrink context before the turn here too: long fallback-mode
+                # sessions otherwise get no automatic overflow protection and
+                # run until the provider rejects the request. Pending prompt is
+                # included in the budget check for the same reason as the main
+                # loop.
+                self._maybe_auto_compact(pending_prompt=user_input)
                 self._conversation_history.append(
                     {"role": "user", "content": user_input}
                 )

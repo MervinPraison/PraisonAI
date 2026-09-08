@@ -225,6 +225,7 @@ def probe_enforcement() -> tuple:
     workdir = tempfile.mkdtemp(prefix="praisonai_sbprobe_ws_")
     outside_dir = tempfile.mkdtemp(prefix="praisonai_sbprobe_out_")
     target = os.path.join(outside_dir, "escaped.txt")
+    canary = os.path.join(workdir, "canary.txt")
     try:
         wrapper = build_wrapper(
             writable_paths=[workdir], network=False, include_tmp=False
@@ -232,12 +233,24 @@ def probe_enforcement() -> tuple:
         if wrapper is None:
             _PROBE_CACHE = (False, backend, "wrapper could not be built")
             return _PROBE_CACHE
-        # The probe deliberately puts the escape target outside every writable
-        # path.  gettempdir() is auto-added as writable, so use a nested dir
-        # that bubblewrap/seatbelt would only expose if enforcement is absent.
+        # The probe writes an in-jail canary AND attempts an out-of-jail escape
+        # in the same child. The escape target sits outside every writable path
+        # (gettempdir() is auto-added as writable, so a nested dir is used that
+        # bubblewrap/seatbelt would only expose if enforcement is absent).
+        #
+        # The canary is the guard against a false positive: if ``bwrap`` cannot
+        # create namespaces or ``sandbox-exec`` rejects its profile, the wrapper
+        # exits *before* running the child. The escape file is then absent not
+        # because containment blocked it but because nothing ran. Requiring the
+        # canary to exist proves the child actually executed inside the jail, so
+        # the missing escape file can be trusted as real enforcement.
+        script = (
+            f"printf canary > {canary}; "
+            f"printf escaped > {target}"
+        )
         try:
             with wrapper:
-                argv = wrapper.wrap(["/bin/sh", "-c", f"printf escaped > {target}"])
+                argv = wrapper.wrap(["/bin/sh", "-c", script])
                 subprocess.run(
                     argv, cwd=workdir, capture_output=True, timeout=20, text=True
                 )
@@ -245,8 +258,16 @@ def probe_enforcement() -> tuple:
             _PROBE_CACHE = (False, backend, f"probe failed to run: {exc}")
             return _PROBE_CACHE
 
+        ran = os.path.exists(canary)
         escaped = os.path.exists(target)
-        if escaped:
+        if not ran:
+            _PROBE_CACHE = (
+                False,
+                backend,
+                f"{backend} wrapper did not run the probe child (in-jail write "
+                f"never happened); treating as unavailable rather than enforcing",
+            )
+        elif escaped:
             _PROBE_CACHE = (
                 False,
                 backend,
