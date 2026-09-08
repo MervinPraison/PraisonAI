@@ -155,3 +155,28 @@ def _reset_module_shadowing():
             delattr(praisonaiagents, 'embedding')
     except (ImportError, AttributeError):
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_deprecation_warn_once():
+    """Clear the process-wide 'already warned' set before each test.
+
+    warn_deprecated_param keeps a module-level `_warned_params` set so a user
+    sees each deprecation once per process rather than on every Agent
+    construction. That is right for users and fatal for tests: whichever test
+    constructs an Agent with a given deprecated parameter FIRST gets the
+    warning, and every later test asserting the same warning sees nothing --
+    even inside `warnings.catch_warnings()` with `simplefilter("always")`,
+    because the suppression is not the warnings filter.
+
+    That made five tests across three files pass alone and fail in the full
+    suite, purely on collection order.
+    """
+    try:
+        from praisonaiagents.utils import deprecation
+    except ImportError:
+        yield
+        return
+    deprecation._warned_params.clear()
+    yield
+    deprecation._warned_params.clear()
