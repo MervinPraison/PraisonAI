@@ -3170,6 +3170,7 @@ Your Goal: {self.goal}"""
             _cancel = self._turn_cancel_token(
                 cancel_source, explicit=cancel_token is not None
             )
+            self._active_turn_token = _cancel
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -3209,6 +3210,8 @@ Your Goal: {self.goal}"""
             try:
                 _trace_emitter.agent_end(self.name)
             finally:
+                if getattr(self, "_active_turn_token", None) is _cancel:
+                    self._active_turn_token = None
                 if _cancel is not None:
                     _cancel.close()
 
@@ -3902,6 +3905,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _cancel = self._turn_cancel_token(
             cancel_source, explicit=cancel_token is not None
         )
+        self._active_turn_token = _cancel
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run
@@ -3946,6 +3950,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 _trace_emitter.agent_end(self.name)
             finally:
+                if getattr(self, "_active_turn_token", None) is _cancel:
+                    self._active_turn_token = None
                 if _cancel is not None:
                     _cancel.close()
 

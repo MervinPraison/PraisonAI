@@ -21,7 +21,7 @@ import contextvars
 import threading
 from praisonaiagents._logging import get_logger
 import os
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
@@ -505,6 +505,7 @@ class ApprovalRegistry:
         force: bool = False,
         auto_approve_scope: Optional[str] = None,
         scope_id: Optional[str] = None,
+        liveness: Optional[Callable[[], bool]] = None,
     ) -> ApprovalDecision:
         """Synchronous approval — used by ``Agent._execute_tool_impl``.
 
@@ -561,6 +562,7 @@ class ApprovalRegistry:
             arguments=arguments,
             risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
             agent_name=agent_name,
+            liveness=liveness,
         )
 
         # Prefer sync method if available
@@ -573,6 +575,13 @@ class ApprovalRegistry:
                 backend.request_approval(request),
                 timeout=self.timeout
             )
+
+        # Live-authority gate: a resolution that lands after the originating
+        # turn was stopped/superseded is dropped fail-closed — the tool does not
+        # run and no durable session/always grant is persisted.
+        stale = self._reject_if_stale(request)
+        if stale is not None:
+            return stale
 
         if decision.approved:
             self.mark_approved(tool_name, arguments, agent_name, scope_id)
@@ -587,6 +596,7 @@ class ApprovalRegistry:
         force: bool = False,
         auto_approve_scope: Optional[str] = None,
         scope_id: Optional[str] = None,
+        liveness: Optional[Callable[[], bool]] = None,
     ) -> ApprovalDecision:
         """Asynchronous approval — used by async tool execution path.
 
@@ -626,6 +636,7 @@ class ApprovalRegistry:
             arguments=arguments,
             risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
             agent_name=agent_name,
+            liveness=liveness,
         )
 
         try:
@@ -636,7 +647,38 @@ class ApprovalRegistry:
         except asyncio.TimeoutError:
             decision = ApprovalDecision(approved=False, reason="Approval timed out")
 
+        # Live-authority gate: a resolution that lands after the originating
+        # turn was stopped/superseded is dropped fail-closed — the tool does not
+        # run and no durable session/always grant is persisted.
+        stale = self._reject_if_stale(request)
+        if stale is not None:
+            return stale
+
         if decision.approved:
             self.mark_approved(tool_name, arguments, agent_name, scope_id)
         self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
         return decision
+
+    @staticmethod
+    def _reject_if_stale(request: ApprovalRequest) -> Optional[ApprovalDecision]:
+        """Return a fail-closed denial when ``request.liveness`` reports stale.
+
+        A ``None`` liveness (the default) keeps today's behaviour by returning
+        ``None`` (no rejection). A liveness probe that raises is treated as live
+        (fail-open on the *probe*, not the decision) so a buggy predicate can
+        never wedge the approval path. When the predicate returns falsy the
+        originating turn was stopped or superseded while awaiting the human, so
+        the decision is dropped and no grant is persisted.
+        """
+        live = getattr(request, "liveness", None)
+        if live is None:
+            return None
+        try:
+            if live():
+                return None
+        except Exception:  # noqa: BLE001 - a liveness probe must never crash
+            return None
+        return ApprovalDecision(
+            approved=False,
+            reason="Turn no longer live (stopped or superseded)",
+        )
