@@ -48,8 +48,6 @@ from .protocols import (
     DeliveryPreflightProtocol,
     DeliveryValidation,
     ScheduleTargetError,
-    # Remote-sandbox outbound media bridge (Issue #4951)
-    RemoteMediaResolver,
     # Agent-facing outbound messaging
     OutboundMessengerProtocol,
     DeliveryResult,
@@ -345,7 +343,6 @@ __all__ = [
     "HomeChannelRegistryProtocol",
     "DeliveryResolverProtocol",
     "DeliveryPreflightProtocol",
-    "RemoteMediaResolver",
     "DeliveryValidation",
     "ScheduleTargetError",
     # Agent-facing outbound messaging

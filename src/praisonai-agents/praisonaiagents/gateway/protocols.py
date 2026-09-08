@@ -2726,37 +2726,6 @@ class DeliveryPreflightProtocol(Protocol):
         ...
 
 
-@runtime_checkable
-class RemoteMediaResolver(Protocol):
-    """Resolves a sandbox-local media path to a gateway-local deliverable path.
-
-    When an agent runs in a remote/serverless sandbox (Modal, E2B, Daytona,
-    Fly.io, SSH host, remote Docker, …) and emits a ``MEDIA:<path>`` directive,
-    the referenced file lives on the *sandbox* filesystem, not the gateway host.
-    The outbound media path only delivers local files, so such a directive would
-    otherwise be silently dropped.
-
-    A resolver bridges that gap: the active sandbox backend (which already
-    exposes a ``download_file``/``read_file`` primitive) satisfies this protocol
-    so the wrapper's outbound media path can pull the artifact down into a local
-    delivery cache and then deliver it, without the wrapper importing any
-    concrete heavy sandbox SDK.
-    """
-
-    def owns_path(self, path: str) -> bool:
-        """Return True if ``path`` refers to a file inside this sandbox."""
-        ...
-
-    async def fetch_to_local(self, remote_path: str) -> str:
-        """Fetch ``remote_path`` out of the sandbox to a local path.
-
-        Returns the gateway-local filesystem path of the fetched copy, which the
-        caller is expected to re-screen through the outbound-path guard before
-        delivery.
-        """
-        ...
-
-
 # ---------------------------------------------------------------------------
 # Agent-facing outbound messaging (Issue #2183)
 # ---------------------------------------------------------------------------
