@@ -17,6 +17,22 @@ from praisonaiagents.agent.handoff import (
 )
 from praisonaiagents import Agent
 
+def _tool(name):
+    """A stand-in tool whose NAME resolves the way a real tool's does.
+
+    Mock is the wrong shape here: _compute_effective_tools reads
+    getattr(tool, 'name', getattr(tool, '__name__', ...)), and a Mock
+    AUTO-CREATES .name -- so every mock tool got a unique Mock object as its
+    name and the intersection was always empty. A plain function has no .name,
+    so the __name__ fallback runs, which is what a real callable tool does.
+    """
+    def fn():
+        return name
+    fn.__name__ = name
+    return fn
+
+
+
 
 class TestHandoffToolPolicySecurity:
     """Test HandoffToolPolicy security boundary enforcement."""
@@ -43,12 +59,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="source_only")]
+        source_agent.tools = [_tool("shared_tool"), _tool("source_only")]
 
         # Mock target agent with tools
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="target_only")]
+        target_agent.tools = [_tool("shared_tool"), _tool("target_only")]
 
         # Create handoff with intersect mode (default)
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -66,12 +82,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with different tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="source_only")]
+        source_agent.tools = [_tool("source_only")]
 
         # Mock target agent with different tools
         target_agent = Mock()
         target_agent.name = "target" 
-        target_agent.tools = [Mock(__name__="target_only")]
+        target_agent.tools = [_tool("target_only")]
 
         # Create handoff with intersect mode
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -109,8 +125,8 @@ class TestHandoffToolPolicySecurity:
         
         target_agent = Mock()
         target_agent.name = "target"
-        tool1 = Mock(__name__="safe_tool")
-        tool2 = Mock(__name__="dangerous_tool")
+        tool1 = _tool("safe_tool")
+        tool2 = _tool("dangerous_tool")
         target_agent.tools = [tool1, tool2]
 
         # Create handoff with passthrough mode and blocked tools
@@ -155,11 +171,11 @@ class TestHandoffToolPolicySecurity:
         
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool")]
+        source_agent.tools = [_tool("shared_tool")]
 
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="private_tool")]
+        target_agent.tools = [_tool("shared_tool"), _tool("private_tool")]
         target_agent.chat = Mock(return_value="response")
 
         # Create handoff with intersect mode
@@ -241,7 +257,7 @@ class TestToolSecurityBoundaryIntegration:
         """Test that tools=None in agent.chat() inherits agent's configured tools."""
         # Create mock agent with tools
         agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
+        agent.tools = [_tool("agent_tool")]
         agent.chat_history = []
         agent._memory_instance = None
         
@@ -263,7 +279,7 @@ class TestToolSecurityBoundaryIntegration:
         """Test that tools=[] in agent.chat() enforces empty tool boundary."""
         # Create mock agent with tools
         agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
+        agent.tools = [_tool("agent_tool")]
         
         # Import and call the fixed method
         from praisonaiagents.agent.chat_mixin import ChatMixin
@@ -280,14 +296,18 @@ class TestToolSecurityBoundaryIntegration:
         """End-to-end test of handoff tool boundary enforcement."""
         mock_time.return_value = 123.0
         
-        # Create real-ish agents with tools
-        source = MockAgent()
+        # Two DISTINCT agents. MockAgent() is a patched class, so calling it
+        # twice returns the SAME return_value -- source and target were one
+        # object, target.tools overwrote source.tools, and intersecting a set
+        # with itself returned both tools. That looked like the tool boundary
+        # failing when it was the test collapsing two agents into one.
+        source = Mock()
         source.name = "orchestrator"
-        source.tools = [Mock(__name__="search")]  # Only has search tool
+        source.tools = [_tool("search")]  # Only has search tool
         
-        target = MockAgent()
+        target = Mock()
         target.name = "automation"
-        target.tools = [Mock(__name__="search"), Mock(__name__="execute_code")]  # Has both tools
+        target.tools = [_tool("search"), _tool("execute_code")]  # Has both tools
         target.chat = Mock(return_value="automation response")
 
         # Create handoff with default intersect mode (secure)
