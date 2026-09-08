@@ -24,7 +24,13 @@ class CompactionHandler:
     - Display compaction statistics
     """
     
-    CONFIG_FILE = ".praison/compaction.json"
+    #: Config file name, resolved under the canonical project data
+    #: directory (``.praisonai/``). It used to be a hard-coded
+    #: ``".praison/compaction.json"``, which created a second dot-directory
+    #: that the config loader then preferred over the project's real
+    #: ``.praisonai/config.toml`` (``_PROJECT_MARKERS`` lists
+    #: ``.praison`` first), silently changing which config was read.
+    CONFIG_NAME = "compaction.json"
     
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -34,8 +40,25 @@ class CompactionHandler:
         return "compaction"
     
     def _get_config_path(self) -> str:
-        """Get path to config file."""
-        return os.path.join(os.getcwd(), self.CONFIG_FILE)
+        """Path to the config file, under the canonical project data dir.
+
+        Reads fall back to an existing legacy ``./.praison/`` file so a
+        setting saved before the fix is still honoured; a save always
+        lands on the canonical ``./.praisonai/`` location.
+        """
+        from praisonai_code.cli.configuration.paths import (
+            resolve_project_data_path,
+        )
+
+        return str(resolve_project_data_path(self.CONFIG_NAME))
+
+    def _get_config_write_path(self) -> str:
+        """Canonical path to save to (never the legacy fallback)."""
+        from praisonai_code.cli.configuration.paths import (
+            get_project_data_path,
+        )
+
+        return str(get_project_data_path(self.CONFIG_NAME))
     
     def _load_config(self) -> Dict[str, Any]:
         """Load config from file."""
@@ -49,8 +72,8 @@ class CompactionHandler:
         return {}
     
     def _save_config(self, config: Dict[str, Any]):
-        """Save config to file."""
-        config_path = self._get_config_path()
+        """Save config to the canonical project data directory."""
+        config_path = self._get_config_write_path()
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)

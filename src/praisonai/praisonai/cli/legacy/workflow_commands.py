@@ -19,12 +19,18 @@ from praisonai.cli.legacy.framework_run import fw_workflow_module as _fw_workflo
 def handle_workflow_command(self, action: str, action_args: list, variables: dict = None, args=None):
     """
     Handle workflow subcommand actions.
-    
+
     Args:
         action: The workflow action (list, run, create, show)
         action_args: Additional arguments for the action
         variables: Workflow variables for substitution
         args: Parsed command line arguments
+
+    Returns:
+        A process exit code: ``0`` on success, ``1`` when the workflow (or the
+        command itself) failed. Every path used to fall off the end returning
+        ``None`` and the dispatcher hard-coded ``sys.exit(0)``, so a run whose
+        only step failed still reported success to CI.
     """
     try:
         from praisonaiagents import Agent as PraisonAgent
@@ -58,14 +64,13 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
         elif action == 'run':
             if not action_args:
                 print("[red]ERROR: Workflow name required. Usage: praisonai workflow run <name>[/red]")
-                return
+                return 1
             workflow_name = action_args[0]
             
             # Check if it's a YAML file
             if workflow_name.endswith(('.yaml', '.yml')) and os.path.exists(workflow_name):
                 # Use new YAML workflow parser
-                self._run_yaml_workflow(workflow_name, action_args, variables, args)
-                return
+                return self._run_yaml_workflow(workflow_name, action_args, variables, args)
             
             # Parse checkpoint/resume flags from the run args. These live in
             # action_args because the markdown run path forwards raw flags.
@@ -178,11 +183,12 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
                     print(f"\n[green]✅ Output saved to: {output_file}[/green]")
             else:
                 print(f"[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
-                
+                return 1
+
         elif action == 'show':
             if not action_args:
                 print("[red]ERROR: Workflow name required. Usage: praisonai workflow show <name>[/red]")
-                return
+                return 1
             workflow_name = action_args[0]
             workflow = manager.get_workflow(workflow_name)
             if workflow:
@@ -195,11 +201,12 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
                     print(f"\n[bold]Variables:[/bold] {workflow.variables}")
             else:
                 print(f"[red]Workflow not found: {workflow_name}[/red]")
-                
+                return 1
+
         elif action == 'create':
             if not action_args:
                 print("[red]ERROR: Workflow name required. Usage: praisonai workflow create <name>[/red]")
-                return
+                return 1
             workflow_name = action_args[0]
             
             # Create a simple template workflow
@@ -218,12 +225,12 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
             # Validate a YAML workflow file
             if not action_args:
                 print("[red]ERROR: YAML file required. Usage: praisonai workflow validate <file.yaml>[/red]")
-                return
+                return 1
             yaml_file = action_args[0]
             if not yaml_file.endswith(('.yaml', '.yml')):
                 print("[red]ERROR: File must be a YAML file (.yaml or .yml)[/red]")
-                return
-            self._validate_yaml_workflow(yaml_file)
+                return 1
+            return self._validate_yaml_workflow(yaml_file)
             
         elif action == 'template':
             # Create from template
@@ -232,11 +239,11 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
             for i, arg in enumerate(action_args):
                 if arg == '--output' and i + 1 < len(action_args):
                     output_file = action_args[i + 1]
-            self._create_workflow_from_template(template_name, output_file)
-        
+            return self._create_workflow_from_template(template_name, output_file)
+
         elif action == 'auto':
             # Auto-generate workflow from topic
-            self._auto_generate_workflow(action_args)
+            return self._auto_generate_workflow(action_args)
 
         elif action == 'checkpoints':
             # Manage saved workflow checkpoints (list / delete).
@@ -300,12 +307,17 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
         else:
             print(f"[red]Unknown workflow action: {action}[/red]")
             print("Use 'praisonai workflow help' for available commands")
-            
+            return 2
+
     except ImportError as e:
         print(f"[red]ERROR: Failed to import workflow module: {e}[/red]")
         print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        return 1
     except Exception as e:
         print(f"[red]ERROR: Workflow command failed: {e}[/red]")
+        return 1
+
+    return 0
 
 def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict = None, args=None):
     """
@@ -484,6 +496,7 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         print("\n[bold]Executing workflow...[/bold]\n")
         result = workflow.start(start_input)
         
+        exit_code = 0
         if result.get("status") == "completed":
             print("\n[green]✅ Workflow completed successfully![/green]")
             
@@ -497,6 +510,7 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
                     print(output)
         else:
             print(f"\n[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
+            exit_code = 1
         
         # Close trace writer on completion
         if trace_emitter:
@@ -508,7 +522,9 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         if trace_emitter_token:
             from praisonaiagents.trace.context_events import reset_context_emitter
             reset_context_emitter(trace_emitter_token)
-            
+
+        return exit_code
+
     except FileNotFoundError:
         # Cleanup trace on error
         if trace_emitter:
@@ -519,6 +535,7 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
             from praisonaiagents.trace.context_events import reset_context_emitter
             reset_context_emitter(trace_emitter_token)
         print(f"[red]ERROR: YAML file not found: {yaml_file}[/red]")
+        return 1
     except Exception as e:
         # Cleanup trace on error
         if trace_emitter:
@@ -531,13 +548,18 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         print(f"[red]ERROR: YAML workflow failed: {e}[/red]")
         import traceback
         traceback.print_exc()
+        return 1
 
 def _validate_yaml_workflow(self, yaml_file: str):
     """
     Validate a YAML workflow file.
-    
+
     Args:
         yaml_file: Path to the YAML workflow file
+
+    Returns:
+        ``0`` when the file parses and validates, ``1`` otherwise (a missing
+        file or a parse error used to print an error and still exit 0).
     """
     try:
         from praisonaiagents.workflows import YAMLWorkflowParser
@@ -550,7 +572,7 @@ def _validate_yaml_workflow(self, yaml_file: str):
         
         if not os.path.exists(yaml_file):
             print(f"[red]ERROR: File not found: {yaml_file}[/red]")
-            return
+            return 1
         
         print(f"[cyan]Validating: {yaml_file}[/cyan]")
         
@@ -593,9 +615,12 @@ def _validate_yaml_workflow(self, yaml_file: str):
                 print(f"   [dim]•[/dim] {suggestion}")
             print()
             print("[dim]Note: Both old and new names work, but canonical names are recommended.[/dim]")
-        
+
+        return 0
+
     except Exception as e:
         print(f"[red]✗ Validation failed: {e}[/red]")
+        return 1
 
 def _get_canonical_suggestions(self, data: dict) -> list:
     """
@@ -675,17 +700,17 @@ def _create_workflow_from_template(self, template_name: str = None, output_file:
         templates = WorkflowHandler.TEMPLATES
     except ImportError:
         print("[red]ERROR: WorkflowHandler not available.[/red]")
-        return
-    
+        return 1
+
     if not template_name:
         print("[red]ERROR: Template name required.[/red]")
         print(f"[cyan]Available templates: {', '.join(templates.keys())}[/cyan]")
-        return
-    
+        return 1
+
     if template_name not in templates:
         print(f"[red]ERROR: Unknown template: {template_name}[/red]")
         print(f"[cyan]Available templates: {', '.join(templates.keys())}[/cyan]")
-        return
+        return 1
     
     # Default output file
     if not output_file:
@@ -694,14 +719,15 @@ def _create_workflow_from_template(self, template_name: str = None, output_file:
     # Check if file exists
     if os.path.exists(output_file):
         print(f"[red]ERROR: File already exists: {output_file}[/red]")
-        return
-    
+        return 1
+
     # Write template
     with open(output_file, 'w') as f:
         f.write(templates[template_name])
-    
+
     print(f"[green]✓ Created workflow: {output_file}[/green]")
     print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
+    return 0
 
 def _auto_generate_workflow(self, action_args: list):
     """
@@ -734,14 +760,14 @@ def _auto_generate_workflow(self, action_args: list):
     if not topic:
         print('[red]Usage: praisonai workflow auto "topic" --pattern <pattern>[/red]')
         print("[cyan]Patterns: sequential, routing, parallel[/cyan]")
-        return
+        return 1
     
     # Validate pattern
     valid_patterns = ["sequential", "routing", "parallel", "loop", "orchestrator-workers", "evaluator-optimizer"]
     if pattern not in valid_patterns:
         print(f"[red]Unknown pattern: {pattern}[/red]")
         print(f"[cyan]Valid patterns: {', '.join(valid_patterns)}[/cyan]")
-        return
+        return 1
     
     # Default output file
     if not output_file:
@@ -751,8 +777,8 @@ def _auto_generate_workflow(self, action_args: list):
     # Check if file exists
     if os.path.exists(output_file):
         print(f"[red]ERROR: File already exists: {output_file}[/red]")
-        return
-    
+        return 1
+
     print(f"[cyan]Generating {pattern} workflow for: {topic}[/cyan]")
     
     try:
@@ -769,8 +795,11 @@ def _auto_generate_workflow(self, action_args: list):
         
         print(f"[green]✓ Created workflow: {result_path}[/green]")
         print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
-        
+        return 0
+
     except ImportError:
         print("[red]Auto-generation requires litellm: pip install litellm[/red]")
+        return 1
     except Exception as e:
         print(f"[red]Generation failed: {e}[/red]")
+        return 1

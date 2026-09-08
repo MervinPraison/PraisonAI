@@ -14,7 +14,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .models import QueuedRun, RunState, RunPriority, QueueStats
+from .models import (
+    DEFAULT_QUEUE_DB_PATH,
+    QueuedRun,
+    RunState,
+    RunPriority,
+    QueueStats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +105,26 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 class QueuePersistence:
     """SQLite-backed persistence for the queue system."""
     
-    def __init__(self, db_path: str = ".praison/queue.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """
         Initialize persistence layer.
-        
+
         Args:
-            db_path: Path to SQLite database file.
+            db_path: Path to SQLite database file. Defaults to the canonical
+                project data directory (``.praisonai/queue.db``); an existing
+                queue database at the legacy ``.praison/queue.db`` is still
+                opened so a queue created before the fix is not orphaned.
         """
+        if db_path is None:
+            from praisonai_code.cli.configuration.paths import (
+                LEGACY_PROJECT_DATA_DIRNAME,
+            )
+
+            db_path = DEFAULT_QUEUE_DB_PATH
+            if not os.path.exists(db_path):
+                legacy = os.path.join(LEGACY_PROJECT_DATA_DIRNAME, "queue.db")
+                if os.path.exists(legacy):
+                    db_path = legacy
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = threading.Lock()

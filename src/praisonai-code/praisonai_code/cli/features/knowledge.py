@@ -114,13 +114,25 @@ Examples:
         if self._knowledge is None:
             try:
                 from praisonaiagents import Knowledge
+
+                from praisonai_code.cli.configuration.paths import (
+                    resolve_project_data_path,
+                )
                 
                 # Build config based on options
                 config = {
                     "vector_store": {
                         "provider": self.vector_store,
                         "config": {
-                            "path": os.path.join(self.workspace, ".praison", "knowledge")
+                            # Canonical project data dir, via the one shared
+                            # constant. A hard-coded ".praison" here created a
+                            # second dot-directory that the config loader then
+                            # preferred over the project's real ".praisonai".
+                            "path": str(
+                                resolve_project_data_path(
+                                    "knowledge", project_root=self.workspace
+                                )
+                            )
                         }
                     }
                 }

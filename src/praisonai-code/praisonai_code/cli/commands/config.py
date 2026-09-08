@@ -30,35 +30,70 @@ def config_list(
         help="Scope to list: all, user, project",
     ),
 ):
-    """List all configuration values."""
+    """List configuration values.
+
+    `--scope` used to be declared and dropped: `--scope user` and
+    `--scope project` produced byte-identical output because the body always
+    printed the fully merged config. It now selects a single layer:
+
+    - ``all`` (default) -- the resolved, merged configuration
+    - ``user``          -- only what the global user config file contributes
+    - ``project``       -- only what this project's config file contributes
+    """
     output = get_output_controller()
-    
+
+    scope = (scope or "all").lower()
+    valid = ("all", "user", "project")
+    if scope not in valid:
+        output.print_error(
+            f"Unknown scope: {scope!r}. Use one of {', '.join(valid)}."
+        )
+        raise typer.Exit(2)
+
     try:
-        # Resolve configuration using new resolver
-        config = resolve_config()
-        config_dict = config.to_dict()
-        
+        if scope == "all":
+            config = resolve_config()
+            config_dict = config.to_dict()
+            sources = config.sources
+            title = "PraisonAI Config"
+        else:
+            resolver = get_resolver()
+            layer = (
+                resolver._load_global_config()
+                if scope == "user"
+                else resolver._load_project_config()
+            ) or {}
+            source = layer.pop("_source", None)
+            config_dict = layer
+            sources = [f"{scope}:{source}"] if source else []
+            title = f"PraisonAI Config ({scope})"
+
         if output.is_json_mode:
             output.print_json(config_dict)
             return
-        
-        output.print_panel("Configuration", title="PraisonAI Config")
-        
-        def print_dict(d, prefix=""):
-            for key, value in d.items():
-                full_key = f"{prefix}.{key}" if prefix else key
-                if isinstance(value, dict):
-                    print_dict(value, full_key)
-                else:
-                    output.print(f"  {full_key} = {value}")
-        
-        print_dict(config_dict)
-        
+
+        output.print_panel("Configuration", title=title)
+
+        if not config_dict:
+            output.print(f"  [dim]no {scope} configuration found[/dim]")
+        else:
+            def print_dict(d, prefix=""):
+                for key, value in d.items():
+                    full_key = f"{prefix}.{key}" if prefix else key
+                    if isinstance(value, dict):
+                        print_dict(value, full_key)
+                    else:
+                        output.print(f"  {full_key} = {value}")
+
+            print_dict(config_dict)
+
         # Show sources if verbose
         if output.is_verbose:
             output.print("\n[dim]Sources:[/dim]")
-            for source in config.sources:
+            for source in sources:
                 output.print(f"  • {source}")
+    except typer.Exit:
+        raise
     except Exception as e:
         output.print_error(f"Failed to load configuration: {e}")
         raise typer.Exit(1)

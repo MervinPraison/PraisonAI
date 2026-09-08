@@ -343,12 +343,16 @@ def up_status(
 
 
 @app.command("logs")
-def up_logs(
-    service: str = typer.Option("all", "--service", help="Service to show logs for (all, langfuse, langflow)"),
-    follow: bool = typer.Option(False, "--follow", "-f", help="Follow log output"),
-    lines: int = typer.Option(50, "--lines", "-n", help="Number of lines to show"),
-):
-    """Show logs from PraisonAI services."""
+def up_logs():
+    """Show logs from PraisonAI services.
+
+    Not implemented. This used to accept --service/--follow/--lines, drop all
+    three, print "not implemented yet" and exit 0 -- so a script piping the
+    output saw success and no logs. It now exits non-zero and does not
+    advertise options it cannot honour.
+    """
     console = Console()
-    console.print("[yellow]Log viewing not implemented yet[/yellow]")
-    console.print("[dim]Use docker logs or check process output directly[/dim]")
+    console.print("[yellow]`praisonai up logs` is not implemented.[/yellow]")
+    console.print("[dim]Use `docker logs <container>` for langfuse/langflow, "
+                  "or check the process output directly.[/dim]")
+    raise typer.Exit(2)

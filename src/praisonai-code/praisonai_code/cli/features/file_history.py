@@ -16,7 +16,26 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_HISTORY_DIR = ".praison/history"
+def _default_history_dir() -> str:
+    """Home-level file-history directory, from the SDK's canonical data root.
+
+    Was a hard-coded ``~/.praison/history`` while every other user-level store
+    resolves through ``praisonaiagents.paths.get_data_dir()`` (``~/.praisonai``,
+    honouring ``PRAISONAI_HOME`` and the legacy fallback), so undo history was
+    written somewhere nothing else looked.
+    """
+    try:
+        from praisonaiagents.paths import get_data_dir
+
+        return str(get_data_dir() / "history")
+    except Exception:  # noqa: BLE001 - core package is optional
+        import os as _os
+
+        return _os.path.expanduser("~/.praisonai/history")
+
+
+#: Kept for callers that imported the name; now the canonical location.
+DEFAULT_HISTORY_DIR = _default_history_dir()
 MAX_VERSIONS_PER_FILE = 50
 
 
@@ -67,7 +86,7 @@ class FileHistoryManager:
         storage_dir: Optional[str] = None,
         max_versions: int = MAX_VERSIONS_PER_FILE,
     ):
-        self.storage_dir = storage_dir or os.path.expanduser(f"~/{DEFAULT_HISTORY_DIR}")
+        self.storage_dir = storage_dir or _default_history_dir()
         self.max_versions = max_versions
         self._index: Dict[str, List[FileVersion]] = {}
         self._ensure_storage()

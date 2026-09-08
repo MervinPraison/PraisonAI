@@ -10,6 +10,14 @@ from typing import Any, Dict, List, Optional
 import time
 import uuid
 
+from praisonai_code.cli.configuration.paths import PROJECT_DATA_DIRNAME
+
+#: Default queue database, relative to the project root. Derived from the one
+#: canonical project-data directory name instead of a hard-coded
+#: ``".praison/queue.db"``: that literal created a second dot-directory which
+#: the config loader then preferred over the project's real ``.praisonai/``.
+DEFAULT_QUEUE_DB_PATH = f"{PROJECT_DATA_DIRNAME}/queue.db"
+
 
 class RunState(str, Enum):
     """State of a queued run."""
@@ -197,7 +205,7 @@ class QueueConfig:
     
     # Persistence
     enable_persistence: bool = True
-    db_path: str = ".praison/queue.db"
+    db_path: str = DEFAULT_QUEUE_DB_PATH
     
     # Autosave
     autosave_interval_seconds: float = 30.0
@@ -243,7 +251,7 @@ class QueueConfig:
             default_priority=priority,
             default_max_retries=data.get("default_max_retries", 3),
             enable_persistence=data.get("enable_persistence", True),
-            db_path=data.get("db_path", ".praison/queue.db"),
+            db_path=data.get("db_path", DEFAULT_QUEUE_DB_PATH),
             autosave_interval_seconds=data.get("autosave_interval_seconds", 30.0),
             stream_buffer_size=data.get("stream_buffer_size", 1000),
             drop_strategy=data.get("drop_strategy", "oldest"),

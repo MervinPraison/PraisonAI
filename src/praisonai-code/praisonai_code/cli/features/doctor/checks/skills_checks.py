@@ -17,20 +17,55 @@ from ..registry import register_check
 
 
 def _find_skills_dirs() -> list:
-    """Find skills directories."""
-    locations = [
-        Path.cwd() / ".praison" / "skills",
-        Path.cwd() / ".claude" / "skills",
-        Path.home() / ".praison" / "skills",
-        Path.home() / ".config" / "praison" / "skills",
-    ]
-    
+    """Find the skills directories the *runtime* actually loads from.
+
+    This used to be its own hard-coded list starting at ``./.praison/skills``,
+    while ``praisonai skills list`` loads ``./.praisonai/skills`` (via
+    ``praisonaiagents.paths.get_project_data_dir``). With both directories
+    populated, `skills list` showed one skill and `doctor` reported and
+    validated a different one -- doctor was checking a directory nothing reads,
+    and its empty state told users to create it.
+
+    The locations are now derived from the same ``praisonaiagents.paths``
+    helpers the skill loader itself uses, so the two cannot disagree again.
+    Only the *parent* directories are listed (project, ``.claude``, user):
+    the loader's remote-skill cache entries are individual skills rather than
+    directories of skills, and doctor's per-entry validation walks children.
+    """
+    locations = []
+    try:
+        from praisonaiagents.paths import get_project_data_dir, get_skills_dir
+
+        locations = [
+            get_project_data_dir() / "skills",
+            Path.cwd() / ".claude" / "skills",
+            get_skills_dir(),
+        ]
+    except Exception:  # noqa: BLE001 - core package is optional
+        from praisonai_code.cli.configuration.paths import (
+            PROJECT_DATA_DIRNAME,
+            home_root,
+        )
+
+        locations = [
+            Path.cwd() / PROJECT_DATA_DIRNAME / "skills",
+            Path.cwd() / ".claude" / "skills",
+            home_root() / "skills",
+        ]
+
     found = []
     for loc in locations:
-        if loc.exists() and loc.is_dir():
+        if loc.exists() and loc.is_dir() and str(loc) not in found:
             found.append(str(loc))
-    
+
     return found
+
+
+def _skills_dir_hint() -> str:
+    """The directory to tell users to create -- the one the runtime reads."""
+    from praisonai_code.cli.configuration.paths import PROJECT_DATA_DIRNAME
+
+    return f"{PROJECT_DATA_DIRNAME}/skills/"
 
 
 def _validate_skill_dir(skill_path: Path) -> dict:
@@ -127,7 +162,7 @@ def check_skills_dirs(config: DoctorConfig) -> CheckResult:
             category=CheckCategory.SKILLS,
             status=CheckStatus.SKIP,
             message="No skills directories found (optional)",
-            details="Create .praison/skills/ to add agent skills",
+            details=f"Create {_skills_dir_hint()} to add agent skills",
         )
 
 

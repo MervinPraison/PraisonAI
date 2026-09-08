@@ -120,6 +120,32 @@ Flag Usage:
         
         return todos
     
+    #: Accepted values for `--priority`, shared by the CLI and this handler.
+    PRIORITIES = ("low", "medium", "high")
+
+    @staticmethod
+    def _extract_priority(args):
+        """Split a `--priority <v>` / `-p <v>` pair out of positional argv.
+
+        Returns ``(remaining_args, priority_or_None)``.
+        """
+        remaining = []
+        priority = None
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg in ("--priority", "-p") and i + 1 < len(args):
+                priority = str(args[i + 1]).lower()
+                i += 2
+                continue
+            if arg.startswith("--priority="):
+                priority = arg.split("=", 1)[1].lower()
+                i += 1
+                continue
+            remaining.append(arg)
+            i += 1
+        return remaining, priority
+
     def action_add(self, args: List[str], **kwargs) -> Dict[str, Any]:
         """
         Add a new todo.
@@ -133,9 +159,25 @@ Flag Usage:
         if not args:
             self.print_status("Usage: praisonai todo add <task>", "error")
             return {}
-        
+
+        # `--priority/-p` arrives inline in argv from the Typer command, which
+        # used to declare the option and never forward it -- so
+        # `todo add "x" --priority high` produced a medium-priority todo.
+        # Pull it out here so it never lands in the task text either.
+        args, inline_priority = self._extract_priority(list(args))
+        if not args:
+            self.print_status("Usage: praisonai todo add <task>", "error")
+            return {}
+
         task = ' '.join(args)
-        priority = kwargs.get('priority', 'medium')
+        priority = inline_priority or kwargs.get('priority') or 'medium'
+        if priority not in self.PRIORITIES:
+            self.print_status(
+                f"Unknown priority: {priority}. Use one of "
+                f"{', '.join(self.PRIORITIES)}.",
+                "error",
+            )
+            return {}
         
         todos = self._load_todos()
         

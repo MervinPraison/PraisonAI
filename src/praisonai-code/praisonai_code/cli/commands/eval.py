@@ -19,8 +19,18 @@ def eval_accuracy(
     """Run accuracy evaluation."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
     
-    argv = ['eval', 'accuracy', agent, '--input', input_text, '--expected', expected]
-    
+    # `--iterations` was declared and dropped, so every accuracy run used the
+    # wrapper's default of 1 -- while the `performance` sibling below forwards
+    # the identical option. `--agent` is a named option on the wrapper's parser,
+    # not a positional, so it must be passed as one.
+    argv = [
+        'eval', 'accuracy',
+        '--agent', agent,
+        '--input', input_text,
+        '--expected', expected,
+        '--iterations', str(iterations),
+    ]
+
     run_wrapper_command(argv, feature="eval")
 
 
@@ -32,7 +42,7 @@ def eval_performance(
     """Run performance evaluation."""
     from praisonai_code._wrapper_bridge import run_wrapper_command
     
-    argv = ['eval', 'performance', agent, '--iterations', str(iterations)]
+    argv = ['eval', 'performance', '--agent', agent, '--iterations', str(iterations)]
     
     run_wrapper_command(argv, feature="eval")
 

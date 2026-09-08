@@ -1200,8 +1200,11 @@ class PraisonAI:
                         if '=' in var:
                             key, value = var.split('=', 1)
                             workflow_vars[key] = value
-                self.handle_workflow_command(action, action_args, workflow_vars, args)
-                sys.exit(0)
+                # Propagate the handler's exit code. This used to be a
+                # hard-coded sys.exit(0): a run whose only step failed still
+                # reported success, so a CI job that ran a workflow doing
+                # nothing stayed green.
+                sys.exit(self.handle_workflow_command(action, action_args, workflow_vars, args) or 0)
 
             elif args.command == 'hooks':
                 self._require_agents()

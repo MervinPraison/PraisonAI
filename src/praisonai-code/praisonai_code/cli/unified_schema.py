@@ -241,7 +241,11 @@ if BaseModel:
         
         def to_knowledge_config(self) -> Dict[str, Any]:
             """Convert to knowledge config format."""
-            path = self.vector_store_path or f"./.praison/knowledge/{self.collection}"
+            from praisonai_code.cli.configuration.paths import (
+                get_knowledge_store_path,
+            )
+
+            path = self.vector_store_path or get_knowledge_store_path(self.collection)
             
             config = {
                 "vector_store": {

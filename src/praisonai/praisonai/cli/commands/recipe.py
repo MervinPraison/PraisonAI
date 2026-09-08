@@ -473,14 +473,22 @@ def recipe_judge(
             max_chunks=max_chunks,
             aggregation_strategy=aggregation,
         )
-        report = judge.judge_trace(events, session_id=trace_id, yaml_file=yaml_file)
+        # `--goal` was declared, documented in this command's own example, and
+        # never passed on, so the judge always evaluated against the goal it
+        # could scrape from --yaml (or "Not specified" when there was none).
+        report = judge.judge_trace(
+            events,
+            session_id=trace_id,
+            yaml_file=yaml_file,
+            recipe_goal=goal,
+        )
         
         # Display report
         print(format_judge_report(report))
         
         # Generate plan if yaml_file provided
         if yaml_file:
-            plan = generate_plan_from_report(report, yaml_file=yaml_file)
+            plan = generate_plan_from_report(report, yaml_file=yaml_file, goal=goal)
             print(plan.format_summary())
             
             if not dry_run:

@@ -62,7 +62,9 @@ class RAGCliConfig:
     
     def to_knowledge_config(self) -> Dict[str, Any]:
         """Convert to knowledge config dict."""
-        path = self.vector_store_path or f"./.praison/knowledge/{self.collection}"
+        from praisonai_code.cli.configuration.paths import get_knowledge_store_path
+
+        path = self.vector_store_path or get_knowledge_store_path(self.collection)
         
         config = {
             "vector_store": {
@@ -416,7 +418,7 @@ def get_config_schema() -> Dict[str, Any]:
         "knowledge": {
             "collection": "Collection/index name (default: 'default')",
             "vector_store_provider": "Vector store provider (default: 'chroma')",
-            "vector_store_path": "Path to vector store (default: './.praison/knowledge/{collection}')",
+            "vector_store_path": "Path to vector store (default: './.praisonai/knowledge/{collection}')",
         },
         "retrieval": {
             "top_k": "Number of results to retrieve (default: 5)",
