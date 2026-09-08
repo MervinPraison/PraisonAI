@@ -6,9 +6,14 @@ to ``eval``: there was no way to take the runs that scored well and turn them
 into supervised fine-tuning data, which is the obvious next step after
 measuring.
 
-    cases = load_cases("tasks.jsonl")
-    report = suite.run(cases)
+    cases = load_cases("tasks.jsonl")          # -> List[EvalCase]
+    report = my_runner.run(package, agent)     # -> EvalReport (has .results)
     export_sft(report, "train.jsonl", min_score=0.8)
+
+``export_sft``/``sft_records`` consume anything that exposes ``.results`` as a
+list of ``EvalResult`` (i.e. an ``EvalReport``) -- or a plain list of
+``EvalResult`` -- so they compose with whatever produced the run, not one
+specific runner.
 
 JSONL rather than a new format: it is what Agno, OpenAI's fine-tuning API and
 every dataset tool already speak, so a task set is portable in and the training
@@ -17,7 +22,7 @@ file is portable out.
 
 import json
 import os
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 __all__ = [
     "DatasetError",
@@ -32,12 +37,13 @@ class DatasetError(ValueError):
     """Raised when a dataset file cannot be read or written."""
 
 
-def iter_jsonl(path: str) -> Iterator[Dict[str, Any]]:
-    """Yield one dict per line, reporting WHICH line failed.
+def _iter_jsonl_numbered(path: str) -> Iterator[Tuple[int, Dict[str, Any]]]:
+    """Yield ``(physical_line_number, dict)`` for each data line.
 
-    A malformed line is named by number rather than collapsing the file into a
-    generic parse error -- with a thousand-line dataset, "invalid JSON" is not
-    an actionable message.
+    The line number is the position in the FILE, so blank and ``//`` comment
+    lines that are skipped do not shift the number reported for a later row --
+    with a thousand-line dataset, ``file:1`` for a fault on line 900 is worse
+    than useless.
     """
     if not os.path.exists(path):
         raise DatasetError(f"No such dataset file: {path!r}")
@@ -54,7 +60,18 @@ def iter_jsonl(path: str) -> Iterator[Dict[str, Any]]:
                 raise DatasetError(
                     f"{path}:{number}: each line must be a JSON object, got {type(row).__name__}"
                 )
-            yield row
+            yield number, row
+
+
+def iter_jsonl(path: str) -> Iterator[Dict[str, Any]]:
+    """Yield one dict per line, reporting WHICH line failed.
+
+    A malformed line is named by number rather than collapsing the file into a
+    generic parse error -- with a thousand-line dataset, "invalid JSON" is not
+    an actionable message.
+    """
+    for _number, row in _iter_jsonl_numbered(path):
+        yield row
 
 
 def load_cases(path: str, *, case_cls: Optional[type] = None) -> List[Any]:
@@ -63,7 +80,7 @@ def load_cases(path: str, *, case_cls: Optional[type] = None) -> List[Any]:
         from .package import EvalCase as case_cls  # type: ignore
 
     cases: List[Any] = []
-    for number, row in enumerate(iter_jsonl(path), start=1):
+    for position, (number, row) in enumerate(_iter_jsonl_numbered(path), start=1):
         # Accept the common aliases rather than demanding one spelling: a task
         # set exported from another tool is the normal case, not the exception.
         data = dict(row)
@@ -77,7 +94,9 @@ def load_cases(path: str, *, case_cls: Optional[type] = None) -> List[Any]:
                 if alias in data:
                     data["expected"] = data.pop(alias)
                     break
-        data.setdefault("name", f"case_{number}")
+        # Auto-name by position among data rows (case_1, case_2, ...), while
+        # errors below are still reported by physical file line.
+        data.setdefault("name", f"case_{position}")
 
         known = {"name", "input", "expected", "criteria", "metadata", "timeout_seconds"}
         extra = {k: v for k, v in data.items() if k not in known}

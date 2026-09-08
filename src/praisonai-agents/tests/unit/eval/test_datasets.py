@@ -69,6 +69,14 @@ class TestLoadingRefusals:
         with pytest.raises(DatasetError, match=r":2:"):
             load_cases(str(path))
 
+    def test_error_reports_physical_line_past_skipped_lines(self, tmp_path):
+        """Blank/comment lines must not shift the reported file:line."""
+        path = tmp_path / "t.jsonl"
+        # Data row is on physical line 4; a naive row-counter would say line 2.
+        path.write_text('\n// comment\n\n{"expected": "no input here"}\n', encoding="utf-8")
+        with pytest.raises(DatasetError, match=r":4:"):
+            load_cases(str(path))
+
     def test_a_non_object_line_is_refused(self, tmp_path):
         path = tmp_path / "t.jsonl"
         path.write_text('[1, 2, 3]\n', encoding="utf-8")
@@ -117,3 +125,13 @@ class TestSFTExport:
     def test_a_wrong_object_is_reported(self):
         with pytest.raises(DatasetError, match="Expected an EvalReport"):
             sft_records("not a report")
+
+
+class TestPublicExports:
+    def test_helpers_are_in_eval_package_all(self):
+        """Wildcard imports and __dir__ must surface the dataset helpers."""
+        import praisonaiagents.eval as evalpkg
+
+        for name in ("load_cases", "iter_jsonl", "export_sft", "sft_records", "DatasetError"):
+            assert name in evalpkg.__all__
+            assert getattr(evalpkg, name) is not None
