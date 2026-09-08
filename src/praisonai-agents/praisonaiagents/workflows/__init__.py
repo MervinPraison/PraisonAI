@@ -86,6 +86,7 @@ __all__ = [
     "Parallel",
     "Loop",
     "Repeat",
+    "Discussion",
     "Include",
     "If",
     "route",

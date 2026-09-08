@@ -7,7 +7,7 @@ fixed, which is what made this worth building rather than documenting around.
 """
 import pytest
 
-from praisonaiagents.workflows.workflows import AgentFlow, Discussion
+from praisonaiagents.workflows.workflows import AgentFlow, Discussion, Loop, StepResult
 
 
 def _speaker(name, log, says=None):
@@ -79,6 +79,47 @@ class TestStopping:
         flow = AgentFlow(steps=[Discussion([_speaker("a", log)], rounds=5, until=boom)])
         with pytest.raises(ValueError, match="until"):
             flow.run("t", verbose=False)
+
+
+    def test_a_speaker_stop_halts_the_discussion(self):
+        """A speaker asking to stop must not burn the rest of the round budget."""
+        log = []
+
+        def a(ctx):
+            log.append("a")
+            return StepResult(output="stop now", stop_workflow=True)
+
+        b = _speaker("b", log)
+        a.__name__ = "a"
+        AgentFlow(steps=[Discussion([a, b], rounds=9)]).run("t", verbose=False)
+        assert log == ["a"]
+
+    def test_a_speaker_stop_halts_later_workflow_steps(self):
+        """The stop propagates past the discussion to the enclosing workflow."""
+        log = []
+
+        def a(ctx):
+            log.append("a")
+            return StepResult(output="halt", stop_workflow=True)
+
+        a.__name__ = "a"
+        AgentFlow(steps=[
+            Discussion([a], rounds=2),
+            _speaker("after", log),
+        ]).run("t", verbose=False)
+        assert log == ["a"]
+
+
+class TestNesting:
+    def test_a_discussion_runs_inside_a_loop(self):
+        """A nested Discussion must execute, not be stringified into a Task."""
+        log = []
+        AgentFlow(
+            steps=[Loop(steps=[Discussion([_speaker("a", log), _speaker("b", log)], rounds=1)],
+                        over="items")],
+            variables={"items": [1, 2]},
+        ).run("t", verbose=False)
+        assert log == ["a", "b", "a", "b"]
 
 
 class TestSpeakerSelection:

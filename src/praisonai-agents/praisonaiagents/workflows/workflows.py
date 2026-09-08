@@ -392,9 +392,13 @@ class Discussion:
         Discussion([critic, author], rounds=3,
                    until=lambda ctx: "AGREED" in (ctx.previous_result or ""))
 
-    Each speaker sees the transcript so far, so this is a conversation rather
-    than N independent answers. ``rounds`` counts full passes over the
-    speakers, and is required -- an unbounded debate is a bill, not a feature.
+    Each turn receives the previous turn's output via ``ctx.previous_result``,
+    so this is a conversation rather than N independent answers. The full
+    running transcript is exposed as the ``discussion_transcript`` variable --
+    a speaker action sees the whole thread only when it references
+    ``{{discussion_transcript}}``. ``rounds`` counts full passes over the
+    speakers; it defaults to a bounded 3 and must be >= 1 -- an unbounded
+    debate is a bill, not a feature.
     """
 
     def __init__(
@@ -1485,6 +1489,13 @@ class AgentFlow:
                 results.extend(discussion_result["steps"])
                 previous_output = discussion_result["output"]
                 all_variables.update(discussion_result.get("variables", {}))
+                # A speaker with on_error="stop" halts the whole workflow, not
+                # just the discussion: honor the propagated stop signal here.
+                if discussion_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested discussion step")
+                    break
                 i += 1
                 continue
 
@@ -2663,6 +2674,21 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 "variables": repeat_result.get("variables", all_variables)
             }
         
+        if isinstance(step, Discussion):
+            discussion_result = self._execute_discussion(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"discussion_{index}",
+                "output": discussion_result.get("output", ""),
+                # Propagate a nested stop request so a speaker with
+                # on_error="stop" halts the enclosing workflow, not just the
+                # discussion, and so a nested Discussion is not stringified into
+                # a Task action by _normalize_single_step.
+                "stop": discussion_result.get("stop", False),
+                "variables": discussion_result.get("variables", all_variables)
+            }
+        
         if isinstance(step, If):
             if_result = self._execute_if(
                 step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
@@ -3768,6 +3794,7 @@ CONCISE SUMMARY:"""
         output = previous_output
         transcript = []
         stopped = False
+        discussion_stopped = False
 
         if verbose:
             names = [getattr(a, "name", getattr(a, "__name__", str(a))) for a in discussion.agents]
@@ -3805,6 +3832,14 @@ CONCISE SUMMARY:"""
                 })
                 turn += 1
 
+                # A speaker with on_error="stop" (the Task default) halts the
+                # whole workflow, not just the discussion: honor its stop signal
+                # rather than burning the rest of the round budget.
+                if step_result.get("stop"):
+                    stopped = True
+                    discussion_stopped = True
+                    break
+
                 if discussion.until:
                     check = WorkflowContext(
                         input=input,
@@ -3831,7 +3866,7 @@ CONCISE SUMMARY:"""
             "steps": results,
             "output": output,
             "variables": {"discussion_transcript": "\n".join(transcript)},
-            "stop": False,
+            "stop": discussion_stopped,
         }
 
     def _execute_repeat(
