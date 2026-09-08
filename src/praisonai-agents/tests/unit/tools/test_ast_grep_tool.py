@@ -14,6 +14,20 @@ import subprocess
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _auto_approve(monkeypatch):
+    """These tests cover ast-grep's behaviour, not the approval gate.
+
+    ast_grep_rewrite is @require_approval(risk_level="high"). With no approval
+    callback configured the gate falls back to an interactive stdin prompt,
+    which under pytest raises "reading from stdin while output is captured" --
+    surfaced as "Execution of ast_grep_rewrite denied: Approval error: ...".
+    That reads like the tool crashing, which is exactly what
+    test_tool_does_not_crash_when_not_installed set out to disprove.
+    """
+    monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
+
 class TestAstGrepToolAvailability:
     """Test ast-grep tool availability detection."""
     
