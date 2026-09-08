@@ -4,6 +4,7 @@ import logging
 from unittest.mock import patch, MagicMock
 import pytest
 
+from praisonaiagents import allowed_tools_filter as allowed_tools_filter_module
 from praisonaiagents.allowed_tools_filter import AllowedToolsFilter, filter_tools_with_allowed_tools
 
 
@@ -77,7 +78,12 @@ class TestAllowedToolsFilter:
         filter_instance = AllowedToolsFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch.object(logging.getLogger(), 'warning') as mock_warn:
+        # Patch the MODULE logger, not the root logger. The product uses
+        # logging.getLogger(__name__); a child logger's .warning is its own
+        # method, and propagation reaches root's HANDLERS, not root.warning --
+        # so the assertion failed while the warning was plainly in the captured
+        # log output.
+        with patch.object(allowed_tools_filter_module.logger, 'warning') as mock_warn:
             filtered = filter_instance.filter_tools(available_tools)
             
         # Should return intersection of available and whitelisted tools
@@ -145,7 +151,9 @@ class TestAllowedToolsFilter:
         
         assert diagnostics["env_var_name"] == "ALLOWED_TOOLS"
         assert diagnostics["env_value"] == "search,send_message,unknown_in_whitelist"
-        assert diagnostics["whitelist"] == ["search", "send_message", "unknown_in_whitelist"]
+        # sorted: the whitelist is stored as a set, and diagnostics now reports
+        # it in sorted order so two runs produce the same report.
+        assert diagnostics["whitelist"] == sorted(["search", "send_message", "unknown_in_whitelist"])
         assert set(diagnostics["registered_before_filter"]) == {"search", "send_message", "extract_pdf"}
         assert set(diagnostics["registered_after_filter"]) == {"search", "send_message"}
         assert set(diagnostics["dropped_tools"]) == {"extract_pdf"}
