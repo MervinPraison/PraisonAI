@@ -2258,10 +2258,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # was sent to OpenAI under a model name that was really a repr -- the
         # opposite of what passing your own model means. Duck-typed on
         # ``get_response`` so any conforming backend works, not just ``LLM``.
+        # Duck-typed across every backend surface this package documents, not
+        # just `get_response`: llm/protocols.py defines LLMProviderProtocol via
+        # `chat`/`achat` and UnifiedLLMProtocol via
+        # `chat_completion`/`achat_completion`. Checking only `get_response`
+        # left those backends falling through to the plain OpenAI branch, where
+        # the object became the model identifier -- the same defect this branch
+        # exists to fix, just for a different protocol.
+        _MODEL_BACKEND_METHODS = (
+            "get_response", "chat", "achat", "chat_completion", "achat_completion",
+        )
         _is_model_instance = (
             llm is not None
             and not isinstance(llm, (str, dict))
-            and callable(getattr(llm, "get_response", None))
+            and any(callable(getattr(llm, m, None)) for m in _MODEL_BACKEND_METHODS)
         )
         if _is_model_instance:
             self._llm_instance = llm

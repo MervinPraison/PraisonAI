@@ -323,3 +323,56 @@ def test_a_callable_returning_garbage_is_not_swallowed(no_network):
 
     with pytest.raises(ScriptedModelError, match="Script entry #1"):
         agent.start("hi")
+
+
+class TestEveryDocumentedBackendProtocolIsAdopted:
+    """Agent(llm=<backend object>) must adopt the object, whichever protocol it implements.
+
+    The original fix duck-typed on `get_response` alone. Review pointed out that
+    llm/protocols.py also documents LLMProviderProtocol (`chat`/`achat`) and
+    UnifiedLLMProtocol (`chat_completion`/`achat_completion`); backends
+    implementing those still fell through to the plain OpenAI branch, where the
+    object became the model identifier and the turn went to the wrong backend.
+    """
+
+    @staticmethod
+    def _agent(backend):
+        from praisonaiagents import Agent
+        return Agent(instructions="t", llm=backend)
+
+    def test_get_response_backend_is_adopted(self):
+        class B:
+            model = "custom/a"
+            def get_response(self, *a, **k): return "x"
+        agent = self._agent(B())
+        assert agent._using_custom_llm is True
+        assert agent.llm == "custom/a"
+
+    def test_chat_protocol_backend_is_adopted(self):
+        class B:
+            model = "custom/b"
+            def chat(self, *a, **k): return "x"
+        agent = self._agent(B())
+        assert agent._using_custom_llm is True
+        assert agent.llm == "custom/b"
+
+    def test_chat_completion_protocol_backend_is_adopted(self):
+        class B:
+            model = "custom/c"
+            def chat_completion(self, *a, **k): return "x"
+            async def achat_completion(self, *a, **k): return "x"
+        agent = self._agent(B())
+        assert agent._using_custom_llm is True
+        assert agent.llm == "custom/c"
+
+    def test_control_a_plain_object_is_not_adopted(self):
+        """Control: adoption must be earned by implementing a backend surface."""
+        class NotABackend:
+            pass
+        agent = self._agent(NotABackend())
+        assert agent._using_custom_llm is False
+
+    def test_control_a_string_llm_is_unaffected(self):
+        from praisonaiagents import Agent
+        agent = Agent(instructions="t", llm="gpt-4o-mini")
+        assert agent.llm == "gpt-4o-mini"
