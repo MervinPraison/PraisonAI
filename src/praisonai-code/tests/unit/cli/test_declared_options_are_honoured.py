@@ -336,59 +336,118 @@ class TestRecipeJudgeGoal:
 # ---------------------------------------------------------------------------
 
 class TestServeUiGatewayAgents:
+    """`--agents` was declared, used in the command's own docstring example,
+    and never forwarded.
 
-    def _run(self, monkeypatch, args, accepts_agents=True):
+    The contract matters: ``run_integrated_gateway`` takes ``**configure_kwargs``
+    and hands them to ``configure_host``, which declares
+    ``agents: Optional[List[Any]]`` -- a PARSED LIST, not a file path, and not a
+    parameter named ``agents_file``. An earlier attempt at this fix passed
+    ``agents_file=<path>`` behind an ``inspect.signature`` guard, which could
+    never match a ``**kwargs`` function and so rejected the option every time.
+    These tests pin the real contract so that cannot recur.
+    """
+
+    AGENTS_YAML = (
+        "agents:\n"
+        "  - name: Writer\n"
+        "    instructions: You write things\n"
+        "    llm: gpt-4o-mini\n"
+        "  - name: Editor\n"
+        "    instructions: You edit things\n"
+    )
+
+    def _run(self, monkeypatch, args):
         captured = {}
 
-        if accepts_agents:
-            def _run_gateway(host=None, port=None, title=None, style=None,
-                             agents_file=None):
-                captured.update(
-                    host=host, port=port, title=title, style=style,
-                    agents_file=agents_file,
-                )
-        else:
-            def _run_gateway(host=None, port=None, title=None, style=None):
-                captured.update(host=host, port=port, title=title, style=style)
+        def _run_gateway(**kwargs):
+            captured.update(kwargs)
 
         class _Mod:
             run_integrated_gateway = staticmethod(_run_gateway)
 
         monkeypatch.setattr(
-            "praisonai_code._bot_bridge.import_bot_module",
-            lambda name: _Mod,
+            "praisonai_code._bot_bridge.import_bot_module", lambda name: _Mod
         )
         from praisonai_code.cli.commands import serve as serve_module
 
         result = _invoke(_group("ui-gateway", serve_module.serve_ui_gateway), args)
         return result, captured
 
-    def test_the_agents_file_reaches_the_gateway(self, monkeypatch):
+    @pytest.fixture
+    def agents_yaml(self, tmp_path):
+        f = tmp_path / "agents.yaml"
+        f.write_text(self.AGENTS_YAML)
+        return str(f)
+
+    def test_a_parsed_agent_list_reaches_the_gateway(self, monkeypatch, agents_yaml):
         result, captured = self._run(
-            monkeypatch, ["ui-gateway", "--agents", "agents.yaml"]
+            monkeypatch, ["ui-gateway", "--agents", agents_yaml]
         )
         assert result.exit_code == 0, result.output
-        assert captured["agents_file"] == "agents.yaml"
+        assert "agents" in captured, (
+            "the gateway never received the agents; configure_host takes "
+            "`agents`, not `agents_file`"
+        )
+        assert isinstance(captured["agents"], list)
+        assert len(captured["agents"]) == 2
+
+    def test_it_is_a_list_of_agents_not_the_path(self, monkeypatch, agents_yaml):
+        _, captured = self._run(monkeypatch, ["ui-gateway", "--agents", agents_yaml])
+        assert captured.get("agents_file") is None, (
+            "passed a file path under a parameter configure_host does not declare"
+        )
+        assert [a.name for a in captured["agents"]] == ["Writer", "Editor"]
 
     def test_it_is_not_passed_when_not_supplied(self, monkeypatch):
         result, captured = self._run(monkeypatch, ["ui-gateway"])
         assert result.exit_code == 0, result.output
-        assert captured["agents_file"] is None
+        assert "agents" not in captured
 
-    def test_an_older_gateway_that_cannot_take_it_fails_loudly(self, monkeypatch):
-        """Never silently drop it, and never crash with a TypeError."""
-        result, _ = self._run(
-            monkeypatch, ["ui-gateway", "--agents", "agents.yaml"],
-            accepts_agents=False,
+    def test_the_other_options_still_reach_the_gateway(self, monkeypatch):
+        _, captured = self._run(
+            monkeypatch, ["ui-gateway", "--style", "chat", "--title", "My App"]
+        )
+        assert captured["style"] == "chat"
+        assert captured["title"] == "My App"
+
+    def test_a_missing_file_fails_loudly(self, monkeypatch):
+        result, captured = self._run(
+            monkeypatch, ["ui-gateway", "--agents", "/no/such/agents.yaml"]
         )
         assert result.exit_code != 0
+        assert captured == {}, "the gateway was started despite a bad --agents"
 
-    def test_an_older_gateway_still_starts_without_the_option(self, monkeypatch):
-        result, captured = self._run(
-            monkeypatch, ["ui-gateway"], accepts_agents=False
-        )
-        assert result.exit_code == 0, result.output
-        assert captured["style"] == "dashboard"
+    def test_a_file_without_an_agents_list_fails_loudly(self, monkeypatch, tmp_path):
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("something_else: 1\n")
+        result, captured = self._run(monkeypatch, ["ui-gateway", "--agents", str(bad)])
+        assert result.exit_code != 0
+        assert captured == {}
+
+    def test_malformed_yaml_fails_loudly(self, monkeypatch, tmp_path):
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("agents: [unclosed\n")
+        result, captured = self._run(monkeypatch, ["ui-gateway", "--agents", str(bad)])
+        assert result.exit_code != 0
+        assert captured == {}
+
+    def test_the_real_gateway_host_accepts_the_kwarg_we_send(self):
+        """Pin the contract against the actual praisonai-bot signature.
+
+        A unit test with a stub cannot catch "we pass a kwarg the real function
+        rejects" -- which is exactly how the earlier attempt went wrong.
+        """
+        import inspect
+
+        try:
+            from praisonai_bot.integration.host_app import configure_host
+        except Exception:
+            pytest.skip("praisonai-bot not importable")
+
+        params = inspect.signature(configure_host).parameters
+        assert "agents" in params, "configure_host no longer takes `agents`"
+        assert "agents_file" not in params
 
 
 # ---------------------------------------------------------------------------
