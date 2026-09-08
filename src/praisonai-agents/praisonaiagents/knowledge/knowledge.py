@@ -50,6 +50,9 @@ class CustomMemory:
 # MongoDBMemory has been moved to adapters/mongodb_adapter.py
 # This maintains backward compatibility while following protocol-driven architecture
 
+from .cloud import is_cloud_source, fetch_cloud_source  # noqa: E402
+
+
 class Knowledge:
     def __init__(self, config=None, verbose=None):
         self._config = config
@@ -525,6 +528,24 @@ class Knowledge:
                 else:
                     all_extensions.append(exts)
             all_extensions = tuple(all_extensions)
+
+            # Cloud object storage (s3://, gs://, az://, Azure blob URL).
+            # Checked BEFORE the http branch, because an Azure blob URL is https
+            # and would otherwise be handed to the web fetcher. The object is
+            # downloaded to a local temp file and then read by the SAME readers
+            # as any local file, so PDF/DOCX parsing is not reimplemented per
+            # provider.
+            if isinstance(input_path, str) and is_cloud_source(input_path):
+                self._log(f"Fetching cloud source: {input_path}")
+                local_path = fetch_cloud_source(input_path)
+                result = self._process_single_input(
+                    local_path, user_id, agent_id, run_id, metadata
+                )
+                # Keep the ORIGINAL uri in metadata: the temp path is meaningless
+                # to anyone reading a citation later.
+                if isinstance(result, dict):
+                    result.setdefault('source', input_path)
+                return result
 
             # Check if input is URL
             if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
