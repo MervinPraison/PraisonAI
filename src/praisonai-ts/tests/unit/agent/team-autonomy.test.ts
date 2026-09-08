@@ -47,4 +47,23 @@ describe('team-wide autonomy', () => {
     new AgentTeam({ agents: [a], autonomy: 'suggest' } as any);
     expect(level(a)).toBe('suggest');
   });
+
+  it('a propagated prompting level creates the approval gate it needs', () => {
+    // A member with no approval manager and no autonomy of its own must, once
+    // it adopts a team-wide `suggest`, get the SAME gate the constructor would
+    // build -- otherwise the level is recorded and nothing ever prompts.
+    const a = member();
+    expect((a as any).approvalManager).toBeUndefined();
+    new AgentTeam({ agents: [a], autonomy: 'suggest' } as any);
+    expect(level(a)).toBe('suggest');
+    expect((a as any).approvalManager).toBeDefined();
+    expect((a as any)._doomLoop).toBeDefined();
+  });
+
+  it('a member built with autonomy already has its own gate, matching adoption', () => {
+    // Control: the constructor path and the adoption path agree on the shape.
+    const own = member({ autonomy: 'suggest' });
+    expect((own as any).approvalManager).toBeDefined();
+    expect((own as any)._doomLoop).toBeDefined();
+  });
 });

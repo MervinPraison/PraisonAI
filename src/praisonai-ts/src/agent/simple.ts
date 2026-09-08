@@ -1851,9 +1851,21 @@ export class Agent {
   adoptAutonomy(config: AutonomyConfig): boolean {
     if (this._autonomyConfig) return false;
     this._autonomyConfig = config;
-    // Only when this agent has an approval manager: autonomy levels widen what
-    // runs without asking, and there is nothing to widen otherwise.
-    if (this.approvalManager) applyAutonomyToApproval(config, this.approvalManager);
+    // A propagated level must create the same gate the constructor would, or a
+    // team-wide `suggest` would be recorded and never prompt -- the opposite of
+    // what a permission boundary is for. This mirrors the constructor exactly:
+    // an enabled level that is not `full_auto` needs an approval manager (with a
+    // prompt handler) so calls actually pause, and the doom-loop guard rides
+    // along.
+    if (config.enabled) {
+      if (!this.approvalManager) {
+        const manager = new ApprovalManager();
+        if (config.level !== 'full_auto') manager.onApprovalRequest(createCLIApprovalPrompt());
+        this.approvalManager = manager;
+      }
+      applyAutonomyToApproval(config, this.approvalManager);
+      this._doomLoop = new DoomLoopTracker(config.doomLoopThreshold);
+    }
     return true;
   }
 

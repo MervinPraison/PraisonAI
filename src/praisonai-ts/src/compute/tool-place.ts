@@ -19,6 +19,7 @@ import {
   registerToolPlace,
   type ToolPlaceLike,
 } from '../agent/features/placement';
+import { Logger } from '../utils/logger';
 import { ComputeError, type ComputeInstance, type ComputeProvider } from './types';
 import { DockerCompute } from './docker';
 import { LocalCompute } from './local';
@@ -78,7 +79,14 @@ export class ComputeToolPlace implements ToolPlaceLike {
     const template = this.commands[toolName];
     if (!template) {
       // No command declared: a JS closure cannot cross the boundary. Run it
-      // locally and SAY so, rather than implying isolation that is not there.
+      // locally and SAY so -- an unlogged fallback would let a caller who asked
+      // for '${this.placeName}' isolation believe they had it while the tool
+      // ran on the host. This warns once at the boundary rather than pretending.
+      await Logger.warn(
+        `Tool '${toolName}' has no command for '${this.placeName}', so it runs on the host, ` +
+          `not in '${this.placeName}'. Declare a command (setCommand) for it to run there; ` +
+          `until then this call is NOT isolated.`
+      );
       return localImplementation();
     }
     const instance = await this.ensureInstance();

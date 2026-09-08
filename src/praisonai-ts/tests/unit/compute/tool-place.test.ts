@@ -13,6 +13,7 @@ import {
   registerComputeToolPlaces,
 } from '../../../src/compute';
 import { toolPlaceNames } from '../../../src/agent/features/placement';
+import { Logger } from '../../../src/utils/logger';
 
 describe('registration', () => {
   it('compute providers become toolsRunOn places', () => {
@@ -40,6 +41,20 @@ describe('running a tool elsewhere', () => {
     // saying so beats implying isolation that is not there.
     const place = new ComputeToolPlace(new LocalCompute());
     expect(await place.runTool('anything', {}, async () => 'LOCAL')).toBe('LOCAL');
+  });
+
+  it('the host fallback is NOT silent: it warns that isolation was not applied', async () => {
+    // "runs locally and says so" must actually say so -- a caller who asked for
+    // a sandbox must not believe they had one when they did not.
+    const warn = jest.spyOn(Logger, 'warn').mockResolvedValue(undefined as never);
+    try {
+      const place = new ComputeToolPlace(new LocalCompute());
+      await place.runTool('anything', {}, async () => 'LOCAL');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toMatch(/not isolated|runs on the host/i);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('arguments are quoted, so an injection stays one argument', async () => {
