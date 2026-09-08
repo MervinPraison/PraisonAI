@@ -978,8 +978,16 @@ class PythonTools:
 # Agent-facing code-execution tool factory
 # ──────────────────────────────────────────────────────────────────────
 
-def _build_unsafe_execute_code(allowed_tools: List[str], timeout: int = 30):
-    """Build the in-process ``execute_code`` tool for ``code_mode="unsafe"``."""
+def _build_unsafe_execute_code(
+    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None
+):
+    """Build the in-process ``execute_code`` tool for ``code_mode="unsafe"``.
+
+    ``registry`` scopes which tools the allow-list can resolve. The agent passes
+    a registry built from its own granted tools so code-mode cannot reach a
+    globally-registered tool (e.g. a plugin entry-point tool) the agent was
+    never given; omitting it falls back to the global registry.
+    """
 
     @require_approval(risk_level="critical")
     def execute_code(code: str) -> Dict[str, Any]:
@@ -995,7 +1003,7 @@ def _build_unsafe_execute_code(allowed_tools: List[str], timeout: int = 30):
             Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
         """
         return execute_code_with_tools(
-            code, allowed_tools=allowed_tools, timeout=timeout
+            code, allowed_tools=allowed_tools, timeout=timeout, registry=registry
         )
 
     return execute_code
@@ -1005,6 +1013,7 @@ def build_code_execution_tools(
     code_mode: str = "safe",
     allowed_tools: Optional[List[str]] = None,
     timeout: int = 30,
+    registry: Optional[Any] = None,
 ) -> List[Any]:
     """Return the code-execution tools for ``ExecutionConfig(code_execution=True)``.
 
@@ -1021,7 +1030,11 @@ def build_code_execution_tools(
       are NOT reachable from the code: they live in the parent process.
     * ``"unsafe"`` — same-process execution with restricted builtins, no
       isolation, and the ``allowed_tools`` allow-list injected as callable
-      proxies (each proxy call still passes the approval gate).
+      proxies (each proxy call still passes the approval gate). Because the code
+      runs in this process, ``timeout`` is NOT enforced in unsafe mode — a
+      runaway loop can block the worker. This is why unsafe mode is opt-in and
+      approval-gated "critical"; use ``"safe"`` (subprocess) when the timeout
+      must be a hard guarantee.
 
     Args:
         code_mode: ``"safe"`` or ``"unsafe"``.
@@ -1037,8 +1050,32 @@ def build_code_execution_tools(
             f"Unknown code_mode {code_mode!r}; expected 'safe' or 'unsafe'."
         )
     if code_mode == "unsafe":
-        return [_build_unsafe_execute_code(list(allowed_tools or []), timeout=timeout)]
-    return [execute_code]
+        return [
+            _build_unsafe_execute_code(
+                list(allowed_tools or []), timeout=timeout, registry=registry
+            )
+        ]
+
+    # Safe mode: bind the configured timeout to the tool the model sees, so a
+    # model call that passes only ``code`` still gets the caller's timeout
+    # rather than execute_code's 30s default. The default timeout returns the
+    # module-level tool unchanged so its identity is preserved for callers.
+    if timeout == 30:
+        return [execute_code]
+
+    def execute_code_timed(code: str) -> Dict[str, Any]:
+        """Execute Python code in an isolated subprocess and return its output.
+
+        Args:
+            code: Python code to execute.
+
+        Returns:
+            Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
+        """
+        return execute_code(code, timeout=timeout)
+
+    execute_code_timed.__name__ = "execute_code"
+    return [execute_code_timed]
 
 
 def _get_python_tools():

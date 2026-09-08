@@ -169,8 +169,16 @@ def context_compact(
         store = get_global_store()
         stats = store.get_stats()
 
+        # Compaction only cleans per-agent history; shared context is not
+        # compactable, so a store without agent history has nothing to compact.
         if not stats.get("agents"):
-            typer.echo(_EMPTY_STORE_MESSAGE)
+            if stats.get("shared_context_size"):
+                typer.echo(
+                    "The context store holds only shared context, which has no "
+                    "per-agent history to compact. Nothing was done."
+                )
+            else:
+                typer.echo(_EMPTY_STORE_MESSAGE)
             raise typer.Exit(1)
 
         if dry_run:
@@ -217,7 +225,11 @@ def context_export(
         
         store = get_global_store()
 
-        if not store.get_stats().get("agents"):
+        # Export serialises per-agent history AND shared context, so a store
+        # holding only shared context is still exportable and must not be
+        # rejected as empty.
+        stats = store.get_stats()
+        if not stats.get("agents") and not stats.get("shared_context_size"):
             typer.echo(_EMPTY_STORE_MESSAGE)
             raise typer.Exit(1)
 

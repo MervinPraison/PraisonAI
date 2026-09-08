@@ -468,17 +468,20 @@ def get_global_store(validate_schema: bool = False) -> ContextStoreImpl:
     IMPORTANT - what this is *not*:
 
     * It is an **in-memory singleton scoped to the current process**. It is not
-      persisted and it is not shared with any other process, so a separate CLI
-      invocation can never observe a store an agent run populated.
+      *automatically* persisted and it is not shared with any other process, so
+      a separate CLI invocation can never observe a store an agent run
+      populated; sharing across processes requires explicit
+      :meth:`ContextStoreImpl.snapshot` / :meth:`ContextStoreImpl.restore`.
     * **Nothing in the agent runtime writes to it.** ``Agent.chat_history`` and
       the session/memory subsystems keep their own state; this store is an
       opt-in structure that a caller must populate itself via
       ``get_mutator(agent_id).append(...)`` + ``commit()`` or
       :meth:`ContextStoreImpl.add_shared_context`.
 
-    A freshly obtained store is therefore always empty. Callers that report on
-    it (stats/compaction/export) must say so rather than reporting success on
-    an empty store.
+    A store is therefore empty when first created and only holds what a caller
+    put in it during this process; the same singleton is returned on later
+    calls, so it may already contain data. Callers that report on it
+    (stats/compaction/export) must not report success on an empty store.
     """
     global _global_store
     

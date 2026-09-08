@@ -66,3 +66,31 @@ def test_compact_still_works_when_the_store_has_content(runner):
     assert result.exit_code == 0, result.output
     assert "Compaction complete" in result.output
     assert "agent-1" in result.output
+
+
+def test_export_writes_a_shared_context_only_store(runner, tmp_path):
+    """A store holding only shared context is still exportable (snapshot()
+    serialises shared_context), so export must not reject it as empty."""
+    from praisonaiagents.context import get_global_store
+
+    get_global_store().add_shared_context({"role": "system", "content": "shared"})
+
+    target = tmp_path / "ctx.json"
+    result = runner.invoke(_app(), ["export", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert target.exists(), "shared-context-only store was rejected as empty"
+
+
+def test_compact_reports_shared_only_store_honestly(runner):
+    """Compaction cleans per-agent history only; a shared-context-only store
+    has nothing to compact and must say so rather than claim success."""
+    from praisonaiagents.context import get_global_store
+
+    get_global_store().add_shared_context({"role": "system", "content": "shared"})
+
+    result = runner.invoke(_app(), ["compact"])
+
+    assert result.exit_code == 1, result.output
+    assert "Compaction complete" not in result.output
+    assert "shared context" in result.output

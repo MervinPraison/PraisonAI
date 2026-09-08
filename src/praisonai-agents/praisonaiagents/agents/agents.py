@@ -850,7 +850,11 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         Shared fields are carried over (``max_iter``; ``max_retry_limit`` ->
         ``max_retries``) and a ``UserWarning`` names the right class and lists
-        any settings that have no team-level counterpart.
+        any settings that have no team-level counterpart. A shared field is only
+        carried when the caller actually changed it, so the team keeps its own
+        defaults for anything left untouched (``ExecutionConfig.max_retry_limit``
+        defaults to 2, but the team default ``max_retries`` is 5 — an
+        ``ExecutionConfig(max_iter=99)`` must not silently drop team retries).
         """
         if execution is None or multi_agent_cls is None:
             return execution
@@ -867,10 +871,6 @@ class AgentTeam(SpawnAnnounceProtocol):
         from dataclasses import fields as _dc_fields
 
         defaults = ExecutionConfig()
-        carried = {
-            "max_iter": execution.max_iter,
-            "max_retries": execution.max_retry_limit,
-        }
         shared = {"max_iter", "max_retry_limit"}
 
         def _is_set(name):
@@ -880,6 +880,14 @@ class AgentTeam(SpawnAnnounceProtocol):
                 return getattr(execution, name) != getattr(defaults, name)
             except Exception:
                 return True
+
+        # Only carry a shared field when the caller changed it; otherwise let
+        # the team config keep its own (different) default.
+        carried = {}
+        if _is_set("max_iter"):
+            carried["max_iter"] = execution.max_iter
+        if _is_set("max_retry_limit"):
+            carried["max_retries"] = execution.max_retry_limit
 
         dropped = sorted(
             f.name for f in _dc_fields(execution)

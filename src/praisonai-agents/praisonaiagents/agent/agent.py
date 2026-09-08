@@ -4080,11 +4080,28 @@ Summary:"""
             )
             code_tools = False
 
+        # In unsafe mode the allow-list must resolve against ONLY the tools this
+        # agent was granted, never the process-global registry (which can hold
+        # plugin/entry-point tools the agent was never given). Build a private
+        # registry from self.tools and pass it down so code-mode inherits the
+        # agent's exact tool boundary.
+        scoped_registry = None
+        if code_tools and code_execution_mode == "unsafe":
+            from ..tools.registry import ToolRegistry
+            scoped_registry = ToolRegistry()
+            for t in (self.tools or []):
+                if callable(t) or hasattr(t, "name"):
+                    try:
+                        scoped_registry.register(t)
+                    except Exception:
+                        pass
+
         # An unknown code_mode raises out of here rather than silently
         # producing nothing, which is the failure this whole change is about.
         new_tools = build_code_execution_tools(
             code_mode=code_execution_mode,
             allowed_tools=allowed if code_tools else [],
+            registry=scoped_registry,
         )
 
         existing = {getattr(t, "__name__", None) for t in (self.tools or [])}

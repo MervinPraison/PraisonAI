@@ -29,6 +29,8 @@ Usage:
     agent = Agent(name="Test", hooks=[add_context, retry_on_error])
 """
 
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
 from functools import wraps
@@ -291,6 +293,28 @@ def wrap_tool_call(func: WrapToolCallFn) -> WrapToolCallFn:
     return func
 
 
+def _invoke_observer(callback: Callable[[Any], Any], arg: Any) -> None:
+    """Call an observer callback, awaiting it if it returns a coroutine.
+
+    ``HooksConfig(on_step=...)`` / ``on_tool_call=...`` accept any ``Callable``,
+    so an ``async def`` is permitted. Calling it synchronously would create a
+    coroutine that is never awaited (a silent no-op plus a RuntimeWarning), so a
+    returned coroutine is drained here: run to completion on a fresh loop when
+    none is running, otherwise scheduled on the running loop. The return value
+    is always ignored — these are observers.
+    """
+    result = callback(arg)
+    if inspect.iscoroutine(result):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.create_task(result)
+        else:
+            asyncio.run(result)
+
+
 def as_step_hook(callback: Callable[[Any], Any]) -> AfterModelFn:
     """Adapt a plain ``on_step`` callback into an ``after_model`` middleware hook.
 
@@ -303,7 +327,7 @@ def as_step_hook(callback: Callable[[Any], Any]) -> AfterModelFn:
 
     @after_model
     def _on_step(response: ModelResponse) -> ModelResponse:
-        callback(response)
+        _invoke_observer(callback, response)
         return response
 
     _on_step.__name__ = getattr(callback, "__name__", "on_step")
@@ -322,7 +346,7 @@ def as_tool_call_hook(callback: Callable[[Any], Any]) -> BeforeToolFn:
 
     @before_tool
     def _on_tool_call(request: ToolRequest) -> ToolRequest:
-        callback(request)
+        _invoke_observer(callback, request)
         return request
 
     _on_tool_call.__name__ = getattr(callback, "__name__", "on_tool_call")
