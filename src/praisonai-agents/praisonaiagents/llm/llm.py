@@ -5236,6 +5236,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         response_content = tool_response.choices[0].message.get("content")
                         response_text = response_content if response_content is not None else ""
                         tool_calls = tool_response.choices[0].message.get("tool_calls", [])
+
+                        # Recover a tool call the provider emitted as response
+                        # text instead of in the tool_calls field. The sync path
+                        # has done this since the adapter seam landed; without it
+                        # here, the same agent silently loses tool calling the
+                        # moment the caller awaits instead of calling.
+                        if not tool_calls and response_text and formatted_tools:
+                            recovered = self._provider_adapter.recover_tool_calls_from_text(
+                                response_text, formatted_tools)
+                            if recovered:
+                                tool_calls = recovered
+                                logging.debug(
+                                    f"Recovered tool calls from response text: {tool_calls}")
                         
                         # Debug logging for Gemini responses
                         if self._is_gemini_model():
