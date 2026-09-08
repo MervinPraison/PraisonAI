@@ -1826,6 +1826,50 @@ export class Agent {
   }
 
   /**
+   * Put this agent's tools somewhere, sharing ONE place with other agents.
+   *
+   * A team-wide `toolsRunOn` means one sandbox for the whole team, not one per
+   * member -- separate instances would multiply the cost and lose any state
+   * tools leave for each other. An agent that declared its OWN toolsRunOn keeps
+   * it: an explicit choice on the member is more specific than the team's
+   * default, and silently overriding it would be the surprising direction.
+   */
+  adoptToolPlace(place: ToolPlaceLike): boolean {
+    if (this._toolPlace) return false;
+    this._toolPlace = place;
+    return true;
+  }
+
+  /**
+   * Take a team's autonomy settings, unless this agent declared its own.
+   *
+   * Python's AgentTeam propagates autonomy to members that have none of their
+   * own; this is that. A member's explicit setting wins, because an autonomy
+   * level is a permission boundary -- silently widening one an agent declared
+   * for itself is the direction that causes harm.
+   */
+  adoptAutonomy(config: AutonomyConfig): boolean {
+    if (this._autonomyConfig) return false;
+    this._autonomyConfig = config;
+    // A propagated level must create the same gate the constructor would, or a
+    // team-wide `suggest` would be recorded and never prompt -- the opposite of
+    // what a permission boundary is for. This mirrors the constructor exactly:
+    // an enabled level that is not `full_auto` needs an approval manager (with a
+    // prompt handler) so calls actually pause, and the doom-loop guard rides
+    // along.
+    if (config.enabled) {
+      if (!this.approvalManager) {
+        const manager = new ApprovalManager();
+        if (config.level !== 'full_auto') manager.onApprovalRequest(createCLIApprovalPrompt());
+        this.approvalManager = manager;
+      }
+      applyAutonomyToApproval(config, this.approvalManager);
+      this._doomLoop = new DoomLoopTracker(config.doomLoopThreshold);
+    }
+    return true;
+  }
+
+  /**
    * Queue live guidance for the next turn (Python `Agent.steer`). Returns the
    * message id, or `''` when steering is off or the queue is full.
    */

@@ -78,8 +78,8 @@ describe('AgentTeam.__init__ parity', () => {
     // acted on now (see parity-agentteam-features.test.ts); the rest are still
     // accepted-with-notice.
     expect(unhonouredOptions()).toEqual([
-      'AgentTeam.autonomy', 'AgentTeam.caching', 'AgentTeam.guardrails', 'AgentTeam.knowledge',
-      'AgentTeam.learn', 'AgentTeam.reflection', 'AgentTeam.toolsRunOn', 'AgentTeam.web',
+      'AgentTeam.caching', 'AgentTeam.guardrails', 'AgentTeam.knowledge',
+      'AgentTeam.learn', 'AgentTeam.reflection', 'AgentTeam.web',
     ]);
   });
 
