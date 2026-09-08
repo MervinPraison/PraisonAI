@@ -5,6 +5,7 @@ Tests that BotSessionManager uses SessionStoreProtocol for persistent
 per-user session isolation instead of in-memory-only storage.
 """
 
+import pytest
 import asyncio
 import tempfile
 from typing import Any, Dict, List
@@ -41,19 +42,20 @@ class TestBotSessionManagerWithStore:
     def _make_manager(self, tmpdir: str, platform: str = "test"):
         """Create a BotSessionManager with a persistent store."""
         # Import here to test the refactored version
-        import sys
-        import os
-        # Add wrapper path so we can import _session
-        wrapper_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))
-            )))),
-            "praisonai", "praisonai", "bots"
+        # The bots module moved from the praisonai wrapper to the praisonai-bot
+        # package. This used to reach for src/praisonai/praisonai/bots by walking
+        # five dirname() calls up from __file__ and putting it on sys.path -- a
+        # path that no longer contains _session.py, so every test here failed with
+        # "No module named '_session'".
+        #
+        # A real import instead of a path hack: it follows the module wherever it
+        # lives, and skips clearly when praisonai-bot is not installed rather than
+        # failing as if the code were broken.
+        pytest.importorskip(
+            "praisonai_bot.bots._session",
+            reason="praisonai-bot is not installed",
         )
-        if wrapper_path not in sys.path:
-            sys.path.insert(0, wrapper_path)
-        
-        from _session import BotSessionManager
+        from praisonai_bot.bots._session import BotSessionManager
         store = DefaultSessionStore(session_dir=tmpdir)
         return BotSessionManager(store=store, platform=platform)
     
@@ -190,7 +192,7 @@ class TestBotSessionManagerWithStore:
         if wrapper_path not in sys.path:
             sys.path.insert(0, wrapper_path)
         
-        from _session import BotSessionManager
+        from praisonai_bot.bots._session import BotSessionManager
         # No store parameter = backward compatible in-memory mode
         mgr = BotSessionManager()
         agent = FakeAgent()

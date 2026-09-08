@@ -208,7 +208,7 @@ class TestRuntimeResolver:
         assert result.runtime == "praisonai"
         assert result.metadata["resolution_source"] == "default"
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
     def test_resolve_runtime_instance_success(self, mock_resolve_runtime):
         """Test successful runtime instance resolution."""
         resolver = RuntimeResolver()
@@ -238,7 +238,7 @@ class TestRuntimeResolver:
             config_overrides={}
         )
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
     def test_resolve_runtime_instance_legacy_instance(self, mock_resolve_runtime):
         """Test legacy instance resolution."""
         resolver = RuntimeResolver()
@@ -260,8 +260,8 @@ class TestRuntimeResolver:
         # Should not call registry resolve for legacy instances
         mock_resolve_runtime.assert_not_called()
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
-    @patch('praisonaiagents.runtime.resolver.list_available_runtimes')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.list_runtimes')
     def test_resolve_runtime_instance_unknown_runtime(self, mock_list_runtimes, mock_resolve_runtime):
         """Test error handling for unknown runtime ID."""
         resolver = RuntimeResolver()
