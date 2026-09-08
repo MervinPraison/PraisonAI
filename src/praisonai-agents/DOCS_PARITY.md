@@ -21,13 +21,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 57 | 18259 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 7 | 3717 |
+| ✅ Approval | 1 | 8 | 3934 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3879 |
 | ✅ Autonomy | 3 | 7 | 2794 |
 | ✅ Bots | 7 | 33 | 13928 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 123 | 38598 |
+| ✅ CLI | 5 | 124 | 38758 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4981 |
@@ -68,7 +68,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 732 |
 | ✅ Retrieval | 2 | 5 | 1046 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3670 |
+| ✅ Sandbox | 5 | 7 | 3674 |
 | ✅ Security | 1 | 3 | 3558 |
 | ✅ Sessions | 4 | 20 | 7934 |
 | ✅ Skills | 6 | 16 | 5984 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2807 |
-| ✅ Workflows | 5 | 18 | 7736 |
+| ✅ Workflows | 5 | 18 | 7780 |
 
 ## Documentation Without Features
 
