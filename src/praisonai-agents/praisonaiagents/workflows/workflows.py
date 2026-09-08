@@ -3723,13 +3723,35 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
         
+        # ``Repeat.step`` is typed ``Any`` and was handed straight to the
+        # single-step executor, so ``repeat([a, b])`` was ACCEPTED and then
+        # stringified into a prompt -- the list became text and the default
+        # agent answered it. Since there is no N-agent discussion loop, that is
+        # exactly the workaround people reach for, which made the silent
+        # misbehaviour worse than a rejection. A list now runs its members in
+        # order, once per iteration.
+        steps = repeat_step.step if isinstance(repeat_step.step, (list, tuple)) else [repeat_step.step]
+
         for iteration in range(repeat_step.max_iterations):
-            step_result = self._execute_single_step_internal(
-                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
-            )
-            results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
-            output = step_result["output"]
-            all_variables.update(step_result.get("variables", {}))
+            iteration_variables = {}
+            last_name = None
+            for position, inner_step in enumerate(steps):
+                step_result = self._execute_single_step_internal(
+                    inner_step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
+                )
+                last_name = step_result['step']
+                # Each member sees the previous member's output, so a two-step
+                # repeat composes the way a two-step flow does.
+                output = step_result["output"]
+                iteration_variables.update(step_result.get("variables", {}))
+                all_variables.update(step_result.get("variables", {}))
+                if len(steps) > 1:
+                    results.append({
+                        "step": f"{last_name}_{iteration}_{position}",
+                        "output": step_result["output"],
+                    })
+            if len(steps) == 1:
+                results.append({"step": f"{last_name}_{iteration}", "output": output})
             
             # Check until condition
             if repeat_step.until:
