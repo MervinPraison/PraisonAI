@@ -145,7 +145,11 @@ def test_code_print_uses_supported_agent_kwargs_and_workspace_tools(monkeypatch,
     assert captured["output"] == "minimal"
     assert captured["tools"]
     assert captured["workspace"] == str(tmp_path)
-    assert captured["tool_groups"] == ["acp", "edit", "search", "lsp"]
+    # "mcp" joined the default groups in #4965, which made MCP tools reachable
+    # from `code -p` like any other group. The list is pinned in full (rather
+    # than loosened to a subset) so a group silently appearing or disappearing
+    # from the headless path still fails here.
+    assert captured["tool_groups"] == ["acp", "edit", "search", "lsp", "mcp"]
 
 
 @pytest.mark.skipif(
