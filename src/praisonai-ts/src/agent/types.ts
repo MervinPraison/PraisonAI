@@ -157,6 +157,17 @@ export interface TaskConfig {
     nextTasks?: string[];
     /** Python parity: task_type (str, default "task"). */
     taskType?: string;
+    /**
+     * Require a person to approve this task's OUTPUT before the next task
+     * consumes it. Python parity: `Task(human_input=True)`.
+     *
+     * Distinct from the approval system, which gates a TOOL CALL, and from
+     * guardrails, which validate automatically. Neither lets an orchestrator
+     * say "a person must sign this off".
+     */
+    humanInput?: boolean;
+    /** What the reviewer is asked. Python parity: `human_review_prompt`. */
+    humanReviewPrompt?: string;
     /** Python parity: condition (Optional[Dict[str, List[str]]], default None). */
     condition?: Record<string, string[]>;
     /** Python parity: is_start (bool, default False). */
@@ -287,6 +298,10 @@ export class Task {
     nextTasks: string[];
     /** Python parity: task_type (str, default "task"). */
     taskType: string;
+    /** See {@link TaskConfig.humanInput}. */
+    humanInput: boolean;
+    /** See {@link TaskConfig.humanReviewPrompt}. */
+    humanReviewPrompt?: string;
     /** Python parity: condition (Optional[Dict[str, List[str]]], default None). */
     condition: Record<string, string[]>;
     /** Python parity: is_start (bool, default False). */
@@ -410,6 +425,8 @@ export class Task {
         this.images = config.images ?? [];
         this.nextTasks = config.nextTasks ?? [];
         this.taskType = config.taskType ?? 'task';
+        this.humanInput = config.humanInput ?? false;
+        this.humanReviewPrompt = config.humanReviewPrompt;
         this.condition = config.condition ?? {};
         this.isStart = config.isStart ?? false;
         this.loopState = config.loopState ?? {};

@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2054 |
+| TypeScript Features | 2058 |
 | **Gap Count** | **6** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -741,7 +741,7 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (174 exports)</summary>
+<summary><strong>agent</strong> (178 exports)</summary>
 
 ```typescript
 import { AGENT_RUN_STATUSES, Agent, AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput... } from 'praisonai';
