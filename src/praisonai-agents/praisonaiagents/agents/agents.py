@@ -2925,34 +2925,66 @@ class AgentTeam(SpawnAnnounceProtocol):
         }
 
     def _task_set_fingerprint(self) -> str:
-        """Identify this team's task SET, so a checkpoint cannot cross teams."""
+        """Identify this team's task SET, so a checkpoint cannot cross teams.
+
+        Covers the fields that change what a task actually *does* -- its name,
+        full description, the agent that runs it, and its expected output. A
+        truncated description or a name-only fingerprint would let a materially
+        changed task keep the same fingerprint, so a restore would mark the
+        changed task completed and skip the new work.
+        """
         import hashlib
         parts = []
         for task_id in sorted(self.tasks, key=lambda k: str(k)):
             task = self.tasks[task_id]
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
             parts.append("|".join([
                 str(task_id),
                 str(getattr(task, "name", "") or ""),
-                str(getattr(task, "description", "") or "")[:200],
+                str(getattr(task, "description", "") or ""),
+                str(agent_name),
+                str(getattr(task, "expected_output", "") or ""),
             ]))
         blob = "\n".join(parts)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _json_safe(value: Any, fallback: Any = None) -> Any:
+        """Return ``value`` if it survives a JSON round-trip, else ``fallback``.
+
+        A nested ``datetime``/``set``/``bytes``/custom object inside a dict or
+        list result reaches the JSON encoder and fails the durable write, losing
+        the WHOLE checkpoint rather than one field. Probing each field here keeps
+        the rest of the checkpoint intact when one field is not portable.
+        """
+        try:
+            json.dumps(value)
+            return value
+        except (TypeError, ValueError):
+            return fallback
 
     def _serialisable_task_state(self) -> Dict[str, Any]:
         """``_snapshot_task_state`` reduced to what survives JSON.
 
         A task result may be a TaskOutput object; only its text is portable, and
         a half-serialised object that fails to write would lose the whole
-        checkpoint rather than one field.
+        checkpoint rather than one field. Nested non-JSON values inside a dict or
+        list result, or inside task variables, are dropped the same way.
         """
         snapshot = {}
         for task_id, state in self._snapshot_task_state().items():
             result = state.get("result")
             if result is not None and not isinstance(result, (str, int, float, bool, dict, list)):
                 result = getattr(result, "raw", None) or str(result)
+            # A dict/list result may still carry a nested non-JSON value; fall
+            # back to its string form rather than forfeiting the checkpoint.
+            if isinstance(result, (dict, list)):
+                result = self._json_safe(result, fallback=str(result))
             variables = state.get("variables")
             if not isinstance(variables, dict):
                 variables = {}
+            variables = self._json_safe(variables, fallback={})
             snapshot[str(task_id)] = {
                 "status": state.get("status"),
                 "result": result,
@@ -2980,13 +3012,50 @@ class AgentTeam(SpawnAnnounceProtocol):
                 continue
             task.status = state.get("status") or getattr(task, "status", "not started")
             if state.get("result") is not None:
-                task.result = state["result"]
+                # The checkpoint reduced a TaskOutput to text; a remaining task
+                # that consumes this predecessor through workflow dependencies or
+                # task.context reads result.raw (see process.py). Restoring a bare
+                # string would raise AttributeError there, so rebuild a minimal
+                # TaskOutput carrying the text instead.
+                task.result = self._result_from_serialised(task, state["result"])
             if state.get("retry_count") is not None:
                 task.retry_count = state["retry_count"]
             if state.get("variables"):
                 task.variables = state["variables"]
             restored += 1
         return restored
+
+    @staticmethod
+    def _result_from_serialised(task: Any, value: Any) -> Any:
+        """Rebuild a ``TaskOutput`` from a checkpointed result string.
+
+        Consumers of a completed task read ``task.result.raw`` (dependency
+        context, routing decisions). A restored plain string has no ``.raw``, so
+        wrap it in a minimal ``TaskOutput`` preserving the text. A non-string
+        (already a structured/portable value) is returned unchanged so nothing is
+        lost. If ``TaskOutput`` cannot be constructed, fall back to the raw value
+        rather than failing the whole restore.
+        """
+        if not isinstance(value, str):
+            return value
+        try:
+            from ..main import TaskOutput
+        except Exception:
+            try:
+                from ..output.models import TaskOutput
+            except Exception:
+                return value
+        try:
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
+            return TaskOutput(
+                description=str(getattr(task, "description", "") or ""),
+                raw=value,
+                agent=str(agent_name),
+                output_format="RAW",
+            )
+        except Exception:
+            return value
 
     def save_session_state(self, session_id: str, include_memory: bool = True) -> bool:
         """Persist team session state for deterministic resume (Issue #3635).

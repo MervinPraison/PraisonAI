@@ -57,7 +57,9 @@ class TestRestore:
         target = _team(agent)
         assert target._restore_serialised_task_state(payload["tasks"]) == 2
         assert target.tasks[first].status == "completed"
-        assert target.tasks[first].result == "FIRST DONE"
+        # Restored as a TaskOutput, not a bare string, so downstream consumers
+        # that read result.raw (dependency context, routing) keep working.
+        assert target.tasks[first].result.raw == "FIRST DONE"
 
     def test_control_an_unfinished_task_is_not_marked_done(self, agent):
         source = _team(agent)
@@ -85,3 +87,78 @@ class TestFingerprint:
         """Task keys are positional, so without this a checkpoint from another
         team would put task 3's output onto a different task 3."""
         assert list(_team(agent).tasks) == [0, 1]
+
+    def test_a_changed_task_agent_changes_the_fingerprint(self, agent):
+        """A different agent means a different task; the fingerprint must move
+        so a restore cannot mark the changed task completed and skip it."""
+        other = Agent(name="other", instructions="y", llm="gpt-4o")
+        a = _team(agent)
+        b = _team(agent)
+        for t in b.tasks.values():
+            t.agent = other
+        assert a._task_set_fingerprint() != b._task_set_fingerprint()
+
+    def test_a_changed_expected_output_changes_the_fingerprint(self, agent):
+        a = _team(agent)
+        b = _team(agent)
+        for t in b.tasks.values():
+            t.expected_output = "SOMETHING ELSE"
+        assert a._task_set_fingerprint() != b._task_set_fingerprint()
+
+    def test_a_late_description_change_is_not_missed(self, agent):
+        """The old fingerprint truncated the description at 200 chars, so a
+        change past that point was invisible. The full description is hashed."""
+        a = _team(agent)
+        b = _team(agent)
+        for t in b.tasks.values():
+            t.description = ("x" * 300) + "CHANGED"
+        c = _team(agent)
+        for t in c.tasks.values():
+            t.description = ("x" * 300) + "DIFFERENT"
+        assert b._task_set_fingerprint() != c._task_set_fingerprint()
+
+
+class TestDurability:
+    def test_a_nested_non_json_result_does_not_lose_the_checkpoint(self, agent):
+        """A datetime inside a dict result would fail the JSON write and lose
+        the WHOLE checkpoint; it must degrade to text for that field only."""
+        import datetime
+        import json
+
+        team = _team(agent)
+        first = list(team.tasks)[0]
+        second = list(team.tasks)[1]
+        team.tasks[first].status = "completed"
+        team.tasks[first].result = {"when": datetime.datetime(2020, 1, 1)}
+        team.tasks[second].status = "completed"
+        team.tasks[second].result = "PLAIN"
+
+        payload = team._team_state_payload("s1")
+        # The whole payload must be JSON-writable; nothing is forfeited.
+        json.dumps(payload)
+        assert payload["tasks"][str(second)]["result"] == "PLAIN"
+
+    def test_a_non_json_variable_does_not_lose_the_checkpoint(self, agent):
+        import json
+
+        team = _team(agent)
+        first = list(team.tasks)[0]
+        team.tasks[first].variables = {"bad": {object()}}
+        payload = team._team_state_payload("s1")
+        json.dumps(payload)
+        assert payload["tasks"][str(first)]["variables"] == {}
+
+
+class TestRestoredType:
+    def test_a_restored_result_exposes_raw(self, agent):
+        """process.py reads prev_task.result.raw; a bare string would raise
+        AttributeError, so the restore must rebuild a TaskOutput."""
+        source = _team(agent)
+        first = list(source.tasks)[0]
+        source.tasks[first].status = "completed"
+        source.tasks[first].result = "DONE TEXT"
+        payload = source._team_state_payload("s1")
+
+        target = _team(agent)
+        target._restore_serialised_task_state(payload["tasks"])
+        assert target.tasks[first].result.raw == "DONE TEXT"
