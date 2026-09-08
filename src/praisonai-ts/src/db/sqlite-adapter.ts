@@ -357,14 +357,71 @@ CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id, started_at);
  * `agent_name`. Without this check the first INSERT would fail deep in the
  * driver with "table runs has no column named agent_name"; with it, the file
  * is diagnosed on open.
+ *
+ * Every column named by an INSERT or UPDATE is listed, not just the NOT NULL
+ * core: a file carrying the core columns but missing, say, `runs.total_tokens`
+ * or `spans.attributes` would otherwise pass open() and fail on the first write
+ * that touches the missing column. The lists are kept in lockstep with the
+ * INSERT statements below.
  */
 const REQUIRED_COLUMNS: Record<string, string[]> = {
   sessions: ['id', 'created_at', 'updated_at', 'metadata'],
-  messages: ['id', 'session_id', 'run_id', 'role', 'content', 'created_at'],
-  runs: ['id', 'session_id', 'agent_name', 'status', 'started_at'],
-  tool_calls: ['id', 'run_id', 'name', 'arguments', 'status', 'started_at'],
-  traces: ['id', 'session_id', 'started_at', 'status'],
-  spans: ['id', 'trace_id', 'name', 'started_at', 'status'],
+  messages: [
+    'id',
+    'session_id',
+    'run_id',
+    'role',
+    'content',
+    'name',
+    'tool_call_id',
+    'tool_calls',
+    'created_at',
+    'metadata',
+  ],
+  runs: [
+    'id',
+    'session_id',
+    'agent_name',
+    'status',
+    'started_at',
+    'completed_at',
+    'error',
+    'metadata',
+    'prompt_tokens',
+    'completion_tokens',
+    'total_tokens',
+  ],
+  tool_calls: [
+    'id',
+    'run_id',
+    'name',
+    'arguments',
+    'result',
+    'status',
+    'started_at',
+    'completed_at',
+    'error',
+  ],
+  traces: [
+    'id',
+    'session_id',
+    'run_id',
+    'agent_name',
+    'started_at',
+    'completed_at',
+    'status',
+    'metadata',
+  ],
+  spans: [
+    'id',
+    'trace_id',
+    'parent_id',
+    'name',
+    'started_at',
+    'completed_at',
+    'status',
+    'attributes',
+  ],
 };
 
 // ---------------------------------------------------------------------------

@@ -179,7 +179,7 @@ export async function startMinimalWsServer(
       },
     };
 
-    let buffered = Buffer.alloc(0);
+    let buffered: Buffer = Buffer.alloc(0);
     socket.on('data', (chunk: Buffer) => {
       buffered = drainFrames(Buffer.concat([buffered, chunk]), (opcode, payload) => {
         if (opcode === 0x8) {
