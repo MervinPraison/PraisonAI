@@ -838,7 +838,76 @@ class AgentTeam(SpawnAnnounceProtocol):
         The class was renamed from `AgentManager` to `AgentTeam` in v1.0.
         `AgentManager` and `Agents` remain as silent aliases for backward compatibility.
     """
-    
+
+    @staticmethod
+    def _adapt_single_agent_execution_config(execution, multi_agent_cls):
+        """Accept the single-agent ``ExecutionConfig`` on a team, loudly.
+
+        ``ExecutionConfig`` is exported at the package top level;
+        ``MultiAgentExecutionConfig`` is not, so ``AgentTeam(execution=
+        ExecutionConfig(max_iter=99))`` is an easy and natural mistake. It used
+        to be resolved against the wrong class and silently discarded whole.
+
+        Shared fields are carried over (``max_iter``; ``max_retry_limit`` ->
+        ``max_retries``) and a ``UserWarning`` names the right class and lists
+        any settings that have no team-level counterpart. A shared field is only
+        carried when the caller actually changed it, so the team keeps its own
+        defaults for anything left untouched (``ExecutionConfig.max_retry_limit``
+        defaults to 2, but the team default ``max_retries`` is 5 — an
+        ``ExecutionConfig(max_iter=99)`` must not silently drop team retries).
+        """
+        if execution is None or multi_agent_cls is None:
+            return execution
+        if isinstance(execution, multi_agent_cls):
+            return execution
+        try:
+            from ..config.feature_configs import ExecutionConfig
+        except ImportError:
+            return execution
+        if not isinstance(execution, ExecutionConfig):
+            return execution
+
+        import warnings
+        from dataclasses import fields as _dc_fields
+
+        defaults = ExecutionConfig()
+        shared = {"max_iter", "max_retry_limit"}
+
+        def _is_set(name):
+            # A user object with an exotic __eq__ must not blow up the warning
+            # path; treat an uncomparable value as explicitly set.
+            try:
+                return getattr(execution, name) != getattr(defaults, name)
+            except Exception:
+                return True
+
+        # Only carry a shared field when the caller changed it; otherwise let
+        # the team config keep its own (different) default.
+        carried = {}
+        if _is_set("max_iter"):
+            carried["max_iter"] = execution.max_iter
+        if _is_set("max_retry_limit"):
+            carried["max_retries"] = execution.max_retry_limit
+
+        dropped = sorted(
+            f.name for f in _dc_fields(execution)
+            if f.name not in shared and _is_set(f.name)
+        )
+        message = (
+            "AgentTeam(execution=...) expects MultiAgentExecutionConfig, not the "
+            "single-agent ExecutionConfig. max_iter and max_retry_limit were "
+            "carried over; pass MultiAgentExecutionConfig(max_iter=..., "
+            "max_retries=...) at the team level and ExecutionConfig(...) to the "
+            "individual Agent(...) instances."
+        )
+        if dropped:
+            message += (
+                " These settings have no team-level counterpart and were "
+                f"ignored: {', '.join(dropped)}."
+            )
+        warnings.warn(message, UserWarning, stacklevel=3)
+        return multi_agent_cls(**carried)
+
     def __init__(
         self,
         agents,
@@ -988,6 +1057,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Resolve EXECUTION param using canonical resolver
         # Supports: None, str preset, list [preset, overrides], Config, dict
         # ─────────────────────────────────────────────────────────────────────
+        # The top-level-exported ``ExecutionConfig`` is the *single-agent* class;
+        # this container's own class is ``MultiAgentExecutionConfig``. Passing
+        # the exported one used to be resolved against the wrong class and
+        # dropped whole - including ``max_iter``, which both classes define -
+        # with no error and no warning. Adapt the shared fields and say so.
+        execution = self._adapt_single_agent_execution_config(
+            execution, MultiAgentExecutionConfig
+        )
         _exec_config = resolve(
             value=execution,
             param_name="execution",
