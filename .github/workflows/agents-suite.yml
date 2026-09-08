@@ -89,10 +89,31 @@ jobs:
           #
           # These 35 directories pass clean (3002 tests, ~60s). The list is a
           # RATCHET: fix a failing area, add it here, and it can never silently
-          # regress. Areas still failing, by count:
-          #   tools(54) provider_matrix(38) gateway_routing(22) tool_guardrails(18)
+          # regress.
+          #
+          # The 297 are NOT 297 broken tests. Every failing file was re-run in
+          # isolation:
+          #     94 failures (18 files) PASS ALONE  -> test pollution
+          #    203 failures (47 files) fail alone  -> genuine
+          # tests/unit/tools shows it starkly: 54 failures in a full run, 5 when
+          # that directory runs by itself.
+          #
+          # Genuine clusters (isolated counts):
+          #   provider_matrix(44) gateway_routing(22) tool_guardrails(18)
           #   gateway_server(17) managed_backend(16) session(12) runtime(12)
-          #   knowledge(12) agent(9) ...and a long tail.
+          #   knowledge(12)
+          #
+          # On the pollution, so the next person does not repeat the search:
+          #   - It is CUMULATIVE. Neither the first 18 directories nor the last
+          #     28, nor all top-level test_*.py files, reproduce it; only the
+          #     whole suite does.
+          #   - The symptom for one victim is arguments not reaching the tool:
+          #     "fn() missing 1 required positional argument: 'x'" even though
+          #     execute_tool was passed {"x": "v"}.
+          #   - Resetting the approval and tool registries in an autouse fixture
+          #     changed nothing (still exactly 297), so neither is the leak.
+          #   Those 94 are likely cheap once the shared state is found; chasing
+          #   them as individual test failures would be the wrong approach.
           # No pipe: piping pytest into anything discards its exit code.
           python -m pytest \
             tests/unit/agents tests/unit/app tests/unit/auth tests/unit/background \
