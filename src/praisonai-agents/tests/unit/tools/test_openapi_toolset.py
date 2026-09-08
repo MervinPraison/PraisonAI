@@ -146,5 +146,91 @@ class TestSelection:
         assert OpenAPIToolset(spec_dict=spec).base_url == "https://api.old.com/v2"
 
 
+class TestPathParameterSafety:
+    """A model-supplied path value must not be able to change the host."""
+
+    def test_an_absolute_value_cannot_hijack_the_url(self, tools):
+        from urllib.parse import urlparse
+
+        request = tools["getPet"].build_request(petId="https://attacker.example/x")
+        assert request["url"].startswith("https://api.example.com/v1/pets/")
+        # The value is encoded into a single path segment; the host stays ours.
+        assert urlparse(request["url"]).netloc == "api.example.com"
+
+    def test_traversal_stays_one_segment(self, tools):
+        request = tools["getPet"].build_request(petId="../../admin")
+        assert request["url"].startswith("https://api.example.com/v1/pets/")
+        assert "/admin" not in request["url"]
+
+    def test_a_query_or_fragment_in_a_path_value_is_encoded(self, tools):
+        request = tools["getPet"].build_request(petId="a?b#c")
+        assert request["url"].endswith("/pets/a%3Fb%23c")
+
+
+class TestSwagger2Body:
+    """Swagger 2 declares the body as an in:body parameter, not requestBody."""
+
+    SWAGGER = {
+        "swagger": "2.0", "host": "api.old.com", "basePath": "/v2",
+        "schemes": ["https"],
+        "paths": {"/pets": {"post": {
+            "operationId": "createPet",
+            "parameters": [{"name": "pet", "in": "body", "required": True,
+                            "schema": {"type": "object", "properties": {
+                                "name": {"type": "string"}}}}]}}},
+    }
+
+    def _tool(self):
+        ts = OpenAPIToolset(spec_dict=self.SWAGGER)
+        return next(t for t in ts.get_tools() if t.name == "createPet")
+
+    def test_the_body_argument_is_exposed(self):
+        assert "pet" in self._tool().input_schema["properties"]
+
+    def test_the_body_argument_becomes_the_json_body(self):
+        request = self._tool().build_request(pet={"name": "Rex"})
+        assert request["json"] == {"name": "Rex"}
+
+
+class TestRelativeServer:
+    """A relative server URL in a remotely loaded spec must be resolved."""
+
+    def test_a_relative_server_is_resolved_against_the_spec_url(self):
+        spec = {"openapi": "3.0.0", "servers": [{"url": "/v1"}], "paths": {}}
+        ts = OpenAPIToolset(spec_dict=spec,
+                            spec_url="https://api.example.com/openapi.json")
+        assert ts.base_url == "https://api.example.com/v1"
+
+
+class TestBodyDoesNotLeakFrameworkArgs:
+    """Framework-injected kwargs (idempotency_key) must not reach the body."""
+
+    def test_an_undeclared_argument_is_dropped_from_the_body(self, tools):
+        request = tools["createPet"].build_request(
+            name="Rex", tag="dog", idempotency_key="abc-123")
+        assert request["json"] == {"name": "Rex", "tag": "dog"}
+        assert "idempotency_key" not in request["json"]
+
+
+class TestCleartextAuthRefused:
+    """Credentials must never be attached to an http:// endpoint."""
+
+    def test_auth_over_http_is_refused(self):
+        spec = {"swagger": "2.0", "host": "api.old.com", "basePath": "/v2",
+                "schemes": ["http"], "paths": {}}
+        with pytest.raises(ValueError, match="http"):
+            OpenAPIToolset(spec_dict=spec, auth={"type": "bearer", "token": "T"})
+
+    def test_https_is_preferred_when_offered(self):
+        spec = {"swagger": "2.0", "host": "api.old.com", "basePath": "/v2",
+                "schemes": ["http", "https"], "paths": {}}
+        assert OpenAPIToolset(spec_dict=spec).base_url == "https://api.old.com/v2"
+
+    def test_http_without_auth_is_allowed(self):
+        spec = {"swagger": "2.0", "host": "api.old.com", "basePath": "/v2",
+                "schemes": ["http"], "paths": {}}
+        assert OpenAPIToolset(spec_dict=spec).base_url == "http://api.old.com/v2"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

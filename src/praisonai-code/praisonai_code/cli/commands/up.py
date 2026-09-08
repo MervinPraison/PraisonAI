@@ -59,8 +59,15 @@ class ServiceManager:
         try:
             import requests
         except ImportError:
-            self.console.print(f"[yellow]⚠️ Cannot health-check {service_name} (requests not installed)[/yellow]")
-            return True
+            # Fail closed: without a client the service cannot be confirmed
+            # healthy, and returning True here let both callers mark a service
+            # "Running" that was never checked. Reporting an unverified service
+            # as ready is the very defect this command was fixed to avoid.
+            self.console.print(
+                f"[yellow]⚠️ Cannot health-check {service_name} "
+                "(requests not installed); treating as not ready. "
+                "Install with: pip install requests[/yellow]")
+            return False
         
         self.console.print(f"[cyan]Waiting for {service_name} at {url}...[/cyan]")
         

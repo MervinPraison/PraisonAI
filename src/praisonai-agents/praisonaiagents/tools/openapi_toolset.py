@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,7 @@ class OpenAPIOperation:
                  base_url: str, parameters: List[Dict[str, Any]],
                  body_schema: Optional[Dict[str, Any]],
                  input_schema: Dict[str, Any],
+                 body_param: Optional[str] = None,
                  auth: Optional[Dict[str, Any]] = None,
                  header_provider: Optional[Callable[[], Dict[str, str]]] = None,
                  timeout: int = 30):
@@ -106,6 +107,11 @@ class OpenAPIOperation:
         self.base_url = base_url
         self.parameters = parameters
         self.body_schema = body_schema
+        # Swagger 2 declares the whole request body as one named parameter
+        # (``in: body``). When set, that single argument *is* the JSON body
+        # rather than one property of it, and OpenAPI 3's property-spreading
+        # must not apply.
+        self.body_param = body_param
         self.input_schema = input_schema
         self.auth = auth or {}
         self.header_provider = header_provider
@@ -140,6 +146,8 @@ class OpenAPIOperation:
         query: Dict[str, Any] = {}
         headers = self._headers()
         body: Dict[str, Any] = {}
+        form: Dict[str, Any] = {}
+        swagger_body: Any = None
         consumed = set()
 
         for param in self.parameters:
@@ -150,16 +158,38 @@ class OpenAPIOperation:
             value = kwargs[pname]
             consumed.add(pname)
             if where == "path":
-                path = path.replace("{" + pname + "}", str(value))
+                # Percent-encode as a single path segment. A raw model-supplied
+                # value like ``../../admin`` or an absolute ``https://other/``
+                # would otherwise alter the path, query, fragment or host that
+                # ``urljoin`` builds, sending the configured credentials
+                # somewhere they were never meant to go.
+                path = path.replace("{" + pname + "}",
+                                    quote(str(value), safe=""))
             elif where == "query":
                 query[pname] = value
             elif where == "header":
                 headers[pname] = str(value)
+            elif where == "body":
+                # Swagger 2: this one argument is the entire JSON body.
+                swagger_body = value
+            elif where in ("formData", "form"):
+                form[pname] = value
 
-        if self.body_schema is not None:
+        if swagger_body is not None:
+            body = swagger_body
+        elif self.body_schema is not None:
+            # Only spread the body-schema's declared properties. Copying every
+            # unconsumed kwarg would leak framework-injected arguments (e.g. the
+            # durable-execution ``idempotency_key`` added for ``**kwargs``
+            # callables) into the request, breaking strict APIs and any schema
+            # with ``additionalProperties: false``.
+            props = (self.body_schema.get("properties")
+                     if isinstance(self.body_schema, dict) else None) or {}
+            allowed = set(props)
             for key, value in kwargs.items():
-                if key not in consumed:
-                    body[key] = value
+                if key in consumed or key not in allowed:
+                    continue
+                body[key] = value
 
         url = urljoin(self.base_url.rstrip("/") + "/", path.lstrip("/")) \
             if self.base_url else path
@@ -169,6 +199,8 @@ class OpenAPIOperation:
             request["params"] = query
         if body:
             request["json"] = body
+        if form:
+            request["data"] = form
         return request
 
     def __call__(self, **kwargs: Any) -> Any:
@@ -211,8 +243,18 @@ class OpenAPIToolset:
         if spec_dict is None and spec_str is None and spec_url is None:
             raise ValueError(
                 "OpenAPIToolset needs one of spec_dict=, spec_str= or spec_url=")
+        # Retained so a relative ``servers``/``basePath`` in a remotely loaded
+        # spec can be resolved back to the origin it was fetched from.
+        self._spec_url = spec_url
         self.spec = self._load(spec_dict, spec_str, spec_url)
         self.base_url = base_url or self._infer_base_url(self.spec)
+        if auth and str(self.base_url).lower().startswith("http://"):
+            # Refuse to attach credentials to a cleartext endpoint: bearer
+            # tokens, API keys and basic-auth values would travel in the clear.
+            raise ValueError(
+                "OpenAPIToolset refuses to send auth over http:// "
+                f"(base_url={self.base_url!r}); use https or pass base_url= "
+                "with an https endpoint.")
         self.auth = auth
         self.tool_filter = tool_filter
         self.tool_name_prefix = tool_name_prefix
@@ -243,27 +285,62 @@ class OpenAPIToolset:
                     "spec is not JSON and PyYAML is unavailable to parse it") from exc
             return yaml.safe_load(text)
 
-    @staticmethod
-    def _infer_base_url(spec: Dict[str, Any]) -> str:
+    def _infer_base_url(self, spec: Dict[str, Any]) -> str:
         servers = spec.get("servers")
         if isinstance(servers, list) and servers:
             first = servers[0]
             if isinstance(first, dict) and first.get("url"):
-                return str(first["url"])
+                url = str(first["url"])
+                # A spec loaded from a URL may declare a relative server such
+                # as ``/v1``; resolve it against the origin it was fetched from
+                # so generated operations do not produce hostless URLs.
+                if url.startswith("/") and self._spec_url:
+                    return urljoin(self._spec_url, url)
+                return url
         # Swagger 2.0
         host, base = spec.get("host"), spec.get("basePath", "")
         if host:
             schemes = spec.get("schemes") or ["https"]
-            return f"{schemes[0]}://{host}{base}"
+            # Prefer HTTPS whenever the spec offers it rather than blindly
+            # taking the first scheme, so authenticated requests are not sent
+            # in cleartext when a secure endpoint exists.
+            scheme = "https" if "https" in schemes else schemes[0]
+            return f"{scheme}://{host}{base}"
+        # Swagger 2 may omit host but still be reachable at the origin it was
+        # fetched from.
+        if self._spec_url and base:
+            return urljoin(self._spec_url, base)
         return ""
 
-    def _input_schema(self, operation: Dict[str, Any],
-                      parameters: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _body_info(self, operation: Dict[str, Any],
+                   parameters: List[Dict[str, Any]]):
+        """Resolve the JSON body schema and its Swagger-2 parameter name.
+
+        OpenAPI 3 carries the body under ``requestBody.content`` and spreads
+        its properties as arguments. Swagger 2 declares it as a single
+        ``in: body`` parameter whose ``schema`` is the whole body. Returns
+        ``(body_schema, body_param_name)`` where ``body_param_name`` is set
+        only for the Swagger 2 form.
+        """
+        body = operation.get("requestBody") or {}
+        content = (body.get("content") or {}).get("application/json") or {}
+        if content:
+            schema = _resolve_ref(content.get("schema") or {}, self.spec)
+            return (schema if isinstance(schema, dict) else None), None
+        for param in parameters:
+            if param.get("in") == "body":
+                schema = _resolve_ref(param.get("schema") or {}, self.spec)
+                return (schema if isinstance(schema, dict) else None), param.get("name")
+        return None, None
+
+    def _input_schema(self, parameters: List[Dict[str, Any]],
+                      body_schema: Optional[Dict[str, Any]],
+                      body_param: Optional[str]) -> Dict[str, Any]:
         properties: Dict[str, Any] = {}
         required: List[str] = []
         for param in parameters:
             pname = param.get("name")
-            if not pname:
+            if not pname or param.get("in") == "body":
                 continue
             schema = _resolve_ref(param.get("schema") or {"type": "string"}, self.spec)
             if param.get("description"):
@@ -272,10 +349,10 @@ class OpenAPIToolset:
             if param.get("required"):
                 required.append(pname)
 
-        body = operation.get("requestBody") or {}
-        content = (body.get("content") or {}).get("application/json") or {}
-        body_schema = _resolve_ref(content.get("schema") or {}, self.spec) if content else None
-        if isinstance(body_schema, dict) and body_schema.get("properties"):
+        if body_param:
+            # Swagger 2: expose the body as one named object argument.
+            properties.setdefault(body_param, body_schema or {"type": "object"})
+        elif isinstance(body_schema, dict) and body_schema.get("properties"):
             for key, value in body_schema["properties"].items():
                 properties.setdefault(key, value)
             required.extend(r for r in (body_schema.get("required") or [])
@@ -304,15 +381,17 @@ class OpenAPIToolset:
                     name = f"{self.tool_name_prefix}{name}"
                 parameters = [_resolve_ref(p, self.spec)
                               for p in (shared + (operation.get("parameters") or []))]
-                body = operation.get("requestBody")
+                body_schema, body_param = self._body_info(operation, parameters)
                 tools.append(OpenAPIOperation(
                     name=name,
                     description=(operation.get("summary")
                                  or operation.get("description") or ""),
                     method=method, path=path, base_url=self.base_url,
                     parameters=parameters,
-                    body_schema={} if body else None,
-                    input_schema=self._input_schema(operation, parameters),
+                    body_schema=body_schema,
+                    body_param=body_param,
+                    input_schema=self._input_schema(
+                        parameters, body_schema, body_param),
                     auth=self.auth, header_provider=self.header_provider,
                     timeout=self.timeout))
         return tools

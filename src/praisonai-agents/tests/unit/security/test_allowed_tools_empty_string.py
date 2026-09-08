@@ -96,6 +96,14 @@ class TestDocumentedBehaviourIsUnchanged:
         monkeypatch.setenv("HERMES_ONLY_TOOLS", "shell")
         assert _filter() == ["read_file"]
 
+    def test_an_empty_primary_still_wins_over_a_set_legacy(self, monkeypatch):
+        """Precedence is by presence, not truthiness: an empty ALLOWED_TOOLS
+        must be refused rather than silently deferring to HERMES_ONLY_TOOLS."""
+        monkeypatch.setenv("ALLOWED_TOOLS", "")
+        monkeypatch.setenv("HERMES_ONLY_TOOLS", "shell")
+        with pytest.raises(ValueError, match="ALLOWED_TOOLS"):
+            _filter()
+
     def test_the_error_names_the_variable_that_was_set(self, monkeypatch):
         """A message naming the wrong variable sends the user to the wrong line."""
         monkeypatch.setenv("HERMES_ONLY_TOOLS", "")

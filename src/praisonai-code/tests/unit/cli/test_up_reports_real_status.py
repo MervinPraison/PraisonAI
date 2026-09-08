@@ -76,6 +76,22 @@ class TestHealthCheckResultIsUsed:
         assert manager.wait_for_service(
             "http://127.0.0.1:59997", "Langflow", timeout=1) is False
 
+    def test_missing_requests_reports_not_ready(self, manager, monkeypatch):
+        """Without a client the health cannot be confirmed, so it must fail
+        closed rather than returning True and marking the service ready."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_requests(name, *args, **kwargs):
+            if name == "requests":
+                raise ImportError("requests not installed")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_requests)
+        assert manager.wait_for_service(
+            "http://127.0.0.1:59997", "Langflow", timeout=1) is False
+
     def test_the_command_gates_on_that_result(self):
         """Guards the wiring, not just the helper.
 
