@@ -195,3 +195,12 @@ _LAZY_GROUPS = {
 
 # Create the __getattr__ function using centralized utility
 __getattr__ = create_lazy_getattr_with_groups(_LAZY_GROUPS, __name__)
+
+# Portable run state: move a durable run between processes that share no disk.
+from .portable import (  # noqa: E402
+    export_run,
+    export_run_json,
+    import_run,
+    import_run_json,
+    PortableRunError,
+)
