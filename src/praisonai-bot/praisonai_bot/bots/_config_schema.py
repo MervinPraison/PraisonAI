@@ -484,6 +484,25 @@ class ChannelConfigSchema(BaseModel):
             )
         return v
     
+    @field_validator("allowlist", "blocklist", "allowed_users", mode="before")
+    @classmethod
+    def split_comma_separated(cls, v):
+        """Accept a comma-separated string, not just a list.
+
+        These were widened to List[str] "for consistency", which made YAML
+        reject the exact form the CLI accepts: `--respond-to 123,456` is split
+        on commas in bots_cli (allowed_numbers = respond_to_raw.split(",")),
+        but `allowed_users: "123,456"` in bot.yaml raised a ValidationError.
+        Same setting, same value, two entry points, one of them broken.
+
+        Comma-separated strings are already this schema's convention -- see
+        admin_users and user_allowed_commands directly below these fields.
+        Lists pass through untouched.
+        """
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
     @field_validator("token", "app_token", "verify_token", mode="before")
     @classmethod
     def resolve_secret_ref(cls, v):
