@@ -6,6 +6,8 @@ Tests IndexResult, CorpusStats, incremental indexing, and .praisonignore support
 
 import os
 import tempfile
+
+import pytest
 import time
 
 
@@ -280,6 +282,10 @@ class TestFileTracker:
             assert tracker2.has_changed(test_file) is False
 
 
+@pytest.mark.live  # embeds every chunk through the configured provider:
+# a real network call. Unmarked, `pytest tests/unit` issued live embedding
+# requests and failed on any key lacking access to the default model. CI
+# sets PRAISONAI_LIVE_TESTS=0 (tests/conftest.py), so these skip there.
 class TestKnowledgeIndex:
     """Tests for Knowledge.index() method."""
     

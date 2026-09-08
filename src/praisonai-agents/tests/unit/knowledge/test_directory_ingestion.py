@@ -30,6 +30,10 @@ def _make_knowledge_or_skip():
 
 
 @requires_knowledge
+@pytest.mark.live  # embeds every chunk through the configured provider:
+# a real network call. Unmarked, `pytest tests/unit` issued live embedding
+# requests and failed on any key lacking access to the default model. CI
+# sets PRAISONAI_LIVE_TESTS=0 (tests/conftest.py), so these skip there.
 class TestDirectoryIngestion:
     """Test that directories are properly processed and file contents stored."""
     
@@ -141,6 +145,10 @@ class TestDirectoryIngestion:
 
 
 @requires_knowledge
+@pytest.mark.live  # embeds every chunk through the configured provider:
+# a real network call. Unmarked, `pytest tests/unit` issued live embedding
+# requests and failed on any key lacking access to the default model. CI
+# sets PRAISONAI_LIVE_TESTS=0 (tests/conftest.py), so these skip there.
 class TestContextBuilderUsesText:
     """Test that context builder injects text, not paths."""
     
