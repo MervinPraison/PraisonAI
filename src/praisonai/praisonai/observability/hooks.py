@@ -79,11 +79,44 @@ _agentops_lock = threading.Lock()
 
 
 def _get_run_stack() -> List[ObservabilityRun]:
+    """Return a snapshot of the current context's run stack (never the live list).
+
+    The ``ContextVar`` value is treated as **immutable**: readers get a copy and
+    writers (:func:`_push_run`/:func:`_pop_run`/:func:`_remove_run`) always
+    ``set`` a brand-new list. This is deliberate — a ``ContextVar`` copied into a
+    child context (``asyncio.create_task``/``asyncio.to_thread``/``copy_context``)
+    shares the *same underlying object*, so mutating a list in place would let a
+    spawned task append to or pop from its parent's stack and cross-finalize a
+    sibling run. Copy-on-write keeps each context's stack genuinely isolated.
+    """
     stack = _run_stack.get()
-    if stack is None:
-        stack = []
-        _run_stack.set(stack)
-    return stack
+    return list(stack) if stack else []
+
+
+def _push_run(run: ObservabilityRun) -> None:
+    """Append ``run`` to this context's stack via copy-on-write."""
+    stack = _run_stack.get()
+    _run_stack.set(([*stack, run]) if stack else [run])
+
+
+def _pop_run() -> Optional[ObservabilityRun]:
+    """Pop and return this context's most-recent run via copy-on-write."""
+    stack = _run_stack.get()
+    if not stack:
+        return None
+    new_stack = list(stack)
+    run = new_stack.pop()
+    _run_stack.set(new_stack)
+    return run
+
+
+def _remove_run(run: ObservabilityRun) -> None:
+    """Remove ``run`` from this context's stack (if present) via copy-on-write."""
+    stack = _run_stack.get()
+    if not stack or run not in stack:
+        return
+    new_stack = [r for r in stack if r is not run]
+    _run_stack.set(new_stack)
 
 
 class _FanoutSink:
@@ -162,7 +195,7 @@ def init_observability(
     Initialize observability providers (AgentOps, etc.) if available.
 
     Returns a per-run :class:`ObservabilityRun` handle. The handle is also
-    pushed onto a thread-local stack so a decoupled ``finalize_observability``
+    pushed onto a per-context stack so a decoupled ``finalize_observability``
     call (which only receives the framework tag) still tears down exactly this
     run. Callers may keep the handle and pass it back explicitly for the
     sanctioned, fully-scoped API.
@@ -205,7 +238,7 @@ def init_observability(
                 run._emitter_swapped = True
                 _swapped_runs.append(run)
 
-    _get_run_stack().append(run)
+    _push_run(run)
 
     # Future: Add other observability providers here
     # _init_langfuse(framework_tag, tags)
@@ -230,20 +263,15 @@ def finalize_observability(
         framework_tag: Framework name for context (reserved for future observability providers)
         status: Session status ("Success", "Failure", etc.)
         run: Explicit per-run handle to tear down. When omitted, the most recent
-            run started on this thread is popped and torn down, preserving the
+            run started in this context is popped and torn down, preserving the
             legacy void-returning call pattern while staying concurrency-safe.
     """
     if run is None:
-        stack = _get_run_stack()
-        run = stack.pop() if stack else None
+        run = _pop_run()
     else:
-        # Explicit handle: remove it from the thread-local stack if present so a
+        # Explicit handle: remove it from the context stack if present so a
         # later void-call doesn't tear it down twice.
-        stack = _get_run_stack()
-        try:
-            stack.remove(run)
-        except ValueError:
-            pass
+        _remove_run(run)
 
     # End AgentOps against THIS run's session (resolved above) so overlapping
     # runs never finalize each other's session. Done before the sink teardown
