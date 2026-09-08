@@ -429,6 +429,51 @@ def serve_ui(
         raise typer.Exit(4)
 
 
+def _load_gateway_agents(agents_file: str, output):
+    """Load an agents YAML file into a list of ``Agent`` objects.
+
+    The integrated gateway host forwards ``agents`` (a parsed list) to
+    ``configure_host``; it does not accept a file path. Parse the YAML here and
+    fail loudly (exit 2) on a missing/malformed/empty file rather than silently
+    starting an empty gateway.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(agents_file):
+        output.print_error(f"Agent file not found: {agents_file}")
+        raise typer.Exit(2)
+    try:
+        with open(agents_file, "r") as f:
+            config = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        output.print_error(f"Could not read agent file {agents_file}: {e}")
+        raise typer.Exit(2)
+
+    agents_cfg = config.get("agents") if isinstance(config, dict) else None
+    if not isinstance(agents_cfg, list) or not agents_cfg:
+        output.print_error(f"Agent file {agents_file} has no 'agents' list")
+        raise typer.Exit(2)
+
+    from praisonaiagents import Agent
+
+    agents = []
+    for entry in agents_cfg:
+        if not isinstance(entry, dict):
+            output.print_error(
+                f"Agent file {agents_file} contains a non-mapping agent entry"
+            )
+            raise typer.Exit(2)
+        agents.append(
+            Agent(
+                name=entry.get("name", "agent"),
+                instructions=entry.get("instructions", ""),
+                llm=entry.get("llm"),
+            )
+        )
+    return agents
+
+
 @app.command("ui-gateway")
 def serve_ui_gateway(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
@@ -455,20 +500,11 @@ def serve_ui_gateway(
         run_integrated_gateway = getattr(_mod, "run_integrated_gateway")
         kwargs = dict(host=host, port=port, title=title, style=style)
         # `--agents` was declared (and used in this command's own docstring
-        # example) but never forwarded. Pass it only when supplied, and only
-        # when the gateway host accepts it, so an older praisonai-bot still
-        # starts instead of raising TypeError.
+        # example) but never forwarded. The gateway host forwards **kwargs to
+        # ``configure_host``, which accepts a parsed ``agents`` list (not a
+        # file path), so load the YAML here and pass ``agents=[...]``.
         if agents_file:
-            import inspect
-
-            if "agents_file" in inspect.signature(run_integrated_gateway).parameters:
-                kwargs["agents_file"] = agents_file
-            else:
-                output.print_error(
-                    "--agents is not supported by the installed praisonai-bot "
-                    "gateway host; upgrade praisonai-bot to use it."
-                )
-                raise typer.Exit(2)
+            kwargs["agents"] = _load_gateway_agents(agents_file, output)
         run_integrated_gateway(**kwargs)
     except ImportError as e:
         output.print_error(f"UI-Gateway module not available: {e}")

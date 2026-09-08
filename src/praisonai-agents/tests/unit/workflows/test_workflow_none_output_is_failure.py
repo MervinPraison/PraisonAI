@@ -101,6 +101,39 @@ class TestAgentStepProducingNothingFailsTheRun:
         assert "error" not in result
 
 
+class TestContinuedFailureKeepsItsReason:
+    """A None-output step with on_error='continue' must still carry its reason.
+
+    The run continues past the failed step, so it takes the general result path
+    rather than the on_error='stop' branch. That path used to omit the step's
+    error, so the final result fell back to the generic 'step(s) failed: <name>'
+    text instead of the computed 'agent produced no output' diagnostic.
+    """
+
+    def test_continued_none_step_reports_its_reason_not_the_generic_fallback(self):
+        first = Task(
+            name="first", agent=_NullAgent(), action="do it", max_retries=0
+        )
+        first.on_error = "continue"
+        wf = Workflow(
+            name="continue-flow",
+            steps=[
+                first,
+                Task(name="second", agent=_RealAgent(), action="Write a haiku", max_retries=0),
+            ],
+        )
+        result = wf.start("go")
+        assert result["status"] == "failed"
+        failed = [s for s in result["steps"] if s.get("status") == "failed"]
+        assert failed and failed[0]["step"] == "first"
+        assert "produced no output" in (failed[0].get("error") or ""), (
+            "a continued failure lost its diagnostic reason"
+        )
+        assert "produced no output" in result.get("error", ""), (
+            "the final result must surface the real reason, not the fallback"
+        )
+
+
 class TestHandlerStepsAreNotJudgedThisWay:
     """A custom handler returning None is legitimate -- leave it alone."""
 

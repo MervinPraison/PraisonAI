@@ -1818,13 +1818,19 @@ class AgentFlow:
                 except Exception as e:
                     logger.error(f"Failed to save output to file: {e}")
             
-            # Store result
-            results.append({
+            # Store result. A step that failed under on_error="continue" reaches
+            # here (the on_error="stop" branch above already returned); carry its
+            # failure_reason through so the final result surfaces *why* it failed
+            # rather than the generic "step(s) failed: <name>" fallback.
+            step_record = {
                 "step": step.name,
                 "output": output,
                 "status": self.step_statuses.get(step.name, "completed"),
                 "retries": retry_count
-            })
+            }
+            if step_failed and failure_reason:
+                step_record["error"] = failure_reason
+            results.append(step_record)
             previous_output = output
             
             if verbose:
