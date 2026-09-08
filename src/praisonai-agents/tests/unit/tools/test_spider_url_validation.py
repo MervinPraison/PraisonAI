@@ -29,7 +29,16 @@ def test_rejects_control_characters():
     assert spider._validate_url("http://example.com\r\n.evil.com") is False
 
 
-def test_allows_normal_public_url():
+def test_allows_normal_public_url(monkeypatch):
+    # Pin the resolver to a public address so the test does not depend on live
+    # DNS for ``example.com`` (which would fail on an offline CI runner).
+    import socket
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     spider = SpiderTools()
     assert spider._validate_url("https://example.com/path?q=1") is True
 
@@ -99,8 +108,17 @@ def test_a_trailing_dot_does_not_evade_the_check():
     assert spider._validate_url("http://0177.0.0.1.:8765/") is False
 
 
-def test_ordinary_public_hosts_are_still_allowed():
+def test_ordinary_public_hosts_are_still_allowed(monkeypatch):
     """The guard must not become a blanket deny."""
+    import socket
+
+    # ``1.1.1.1`` is a literal and needs no resolver; pin DNS only so the
+    # ``example.com`` assertion stays hermetic on offline CI.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     spider = SpiderTools()
     assert spider._validate_url("https://example.com/path") is True
     assert spider._validate_url("http://1.1.1.1/") is True

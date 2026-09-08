@@ -167,6 +167,15 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
                 pinned = pinned_path.read_text(encoding="utf-8").strip()
                 if pinned in available:
                     return pinned
+                # Pinned commit is no longer a root here (history rewritten, or
+                # a shallow/partial clone). Re-pin to the freshly chosen root so
+                # the identity can't keep drifting on every later invocation --
+                # otherwise a subsequent root-set change re-selects and orphans
+                # the session history again.
+                try:
+                    pinned_path.write_text(chosen, encoding="utf-8")
+                except OSError:
+                    pass
             else:
                 # Exclusive create, like the cached id below: concurrent first
                 # runs must agree rather than each pinning its own choice.

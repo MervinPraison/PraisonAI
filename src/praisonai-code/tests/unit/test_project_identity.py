@@ -292,6 +292,11 @@ def test_a_pin_naming_a_vanished_commit_is_not_trusted(tmp_path):
     pin = Path(_git_out(repo, "rev-parse", "--git-common-dir").strip())
     if not pin.is_absolute():
         pin = (repo / pin).resolve()
-    (pin / "praisonai-root-commit").write_text("0" * 40)
+    pin_file = pin / "praisonai-root-commit"
+    pin_file.write_text("0" * 40)
 
     assert get_git_root_commit(str(repo)) == real_root
+    # A stale pin must be *repaired*, not merely ignored: otherwise every later
+    # call recomputes and a subsequent root-set change can drift again
+    # (Greptile P1). The file should now name the freshly chosen root.
+    assert pin_file.read_text(encoding="utf-8").strip() == real_root
