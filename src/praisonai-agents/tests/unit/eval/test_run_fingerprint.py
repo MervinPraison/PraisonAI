@@ -73,6 +73,42 @@ class TestPrivacy:
         assert parts["prompt"] and parts["prompt"] != secret
 
 
+class TestPackageExports:
+    def test_fingerprint_api_is_publicly_exported(self):
+        """The guard is useless if callers cannot import it -- ``import *``,
+        ``dir()`` and tab-completion must all surface it."""
+        import praisonaiagents.eval as pkg
+
+        for name in (
+            "FINGERPRINT_VERSION",
+            "run_fingerprint",
+            "fingerprint_parts",
+            "compare_fingerprints",
+            "assert_comparable",
+            "FingerprintMismatch",
+        ):
+            assert name in pkg.__all__, f"{name} missing from __all__"
+            assert getattr(pkg, name) is not None
+            assert name in dir(pkg), f"{name} missing from dir()"
+
+    def test_lazy_import_map_has_no_duplicate_keys(self):
+        """A duplicated lazy entry silently shadows the earlier one -- assert the
+        map is defined once per name."""
+        import ast
+        import praisonaiagents.eval as pkg
+
+        src = open(pkg.__file__).read()
+        module = ast.parse(src)
+        for node in ast.walk(module):
+            if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == "_LAZY_IMPORTS" for t in node.targets
+            ):
+                keys = [k.value for k in node.value.keys]
+                assert len(keys) == len(set(keys)), (
+                    f"duplicate keys: {sorted({k for k in keys if keys.count(k) > 1})}"
+                )
+
+
 class TestSuiteIntegration:
     def test_a_suite_result_carries_its_fingerprint(self):
         from praisonaiagents.eval.suite import EvalSuite
