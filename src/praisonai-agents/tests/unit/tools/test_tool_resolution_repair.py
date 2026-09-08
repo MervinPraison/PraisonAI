@@ -101,18 +101,31 @@ def test_runtime_valueerror_omits_parameter_hint():
 
 
 def test_unknown_tool_message_reaches_model_via_public_path():
+    """An unknown tool RETURNS actionable feedback; it does not abort the run.
+
+    This expected ToolExecutionError. #3309 ("self-repair and actionable
+    feedback on unknown tool calls") deliberately changed the unknown-tool case
+    to return {"error": ..., "available_tools": [...]} so the model can pick a
+    real tool and retry, instead of the run being finalized failed on what is a
+    recoverable mistake. The conversion at the agentic-loop boundary only raises
+    for results marked retryable or raised-exception, so this dict stays a dict.
+
+    The sibling test below still expects a raise, and correctly: a bind failure
+    is the tool itself throwing, not a name the model can simply correct.
+    """
     def web_search(query: str) -> str:
         """Search the web."""
         return query
 
-    from praisonaiagents.errors import ToolExecutionError
-
     agent = _make_agent([web_search])
 
-    with pytest.raises(ToolExecutionError) as exc:
-        agent.execute_tool("totally_made_up_tool", {})
-    assert "not found" in str(exc.value)
-    assert "web_search" in str(exc.value)
+    result = agent.execute_tool("totally_made_up_tool", {})
+
+    assert isinstance(result, dict)
+    assert "not found" in result["error"]
+    # The available names must reach the model, or it cannot self-repair.
+    assert "web_search" in result["error"]
+    assert result["available_tools"] == ["web_search"]
 
 
 def test_bind_failure_parameter_hint_reaches_model_via_public_path():
