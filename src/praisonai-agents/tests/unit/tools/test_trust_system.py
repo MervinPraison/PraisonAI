@@ -13,6 +13,7 @@ import pytest
 import json
 from unittest.mock import patch, MagicMock
 
+from praisonaiagents.tools import trust as trust_module
 from praisonaiagents.tools.trust import (
     wrap_if_external, 
     wrap_request_payload,
@@ -113,7 +114,11 @@ class TestRegistryIntegration:
         assert registry.get_trust_level("trusted_tool") == "trusted"
         assert registry.get_trust_level("unknown_tool") is None
 
-    @patch('praisonaiagents.tools.trust.get_registry')
+    # get_registry is imported inside _is_tool_external as
+    # `from .registry import get_registry`, so it is never an attribute of
+    # trust -- patching it there raised AttributeError. The call resolves
+    # against the source module at call time.
+    @patch('praisonaiagents.tools.registry.get_registry')
     def test_wrap_if_external_uses_registry(self, mock_get_registry):
         """wrap_if_external should check registry for tool trust level."""
         mock_registry = MagicMock()
@@ -157,11 +162,27 @@ class TestExternalToolDetection:
 
     def test_add_external_tool(self):
         """Adding external tools should work."""
-        original_count = len(EXTERNAL_TOOL_NAMES)
+        original = trust_module.EXTERNAL_TOOL_NAMES
+        original_count = len(original)
+        try:
+            self._check_add(original_count)
+        finally:
+            # add_external_tool mutates process-global state with no way to
+            # undo it, so restore the original set rather than leaking a fake
+            # tool name into every test that runs after this one.
+            trust_module.EXTERNAL_TOOL_NAMES = original
+
+    def _check_add(self, original_count):
         add_external_tool("new_external_tool")
-        
-        assert "new_external_tool" in EXTERNAL_TOOL_NAMES
-        assert len(EXTERNAL_TOOL_NAMES) == original_count + 1
+
+        # Read through the module, not the name imported at the top of this
+        # file: add_external_tool REBINDS the module global
+        # (EXTERNAL_TOOL_NAMES = EXTERNAL_TOOL_NAMES | {...}) because the set is
+        # a frozenset, so a `from ... import EXTERNAL_TOOL_NAMES` binding still
+        # points at the old object. The behaviour is correct -- is_external_tool
+        # below returns True -- only this test's stale reference was wrong.
+        assert "new_external_tool" in trust_module.EXTERNAL_TOOL_NAMES
+        assert len(trust_module.EXTERNAL_TOOL_NAMES) == original_count + 1
         assert is_external_tool("new_external_tool")
 
 

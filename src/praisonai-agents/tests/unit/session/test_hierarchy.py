@@ -434,7 +434,14 @@ class TestHierarchicalSessionStore:
         
         session2 = self.store.get_extended_session(session_id)
         assert len(session2.messages) == 1
-        assert session2 is session1  # Should be same cached object
+        # NOT `session2 is session1`. get_extended_session deliberately reads
+        # fresh from disk on every call: #1785 ("stale extended cache after
+        # cross-instance writes") found it returning TRUNCATED message lists
+        # after a cross-process write, and correctness was chosen over reusing
+        # the cached object. The cache is still maintained and still valid --
+        # _is_cache_valid above -- it is just no longer what this accessor
+        # returns. Equality is the guarantee that survives.
+        assert session2 == session1
     
     def test_force_reload_bypasses_cache(self):
         """Test that force_reload=True always loads from disk."""
