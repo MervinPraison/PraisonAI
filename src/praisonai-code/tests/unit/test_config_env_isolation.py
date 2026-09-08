@@ -21,7 +21,7 @@ import pytest
 from praisonai_code.cli.configuration import resolver as resolver_mod
 from praisonai_code.cli.configuration.resolver import ConfigResolver
 
-from .conftest import CONFIG_ENV_VARS
+from .conftest import CONFIG_ENV_VARS, CONFIG_USER_ENV_VARS
 
 
 def _env_vars_read_by_load_env_config():
@@ -95,4 +95,44 @@ def test_without_the_export_there_is_no_environment_layer(isolated_config_env,
     assert config.sources == ["defaults"], (
         "an environment layer appeared with nothing exported -- the fixture "
         "is missing a variable the resolver reads"
+    )
+
+
+def test_the_fixture_covers_the_user_config_env_vars():
+    """The user-config layer (``_load_env_user_config``) reads these via module
+    constants, so the AST guard above cannot see them. Pin them against the
+    resolver's own constants so a rename there fails here rather than silently
+    reopening the leak.
+    """
+    read = {resolver_mod.CONFIG_CONTENT_ENV, resolver_mod.CONFIG_PATH_ENV}
+    missing = sorted(read - set(CONFIG_USER_ENV_VARS))
+    assert not missing, (
+        "ConfigResolver reads these user-config env vars and "
+        f"isolated_config_env does not scrub them: {missing}"
+    )
+
+
+@pytest.fixture
+def _export_user_config(monkeypatch):
+    """Export a user-config blob *before* ``isolated_config_env`` runs.
+
+    Ordering matters: a fixture listed earlier in a test's parameter list is
+    set up first, so this stands in for the developer's already-exported shell
+    that the isolation fixture must scrub. Setting it inside the test (after the
+    fixture) would instead prove the test controls its own environment, which is
+    the opposite assertion.
+    """
+    monkeypatch.setenv("PRAISONAI_CONFIG_CONTENT", '{"model": "leaked-model"}')
+
+
+def test_an_exported_user_config_does_not_reach_the_resolver(_export_user_config,
+                                                             isolated_config_env,
+                                                             monkeypatch,
+                                                             tmp_path):
+    """A pre-existing PRAISONAI_CONFIG_CONTENT export must not survive the fixture."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    config = ConfigResolver(cwd=tmp_path).resolve()
+    assert config.sources == ["defaults"], (
+        "an exported user-config blob leaked into resolution -- the fixture "
+        "did not scrub PRAISONAI_CONFIG_CONTENT"
     )

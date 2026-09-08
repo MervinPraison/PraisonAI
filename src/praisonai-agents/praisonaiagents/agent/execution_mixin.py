@@ -2052,6 +2052,20 @@ Write the complete compiled report:"""
                             "timeout": True,
                             "_praison_retryable": False,
                         }
+                        # wait_for cancels breaker.acall, so its except-clause never
+                        # ran and the breaker did NOT count this outcome. The
+                        # post-execution breaker_record below is skipped whenever a
+                        # breaker exists (to avoid double-counting the outcomes the
+                        # breaker already saw) — but a cancelled acall saw nothing.
+                        # Record the timeout here so repeated timeouts still open the
+                        # circuit; guard the call so a plain instance without a
+                        # breaker record (breaker fell back to direct invocation)
+                        # doesn't raise.
+                        if breaker is not None:
+                            _timeout_record = getattr(
+                                self, '_circuit_breaker_record', None)
+                            if _timeout_record is not None:
+                                _timeout_record(function_name, False)
                 else:
                     try:
                         result = await _invoke_guarded()

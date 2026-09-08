@@ -201,6 +201,38 @@ def test_async_breaker_opens_after_raised_exceptions():
     assert not any(r.get("circuit_open") for r in results[:5])
 
 
+def test_async_breaker_opens_after_timeouts():
+    """A tool that keeps *timing out* must also open the breaker. ``wait_for``
+    cancels ``breaker.acall``, so the breaker never saw the outcome and the
+    post-execution record block is skipped whenever a breaker exists — leaving
+    repeated timeouts uncounted. The timeout branch records the failure itself
+    so five timeouts open the circuit and the sixth short-circuits.
+    """
+    import time
+
+    def slow(x: str = "") -> str:
+        time.sleep(0.5)
+        return "done"
+
+    agent = Agent(name="t", instructions="x", tools=[slow])
+    # ToolConfig.timeout is int-seconds; set the resolved attribute directly to
+    # a sub-second value so the test stays fast while exercising the same path.
+    agent._tool_timeout = 0.05
+
+    async def _drive():
+        results = []
+        for _ in range(6):
+            results.append(
+                await agent._execute_tool_async_impl("slow", {}, None, None)
+            )
+        return results
+
+    results = asyncio.run(_drive())
+    assert results[-1].get("circuit_open") is True
+    assert all(r.get("timeout") for r in results[:5])
+    assert not any(r.get("circuit_open") for r in results[:5])
+
+
 def test_async_breaker_is_per_instance():
     """One agent's open breaker must not trip a distinct agent's same-named
     tool — the breaker key is instance-scoped (``tool_{id(self)}_{name}``)."""

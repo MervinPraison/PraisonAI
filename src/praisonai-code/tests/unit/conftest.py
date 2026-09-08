@@ -28,6 +28,18 @@ CONFIG_ENV_VARS = (
     "PRAISONAI_TELEMETRY",
 )
 
+# Read by ``_load_env_user_config`` (not ``_load_env_config``), so the AST guard
+# in test_config_env_isolation.py does not police these. They stand in for the
+# whole user-config layer: an exported ``PRAISONAI_CONFIG_CONTENT`` (inline blob)
+# or ``PRAISONAI_CONFIG`` (explicit path) would suppress file discovery and feed
+# the developer's own config into resolution -- the same machine-dependence the
+# fixture exists to prevent. Kept in a separate tuple so the two guards stay
+# distinct: one polices the environment layer, this covers the user-config layer.
+CONFIG_USER_ENV_VARS = (
+    "PRAISONAI_CONFIG_CONTENT",
+    "PRAISONAI_CONFIG",
+)
+
 
 @pytest.fixture
 def isolated_config_env(monkeypatch):
@@ -39,6 +51,10 @@ def isolated_config_env(monkeypatch):
     ``config.sources`` gained an "environment" entry and the resolved model
     became whatever they had set. The tests passed or failed per machine, and
     on CI (where nothing is exported) the gap was invisible.
+
+    ``_load_env_user_config`` reads PRAISONAI_CONFIG_CONTENT / PRAISONAI_CONFIG,
+    which likewise override file discovery with the developer's own config, so
+    they are scrubbed too.
     """
-    for name in CONFIG_ENV_VARS:
+    for name in CONFIG_ENV_VARS + CONFIG_USER_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
