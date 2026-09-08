@@ -15,7 +15,14 @@ from praisonaiagents.runtime.middleware import (
     NormalizedToolResult, 
     MiddlewareContext
 )
-from praisonaiagents.runtime.registry import RuntimeRegistry, get_default_registry
+# This file used to import `get_default_registry` from runtime.registry. The
+# middleware registry has since been split into its own module, so the name it
+# wanted now lives in runtime.middleware_registry. Nothing in CI ran this file,
+# so the import break went unnoticed.
+from praisonaiagents.runtime.middleware_registry import MiddlewareRegistry
+from praisonaiagents.runtime.middleware_registry import (
+    get_default_middleware_registry as get_default_registry,
+)
 
 
 @dataclass
@@ -71,7 +78,7 @@ class StubHarnessMiddleware:
 
 def test_middleware_registry():
     """Test basic middleware registry functionality."""
-    registry = RuntimeRegistry()
+    registry = MiddlewareRegistry()
     middleware = StubHarnessMiddleware()
     
     # Test registration

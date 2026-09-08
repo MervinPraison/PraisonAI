@@ -10,8 +10,11 @@ Provides enhanced retrieval with:
 No heavy imports at module level.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -53,6 +56,14 @@ class RetrievalResult:
     reranked: bool = False
     filtered: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    #: True when the knowledge store raised instead of returning matches. An
+    #: empty ``chunks`` list alone cannot tell a caller which happened, and the
+    #: two mean opposite things: "nothing matched" is an answer, "the store is
+    #: unreachable" means the agent is about to answer without its knowledge
+    #: base and should say so.
+    retrieval_failed: bool = False
+    #: The store's error message when ``retrieval_failed`` is True.
+    error: Optional[str] = None
 
 
 class SmartRetriever:
@@ -127,6 +138,13 @@ class SmartRetriever:
             user_id=user_id,
             agent_id=agent_id,
         )
+        # Surface a store failure on the result. Without this the caller sees an
+        # empty chunk list and cannot tell whether the knowledge base had no
+        # match or was never reached.
+        if getattr(self, "_last_error", None):
+            result.retrieval_failed = True
+            result.error = self._last_error
+            result.metadata["retrieval_error"] = self._last_error
         
         chunks = self._normalize_results(search_results)
         result.total_found = len(chunks)
@@ -160,6 +178,7 @@ class SmartRetriever:
         agent_id: Optional[str] = None,
     ) -> Any:
         """Perform search on knowledge store."""
+        self._last_error = None
         try:
             return self._knowledge.search(
                 query,
@@ -167,7 +186,22 @@ class SmartRetriever:
                 agent_id=agent_id,
                 limit=top_k,
             )
-        except Exception:
+        except Exception as e:
+            # Record the failure rather than returning a bare [] that is
+            # indistinguishable from "nothing matched". Knowledge.search itself
+            # re-raises, so reaching here means the store really is broken --
+            # misconfigured, unreachable, or refusing auth -- and the agent is
+            # about to answer with no context at all.
+            self._last_error = f"{type(e).__name__}: {e}"
+            # Do not log the raw query: it may carry personal data, credentials
+            # or proprietary text, and this line lands at ERROR in application
+            # logs. The exception text is enough to diagnose the store; the
+            # query length is enough to tell an empty probe from a real one.
+            logger.error(
+                "Knowledge retrieval failed (query length %d): %s. "
+                "Returning no chunks; the answer will not use the knowledge base.",
+                len(query or ""), self._last_error,
+            )
             return []
     
     def _normalize_results(self, results: Any) -> List[Dict[str, Any]]:

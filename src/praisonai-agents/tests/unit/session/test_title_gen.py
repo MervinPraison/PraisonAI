@@ -11,7 +11,6 @@ from praisonaiagents.session.title import (
     generate_title_async,
     _create_fallback_title,
     _resolve_small_model,
-    _DEFAULT_SMALL_MODEL,
 )
 
 
@@ -151,7 +150,11 @@ class TestSmallModelResolution:
 
     def test_falls_back_to_default_when_nothing_set(self):
         """With nothing configured, preserve the historical default."""
-        assert _resolve_small_model(None, None) == _DEFAULT_SMALL_MODEL
+        # _DEFAULT_SMALL_MODEL was replaced by default_auxiliary_model(), resolved
+        # at call time so PRAISONAI_AUXILIARY_MODEL / OPENAI_MODEL_NAME set after
+        # import still take effect.
+        from praisonaiagents.llm.model_providers import default_auxiliary_model
+        assert _resolve_small_model(None, None) == default_auxiliary_model()
 
     def test_config_small_model_used(self, monkeypatch):
         """A configured defaults.small_model is used over the primary model."""

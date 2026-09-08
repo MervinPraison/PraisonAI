@@ -2,6 +2,18 @@
 import os
 import pytest
 from unittest.mock import patch, MagicMock
+
+# This module lives in the praisonaiagents test tree but reaches into the
+# praisonai wrapper for its CLI-handler cases. The wrapper is a separate,
+# optional package that is not installed when praisonaiagents is tested in
+# isolation (e.g. the agents-collect-gate). Skip the whole module rather than
+# fail collection when it is absent -- the agents-only assertions below still
+# run wherever the wrapper happens to be present.
+pytest.importorskip(
+    "praisonai.cli.features.agents",
+    reason="praisonai wrapper not installed (praisonaiagents tested in isolation)",
+)
+
 from praisonai.cli.features.agents import MultiAgentHandler
 
 
