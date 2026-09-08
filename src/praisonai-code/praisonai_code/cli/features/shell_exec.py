@@ -109,6 +109,11 @@ def find_shell_syntax(command: str) -> Optional[str]:
         if ch in ("\n", "\r"):
             return "newline"
         i += 1
+    if quote:
+        # An unterminated quote can hide an operator from this scan
+        # ('echo "a ; rm -rf /'), and shlex.split would raise on it anyway.
+        # Report it so the command is refused rather than waved through.
+        return "unterminated-quote"
     return None
 
 
