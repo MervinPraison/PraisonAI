@@ -119,7 +119,7 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="write_file", arguments={"path": "/tmp"}, risk_level="high")
 
-        with patch.object(backend, '_prompt_user', return_value=True):
+        with patch.object(backend, '_prompt_user', return_value=(True, 'once', None, None)):
             decision = backend.request_approval_sync(req)
         assert decision.approved is True
 
@@ -129,7 +129,7 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="kill_process", arguments={}, risk_level="critical")
 
-        with patch.object(backend, '_prompt_user', return_value=False):
+        with patch.object(backend, '_prompt_user', return_value=(False, 'once', None, None)):
             decision = backend.request_approval_sync(req)
         assert decision.approved is False
 
@@ -139,7 +139,7 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="x", arguments={}, risk_level="low")
 
-        with patch.object(backend, '_prompt_user', return_value=True):
+        with patch.object(backend, '_prompt_user', return_value=(True, 'once', None, None)):
             decision = asyncio.run(backend.request_approval(req))
         assert decision.approved is True
 
@@ -363,13 +363,41 @@ class TestApprovalRegistry:
         assert reg.is_already_approved("write_file", {}, agent_name="strict") is False
         assert reg.is_already_approved("write_file", {}, agent_name="permissive") is True
 
-    def test_yaml_approved_skips_backend(self):
+    def test_yaml_approved_is_recorded_and_readable(self):
+        """YAML pre-approval is consulted ABOVE approve_sync, not inside it.
+
+        This used to call approve_sync directly and expect it to honour the
+        YAML set. It never has: the standing-grant check lives in the caller
+        (agent/tool_execution.py, which ORs is_env_auto_approve,
+        is_yaml_approved, is_auto_approved and is_already_approved before
+        deciding to prompt) and in tools/tool_proxy.py. Asserting it one layer
+        too low made approve_sync fall through to the console backend, which
+        then tried to read stdin under pytest -- a failure that looked like
+        broken pre-approval when the product behaviour is correct.
+
+        It also uses a HIGH-risk tool rather than execute_command. A CRITICAL
+        tool can never be yaml-approved -- is_yaml_approved refuses it outright,
+        deliberately, so config cannot pre-approve the most dangerous calls. The
+        old test picked execute_command, which is critical, so it was asserting
+        something the design forbids.
+        """
         from praisonaiagents.approval.registry import ApprovalRegistry
         reg = ApprovalRegistry()
-        token = reg.set_yaml_approved_tools(["execute_command"])
-        decision = reg.approve_sync("agent", "execute_command", {})
-        assert decision.approved is True
-        reg.reset_yaml_approved_tools(token)
+        assert reg.get_risk_level("write_file") == "high"
+        assert reg.is_yaml_approved("write_file") is False
+        token = reg.set_yaml_approved_tools(["write_file"])
+        try:
+            assert reg.is_yaml_approved("write_file") is True
+            assert reg.is_yaml_approved("something_else") is False
+            # The safety property, pinned: critical stays un-approvable even
+            # when config names it.
+            reg.reset_yaml_approved_tools(token)
+            token = reg.set_yaml_approved_tools(["execute_command"])
+            assert reg.get_risk_level("execute_command") == "critical"
+            assert reg.is_yaml_approved("execute_command") is False
+        finally:
+            reg.reset_yaml_approved_tools(token)
+        assert reg.is_yaml_approved("write_file") is False
 
     def test_remove_backend(self):
         from praisonaiagents.approval.registry import ApprovalRegistry
