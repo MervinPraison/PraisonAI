@@ -137,17 +137,20 @@ export class EmbeddingAgent {
   async embed(text: string): Promise<EmbeddingResult> {
     this.log(`Generating embedding for text (${text.length} chars)...`);
 
-    // Placeholder implementation - real implementation would call OpenAI
-    // For now, return a mock embedding
-    const embedding = new Array(this.embeddingConfig.dimensions).fill(0).map(() => Math.random() - 0.5);
+    // Delegates to the real network-backed embedder (AI SDK preferred, native
+    // OpenAI fallback). This previously returned `Math.random()` vectors tagged
+    // with the configured model name, so every similarity score computed from
+    // them was noise that looked like a successful result. There is no random
+    // fallback: if the provider cannot be reached the error propagates.
+    const { embed: embedAsync } = await import('../llm/embeddings');
+    const result = await embedAsync(text, { model: this.model });
 
     return {
-      embedding,
+      embedding: result.embedding,
       model: this.model,
-      usage: {
-        promptTokens: Math.ceil(text.length / 4),
-        totalTokens: Math.ceil(text.length / 4),
-      },
+      usage: result.usage
+        ? { promptTokens: result.usage.tokens, totalTokens: result.usage.tokens }
+        : undefined,
     };
   }
 
@@ -160,22 +163,17 @@ export class EmbeddingAgent {
   async embedMany(texts: string[]): Promise<BatchEmbeddingResult> {
     this.log(`Generating embeddings for ${texts.length} texts...`);
 
-    const embeddings: number[][] = [];
-    let totalTokens = 0;
-
-    for (const text of texts) {
-      const result = await this.embed(text);
-      embeddings.push(result.embedding);
-      totalTokens += result.usage?.totalTokens || 0;
-    }
+    // One batched provider call rather than N sequential ones. Same honesty
+    // rule as embed(): a provider failure throws, it never degrades to noise.
+    const { embedMany: embedManyAsync } = await import('../llm/embeddings');
+    const result = await embedManyAsync(texts, { model: this.model });
 
     return {
-      embeddings,
+      embeddings: result.embeddings,
       model: this.model,
-      usage: {
-        promptTokens: totalTokens,
-        totalTokens,
-      },
+      usage: result.usage
+        ? { promptTokens: result.usage.tokens, totalTokens: result.usage.tokens }
+        : undefined,
     };
   }
 

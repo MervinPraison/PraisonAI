@@ -53,9 +53,42 @@ export interface OCRResult {
 }
 
 /**
+ * Request handed to an {@link OCRExtractor}.
+ */
+export interface OCRExtractRequest {
+  /** URL or path the caller asked to read. */
+  source: string;
+  /** Provider document reference derived from `source`. */
+  document: { type: string; [key: string]: string };
+  /** Model to use for this extraction. */
+  model: string;
+  /** Resolved OCR options for this extraction. */
+  options: Required<OCRConfig>;
+  /** Custom API endpoint URL, if configured. */
+  baseUrl?: string;
+  /** API key, if configured. */
+  apiKey?: string;
+}
+
+/**
+ * A pluggable OCR backend. Supplying one is the only way to make
+ * `OCRAgent.extract()` return text.
+ */
+export type OCRExtractor = (request: OCRExtractRequest) => Promise<OCRResult>;
+
+/**
  * Configuration for creating an OCRAgent.
  */
 export interface OCRAgentConfig {
+  /**
+   * OCR backend that performs the extraction.
+   *
+   * Without one, `extract()` throws. It used to return
+   * `"[OCR extraction from <source> - requires API integration]"` and log
+   * `✓ OCR complete`, so a caller could not tell a fabricated document
+   * from a real one.
+   */
+  extractor?: OCRExtractor;
   /** Agent name */
   name?: string;
   /** Optional instructions */
@@ -126,6 +159,7 @@ export class OCRAgent {
   private readonly apiKey?: string;
   private readonly ocrConfig: Required<OCRConfig>;
   private readonly verbose: boolean | number;
+  private readonly extractor?: OCRExtractor;
 
   constructor(config: OCRAgentConfig) {
     // Handle model alias
@@ -137,6 +171,7 @@ export class OCRAgent {
     this.baseUrl = config.baseUrl;
     this.apiKey = config.apiKey;
     this.verbose = config.verbose ?? true;
+    this.extractor = config.extractor;
 
     // Resolve OCR configuration
     this.ocrConfig = this.resolveOCRConfig(config.ocr);
@@ -188,35 +223,35 @@ export class OCRAgent {
     // Build document reference
     const document = this.buildDocument(source);
 
-    // In a real implementation, this would call the OCR API
-    // For now, we return a placeholder that indicates the structure
-    // The actual implementation would use OpenAI's vision API or Mistral's OCR
-    
-    try {
-      // Placeholder implementation - real implementation would call LLM
-      const result: OCRResult = {
-        text: `[OCR extraction from ${source} - requires API integration]`,
-        pages: [
-          {
-            index: 0,
-            markdown: `[Content from ${source}]`,
-            images: options?.includeImageBase64 ? [] : undefined,
-          },
-        ],
-        metadata: {
-          source,
-          model,
-          documentType: document.type,
-        },
-      };
-
-      this.log('✓ OCR complete');
-      return result;
-    } catch (error) {
+    // No backend, no result. This deliberately throws instead of returning a
+    // shaped placeholder: the previous code produced
+    // `"[OCR extraction from <source> - requires API integration]"`, logged
+    // `✓ OCR complete`, and handed downstream code something that looked
+    // exactly like a successful extraction.
+    if (!this.extractor) {
       throw new Error(
-        `OCR extraction failed: ${error instanceof Error ? error.message : String(error)}`
+        `OCRAgent has no extractor configured, so '${source}' was not read. ` +
+          "Pass one explicitly, e.g. `new OCRAgent({ extractor: myMistralOcrCall })`. " +
+          `Intended model: ${model}.`
       );
     }
+
+    const result = await this.extractor({
+      source,
+      document,
+      model,
+      options: {
+        ...this.ocrConfig,
+        includeImageBase64: options?.includeImageBase64 ?? this.ocrConfig.includeImageBase64,
+        pages: options?.pages ?? this.ocrConfig.pages,
+        imageLimit: options?.imageLimit ?? this.ocrConfig.imageLimit,
+      },
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+    });
+
+    this.log('✓ OCR complete');
+    return result;
   }
 
   /**

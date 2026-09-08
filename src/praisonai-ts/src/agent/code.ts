@@ -15,8 +15,26 @@ import { Agent, SimpleAgentConfig } from './simple';
  * Python parity with CodeConfig dataclass.
  */
 export interface CodeConfig {
-  /** Enable sandboxed execution (default: true for safety) */
+  /**
+   * Advisory isolation hint passed through to `executor` (default: true).
+   *
+   * This flag does NOT by itself enable, disable, or sandbox any execution.
+   * It used to: `sandbox: false` was the only setting under which `execute()`
+   * ran anything, and what it ran was in-process `eval()` of model-generated
+   * code. The option that reads as the safety toggle was the dangerous one, so
+   * that path is gone. Code now runs only when an `executor` is supplied
+   * explicitly, and the executor decides what `sandbox` means for it.
+   */
   sandbox?: boolean;
+  /**
+   * Explicit code runner. Without one, `execute()` runs nothing and says so.
+   *
+   * Executing model-generated code is opt-in by naming a runner, never by
+   * flipping a boolean. `createSubprocessExecutor()` in this module is a
+   * ready-made out-of-process runner; pass your own to target a container,
+   * a VM, or a remote sandbox service.
+   */
+  executor?: CodeExecutor;
   /** Execution timeout in seconds */
   timeout?: number;
   /** List of allowed programming languages */
@@ -28,6 +46,32 @@ export interface CodeConfig {
   /** Environment variables for execution */
   environment?: Record<string, string>;
 }
+
+/**
+ * Context handed to a {@link CodeExecutor}.
+ */
+export interface CodeExecutorContext {
+  /** Advisory isolation hint from `CodeConfig.sandbox`. */
+  sandbox: boolean;
+  /** Execution timeout in seconds. */
+  timeout: number;
+  /** Working directory for execution. */
+  workingDirectory: string;
+  /** Extra environment variables for execution. */
+  environment: Record<string, string>;
+  /** Maximum output length in characters. */
+  maxOutputLength: number;
+}
+
+/**
+ * A pluggable code runner. Supplying one is the only way to make
+ * `CodeAgent.execute()` run code.
+ */
+export type CodeExecutor = (
+  code: string,
+  language: string,
+  context: CodeExecutorContext,
+) => Promise<CodeExecutionResult>;
 
 /**
  * Result of code execution.
@@ -65,7 +109,11 @@ export interface CodeAgentConfig {
 // Default Configuration
 // ============================================================================
 
-const DEFAULT_CODE_CONFIG: Required<CodeConfig> = {
+type ResolvedCodeConfig = Required<Omit<CodeConfig, 'executor'>> & {
+  executor?: CodeExecutor;
+};
+
+const DEFAULT_CODE_CONFIG: ResolvedCodeConfig = {
   sandbox: true,
   timeout: 30,
   allowedLanguages: ['python'],
@@ -109,7 +157,7 @@ export class CodeAgent {
   private readonly llm: string;
   private readonly instructions?: string;
   private readonly verbose: boolean;
-  private readonly codeConfig: Required<CodeConfig>;
+  private readonly codeConfig: ResolvedCodeConfig;
   private readonly agent: Agent;
 
   constructor(config: CodeAgentConfig) {
@@ -205,30 +253,33 @@ Follow best practices and coding standards.`;
 
     const startTime = Date.now();
 
-    try {
-      // For safety, we use the sandbox executor if available
-      // This is a simplified implementation - full sandbox would use child_process
-      if (language === 'javascript' || language === 'typescript') {
-        // Use eval for simple JS (NOT SAFE FOR PRODUCTION - use sandbox)
-        if (!this.codeConfig.sandbox) {
-          const result = eval(code);
-          return {
-            success: true,
-            output: String(result ?? ''),
-            exitCode: 0,
-            executionTime: (Date.now() - startTime) / 1000,
-          };
-        }
-      }
-
-      // For other languages or sandboxed execution, return placeholder
+    // No executor, no execution. There is deliberately no built-in fallback:
+    // the previous one was in-process `eval()` reachable by setting
+    // `sandbox: false`, i.e. the option that reads as a safety toggle was the
+    // only one that ran code, and it ran it unsandboxed in this process.
+    const executor = this.codeConfig.executor;
+    if (!executor) {
       return {
         success: false,
         output: '',
-        error: `Sandboxed execution for '${language}' requires additional setup. Use sandbox executor.`,
+        error:
+          `No code executor is configured, so '${language}' code was not run. ` +
+          'Pass one explicitly, e.g. ' +
+          "`new CodeAgent({ code: { executor: createSubprocessExecutor() } })`, " +
+          'or supply your own container/VM runner.',
         exitCode: 1,
         executionTime: (Date.now() - startTime) / 1000,
       };
+    }
+
+    try {
+      return await executor(code, language, {
+        sandbox: this.codeConfig.sandbox,
+        timeout: this.codeConfig.timeout,
+        workingDirectory: this.codeConfig.workingDirectory,
+        environment: this.codeConfig.environment,
+        maxOutputLength: this.codeConfig.maxOutputLength,
+      });
     } catch (error) {
       return {
         success: false,
@@ -335,4 +386,108 @@ Follow best practices and coding standards.`;
  */
 export function createCodeAgent(config: CodeAgentConfig): CodeAgent {
   return new CodeAgent(config);
+}
+
+// ============================================================================
+// Executors
+// ============================================================================
+
+/** Interpreter command used for each language by `createSubprocessExecutor`. */
+const SUBPROCESS_INTERPRETERS: Record<string, { command: string; args: string[] }> = {
+  python: { command: process.env.PRAISONAI_PYTHON ?? 'python3', args: ['-c'] },
+  python3: { command: process.env.PRAISONAI_PYTHON ?? 'python3', args: ['-c'] },
+  javascript: { command: process.execPath, args: ['-e'] },
+  node: { command: process.execPath, args: ['-e'] },
+  bash: { command: 'bash', args: ['-c'] },
+  sh: { command: 'sh', args: ['-c'] },
+};
+
+/**
+ * Build an out-of-process code executor for {@link CodeConfig.executor}.
+ *
+ * Importing and passing this function is an explicit, visible decision to run
+ * model-generated code. That is the point: execution is granted by naming a
+ * runner, never by flipping a boolean that reads as a safety toggle.
+ *
+ * The code runs in a child process with its own cwd, environment and timeout,
+ * so it cannot reach into the host process the way the removed in-process
+ * `eval()` path could. A child process is *not* a security sandbox -- it shares
+ * the host filesystem, network and user. For untrusted code use a container,
+ * microVM or remote sandbox service and pass that as the executor instead.
+ *
+ * @example
+ * ```typescript
+ * import { CodeAgent, createSubprocessExecutor } from 'praisonai';
+ *
+ * const agent = new CodeAgent({
+ *   code: { executor: createSubprocessExecutor(), allowedLanguages: ['python'] },
+ * });
+ * const result = await agent.execute('print(2 + 2)', 'python');
+ * ```
+ */
+export function createSubprocessExecutor(
+  interpreters: Record<string, { command: string; args: string[] }> = SUBPROCESS_INTERPRETERS,
+): CodeExecutor {
+  return async (code, language, context) => {
+    const startTime = Date.now();
+    const interpreter = interpreters[language];
+    if (!interpreter) {
+      return {
+        success: false,
+        output: '',
+        error:
+          `No interpreter is registered for '${language}'. Known: ` +
+          `${Object.keys(interpreters).join(', ')}.`,
+        exitCode: 1,
+        executionTime: 0,
+      };
+    }
+
+    const { spawn } = await import('child_process');
+    const truncate = (text: string) =>
+      text.length > context.maxOutputLength ? text.slice(0, context.maxOutputLength) : text;
+
+    return await new Promise<CodeExecutionResult>((resolve) => {
+      const child = spawn(interpreter.command, [...interpreter.args, code], {
+        cwd: context.workingDirectory,
+        env: { ...process.env, ...context.environment },
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, context.timeout * 1000);
+
+      child.stdout?.on('data', (chunk) => {
+        stdout += String(chunk);
+      });
+      child.stderr?.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+
+      const settle = (exitCode: number, error?: string) => {
+        clearTimeout(timer);
+        resolve({
+          success: exitCode === 0 && !error,
+          output: truncate(stdout),
+          error: error ?? (stderr ? truncate(stderr) : undefined),
+          exitCode,
+          executionTime: (Date.now() - startTime) / 1000,
+        });
+      };
+
+      child.on('error', (err) => settle(1, err.message));
+      child.on('close', (exitCode) => {
+        if (timedOut) {
+          settle(124, `Execution timed out after ${context.timeout}s.`);
+          return;
+        }
+        settle(exitCode ?? 1);
+      });
+    });
+  };
 }
