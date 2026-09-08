@@ -42,11 +42,25 @@ class _CommandCancelled(Exception):
 # Shell metacharacters this executor cannot honour. Detection is quote-aware:
 # `git commit -m "fix: a > b"` is a legitimate command whose ">" is inside a
 # quoted argument, and rejecting it would be its own false failure.
-_SHELL_METACHARS = (">>", "<<", "&&", "||", ">", "<", "|", ";", "&", "`", "$(")
+#
+# A newline separates commands just as ";" does: `echo first\ntouch proof.txt`
+# is two commands, and passing it to shell=False runs only `echo` while `touch`
+# silently never runs -- exactly the false-success this guard exists to stop.
+_SHELL_METACHARS = (">>", "<<", "&&", "||", ">", "<", "|", ";", "&", "`", "$(", "\n", "\r")
+
+# A command substitution keeps its power inside DOUBLE quotes -- POSIX shells
+# still evaluate `$(...)` and backticks there -- so `echo "$(whoami)"` is not an
+# inert literal. Single quotes DO make them literal, so those stay honoured.
+_DQUOTE_SUBSTITUTIONS = ("$(", "`")
 
 
 def _find_shell_syntax(command: str):
-    """Return the first unquoted shell metacharacter in *command*, else None."""
+    """Return the first unquoted shell metacharacter in *command*, else None.
+
+    Command substitutions (``$(`` and backticks) are also reported when they
+    appear inside double quotes, because a POSIX shell evaluates them there;
+    single-quoted content stays literal and is left alone.
+    """
     if not isinstance(command, str):
         return None
     quote = None
@@ -54,6 +68,10 @@ def _find_shell_syntax(command: str):
     while i < len(command):
         ch = command[i]
         if quote:
+            if quote == '"':
+                for token in _DQUOTE_SUBSTITUTIONS:
+                    if command.startswith(token, i):
+                        return token
             if ch == quote:
                 quote = None
             elif ch == "\\" and quote == '"':
