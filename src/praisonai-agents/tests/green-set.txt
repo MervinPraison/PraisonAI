@@ -1,6 +1,6 @@
 # Test paths that pass CLEAN together, run by .github/workflows/agents-suite.yml.
 #
-# Why a list and not `tests/unit`: 250 of ~9,400 unit tests fail on main today.
+# Why a list and not `tests/unit`: 214 of ~9,400 unit tests fail on main today.
 # Enabling everything would land red, and a job that is red the day it lands
 # teaches people to ignore it -- which is how this package ended up running 15
 # tests in CI in the first place.
@@ -114,7 +114,9 @@ tests/unit/test_gateway_pressure_eviction.py
 tests/unit/test_gateway_rate_limit_policy.py
 tests/unit/test_gateway_relay_transport.py
 tests/unit/test_gateway_restart_loop_guard.py
+tests/unit/test_gateway_routing.py
 tests/unit/test_gateway_scope_lockstep.py
+tests/unit/test_gateway_server.py
 tests/unit/test_gateway_spend_budget_policy.py
 tests/unit/test_gateway_thaw_policy.py
 tests/unit/test_gateway_trace_hook.py
@@ -199,6 +201,6 @@ tests/unit/test_token_budget.py
 tests/unit/test_tool_decorator_approval.py
 tests/unit/test_tool_retry_integration.py
 tests/unit/test_tools_reliability.py
-tests/unit/test_whatsapp_message_filtering.py
+tests/unit/test_whatsapp_bot.py
 tests/unit/test_whatsapp_web_adapter.py
 tests/unit/test_whatsapp_web_mode.py

@@ -82,6 +82,10 @@ jobs:
           # praisonai_sandbox.compute" -- an install gap reported as 47 code
           # failures. Installing it took the suite from 297 failures to 250.
           pip install -e src/praisonai-sandbox
+          # Same story: a stale praisonai-bot in the environment made 22 gateway
+          # tests fail on a malformed pairing file. The monorepo version already
+          # handles it; the INSTALLED one did not.
+          pip install -e src/praisonai-bot
           pip install pytest pytest-asyncio pytest-timeout
       - name: Run the paths that pass clean
         working-directory: src/praisonai-agents
@@ -98,7 +102,13 @@ jobs:
           # The 250 remaining failures are NOT 250 broken tests. Every failing
           # file was re-run in isolation:
           #     94 failures (18 files) PASS ALONE  -> shared-state pollution
-          #    156 failures (44 files) fail alone  -> genuine
+          #    120 failures            fail alone  -> genuine
+          #
+          # The count moved 297 -> 250 -> 214 purely by cleaning the ENVIRONMENT:
+          # installing the monorepo praisonai-sandbox (-47), installing the
+          # monorepo praisonai-bot and using a clean HOME (-36). 83 of the
+          # original failures were never code. A fresh CI runner has neither
+          # problem, which is why this job installs both siblings.
           # tests/unit/tools shows it starkly: 54 failures in a full run, 5 when
           # that directory runs by itself.
           #
