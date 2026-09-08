@@ -359,6 +359,20 @@ export class RealtimeAgent {
 
   private connected: boolean = false;
   private ws: WebSocketLike | null = null;
+  /**
+   * The connect() attempt currently in flight, if any. connect() assigns
+   * `this.ws` only after the handshake resolves, so without this two
+   * concurrent callers both pass the isConnected() check, both open a socket,
+   * and the slower one is overwritten -- left open and unreachable, because
+   * nothing references it any more. Concurrent callers share one attempt.
+   */
+  private connecting: Promise<void> | null = null;
+  /**
+   * Incremented by every teardown. A teardown captures the generation it was
+   * issued for, so a disconnect still unwinding an old socket cannot clear a
+   * newer one established by a reconnect in the meantime.
+   */
+  private generation: number = 0;
   private eventHandlers: Map<RealtimeEventType, Array<(event: RealtimeEvent) => void>> = new Map();
   private messageCallbacks: Array<(text: string) => void> = [];
   private audioCallbacks: Array<(audio: Uint8Array) => void> = [];
@@ -426,6 +440,22 @@ export class RealtimeAgent {
       return;
     }
 
+    // Share one attempt between concurrent callers rather than opening a
+    // socket per call and leaking all but the last.
+    if (this.connecting) {
+      return this.connecting;
+    }
+
+    const attempt = this.doConnect();
+    this.connecting = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.connecting === attempt) this.connecting = null;
+    }
+  }
+
+  private async doConnect(): Promise<void> {
     // A half-dead socket from a previous attempt must not linger.
     this.teardown();
 
@@ -547,6 +577,12 @@ export class RealtimeAgent {
       return;
     }
 
+    // Capture the generation this disconnect belongs to. Closing a socket is
+    // asynchronous, and a connect() can complete while we wait; clearing state
+    // unconditionally afterwards would null out that newer socket and mark the
+    // agent disconnected while its connection stayed open and unreachable.
+    const generation = this.generation;
+
     this.log('Disconnecting from realtime session...');
     await new Promise<void>((resolve) => {
       let done = false;
@@ -566,13 +602,24 @@ export class RealtimeAgent {
       }
     });
 
-    this.teardown();
+    this.teardownIfCurrent(generation);
   }
 
   /** Drop the socket reference and mark the agent disconnected. */
   private teardown(): void {
+    this.generation += 1;
     this.ws = null;
     this.connected = false;
+  }
+
+  /**
+   * Tear down only if nothing newer has been established since `generation`
+   * was captured. Used by disconnect(), so a slow close cannot clear a socket
+   * a later connect() has already installed.
+   */
+  private teardownIfCurrent(generation: number): void {
+    if (this.generation !== generation) return;
+    this.teardown();
   }
 
   /**
