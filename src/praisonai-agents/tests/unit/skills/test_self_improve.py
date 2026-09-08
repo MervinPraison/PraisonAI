@@ -1,6 +1,7 @@
 """Tests for the autonomous skill self-improvement loop (issue #2231)."""
 
 import asyncio
+import pytest
 
 from praisonaiagents.skills import (
     SkillReviewProtocol,
@@ -314,17 +315,28 @@ def test_schedule_self_improvement_falls_back_inline_on_failure(monkeypatch):
 
 
 def test_self_improve_falsy_strings_disable():
-    for value in ("false", "off", "no", "0", "", "False", "OFF"):
+    for value in ("false", "off", "no", "0", "False", "OFF"):
         agent = Agent(instructions="x", self_improve=value)
         assert agent._self_improve is False, value
         assert agent._self_improve_mode == "inline"
 
 
-def test_self_improve_unknown_string_disables():
-    # A typo like "backround" must not silently enable inline review.
-    agent = Agent(instructions="x", self_improve="backround")
-    assert agent._self_improve is False
-    assert agent._self_improve_mode == "inline"
+def test_self_improve_unknown_string_is_rejected():
+    """A typo must not silently enable inline review -- it is now an error.
+
+    This asserted that an unrecognised value silently disabled review. The
+    parser was tightened to reject anything outside the preset list, with a
+    did-you-mean suggestion, which is the stronger guarantee: a typo can neither
+    silently enable review nor silently do nothing. "" is unrecognised too and
+    is rejected on the same grounds, so it moved out of the falsy list above.
+    """
+    for value in ("backround", ""):
+        with pytest.raises(ValueError, match="Invalid self_improve value"):
+            Agent(instructions="x", self_improve=value)
+
+    # The suggestion is what makes the rejection actionable.
+    with pytest.raises(ValueError, match="Did you mean 'background'"):
+        Agent(instructions="x", self_improve="backround")
 
 
 def test_self_improve_truthy_strings_enable_inline():
