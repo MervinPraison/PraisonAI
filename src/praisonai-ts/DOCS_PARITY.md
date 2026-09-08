@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 2978 |
+| ✅ Agent | 109 | 7 | 2980 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 281 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -38,7 +38,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Configuration | 5 | 1 | 272 |
 | ✅ Context Management | 36 | 2 | 345 |
 | ✅ Criteria | 1 | 1 | 162 |
-| ✅ Database | 17 | 2 | 469 |
+| ✅ Database | 17 | 2 | 483 |
 | ✅ Display | 22 | 1 | 342 |
 | ✅ Embeddings | 13 | 3 | 898 |
 | ✅ Evaluation | 10 | 4 | 866 |
@@ -71,7 +71,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 7 | 2 | 246 |
 | ✅ RAG | 16 | 2 | 386 |
-| ✅ Realtime | 5 | 1 | 150 |
+| ✅ Realtime | 5 | 1 | 237 |
 | ✅ Reflection | 3 | 1 | 151 |
 | ✅ Retrieval | 5 | 1 | 150 |
 | ✅ Routing | 1 | 1 | 252 |
