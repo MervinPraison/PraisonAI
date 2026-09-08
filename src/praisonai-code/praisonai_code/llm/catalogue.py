@@ -191,6 +191,7 @@ PROVIDER_KEY_URLS = {
     "gemini": "https://aistudio.google.com/app/apikey",
     "groq": "https://console.groq.com/keys",
     "openrouter": "https://openrouter.ai/keys",
+    "edenai": "https://app.edenai.run/settings/api-keys",
     "mistral": "https://console.mistral.ai/api-keys",
     "deepseek": "https://platform.deepseek.com/api_keys",
     "xai": "https://console.x.ai",
@@ -240,6 +241,10 @@ PROVIDER_ENV_CATALOGUE: Dict[str, tuple] = {
     "together":   (("TOGETHER_API_KEY", "TOGETHERAI_API_KEY"), "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together_ai/"),
     "perplexity": (("PERPLEXITYAI_API_KEY",),         "perplexity/sonar",                     "perplexity/"),
     "fireworks":  (("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"), "fireworks_ai/accounts/fireworks/models/llama-v3p3-70b-instruct", "fireworks_ai/"),
+    # Eden AI is a gateway, so its model ids nest a vendor the same way
+    # OpenRouter's and Together's do. The default below is one representative
+    # model, not a catalogue: any "edenai/<vendor>/<model>" is forwarded as-is.
+    "edenai":     (("EDENAI_API_KEY",),           "edenai/openai/gpt-4.1-mini",           "edenai/"),
 }
 
 

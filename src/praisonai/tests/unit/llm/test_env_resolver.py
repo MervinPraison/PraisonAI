@@ -277,6 +277,7 @@ class TestProviderMapping:
             "cohere/": "https://api.cohere.ai/v1",
             "openrouter/": "https://openrouter.ai/api/v1",
             "ollama/": "http://localhost:11434/v1",
+            "edenai/": "https://api.edenai.run/v3",
         }
         
         for prefix, (key_var, base_url) in _PROVIDER_MAP.items():

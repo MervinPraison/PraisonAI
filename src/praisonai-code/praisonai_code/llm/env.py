@@ -30,6 +30,10 @@ _PROVIDER_MAP = {
     "cohere/":     ("COHERE_API_KEY",     "https://api.cohere.ai/v1"),
     "openrouter/": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
     "ollama/":     ("OLLAMA_API_KEY",     "http://localhost:11434/v1"),
+    # Without this row an "edenai/..." model fell through to the OpenAI
+    # default, so the resolved endpoint was https://api.openai.com/v1 holding an
+    # Eden AI key.
+    "edenai/":     ("EDENAI_API_KEY",     "https://api.edenai.run/v3"),
 }
 
 # Documented, single precedence list. Add new providers here only.
@@ -54,9 +58,11 @@ _KEY_VAR_TO_FALLBACK_PROVIDERS = {
     "GROQ_API_KEY": ("groq",),
     "COHERE_API_KEY": ("cohere",),
     "OPENROUTER_API_KEY": ("openrouter",),
+    "EDENAI_API_KEY": ("edenai",),
 }
 _ALL_FALLBACK_PROVIDERS = (
     "openai", "anthropic", "google", "gemini", "groq", "cohere", "openrouter",
+    "edenai",
 )
 
 # Ordered list of (credential env-var, provider-appropriate default model),
