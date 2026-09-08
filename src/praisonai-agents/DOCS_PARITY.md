@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 87 | 32735 |
+| ✅ Gateway | 7 | 87 | 32815 |
 | ✅ Guardrails | 5 | 4 | 2470 |
 | ✅ Handoffs | 11 | 6 | 2748 |
 | ✅ Hooks | 2 | 9 | 4696 |
