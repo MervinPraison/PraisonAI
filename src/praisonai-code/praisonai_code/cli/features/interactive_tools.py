@@ -72,6 +72,11 @@ TOOL_GROUPS = {
     "clarify": [
         "clarify",
     ],
+    # MCP tool names are discovered at runtime from the configured servers, so
+    # this group has no static membership; ``get_interactive_tools`` adds
+    # whatever the servers expose. Present here so ``PRAISON_TOOLS_DISABLE=mcp``
+    # and ``groups=["mcp"]`` behave like every other group.
+    "mcp": [],
 }
 
 # Default interactive group includes all
@@ -81,7 +86,8 @@ TOOL_GROUPS["interactive"] = (
     TOOL_GROUPS["lsp"] + 
     TOOL_GROUPS["search"] + 
     TOOL_GROUPS["basic"] +
-    TOOL_GROUPS["clarify"]
+    TOOL_GROUPS["clarify"] +
+    TOOL_GROUPS["mcp"]
 )
 
 
@@ -95,6 +101,7 @@ class ToolConfig:
     enable_search: bool = True
     enable_basic: bool = True
     enable_clarify: bool = True
+    enable_mcp: bool = True
     approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
@@ -127,6 +134,8 @@ class ToolConfig:
             self.enable_basic = False
         if "clarify" in disabled:
             self.enable_clarify = False
+        if "mcp" in disabled:
+            self.enable_mcp = False
 
     @classmethod
     def from_env(cls) -> "ToolConfig":
@@ -191,6 +200,8 @@ def resolve_tool_groups(
             tool_names.update(TOOL_GROUPS["basic"])
         if config.enable_clarify:
             tool_names.update(TOOL_GROUPS["clarify"])
+        if config.enable_mcp:
+            tool_names.update(TOOL_GROUPS["mcp"])
     
     # Remove disabled groups
     for group in disable:
@@ -249,6 +260,68 @@ def _load_basic_tools() -> Dict[str, Callable]:
     except ImportError:
         logger.debug("web_crawl not available")
     
+    return tools
+
+
+def _load_mcp_tools(verbose: bool = False) -> Dict[str, Callable]:
+    """Load MCP tools for the interactive/code session.
+
+    The code session built *zero* MCP tools -- ``mcp`` appeared nowhere in
+    ``commands/code.py``, ``interactive_tools.py`` or ``interactive/async_tui.py``
+    -- while the sibling ``commands/run.py`` already had a working builder. This
+    reuses that builder rather than adding a second one, so a project's
+    configured servers reach both entry points identically.
+
+    Never raises: a broken or unreachable server yields no tools and a debug
+    log, because an MCP misconfiguration must not take down the session.
+    """
+    tools: Dict[str, Callable] = {}
+    try:
+        from praisonai_code.cli.commands.run import (
+            _build_mcp_tools,
+            _collect_mcp_servers_from_config,
+        )
+        from praisonai_code.cli.configuration.resolver import resolve_config
+    except ImportError as exc:
+        logger.debug("MCP tools unavailable: %s", exc)
+        return tools
+
+    try:
+        config = resolve_config()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("MCP config could not be resolved: %s", exc)
+        return tools
+
+    try:
+        servers = _collect_mcp_servers_from_config(config)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("MCP server collection failed: %s", exc)
+        return tools
+
+    env_mcp = os.environ.get("PRAISONAI_MCP") or None
+    env_mcp_env = os.environ.get("PRAISONAI_MCP_ENV") or None
+    if not servers and not env_mcp:
+        return tools
+
+    try:
+        mcp_tools = _build_mcp_tools(
+            env_mcp, env_mcp_env, servers, verbose=verbose
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("MCP tools failed to load: %s", exc)
+        return tools
+
+    for tool in mcp_tools or []:
+        name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+        if not name:
+            continue
+        if name in tools:
+            logger.debug("Duplicate MCP tool name %r; keeping the first", name)
+            continue
+        tools[name] = tool
+
+    if tools:
+        logger.debug("Loaded %d MCP tool(s): %s", len(tools), ", ".join(tools))
     return tools
 
 
@@ -804,14 +877,40 @@ def get_interactive_tools(
     if config.enable_lsp and not (disable and "lsp" in disable):
         lsp_tools = _load_lsp_tools(config)
         all_tools.update(lsp_tools)
-    
+
+    # Load MCP tools from the project's configured servers. Their names are
+    # only known at runtime, so they are added to the requested set here rather
+    # than living in the static TOOL_GROUPS table.
+    want_mcp = (
+        config.enable_mcp
+        and not (disable and "mcp" in disable)
+        and (groups is None or "mcp" in groups or "interactive" in groups)
+    )
+    if want_mcp:
+        mcp_tools = _load_mcp_tools()
+        if mcp_tools:
+            # Never let an MCP server shadow a built-in tool name.
+            for name, tool in mcp_tools.items():
+                if name in all_tools:
+                    logger.warning(
+                        "MCP server exposes %r, which collides with a built-in "
+                        "tool; keeping the built-in.", name
+                    )
+                    continue
+                all_tools[name] = tool
+                tool_names.add(name)
+
     # Filter to requested tools
     result = []
     for name in sorted(tool_names):  # Deterministic ordering
         if name in all_tools:
             result.append(all_tools[name])
     
-    logger.debug(f"Loaded {len(result)} interactive tools: {[t.__name__ for t in result]}")
+    logger.debug(
+        "Loaded %d interactive tools: %s",
+        len(result),
+        [getattr(t, "__name__", getattr(t, "name", repr(t))) for t in result],
+    )
     
     return result
 
