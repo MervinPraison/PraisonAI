@@ -199,14 +199,16 @@ class SmartRetriever:
             # this is a latent defect for direct users of the class, not a live
             # agent failure.
             self._last_error = f"{type(e).__name__}: {e}"
-            # The query is deliberately NOT logged: it is caller-supplied text
-            # that can carry personal data, credentials or proprietary content,
-            # and this package redacts such material elsewhere (trace/redact.py).
-            # The exception and the retrieval_failed flag are enough to diagnose.
+            # Do not log the raw query: it is caller-supplied text that can carry
+            # personal data, credentials or proprietary content, and this line
+            # lands at ERROR in application logs. This package redacts exactly
+            # that elsewhere (trace/redact.py). The exception identifies the
+            # store problem; the query LENGTH distinguishes an empty probe from
+            # a real search without reproducing the text.
             logger.error(
-                "Knowledge retrieval failed: %s. "
+                "Knowledge retrieval failed (query length %d): %s. "
                 "Returning no chunks; the caller will see an empty result.",
-                self._last_error,
+                len(query or ""), self._last_error,
             )
             return []
     
