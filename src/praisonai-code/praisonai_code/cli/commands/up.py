@@ -25,7 +25,7 @@ class ServiceManager:
         self.services: List[subprocess.Popen] = []
         self.console = Console()
     
-    def add_service(self, cmd: List[str], name: str, env: Optional[dict] = None) -> subprocess.Popen:
+    def add_service(self, cmd: List[str], name: str, env: Optional[dict] = None) -> Optional[subprocess.Popen]:
         """Start a service and add to managed list."""
         self.console.print(f"[cyan]Starting {name}...[/cyan]")
         
@@ -37,6 +37,16 @@ class ServiceManager:
                 stderr=subprocess.DEVNULL,
             )
             self.services.append(proc)
+            # Popen succeeding means the process was spawned, not that it is
+            # alive. A bad flag, a missing dependency or a taken port all exit
+            # immediately, and this used to print "started (PID: N)" for them,
+            # with stderr going to DEVNULL so the reason was gone too.
+            time.sleep(0.5)
+            if proc.poll() is not None:
+                self.console.print(
+                    f"[red]❌ {name} exited immediately (code {proc.returncode})[/red]")
+                self.services.remove(proc)
+                return None
             self.console.print(f"[green]✅ {name} started (PID: {proc.pid})[/green]")
             return proc
             
@@ -181,16 +191,19 @@ def up_start(
                 ]
                 
                 langfuse_proc = manager.add_service(langfuse_cmd, "Langfuse", env)
+                # Only claim a service once it is actually up. This used to
+                # append before the health check and discard the check's
+                # result, so a dead or unreachable service was still rendered
+                # "Running" under a table headed "Services Ready".
+                if langfuse_proc is None:
+                    raise RuntimeError("Langfuse exited during startup")
+                if wait_timeout > 0 and not manager.wait_for_service(
+                        f"http://{host}:{langfuse_port}", "Langfuse",
+                        timeout=wait_timeout):
+                    raise RuntimeError("Langfuse never became healthy")
                 services_started.append(("Langfuse", f"http://{host}:{langfuse_port}"))
-                
-                # Wait for Langfuse to be ready
-                if wait_timeout > 0:
-                    manager.wait_for_service(
-                        f"http://{host}:{langfuse_port}", 
-                        "Langfuse", 
-                        timeout=wait_timeout
-                    )
-                    
+
+
             except Exception as e:
                 console.print(f"[red]Failed to start Langfuse: {e}[/red]")
                 console.print("[yellow]Try: pip install 'praisonai[langfuse]'[/yellow]")
@@ -209,16 +222,19 @@ def up_start(
                 ]
                 
                 langflow_proc = manager.add_service(langflow_cmd, "Langflow", env)
+                # Only claim a service once it is actually up. This used to
+                # append before the health check and discard the check's
+                # result, so a dead or unreachable service was still rendered
+                # "Running" under a table headed "Services Ready".
+                if langflow_proc is None:
+                    raise RuntimeError("Langflow exited during startup")
+                if wait_timeout > 0 and not manager.wait_for_service(
+                        f"http://{host}:{langflow_port}", "Langflow",
+                        timeout=wait_timeout):
+                    raise RuntimeError("Langflow never became healthy")
                 services_started.append(("Langflow", f"http://{host}:{langflow_port}"))
-                
-                # Wait for Langflow to be ready
-                if wait_timeout > 0:
-                    manager.wait_for_service(
-                        f"http://{host}:{langflow_port}", 
-                        "Langflow", 
-                        timeout=wait_timeout
-                    )
-                    
+
+
             except Exception as e:
                 console.print(f"[red]Failed to start Langflow: {e}[/red]")
                 console.print("[yellow]Try: pip install 'praisonai[flow]'[/yellow]")
