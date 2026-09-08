@@ -1,0 +1,59 @@
+# Why this exists
+#
+# praisonai-agents has ~11,900 tests. Until this gate, CI executed 15 of them:
+# one smoke step in test-optimized.yml naming two files. Everything else was
+# collected by nobody.
+#
+# The cost of that showed up as two test modules that could not even be
+# IMPORTED -- they referenced symbols moved or replaced months earlier, so 19
+# tests silently contributed nothing while still appearing to exist. A failing
+# test is loud; a test that never collects is not.
+#
+# This job does not run the suite. Running all 11,900 on every PR is a real
+# decision about Actions compute, and it would go red on arrival because there
+# are pre-existing failures nothing has been enforcing. A job that is red the
+# day it lands teaches people to ignore it.
+#
+# Collection alone takes ~40s, costs almost nothing, and would have caught both
+# dead modules the day they broke. It is the honest ratchet: it cannot pass
+# while a test file is unimportable.
+name: agents-collect-gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-collect-gate.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-collect-gate.yml'
+
+jobs:
+  collect:
+    name: every praisonai-agents test file imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Collect the whole suite
+        working-directory: src/praisonai-agents
+        env:
+          # A key must be present or some modules bail at import; it is never
+          # used, because collection does not execute test bodies.
+          OPENAI_API_KEY: 'sk-collect-only-not-a-real-key'
+        run: |
+          set -euo pipefail
+          # No pipe here: piping pytest into tail discards its exit code, which
+          # is how a gate silently stops gating.
+          python -m pytest tests/ --collect-only -q --disable-warnings
