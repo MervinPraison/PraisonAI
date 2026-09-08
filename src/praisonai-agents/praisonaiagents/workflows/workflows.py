@@ -638,6 +638,11 @@ class AgentFlow:
     description: str = ""
     steps: List = field(default_factory=list)  # Can be Task, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
+    #: Cache step results by their inputs. True for a process-scoped LRU, or
+    #: any object with get()/set(). OPT-IN: an agent step is not always
+    #: deterministic, and silently serving a cached answer for a call the user
+    #: expected to happen again is worse than paying for it.
+    cache: Any = None
     file_path: Optional[str] = None
     
     # Default configuration for all steps
@@ -748,6 +753,12 @@ class AgentFlow:
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
         from ..utils.model_alias import resolve_model_name
+        from .step_cache import resolve_step_cache
+
+        # Resolved once, not per step: `cache=True` must mean ONE cache shared
+        # across the run, not a fresh empty one for every step (which would
+        # never hit and would look like the feature simply not working).
+        self._step_cache = resolve_step_cache(self.cache)
 
         # One rule for the alias pair, shared with Agent and AgentTeam. Must
         # UNWRAP an LLMConfig to its model string: this value seeds the agents
@@ -1485,6 +1496,28 @@ class AgentFlow:
                 current_step=step.name,
                 variables=all_variables.copy()
             )
+
+            # Step-result cache (opt-in via cache=). This linear path invokes
+            # handlers INLINE rather than through _execute_single_step_internal,
+            # which the pattern paths use -- so both are wrapped. Caching only
+            # one would make the feature work or not depending on whether a step
+            # happened to sit inside a Parallel or an If, which is worse than
+            # not having it.
+            _step_cache = getattr(self, "_step_cache", None)
+            _cache_key = None
+            if _step_cache is not None:
+                from .step_cache import make_step_key
+                _cache_key = make_step_key(step, previous_output, input, all_variables)
+                _cached = _step_cache.get(_cache_key)
+                if _cached is not None:
+                    if verbose:
+                        print(f"↩︎  cache hit: {step.name}")
+                    previous_output = _cached.get("output")
+                    results.append({"step": step.name, "output": previous_output})
+                    if _cached.get("variables"):
+                        all_variables.update(_cached["variables"])
+                    i += 1
+                    continue
             
             # Update step status
             if hasattr(step, 'status'):
@@ -1832,6 +1865,12 @@ class AgentFlow:
                 step_record["error"] = failure_reason
             results.append(step_record)
             previous_output = output
+
+            # Only a SUCCESSFUL step is cached. Caching a failure would serve
+            # the failure again on every re-run, turning a transient error into
+            # a permanent one that no retry could clear.
+            if _cache_key is not None and not step_failed:
+                _step_cache.set(_cache_key, {"output": output, "variables": {}})
             
             if verbose:
                 print(f"✅ {step.name}: {str(output)}")
@@ -2524,6 +2563,40 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             )
     
     def _execute_single_step_internal(
+        self, 
+        step: Any, 
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        index: int = 0,
+        stream: bool = True,
+        depth: int = 0
+    ) -> Dict[str, Any]:
+        """Cache wrapper. The uncached body is _execute_single_step_uncached."""
+        cache = getattr(self, "_step_cache", None)
+        if cache is None:
+            return self._execute_single_step_uncached(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        from .step_cache import make_step_key
+        key = make_step_key(step, previous_output, input, all_variables)
+        hit = cache.get(key)
+        if hit is not None:
+            if verbose:
+                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            # Copy: a caller mutating a returned result must not edit the cache.
+            return dict(hit)
+        result = self._execute_single_step_uncached(
+            step, previous_output, input, all_variables, model, verbose, index,
+            stream=stream, depth=depth,
+        )
+        cache.set(key, dict(result))
+        return result
+
+    def _execute_single_step_uncached(
         self, 
         step: Any, 
         previous_output: Optional[str],
@@ -5219,6 +5292,49 @@ class WorkflowManager:
         }
 
     def _execute_single_step(
+        self,
+        step: Task,
+        step_idx: int,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+        executor: Optional[Callable[[str], str]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        verbose: int = 0,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
+        original_input: str = ""
+    ) -> Dict[str, Any]:
+        """Cache wrapper for the top-level run() path.
+
+        There are two step executors -- this one and
+        _execute_single_step_internal, used inside patterns. Both are wrapped,
+        because caching only one would make the feature work or not depending on
+        whether the step happened to sit inside a Parallel or an If.
+        """
+        cache = getattr(self, "_step_cache", None)
+        if cache is None:
+            return self._execute_single_step_nocache(
+                step, step_idx, results, all_variables, executor, default_agent,
+                default_llm, memory, planning, verbose, on_step, on_result, original_input,
+            )
+        from .step_cache import make_step_key
+        key = make_step_key(step, None, original_input, all_variables)
+        hit = cache.get(key)
+        if hit is not None:
+            if verbose:
+                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            return dict(hit)
+        result = self._execute_single_step_nocache(
+            step, step_idx, results, all_variables, executor, default_agent,
+            default_llm, memory, planning, verbose, on_step, on_result, original_input,
+        )
+        cache.set(key, dict(result))
+        return result
+
+    def _execute_single_step_nocache(
         self,
         step: Task,
         step_idx: int,
