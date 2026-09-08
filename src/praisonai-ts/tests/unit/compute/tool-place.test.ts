@@ -43,12 +43,24 @@ describe('running a tool elsewhere', () => {
     expect(await place.runTool('anything', {}, async () => 'LOCAL')).toBe('LOCAL');
   });
 
-  it('the host fallback is NOT silent: it warns that isolation was not applied', async () => {
+  it('the host fallback on a SANDBOX place is NOT silent: it warns that isolation was not applied', async () => {
     // "runs locally and says so" must actually say so -- a caller who asked for
-    // a sandbox must not believe they had one when they did not.
+    // a sandbox must not believe they had one when they did not. A `local` place
+    // IS the host, so warning there would be noise; the warning is reserved for a
+    // non-local place that has to fall back, and fires once per tool.
     const warn = jest.spyOn(Logger, 'warn').mockResolvedValue(undefined as never);
     try {
-      const place = new ComputeToolPlace(new LocalCompute());
+      const sandbox: any = {
+        name: 'sandbox',
+        isAvailable: async () => true,
+        provision: async () => ({ id: 'x' }),
+        execute: async () => ({ stdout: '', stderr: '', exitCode: 0, timedOut: false }),
+        shutdown: async () => {},
+        listInstances: async () => [],
+        getStatus: async () => null,
+      };
+      const place = new ComputeToolPlace(sandbox);
+      await place.runTool('anything', {}, async () => 'LOCAL');
       await place.runTool('anything', {}, async () => 'LOCAL');
       expect(warn).toHaveBeenCalledTimes(1);
       expect(String(warn.mock.calls[0][0])).toMatch(/not isolated|runs on the host/i);
