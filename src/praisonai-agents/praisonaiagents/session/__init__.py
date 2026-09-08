@@ -239,3 +239,9 @@ __all__ = [
     "MessageOrigin",
     "wrap_inter_agent",
 ]
+
+from .encrypted_store import (  # noqa: E402
+    EncryptedSessionStore,
+    SessionEncryptionError,
+    generate_session_key,
+)
