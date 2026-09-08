@@ -1,4 +1,5 @@
 import os
+import tempfile
 import logging
 from praisonaiagents._logging import get_logger
 from datetime import datetime
@@ -537,14 +538,21 @@ class Knowledge:
             # provider.
             if isinstance(input_path, str) and is_cloud_source(input_path):
                 self._log(f"Fetching cloud source: {input_path}")
-                local_path = fetch_cloud_source(input_path)
-                result = self._process_single_input(
-                    local_path, user_id, agent_id, run_id, metadata
-                )
-                # Keep the ORIGINAL uri in metadata: the temp path is meaningless
-                # to anyone reading a citation later.
+                # Download into a TemporaryDirectory so the fetched document is
+                # removed after indexing rather than accumulating on disk.
+                with tempfile.TemporaryDirectory(prefix="praisonai-kb-") as tmp_dir:
+                    local_path = fetch_cloud_source(input_path, dest_dir=tmp_dir)
+                    # Persist the ORIGINAL uri in the stored chunk metadata, not
+                    # the temp filename -- a temp path is meaningless in a
+                    # citation, and two objects with the same basename would
+                    # otherwise be indistinguishable.
+                    cloud_metadata = dict(metadata or {})
+                    cloud_metadata['source'] = input_path
+                    result = self._process_single_input(
+                        local_path, user_id, agent_id, run_id, cloud_metadata
+                    )
                 if isinstance(result, dict):
-                    result.setdefault('source', input_path)
+                    result['source'] = input_path
                 return result
 
             # Check if input is URL
