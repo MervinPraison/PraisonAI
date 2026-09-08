@@ -96,6 +96,32 @@ class TestRoundTrip:
             "content"
         ] == "written in plaintext"
 
+    def test_legacy_metadata_with_an_enc_key_is_not_corrupted(self, key):
+        """A pre-existing __enc__ key is data, not our envelope; keep it intact."""
+        inner = FakeStore()
+        inner.add_message("s1", "user", "hi", metadata={"__enc__": "external-id", "patient": "Alice"})
+        got = EncryptedSessionStore(inner, key=key).get_chat_history("s1")[0]["metadata"]
+        assert got == {"__enc__": "external-id", "patient": "Alice"}
+
+
+class TestRuntimeHelpersAreEncrypted:
+    """The normal agent path uses add_user_message / add_assistant_message.
+
+    If the wrapper forwarded these to the inner store they would write
+    plaintext, so they must be owned by the wrapper.
+    """
+
+    def test_add_user_message_encrypts(self, key):
+        inner = FakeStore()
+        EncryptedSessionStore(inner, key=key).add_user_message("s1", SECRET)
+        assert SECRET not in inner.rows[0]["content"]
+        assert inner.rows[0]["content"].startswith(EncryptedSessionStore.PREFIX)
+
+    def test_add_assistant_message_encrypts_and_round_trips(self, key):
+        store = EncryptedSessionStore(FakeStore(), key=key)
+        store.add_assistant_message("s1", SECRET)
+        assert store.get_chat_history("s1")[0]["content"] == SECRET
+
 
 class TestHonestLimits:
     def test_search_raises_instead_of_returning_an_empty_list(self, key):
@@ -140,3 +166,25 @@ class TestAgainstTheRealStore:
         SqliteSessionStore(str(tmp_path)).add_message("s1", "user", SECRET)
         blobs = b"".join(p.read_bytes() for p in tmp_path.rglob("*") if p.is_file())
         assert b"4111 1111 1111 1111" in blobs
+
+    def test_tool_calls_are_encrypted_and_round_trip(self, key, tmp_path):
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        tool_calls = [{"id": "c1", "type": "function",
+                       "function": {"name": "charge", "arguments": SECRET}}]
+        store = EncryptedSessionStore(SqliteSessionStore(str(tmp_path)), key=key)
+        store.add_message("s1", "assistant", "ok", tool_calls=tool_calls)
+
+        blobs = b"".join(p.read_bytes() for p in tmp_path.rglob("*") if p.is_file())
+        assert b"4111 1111 1111 1111" not in blobs
+
+        back = store.get_chat_history("s1")[0]
+        assert back["tool_calls"] == tool_calls
+
+    def test_get_session_returns_decrypted_messages(self, key, tmp_path):
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        store = EncryptedSessionStore(SqliteSessionStore(str(tmp_path)), key=key)
+        store.add_message("s1", "user", SECRET)
+        session = store.get_session("s1")
+        assert session.messages[0].content == SECRET

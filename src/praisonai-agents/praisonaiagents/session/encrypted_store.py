@@ -115,9 +115,20 @@ class EncryptedSessionStore:
         return {"__enc__": self._encrypt(json.dumps(metadata, default=str))}
 
     def _decrypt_metadata(self, metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if not isinstance(metadata, dict) or "__enc__" not in metadata:
+        if not isinstance(metadata, dict):
             return metadata
-        raw = self._decrypt(metadata["__enc__"])
+        # Recognise only the exact one-key envelope this wrapper produces, whose
+        # value carries the crypto PREFIX. Legacy metadata that merely happens to
+        # contain an "__enc__" key (alongside others, or without the marker) is
+        # left untouched rather than being misread and dropped.
+        value = metadata.get("__enc__")
+        if (
+            len(metadata) != 1
+            or not isinstance(value, str)
+            or not value.startswith(self.PREFIX)
+        ):
+            return metadata
+        raw = self._decrypt(value)
         try:
             return json.loads(raw) if raw else {}
         except (TypeError, ValueError):
@@ -131,25 +142,98 @@ class EncryptedSessionStore:
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> bool:
+        # tool_calls carry function arguments — as sensitive as content — so they
+        # are encrypted too. tool_call_id is an opaque correlation id the store
+        # may need to link turns, so it is left readable like the role and ids.
+        # These kwargs are only forwarded when present, so wrapping a leaner
+        # store whose add_message lacks them keeps working.
+        extra: Dict[str, Any] = {}
+        if tool_calls is not None:
+            extra["tool_calls"] = self._encrypt_tool_calls(tool_calls)
+        if tool_call_id is not None:
+            extra["tool_call_id"] = tool_call_id
         return self._store.add_message(
-            session_id, role, self._encrypt(content), self._encrypt_metadata(metadata)
+            session_id,
+            role,
+            self._encrypt(content),
+            self._encrypt_metadata(metadata),
+            **extra,
         )
+
+    def add_user_message(self, session_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        # The runtime persists ordinary turns through these helpers. Left to the
+        # inner store they would call the inner add_message and write plaintext,
+        # so the wrapper must own them rather than forward them.
+        return self.add_message(session_id, "user", content, metadata)
+
+    def add_assistant_message(self, session_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        return self.add_message(session_id, "assistant", content, metadata)
 
     def get_chat_history(self, session_id: str, max_messages: Optional[int] = None) -> List[Dict[str, Any]]:
         rows = self._store.get_chat_history(session_id, max_messages)
-        out = []
-        for row in rows or []:
-            if not isinstance(row, dict):
-                out.append(row)
-                continue
-            decoded = dict(row)
-            if "content" in decoded:
-                decoded["content"] = self._decrypt(decoded["content"])
-            if "metadata" in decoded:
-                decoded["metadata"] = self._decrypt_metadata(decoded["metadata"])
-            out.append(decoded)
-        return out
+        return [self._decrypt_row(row) for row in rows or []]
+
+    def get_working_history(self, session_id: str, *args: Any, **kwargs: Any):
+        rows = self._store.get_working_history(session_id, *args, **kwargs)
+        return [self._decrypt_row(row) for row in rows or []]
+
+    def get_session(self, session_id: str) -> Any:
+        # Session objects expose their turns as a list of message dicts/objects;
+        # decrypt those in place so callers see plaintext without the wrapper
+        # having to know the concrete session type.
+        session = self._store.get_session(session_id)
+        messages = getattr(session, "messages", None)
+        if isinstance(messages, list):
+            for msg in messages:
+                self._decrypt_message_obj(msg)
+        return session
+
+    # -- helpers ----------------------------------------------------------
+
+    def _encrypt_tool_calls(self, tool_calls):
+        if not tool_calls:
+            return tool_calls
+        return self._encrypt(json.dumps(tool_calls, default=str))
+
+    def _decrypt_tool_calls(self, tool_calls):
+        if not isinstance(tool_calls, str) or not tool_calls.startswith(self.PREFIX):
+            return tool_calls
+        raw = self._decrypt(tool_calls)
+        try:
+            return json.loads(raw) if raw else tool_calls
+        except (TypeError, ValueError):
+            return tool_calls
+
+    def _decrypt_row(self, row: Any) -> Any:
+        if not isinstance(row, dict):
+            return row
+        decoded = dict(row)
+        if "content" in decoded:
+            decoded["content"] = self._decrypt(decoded["content"])
+        if "metadata" in decoded:
+            decoded["metadata"] = self._decrypt_metadata(decoded["metadata"])
+        if decoded.get("tool_calls") is not None:
+            decoded["tool_calls"] = self._decrypt_tool_calls(decoded["tool_calls"])
+        return decoded
+
+    def _decrypt_message_obj(self, msg: Any) -> None:
+        if isinstance(msg, dict):
+            if "content" in msg:
+                msg["content"] = self._decrypt(msg["content"])
+            if "metadata" in msg:
+                msg["metadata"] = self._decrypt_metadata(msg["metadata"])
+            if msg.get("tool_calls") is not None:
+                msg["tool_calls"] = self._decrypt_tool_calls(msg["tool_calls"])
+            return
+        if hasattr(msg, "content"):
+            msg.content = self._decrypt(msg.content)
+        if hasattr(msg, "metadata"):
+            msg.metadata = self._decrypt_metadata(msg.metadata)
+        if getattr(msg, "tool_calls", None) is not None:
+            msg.tool_calls = self._decrypt_tool_calls(msg.tool_calls)
 
     def search(self, *args: Any, **kwargs: Any):
         raise SessionEncryptionError(
