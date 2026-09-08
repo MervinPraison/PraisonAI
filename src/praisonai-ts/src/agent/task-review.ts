@@ -26,6 +26,22 @@ export interface ReviewableTask {
 }
 
 /**
+ * Minimal contract the review needs from an approval manager: a
+ * `requestApproval` that resolves to a boolean verdict. Typing it explicitly
+ * (rather than `Function`) stops a manager whose `requestApproval` resolves to
+ * a truthy non-boolean — e.g. `{ approved: false }` — from being read as an
+ * approval, which would silently turn a denial into a pass.
+ */
+export interface ReviewApprovalManager {
+  requestApproval: (options: {
+    toolName: string;
+    input: unknown;
+    reason?: string;
+    timeout?: number;
+  }) => Promise<boolean>;
+}
+
+/**
  * Ask a person to approve `output`.
  *
  * Returns `{ approved: true }` untouched when the task did not ask for review,
@@ -34,7 +50,7 @@ export interface ReviewableTask {
 export async function reviewTaskOutput(
   task: ReviewableTask,
   output: unknown,
-  options: { approvalManager?: { requestApproval: Function }; timeout?: number } = {}
+  options: { approvalManager?: ReviewApprovalManager; timeout?: number } = {}
 ): Promise<ReviewOutcome> {
   if (!task?.humanInput) return { approved: true };
 
@@ -48,15 +64,20 @@ export async function reviewTaskOutput(
     );
   }
 
+  // The reviewer must see the COMPLETE output they are signing off on. Sending
+  // only a prefix would let a reviewer approve a visible fragment while
+  // unreviewed trailing content still reaches the next task.
   const approved = await manager.requestApproval({
     toolName: `task_output:${task.name ?? 'task'}`,
-    input: { output: typeof output === 'string' ? output.slice(0, 4000) : output },
+    input: { output },
     reason:
       task.humanReviewPrompt ?? `Approve the output of task ${task.name ?? '<unnamed>'}?`,
     timeout: options.timeout,
   });
 
-  return approved
+  // `requestApproval` is typed to resolve to a boolean; guard the boundary so an
+  // untyped/JS caller cannot smuggle a truthy non-boolean past as an approval.
+  return approved === true
     ? { approved: true }
     : { approved: false, reason: 'a reviewer rejected this output' };
 }

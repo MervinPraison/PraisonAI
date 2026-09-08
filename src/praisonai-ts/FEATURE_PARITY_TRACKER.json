@@ -6,7 +6,7 @@
   "summary": {
     "pythonCoreFeatures": 417,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 2057,
+    "typescriptFeatures": 2058,
     "gapCount": 6,
     "stubCount": 0,
     "priorityP0": 0,
@@ -2215,6 +2215,7 @@
         "ResolvedHandoffToolPolicy",
         "RetryBackoffConfig",
         "RetryBackoffConfigOptions",
+        "ReviewApprovalManager",
         "ReviewOutcome",
         "ReviewableTask",
         "RewriteResult",

@@ -60,6 +60,30 @@ describe('task output review', () => {
     expect(seen[0].reason).toBe('Is this legally safe?');
   });
 
+  it('the reviewer sees the COMPLETE output, not a truncated prefix', async () => {
+    // A reviewer signing off must see everything the next task will consume;
+    // approving a visible fragment while unreviewed trailing content passes is
+    // the exact hole this closes.
+    const seen: any[] = [];
+    const long = 'A'.repeat(5000) + 'TRAILING_SECRET';
+    await reviewTaskOutput({ name: 't', humanInput: true }, long, {
+      approvalManager: manager(true, seen),
+    });
+    expect(seen[0].input.output).toBe(long);
+    expect(seen[0].input.output).toContain('TRAILING_SECRET');
+  });
+
+  it('a truthy non-boolean verdict is treated as a rejection, not an approval', async () => {
+    // A manager whose requestApproval resolves to e.g. { approved: false } must
+    // never be read as an approval just because the object is truthy.
+    const outcome = await reviewTaskOutput(
+      { name: 't', humanInput: true },
+      'draft',
+      { approvalManager: { requestApproval: async () => ({ approved: false }) as any } }
+    );
+    expect(outcome.approved).toBe(false);
+  });
+
   it('a missing approval manager raises rather than skipping the review', async () => {
     // A task that was supposed to be signed off and simply was not is the
     // failure this feature prevents.

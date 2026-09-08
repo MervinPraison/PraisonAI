@@ -1234,4 +1234,4 @@ export {
 } from './compute';
 
 // Human sign-off on a task's output (Python parity: Task(human_input=True)).
-export { reviewTaskOutput, type ReviewOutcome, type ReviewableTask } from './agent/task-review';
+export { reviewTaskOutput, type ReviewOutcome, type ReviewableTask, type ReviewApprovalManager } from './agent/task-review';
