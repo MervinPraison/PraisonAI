@@ -71,3 +71,34 @@ def test_ag2_not_in_default_builtins():
     from praisonai.framework_adapters import registry as registry_module
 
     assert "ag2" not in registry_module._BUILTIN_ADAPTERS
+
+
+def test_resolve_or_default_uses_registered_default():
+    from praisonai.framework_adapters.base import BaseFrameworkAdapter
+    from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+    class _DefaultAdapter(BaseFrameworkAdapter):
+        name = "default_test_adapter"
+
+        def is_available(self):
+            return True
+
+        def run(
+            self,
+            config,
+            llm_config,
+            topic,
+            *,
+            tools_dict=None,
+            agent_callback=None,
+            task_callback=None,
+            cli_config=None,
+        ):
+            return topic
+
+    registry = FrameworkAdapterRegistry(discover_entry_points=False)
+    registry.unregister("praisonai")
+    registry.register("default_test_adapter", _DefaultAdapter)
+
+    assert registry.resolve_or_default(None) == "default_test_adapter"
+    assert registry.resolve_or_default("explicit") == "explicit"

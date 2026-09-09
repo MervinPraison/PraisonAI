@@ -845,7 +845,9 @@ class AgentsGenerator:
         tools_dict = self._build_tools_dict(config)
         
         # Select framework and resolve adapter variant
-        framework_name = self.framework or config.get('framework', 'praisonai')
+        framework_name = self._adapter_registry.resolve_or_default(
+            self.framework or config.get('framework')
+        )
         adapter = self._select_framework(framework_name, config)
         
         # Validate framework availability through the injected registry so a
