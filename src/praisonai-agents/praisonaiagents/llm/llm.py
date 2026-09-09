@@ -2082,10 +2082,24 @@ Respond with ONLY a valid JSON tool call in this format:
                 logging.debug(f"[OLLAMA_FIX] Filtered arguments: {filtered_args}")
                 
             return filtered_args
-            
+
         except Exception as e:
             logging.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
             return arguments
+
+    def _filter_ollama_dispatch_arguments(
+        self, function_name: str, arguments: Dict[str, Any], available_tools: List
+    ) -> Dict[str, Any]:
+        """Re-validate arguments after same-turn result substitution.
+
+        The streaming fallback resolves dependent arguments immediately before
+        each sequential dispatch. Keep this wrapper separate so the source has
+        one obvious pre-dispatch filter per streaming/fallback phase while the
+        post-substitution pass still enforces the target signature.
+        """
+        return self._validate_and_filter_ollama_arguments(
+            function_name, arguments, available_tools
+        )
 
     def _handle_ollama_sequential_logic(self, iteration_count: int, accumulated_tool_results: List[Any], 
                                       response_text: str, messages: List[Dict]) -> tuple:
@@ -4587,9 +4601,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     _tool_call.arguments, ollama_tool_result_mapping
                                 )
                                 # The batch-preparation filter above has
-                                # already removed unknown keys. Chained
-                                # substitution changes values only, so no
-                                # second filtering pass is needed here.
+                                # already removed unknown keys. Re-validate
+                                # after substitution so dependent values follow
+                                # the same signature contract as other paths.
+                                _tool_call.arguments = self._filter_ollama_dispatch_arguments(
+                                    _tool_call.function_name,
+                                    _tool_call.arguments,
+                                    tools,
+                                )
                                 _result = executor.execute_batch(
                                     [_tool_call], execute_tool_fn,
                                     timeout_ms=self.tool_timeout_ms,
