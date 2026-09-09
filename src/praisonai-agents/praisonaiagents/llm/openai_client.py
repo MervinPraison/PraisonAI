@@ -986,12 +986,59 @@ class OpenAIClient:
             logging.error(f"Error generating tool definition: {e}")
             return None
     
+    @staticmethod
+    def _lookup_by_name(name: str) -> Any:
+        """This module's globals first, then __main__, which is where a script's
+        own tools live."""
+        found = globals().get(name)
+        if found is None:
+            import __main__
+            found = getattr(__main__, name, None)
+        return found
+
     def _generate_tool_definition_from_name(self, function_name: str) -> Optional[Dict]:
-        """Generate a tool definition from a function name."""
-        # This is a placeholder - in agent.py this would look up the function
-        # For now, return None as the actual implementation would need access to the function
-        logging.debug(f"Tool definition generation from name '{function_name}' requires function reference")
-        return None
+        """Resolve a tool named by a string and build its definition.
+
+        format_tools() documents string function names as a supported format,
+        and this returned None unconditionally, so every such tool was dropped
+        from the request with no error and nothing above debug level. The same
+        name works on the LiteLLM path, which is what made it hard to see.
+
+        Resolution order matches LLM._generate_tool_definition: the shared tool
+        registry first, then a `<name>_definition` dict, then the function
+        itself.
+        """
+        tool = None
+        try:
+            from ..tools.registry import get_registry
+            tool = get_registry().get(function_name)
+        except ImportError:
+            logging.debug("Tool registry not available, falling back to globals/__main__")
+        except Exception as e:
+            logging.debug(f"Tool registry lookup failed for '{function_name}': {e}")
+
+        if tool is not None:
+            if hasattr(tool, 'get_schema'):
+                # A BaseTool declares its own schema, which honours an @tool
+                # name= override and excludes injected parameters.
+                return tool.get_schema()
+            if not callable(tool):
+                logging.debug(f"Tool '{function_name}' in registry is not callable")
+                return None
+            return self._generate_tool_definition(tool)
+
+        logging.debug(f"Tool '{function_name}' not in registry, falling back to globals/__main__")
+
+        tool_def = self._lookup_by_name(f"{function_name}_definition")
+        if tool_def:
+            return tool_def
+
+        func = self._lookup_by_name(function_name)
+        if not callable(func):
+            logging.debug(f"Function '{function_name}' not found or not callable")
+            return None
+
+        return self._generate_tool_definition(func)
     
     def process_stream_response(
         self,
