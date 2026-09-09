@@ -72,12 +72,12 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          # The green set selects directories whose tests patch litellm and
-          # construct LLM(...) (workflows/embedding/eval/context) or a real
-          # sandbox backend (sandbox/). Base deps alone make those raise
-          # ImportError at run time, so the extras are part of the green set's
-          # contract -- install them explicitly rather than let the job go red.
-          pip install -e "src/praisonai-agents[llm]"
+          # Extras, not decoration. Tests across workflows/embedding/eval/context
+          # patch litellm and construct LLM(...), and the knowledge suite needs
+          # chonkie for chunking -- without [knowledge] 22 tests fail on
+          # "chonkie package not found", an install gap that reads as 22 code
+          # failures.
+          pip install -e "src/praisonai-agents[llm,knowledge]"
           # praisonai-sandbox is a MONOREPO sibling, not a third-party optional.
           # Without it 47 tests fail with "No module named
           # praisonai_sandbox.compute" -- an install gap reported as 47 code
@@ -87,6 +87,12 @@ jobs:
           # tests fail on a malformed pairing file. The monorepo version already
           # handles it; the INSTALLED one did not.
           pip install -e src/praisonai-bot
+          # The wrapper. tests/unit/test_managed_backend.py imports
+          # praisonai.integrations.managed_agents; without it 47 tests fail with
+          # "No module named 'praisonai'". Found by running the suite on 3.11 in
+          # a CI-shaped environment rather than trusting a developer machine
+          # where every sibling is already installed.
+          pip install -e src/praisonai
           pip install pytest pytest-asyncio pytest-timeout
       - name: Run the unit suite
         working-directory: src/praisonai-agents
@@ -125,9 +131,12 @@ jobs:
           # No pipe: piping pytest into anything discards its exit code, which is
           # how a gate silently stops gating.
           #
-          # Excluded: tests/unit/memory/test_prefetch.py passes on macOS and
-          # FAILS on the Linux runner (test_async_memory_search_enforces_...,
-          # search_long_term not called). A genuine platform difference that
-          # needs its own look; excluded rather than left red.
+          # Nothing is excluded. test_prefetch.py used to be, recorded as "passes
+          # on macOS, fails on Linux" -- wrong variable. It was Python 3.12 vs the
+          # 3.11 pinned above: isinstance() against a runtime_checkable Protocol
+          # used hasattr on 3.11 (which any MagicMock satisfies) and
+          # inspect.getattr_static from 3.12 (which does not see Mock's
+          # auto-created attributes). The mock now names its methods, so both
+          # versions take the same branch.
           python -m pytest tests/unit/ -q -p no:randomly --timeout=120 \
-            --disable-warnings --ignore=tests/unit/memory/test_prefetch.py
+            --disable-warnings

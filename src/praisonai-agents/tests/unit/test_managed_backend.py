@@ -227,6 +227,12 @@ class TestManagedAgent:
             AnthropicManagedAgent as ManagedAgent,
         )
 
+        # The anthropic SDK is optional and CI does not install it. Without it
+        # _get_client raises ImportError about the missing SDK before it ever
+        # reaches the missing-key check this test is about -- which is the very
+        # case test_get_client_raises_without_sdk covers next.
+        pytest.importorskip("anthropic", reason="anthropic SDK not installed")
+
         m = ManagedAgent(api_key=None)
         m.api_key = None  # Force no key
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY not set"):
