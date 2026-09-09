@@ -28,6 +28,23 @@ def _auto_approve(monkeypatch):
     monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
 
 
+@pytest.fixture(autouse=True)
+def _reset_availability_cache():
+    """Clear the module-level availability cache around each test.
+
+    is_ast_grep_available() memoises its answer in a module global, so the FIRST
+    test to call it fixes the result for the whole process. A later test that
+    patches shutil.which to simulate the binary being present then got the
+    cached answer instead -- "assert False is True" under some orderings and
+    correct under others.
+    """
+    import praisonaiagents.tools.ast_grep_tool as mod
+
+    mod._availability_cache = None
+    yield
+    mod._availability_cache = None
+
+
 class TestAstGrepToolAvailability:
     """Test ast-grep tool availability detection."""
     

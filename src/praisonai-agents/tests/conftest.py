@@ -180,3 +180,31 @@ def _reset_deprecation_warn_once():
     deprecation._warned_params.clear()
     yield
     deprecation._warned_params.clear()
+
+
+@pytest.fixture(autouse=True)
+def _release_chroma_clients():
+    """Drop ChromaDB's global client cache after each test.
+
+    Chroma caches a System per persist path in
+    SharedSystemClient._identifier_to_system, and that cache outlives the
+    directory. When a test builds a store under a temp dir and the dir is then
+    removed, the cached client -- and its memory-mapped sqlite file -- stays
+    alive. A later test that resolves to the same path reuses it and touches a
+    mapping whose backing file is gone, which the kernel answers with SIGBUS or
+    SIGSEGV rather than an exception.
+
+    That crashed the whole run (exit 138/139) inside an unrelated test under
+    pytest-randomly seed 7, and disappeared entirely when tests/unit/knowledge
+    was excluded. Clearing the cache costs a client rebuild per knowledge test
+    and removes the dangling mapping.
+    """
+    yield
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+    except Exception:
+        return
+    try:
+        SharedSystemClient.clear_system_cache()
+    except Exception:
+        pass
