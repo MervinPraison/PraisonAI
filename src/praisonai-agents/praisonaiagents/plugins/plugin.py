@@ -259,8 +259,14 @@ class Plugin(ABC):
         """Called for authentication. Return credentials or None."""
         return None
     
-    def get_tools(self) -> List[Dict[str, Any]]:
-        """Return additional tools provided by this plugin."""
+    def get_tools(self) -> List[Any]:
+        """Return additional callable or provider-ready tools for agents.
+
+        Entries may be local callables/tool instances or preformatted
+        provider specifications (for example an OpenAI function or hosted
+        tool dictionary). The Agent routes each supported form through its
+        normal formatter and execution boundary.
+        """
         return []
 
 class FunctionPlugin(Plugin):
