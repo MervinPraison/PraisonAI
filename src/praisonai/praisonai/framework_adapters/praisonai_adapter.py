@@ -438,6 +438,18 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Resolve approval configuration
             agent_approval = self._resolve_agent_approval(details, config)
             
+            # Preserve the complete YAML LLM mapping (endpoint, credentials,
+            # sampling, retries, and provider-specific options) while adding
+            # the resolved model/budget fields. Rebuilding from only ``model``
+            # silently discarded those settings.
+            raw_llm_spec = details.get('llm')
+            if isinstance(raw_llm_spec, dict):
+                agent_llm = dict(raw_llm_spec)
+            else:
+                agent_llm = {}
+            agent_llm['model'] = agent_model
+            agent_llm['max_tokens'] = resolved_max_tokens
+
             # Create basic agent (pass both tools and toolsets)
             agent_kwargs = {
                 'name': role_filled,
@@ -445,10 +457,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'goal': goal_filled,
                 'backstory': backstory_filled,
                 'instructions': details.get('instructions'),
-                'llm': {
-                    'model': agent_model,
-                    'max_tokens': resolved_max_tokens,
-                },
+                'llm': agent_llm,
                 'allow_delegation': details.get('allow_delegation', False),
                 'tools': agent_tool_list,
                 'toolsets': agent_toolsets,

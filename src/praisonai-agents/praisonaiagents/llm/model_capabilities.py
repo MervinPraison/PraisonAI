@@ -86,7 +86,11 @@ def max_output_tokens(model_name: str) -> Optional[int]:
         info = _model_info(litellm, model_name)
         if not info:
             return None
-        value = info.get("max_output_tokens") or info.get("max_tokens")
+        # LiteLLM's ``max_tokens`` field is the model context window.  It is
+        # intentionally not a fallback here: using it as an output ceiling
+        # can send provider-invalid completion limits.  Only the explicit
+        # output-limit field is safe for this accessor.
+        value = info.get("max_output_tokens")
         if isinstance(value, bool) or value is None:
             return None
         value = int(value)

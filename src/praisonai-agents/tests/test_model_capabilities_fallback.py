@@ -159,4 +159,14 @@ def test_max_output_tokens_unknown_or_invalid_is_none():
     )
     with patch.object(mc, "_get_litellm", return_value=fake):
         assert mc.max_output_tokens("unknown-model") is None
+
+
+def test_max_output_tokens_does_not_treat_context_limit_as_output_limit():
+    mc.max_output_tokens.cache_clear()
+    fake = SimpleNamespace(
+        get_model_info=lambda *, model: {"max_tokens": 128000}
+    )
+    with patch.object(mc, "_get_litellm", return_value=fake):
+        assert mc.max_output_tokens("unknown-model") is None
+    mc.max_output_tokens.cache_clear()
     mc.max_output_tokens.cache_clear()

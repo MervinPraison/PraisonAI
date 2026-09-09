@@ -61,7 +61,16 @@ def _resolve_max_tokens(
         f"clamping to {ceiling}"
     )
     if output is not None:
-        if getattr(output, "is_json_mode", False) and hasattr(output, "print_json"):
+        output_mode = getattr(getattr(output, "mode", None), "value", None)
+        if output_mode == "stream-json" and hasattr(output, "emit_event"):
+            # stream-json is an NDJSON protocol: never use print_json(), whose
+            # indentation emits a multi-line object and corrupts framing.
+            output.emit_event(
+                "warning",
+                message=message,
+                data={"code": "max_tokens_clamped"},
+            )
+        elif getattr(output, "is_json_mode", False) and hasattr(output, "print_json"):
             # ``print_warning`` intentionally suppresses human text in JSON
             # mode. Emit a structured diagnostic so automation can see that
             # the requested value was lowered without corrupting stderr.
@@ -1445,6 +1454,27 @@ def run_main(
     if target:  # Only check if we actually have something to run
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
+
+        # A custom agent may declare its model in frontmatter. Resolve that
+        # model before deriving the default output budget; otherwise an omitted
+        # ``--model`` is budgeted at the generic 16k fallback and then attached
+        # to the frontmatter model, which can have a different ceiling.
+        if agent and model is None:
+            try:
+                from praisonai_code.cli.features.custom_definitions import (
+                    load_agent_from_name,
+                )
+
+                _preview_config = load_agent_from_name(agent)
+                _preview_llm = (_preview_config or {}).get("llm")
+                if isinstance(_preview_llm, dict):
+                    _preview_llm = _preview_llm.get("model")
+                if isinstance(_preview_llm, str) and _preview_llm.strip():
+                    model = _preview_llm.strip()
+            except Exception:
+                # The normal custom-agent load below reports missing/invalid
+                # definitions; preview is only for model-aware budgeting.
+                pass
 
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
         model = ensure_configured_or_onboard(model=model, interactive=not _headless)

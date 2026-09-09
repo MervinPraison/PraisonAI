@@ -40,6 +40,32 @@ def test_explicit_budget_is_capped_with_warning(monkeypatch):
     ]
 
 
+def test_explicit_budget_warning_is_single_ndjson_event_in_stream_mode(monkeypatch):
+    monkeypatch.setattr(
+        "praisonaiagents.llm.model_capabilities.max_output_tokens",
+        lambda model: 8192,
+    )
+    events = []
+    output = SimpleNamespace(
+        mode=SimpleNamespace(value="stream-json"),
+        emit_event=lambda *args, **kwargs: events.append((args, kwargs)),
+        is_json_mode=True,
+    )
+
+    assert run_command._resolve_max_tokens(
+        "provider/model", 12000, output=output
+    ) == 8192
+    assert events == [
+        (
+            ("warning",),
+            {
+                "message": "--max-tokens 12000 exceeds provider/model's output limit (8192); clamping to 8192",
+                "data": {"code": "max_tokens_clamped"},
+            },
+        )
+    ]
+
+
 def test_unknown_model_preserves_historical_default(monkeypatch):
     monkeypatch.setattr(
         "praisonaiagents.llm.model_capabilities.max_output_tokens",
