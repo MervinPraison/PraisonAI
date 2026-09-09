@@ -60,7 +60,7 @@ jobs:
           python -m pytest tests/ --collect-only -q --disable-warnings
 
   unit:
-    name: praisonai-agents unit tests (green set)
+    name: praisonai-agents unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
