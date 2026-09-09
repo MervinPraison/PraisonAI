@@ -3405,8 +3405,20 @@ Your Goal: {self.goal}
                         from ..config.feature_configs import MemoryConfig
                         clone_kwargs['memory'] = MemoryConfig(auto_save=value)
         
-        # Create new Agent instance
-        return self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        # Create new Agent instance. Plugin tools are shallow-copied above so
+        # callable identity and their ownership metadata can be carried over;
+        # otherwise the constructor's name-collision guard would treat a copied
+        # plugin tool as a caller-declared tool and disabling the plugin could
+        # leave the clone with an executable stale capability.
+        clone = self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        plugin_owners = getattr(self, "_plugin_tool_owners", None)
+        if plugin_owners:
+            clone._plugin_tool_owners = {
+                id(tool): plugin_owners[id(tool)]
+                for tool in (clone.tools if isinstance(clone.tools, (list, tuple)) else [])
+                if id(tool) in plugin_owners
+            }
+        return clone
 
     @property
     def _telemetry(self):

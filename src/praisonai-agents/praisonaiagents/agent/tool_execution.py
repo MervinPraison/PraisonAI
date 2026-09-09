@@ -418,8 +418,13 @@ class ToolExecutionMixin:
             return True
 
         try:
-            from ..plugins import is_enabled, get_plugin_manager
+            from ..plugins import get_plugin_manager
 
+            # Revocation tracks the OWNING plugin's per-manager enabled state
+            # (and identity, to catch unregister/re-register). It deliberately
+            # does NOT gate on the package-wide ``plugins.enable()`` flag, which
+            # governs background hook/metric plugins — tool plugins are live on
+            # registration, matching how they were attached in ``_merge_plugin_tools``.
             manager = get_plugin_manager()
             if isinstance(owner, tuple):
                 owner_name, owner_plugin = owner
@@ -428,7 +433,7 @@ class ToolExecutionMixin:
                 if current_plugin is not owner_plugin:
                     return False
                 owner = owner_name
-            return bool(is_enabled()) and manager.is_enabled(owner)
+            return manager.is_enabled(owner)
         except Exception as exc:  # pragma: no cover - defensive plugin boundary
             logging.warning("Failed to check plugin tool state: %s", exc)
             return False
@@ -444,10 +449,14 @@ class ToolExecutionMixin:
         agent's discovery and execution paths.
         """
         try:
-            from ..plugins import is_enabled, get_plugin_manager
+            from ..plugins import get_plugin_manager
 
-            if not is_enabled():
-                return
+            # NOTE: do NOT gate on the package-wide ``plugins.enable()`` flag.
+            # ``get_all_tools_with_sources()`` already filters to individually
+            # manager-enabled plugins, and registering a tool plugin marks it
+            # enabled. The plugin docs state tools work WITHOUT calling
+            # ``enable()`` (only background hook/metric plugins need it), so a
+            # merely-registered tool plugin must still reach the agent.
             manager = get_plugin_manager()
             get_tools_with_sources = getattr(
                 manager, "get_all_tools_with_sources", None
