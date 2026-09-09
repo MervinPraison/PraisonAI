@@ -14,11 +14,22 @@ import pytest
 
 from praisonai_code.cli.utils import project as project_mod
 from praisonai_code.cli.utils.project import (
+    get_git_root_commit,
     get_legacy_project_id,
     get_project_id,
     normalize_git_remote,
     resolve_project_identity,
 )
+
+
+def _git_out(cwd, *args):
+    """Like ``_git`` but returns stdout (``_git`` discards it)."""
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+        env={**os.environ,
+             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e.com",
+             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e.com"},
+    ).stdout
 
 
 def _git(cwd, *args):
@@ -205,3 +216,109 @@ def test_get_project_id_returns_only_hash(tmp_path, monkeypatch):
         project_mod, "resolve_project_identity", lambda path=None: ("abcd1234", "path")
     )
     assert get_project_id(str(tmp_path)) == "abcd1234"
+
+
+@requires_git
+def test_root_commit_choice_is_pinned_not_recomputed(tmp_path):
+    """Identity must survive the repo *gaining* a root commit.
+
+    The selection used to be ``min()`` over every root SHA. That is stable for
+    a fixed set of roots but not as the set grows: creating an orphan branch
+    adds a root, and about half the time the new SHA sorts below the original
+    (measured 10/20 on fresh repos), silently reassigning the project id and
+    orphaning the very session history the selection exists to protect. This
+    test failed roughly one run in two.
+
+    Preferring the oldest root fixes the common case but not two roots created
+    in the same second -- routine in scripted setup -- so the resolved SHA is
+    pinned in the git common dir on first use.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+
+    original_root = _git_out(repo, "rev-list", "--max-parents=0", "--all").strip()
+    first = get_git_root_commit(str(repo))
+    assert first == original_root
+
+    # Ten orphan branches: with the old min(), at least one new root sorting
+    # below the original is near-certain.
+    for i in range(10):
+        _git(repo, "checkout", "--orphan", f"orphan{i}")
+        (repo / f"g{i}.txt").write_text(str(i))
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", f"orphan{i}")
+        assert get_git_root_commit(str(repo)) == original_root, (
+            f"identity changed after adding orphan branch {i}"
+        )
+
+
+@requires_git
+def test_the_pin_is_shared_by_every_worktree(tmp_path):
+    """A linked worktree must resolve the same identity as its main checkout.
+
+    The pin lives in ``--git-common-dir`` for this reason; a per-worktree
+    ``.git`` file would give each worktree its own project id.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    main_id, _ = resolve_project_identity(str(repo))
+
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "-b", "wt", str(linked))
+    linked_id, _ = resolve_project_identity(str(linked))
+
+    assert linked_id == main_id
+
+
+@requires_git
+def test_a_pin_naming_a_vanished_commit_is_not_trusted(tmp_path):
+    """A rewritten history must re-choose rather than return a dead SHA."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    real_root = get_git_root_commit(str(repo))
+
+    pin = Path(_git_out(repo, "rev-parse", "--git-common-dir").strip())
+    if not pin.is_absolute():
+        pin = (repo / pin).resolve()
+    (pin / "praisonai-root-commit").write_text("0" * 40)
+
+    assert get_git_root_commit(str(repo)) == real_root
+
+
+@requires_git
+def test_a_vanished_pin_is_repaired_not_merely_ignored(tmp_path):
+    """A stale pin must be *rewritten*, not just distrusted.
+
+    If a dead pin were only ignored, every later resolve would recompute the
+    root -- reintroducing the same-second tie-break flip the pin exists to
+    prevent. So the first resolve must heal the pin to the freshly chosen root,
+    restoring persistent stability rather than leaving recomputation forever.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    real_root = get_git_root_commit(str(repo))
+
+    pin_file = project_mod._git_meta_path(str(repo), "praisonai-root-commit")
+    assert pin_file is not None
+    pin_file.write_text("0" * 40)
+
+    # First resolve after the pin went stale re-chooses...
+    assert get_git_root_commit(str(repo)) == real_root
+    # ...and repairs the pin on disk so it is trusted from now on.
+    assert pin_file.read_text(encoding="utf-8").strip() == real_root

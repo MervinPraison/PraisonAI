@@ -21,6 +21,40 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _get_todo_tools():
+    """The runtime object that owns the todo store, or ``None``.
+
+    Every MCP todo handler goes through this so it reads/writes the *same*
+    file, in the *same* record shape, as ``praisonaiagents.tools.todo_tools``.
+    Earlier these handlers hardcoded ``~/.praison/todo.json`` -- the wrong
+    directory AND filename -- and wrote a *different* schema (``id`` as a UUID
+    string, ``content``) than the runtime (``id`` as an int, ``task``). Sharing
+    the path alone would still have left the two unable to read each other's
+    records, so the handlers now delegate storage and schema to the owner.
+    """
+    try:
+        from praisonaiagents.tools.todo_tools import TodoTools
+
+        return TodoTools()
+    except Exception:
+        return None
+
+
+def _resolve_todo_store() -> str:
+    """Path of the todo store owned by ``praisonaiagents.tools.todo_tools``.
+
+    ``<workspace>/todos.json`` when a workspace is active, else
+    ``~/.praisonai/todos.json``. Resolved through the owning module rather than
+    a corrected literal, so the two cannot drift apart again.
+    """
+    import os
+
+    tools = _get_todo_tools()
+    if tools is not None:
+        return tools._get_todo_file()
+    return os.path.expanduser("~/.praisonai/todos.json")
+
+
 def _resolve_cwd_yaml_path(file_path: str) -> "Path":
     """Resolve a YAML path strictly inside the current working directory."""
     from pathlib import Path
@@ -269,96 +303,91 @@ def register_cli_tools() -> None:
             return f"Error: {e}"
     
     # Todo tools
+    #
+    # All four delegate storage AND record schema to
+    # ``praisonaiagents.tools.todo_tools.TodoTools`` -- the owner of the store.
+    # They use the owner's non-decorated ``_load_todos``/``_save_todos`` (the
+    # public ``todo_add``/``todo_update`` methods carry an @require_approval
+    # gate that cannot use console I/O from the MCP server's async context) and
+    # write the owner's shape (``id`` int, ``task``) so MCP- and runtime-created
+    # todos can read, complete, and delete each other. ``_match_todo_id`` bridges
+    # MCP's string arguments to the owner's integer ids.
+    def _match_todo_id(todo: dict, todo_id: str) -> bool:
+        return str(todo.get("id")) == str(todo_id)
+
     @register_tool("praisonai.todo.list")
     def todo_list() -> str:
         """List todo items."""
         try:
-            import os
-            import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
-            if not os.path.exists(todo_path):
+            tools = _get_todo_tools()
+            if tools is None:
+                return "Error: Todo tools not available"
+            todos = tools._load_todos()
+            if not todos:
                 return "No todos found"
-            with open(todo_path, 'r') as f:
-                todos = json.load(f)
             return str(todos)
         except Exception as e:
             return f"Error: {e}"
-    
+
     @register_tool("praisonai.todo.add")
     def todo_add(content: str, priority: str = "medium") -> str:
         """Add a todo item."""
         try:
-            import os
-            import json
-            import uuid
-            todo_path = os.path.expanduser("~/.praison/todo.json")
-            os.makedirs(os.path.dirname(todo_path), exist_ok=True)
-            
-            todos = []
-            if os.path.exists(todo_path):
-                with open(todo_path, 'r') as f:
-                    todos = json.load(f)
-            
+            tools = _get_todo_tools()
+            if tools is None:
+                return "Error: Todo tools not available"
+            todos = tools._load_todos()
+
+            existing_ids = [t.get("id") for t in todos if isinstance(t.get("id"), int)]
             todo = {
-                "id": str(uuid.uuid4())[:8],
-                "content": content,
+                "id": (max(existing_ids) + 1) if existing_ids else 1,
+                "task": content,
                 "priority": priority,
+                "category": "general",
                 "status": "pending",
+                "created_at": tools._get_timestamp(),
             }
             todos.append(todo)
-            
-            with open(todo_path, 'w') as f:
-                json.dump(todos, f, indent=2)
-            
+            tools._save_todos(todos)
             return f"Todo added: {todo['id']}"
         except Exception as e:
             return f"Error: {e}"
-    
+
     @register_tool("praisonai.todo.complete")
     def todo_complete(todo_id: str) -> str:
         """Mark a todo as complete."""
         try:
-            import os
-            import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
-            if not os.path.exists(todo_path):
-                return "No todos found"
-            
-            with open(todo_path, 'r') as f:
-                todos = json.load(f)
-            
+            tools = _get_todo_tools()
+            if tools is None:
+                return "Error: Todo tools not available"
+            todos = tools._load_todos()
+
             for todo in todos:
-                if todo.get("id") == todo_id:
+                if _match_todo_id(todo, todo_id):
                     todo["status"] = "completed"
                     break
             else:
                 return f"Todo not found: {todo_id}"
-            
-            with open(todo_path, 'w') as f:
-                json.dump(todos, f, indent=2)
-            
+
+            tools._save_todos(todos)
             return f"Todo completed: {todo_id}"
         except Exception as e:
             return f"Error: {e}"
-    
+
     @register_tool("praisonai.todo.delete")
     def todo_delete(todo_id: str) -> str:
         """Delete a todo item."""
         try:
-            import os
-            import json
-            todo_path = os.path.expanduser("~/.praison/todo.json")
-            if not os.path.exists(todo_path):
-                return "No todos found"
-            
-            with open(todo_path, 'r') as f:
-                todos = json.load(f)
-            
-            todos = [t for t in todos if t.get("id") != todo_id]
-            
-            with open(todo_path, 'w') as f:
-                json.dump(todos, f, indent=2)
-            
+            tools = _get_todo_tools()
+            if tools is None:
+                return "Error: Todo tools not available"
+            todos = tools._load_todos()
+
+            remaining = [t for t in todos if not _match_todo_id(t, todo_id)]
+            if len(remaining) == len(todos):
+                return f"Todo not found: {todo_id}"
+
+            tools._save_todos(remaining)
             return f"Todo deleted: {todo_id}"
         except Exception as e:
             return f"Error: {e}"

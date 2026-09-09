@@ -92,9 +92,11 @@ class TestHookUnification:
         assert hasattr(HookEvent, 'ON_CONFIG'), "Missing ON_CONFIG"
         assert hasattr(HookEvent, 'ON_AUTH'), "Missing ON_AUTH"
         
-        # Message events
-        assert hasattr(HookEvent, 'BEFORE_MESSAGE'), "Missing BEFORE_MESSAGE"
-        assert hasattr(HookEvent, 'AFTER_MESSAGE'), "Missing AFTER_MESSAGE"
+        # Message events. BEFORE_/AFTER_MESSAGE are aliases of the live
+        # inbound/outbound events, so they must resolve to those members --
+        # merely existing is what let them swallow hooks silently before.
+        assert HookEvent.BEFORE_MESSAGE is HookEvent.MESSAGE_RECEIVED
+        assert HookEvent.AFTER_MESSAGE is HookEvent.MESSAGE_SENDING
     
     def test_hook_event_values_match_plugin_hook_values(self):
         """HookEvent values should match expected plugin hook values."""

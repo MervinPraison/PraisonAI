@@ -1036,14 +1036,16 @@ export {
 // SPECIALIZED AGENTS (Python parity: praisonaiagents.agent.{code,ocr,vision,video,realtime,embedding}_agent)
 // ============================================================================
 export {
-  CodeAgent, createCodeAgent,
+  CodeAgent, createCodeAgent, createSubprocessExecutor,
   OCRAgent, createOCRAgent,
   VisionAgent, createVisionAgent,
   VideoAgent, createVideoAgent,
   RealtimeAgent, createRealtimeAgent,
   EmbeddingAgent, createEmbeddingAgent,
   type CodeConfig, type CodeAgentConfig, type CodeExecutionResult,
+  type CodeExecutor, type CodeExecutorContext,
   type OCRConfig, type OCRAgentConfig, type OCRResult, type OCRPage,
+  type OCRExtractor, type OCRExtractRequest,
   type VisionConfig, type VisionAgentConfig, type VisionResult,
   type VideoConfig, type VideoAgentConfig, type VideoResult,
   type RealtimeConfig, type RealtimeAgentConfig, type RealtimeEvent, type RealtimeEventType,
@@ -1223,3 +1225,13 @@ export type {
   FlowStep, AgentLikeStep, IncludableWorkflow, RecipeResolver, ParallelOnFailure, ParallelBranchError,
 } from './workflows';
 // If, Parallel, Route, when (real classes land in src/workflows/patterns.ts)
+
+// Compute providers: where an agent's tools run (Python parity: praisonai_sandbox.compute).
+export {
+  LocalCompute, DockerCompute, registerComputeProvider, listComputeProviders,
+  resolveComputeProvider, ComputeError,
+  type ComputeProvider, type ComputeConfig, type ComputeInstance, type ExecResult,
+} from './compute';
+
+// Human sign-off on a task's output (Python parity: Task(human_input=True)).
+export { reviewTaskOutput, type ReviewOutcome, type ReviewableTask, type ReviewApprovalManager } from './agent/task-review';

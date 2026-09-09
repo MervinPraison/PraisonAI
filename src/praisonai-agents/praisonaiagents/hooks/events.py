@@ -462,6 +462,61 @@ class ScheduleTriggerInput(HookInput):
 
 
 @dataclass
+class ScheduleAddInput(HookInput):
+    """Input for SCHEDULE_ADD hooks (a scheduled job was persisted).
+
+    Emitted by the schedule store, which is the single point every author
+    path funnels through: the agent-callable ``schedule_add`` tool, the
+    ``praisonai schedule add`` CLI, and the gateway's config reconciler.
+    """
+    job_name: str = ""
+    job_id: str = ""
+    schedule: str = ""
+    message: str = ""
+    agent_id: str = ""
+    principal: str = ""
+    enabled: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "job_name": self.job_name,
+            "job_id": self.job_id,
+            "schedule": self.schedule,
+            "message": self.message[:500] if self.message else "",
+            "agent_id": self.agent_id,
+            "principal": self.principal,
+            "enabled": self.enabled,
+        })
+        return base
+
+
+@dataclass
+class ScheduleRemoveInput(HookInput):
+    """Input for SCHEDULE_REMOVE hooks (a scheduled job was deleted).
+
+    Emitted by the schedule store for every deletion path — the
+    agent-callable ``schedule_remove`` tool, ``praisonai schedule
+    remove``/``delete`` (which delete by id, not name), and the automatic
+    cleanup of a spent ``delete_after_run`` one-shot.
+    """
+    job_name: str = ""
+    job_id: str = ""
+    schedule: str = ""
+    principal: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "job_name": self.job_name,
+            "job_id": self.job_id,
+            "schedule": self.schedule,
+            "principal": self.principal,
+        })
+        return base
+
+
+@dataclass
 class JobCompletedInput(HookInput):
     """Input for JOB_COMPLETED hooks (a background job finished).
 
@@ -491,5 +546,65 @@ class JobCompletedInput(HookInput):
             "platform": self.platform,
             "chat_id": self.chat_id,
             "thread_id": self.thread_id,
+        })
+        return base
+
+
+@dataclass
+class PluginLifecycleInput(HookInput):
+    """Input for ON_INIT / ON_SHUTDOWN hooks (plugin lifecycle).
+
+    Emitted by :meth:`PluginManager.register` (ON_INIT, right after the
+    plugin runs its own ``on_init``) and :meth:`PluginManager.unregister`
+    (ON_SHUTDOWN, right after its ``on_shutdown``). Lets an observability
+    plugin see the plugin set change at runtime instead of polling
+    ``list_plugins()``.
+    """
+    plugin_name: str = ""
+    plugin_version: str = ""
+    plugin_description: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "plugin_name": self.plugin_name,
+            "plugin_version": self.plugin_version,
+            "plugin_description": self.plugin_description,
+        })
+        return base
+
+
+@dataclass
+class SubagentStopInput(HookInput):
+    """Input for SUBAGENT_STOP hooks (a spawned subagent reached a terminal state).
+
+    Emitted from the single completion chokepoint in
+    ``tools/subagent_tool.py``, so it covers every path: synchronous spawns,
+    ``background=True`` jobs, resolver-routed named agents, generic factory
+    spawns, and failures. ``success`` is False (with ``error`` populated) when
+    the subagent raised.
+
+    ``agent_name`` on the base :class:`HookInput` carries the subagent name.
+    """
+    task: str = ""
+    success: bool = True
+    output: Any = None
+    error: Optional[str] = None
+    llm: Optional[str] = None
+    permission_mode: Optional[str] = None
+    depth: int = 0
+    duration_ms: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "task": self.task,
+            "success": self.success,
+            "output": str(self.output) if self.output is not None else None,
+            "error": self.error,
+            "llm": self.llm,
+            "permission_mode": self.permission_mode,
+            "depth": self.depth,
+            "duration_ms": self.duration_ms,
         })
         return base

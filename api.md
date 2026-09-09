@@ -309,7 +309,7 @@ Methods:
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">markdown</a>()</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">memory</a>()</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">normalize_content</a>(content)</code>
-* <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">reset</a>()</code>
+* <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">reset</a>() -> bool</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">search</a>(query, user_id = None, agent_id = None, run_id = None, rerank = None, **kwargs)</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">store</a>(content, user_id = None, agent_id = None, run_id = None, metadata = None, is_content = False)</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">update</a>(memory_id, data)</code>
@@ -715,6 +715,7 @@ Methods:
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">start</a>(input: str = '', **kwargs) -> Dict[str, Any]</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">stream</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_mermaid</a>() -> str</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">where_does_it_run</a>() -> str</code>
@@ -928,7 +929,7 @@ Methods:
 
 Types/Exports:
 ```ts
-export { Agent, AgentTeam, Agents, CodeAgent, EmbeddingAgent, OCRAgent, PraisonAIAgents, RealtimeAgent, Router, TASK_STATUS, VideoAgent, VisionAgent, createCodeAgent, createEmbeddingAgent, createOCRAgent, createRealtimeAgent, createVideoAgent, createVisionAgent } from "./agent";
+export { Agent, AgentTeam, Agents, CodeAgent, EmbeddingAgent, OCRAgent, PraisonAIAgents, RealtimeAgent, Router, TASK_STATUS, VideoAgent, VisionAgent, createCodeAgent, createEmbeddingAgent, createOCRAgent, createRealtimeAgent, createSubprocessExecutor, createVideoAgent, createVisionAgent } from "./agent";
 export type { AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput, AgentMemoryStore, AgentMessage, AgentRetryConfig, AgentStreamOptions, AgentTaskLike, AgentTeamConfig, AgentTeamProcess, AgentTeamStartDictOptions, AgentTeamStartOptions, AgentTeamStartOptionsInput, AgentWebConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason, TaskCallback, TaskGuardrail, TaskOnError } from "./agent";
 export { AudioAgent, createAudioAgent } from "./agent/audio";
 export type { AudioAgentConfig, AudioConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
@@ -945,6 +946,7 @@ export type { JitteredBackoffOptions, RetryBackoffConfigOptions } from "./agent/
 export { RouterAgent, createRouter, routeConditions } from "./agent/router";
 export { AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
 export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, TerminalReason } from "./agent/run-outcome";
+export { reviewTaskOutput } from "./agent/task-review";
 export { // Agent loop
   createAgentLoop, // DevTools
   enableDevTools, // MCP
@@ -980,6 +982,7 @@ export { // Autonomy Mode
   SandboxExecutor, // Scheduler
   Scheduler, // Slash Commands
   SlashCommandHandler, AiderAgent, ClaudeCodeAgent, CodexCliAgent, CommandValidator, CostTokenUsage, DEFAULT_BLOCKED_COMMANDS, DEFAULT_BLOCKED_PATHS, DEFAULT_IGNORE_PATTERNS, DiffViewer, FileCheckpointStorage, FileJobStorage, GeminiCliAgent, GenericExternalAgent, HistoryManager, MODEL_PRICING, MODE_POLICIES, MemoryCheckpointStorage, MemoryJobStorage, StatusDisplay, addLineRangeToFileMatch, cliApprovalPrompt, createAutonomyManager, createCheckpointManager, createCostTracker, createDiffViewer, createExternalAgent, createFastContext, createFileCheckpointStorage, createFileJobStorage, createFileMatch, createFlowDisplay, createGitManager, createHistoryManager, createInteractiveTUI, createJobQueue, createLineRange, createN8NIntegration, createRepoMap, createSandboxExecutor, createScheduler, createSlashCommandHandler, createStatusDisplay, cronExpressions, estimateTokens, executeSlashCommand, externalAgentAsTool, formatCost, getExternalAgentRegistry, getLineCount, getQuickContext, getRepoTree, getTotalLines, isSlashCommand, mergeRanges, parseSlashCommand, rangesOverlap, registerCommand, renderWorkflow, sandboxExec, triggerN8NWebhook } from "./cli/features";
+export { ComputeError, DockerCompute, LocalCompute, listComputeProviders, registerComputeProvider, resolveComputeProvider } from "./compute";
 export { // Classes
   DictCondition, // Functions
   evaluateCondition, // Types

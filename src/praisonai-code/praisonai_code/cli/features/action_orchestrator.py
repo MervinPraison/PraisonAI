@@ -481,6 +481,26 @@ class ActionOrchestrator:
                     }
                 run_cwd = candidate
 
+            # Defence in depth: this executor runs argv directly, so any
+            # shell operator here would be handed to the program as a literal
+            # argument and the step would report success for work that never
+            # happened. Fail instead of lying.
+            from .shell_exec import MODE_ENV_VAR, find_shell_syntax
+
+            _operator = find_shell_syntax(step.target)
+            if _operator is not None:
+                return {
+                    "command": step.target,
+                    "stdout": "",
+                    "stderr": (
+                        f"Refused: shell operator {_operator!r} is not "
+                        f"interpreted by this executor, so running the command "
+                        f"would drop it silently. Split the command into "
+                        f"separate steps, or set {MODE_ENV_VAR}=sandboxed."
+                    ),
+                    "returncode": 126,
+                }
+
             # Use shell=False with shlex.split for safer execution
             args = shlex.split(step.target)
             result = subprocess.run(

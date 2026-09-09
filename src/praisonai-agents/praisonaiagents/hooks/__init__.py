@@ -53,6 +53,7 @@ __all__ = [
     "HookResult",
     "HookInput",
     "HookOutput",
+    "KanbanHookInput",
     # Hook definitions
     "HookDefinition",
     "CommandHook",
@@ -83,7 +84,11 @@ __all__ = [
     "GatewayStartInput",
     "GatewayStopInput",
     "ScheduleTriggerInput",
+    "ScheduleAddInput",
+    "ScheduleRemoveInput",
     "JobCompletedInput",
+    "PluginLifecycleInput",
+    "SubagentStopInput",
     # Middleware types
     "InvocationContext",
     "ModelRequest",
@@ -111,6 +116,8 @@ __all__ = [
     "add_hook",
     "remove_hook",
     "has_hook",
+    "fire_hook",
+    "resolve_hook_event",
     "get_default_registry",
 ]
 
@@ -123,6 +130,7 @@ _LAZY_GROUPS = {
         'HookResult': ('praisonaiagents.hooks.types', 'HookResult'),
         'HookInput': ('praisonaiagents.hooks.types', 'HookInput'),
         'HookOutput': ('praisonaiagents.hooks.types', 'HookOutput'),
+        'KanbanHookInput': ('praisonaiagents.hooks.types', 'KanbanHookInput'),
     },
     'types_definitions': {
         'HookDefinition': ('praisonaiagents.hooks.types', 'HookDefinition'),
@@ -156,7 +164,11 @@ _LAZY_GROUPS = {
         'GatewayStartInput': ('praisonaiagents.hooks.events', 'GatewayStartInput'),
         'GatewayStopInput': ('praisonaiagents.hooks.events', 'GatewayStopInput'),
         'ScheduleTriggerInput': ('praisonaiagents.hooks.events', 'ScheduleTriggerInput'),
+        'ScheduleAddInput': ('praisonaiagents.hooks.events', 'ScheduleAddInput'),
+        'ScheduleRemoveInput': ('praisonaiagents.hooks.events', 'ScheduleRemoveInput'),
         'JobCompletedInput': ('praisonaiagents.hooks.events', 'JobCompletedInput'),
+        'PluginLifecycleInput': ('praisonaiagents.hooks.events', 'PluginLifecycleInput'),
+        'SubagentStopInput': ('praisonaiagents.hooks.events', 'SubagentStopInput'),
     },
     'middleware_types': {
         'InvocationContext': ('praisonaiagents.hooks.middleware', 'InvocationContext'),
@@ -190,6 +202,10 @@ _LAZY_GROUPS = {
         'add_hook': ('praisonaiagents.hooks.registry', 'add_hook'),
         'remove_hook': ('praisonaiagents.hooks.registry', 'remove_hook'),
         'has_hook': ('praisonaiagents.hooks.registry', 'has_hook'),
+        # Emission counterpart of add_hook: runtime components call fire_hook()
+        # at a real state transition so subscribers actually receive the event.
+        'fire_hook': ('praisonaiagents.hooks.registry', 'fire_hook'),
+        'resolve_hook_event': ('praisonaiagents.hooks.registry', 'resolve_hook_event'),
         'get_default_registry': ('praisonaiagents.hooks.registry', 'get_default_registry'),
     },
 }

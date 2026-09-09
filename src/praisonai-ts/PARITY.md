@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-09-07
+> **Version:** 1.5.87 | **Last Updated:** 2026-09-08
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2040 |
+| TypeScript Features | 2058 |
 | **Gap Count** | **6** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -741,7 +741,7 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (169 exports)</summary>
+<summary><strong>agent</strong> (178 exports)</summary>
 
 ```typescript
 import { AGENT_RUN_STATUSES, Agent, AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput... } from 'praisonai';
@@ -903,7 +903,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
-<summary><strong>other</strong> (495 exports)</summary>
+<summary><strong>other</strong> (504 exports)</summary>
 
 ```typescript
 import { A2UI, A2UIAdapter, A2UINotInstalledError, A2UISystemPromptOptions, A2UIToolResultProtocol, A2UI_MIME_TYPE, AGENT_ERROR_KINDS, ARITY, AUTONOMY_PRESETS, ActionRecord... } from 'praisonai';

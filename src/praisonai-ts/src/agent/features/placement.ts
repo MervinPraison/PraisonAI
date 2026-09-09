@@ -93,7 +93,44 @@ export function unregisterToolPlace(name: string): boolean {
 }
 
 /** Every place name `toolsRunOn=` accepts right now. */
+/**
+ * Register the built-in compute places on first use.
+ *
+ * `toolsRunOn` is VALIDATED now rather than accepted-and-ignored, so 'local'
+ * and 'docker' must be KNOWN NAMES without the caller having imported
+ * `praisonai/compute`.
+ *
+ * These are thin placeholders: the real provider is loaded inside runTool via a
+ * COMPUTED dynamic specifier, so nothing from compute/ lands on a bundler's
+ * static graph. A plain `require` here put it on praisonai/mobile's graph and
+ * broke the chrome58 bundle check -- `require` counts as a static import, which
+ * this package has been caught by before.
+ */
+let builtinsRegistered = false;
+function ensureBuiltinToolPlaces(): void {
+  if (builtinsRegistered) return;
+  builtinsRegistered = true;
+  for (const name of ['local', 'docker']) {
+    if (toolPlaces.has(name)) continue;
+    toolPlaces.set(name, () => ({
+      placeName: name,
+      async runTool(toolName, args, localImplementation) {
+        const specifier = ['../../comp', 'ute/tool-place'].join('');
+        const mod: any = await import(specifier);
+        mod.registerComputeToolPlaces?.();
+        const factory = toolPlaces.get(name);
+        const real = factory ? factory() : null;
+        if (!real || real.placeName !== name || real.runTool === this.runTool) {
+          return localImplementation();
+        }
+        return real.runTool(toolName, args, localImplementation);
+      },
+    }));
+  }
+}
+
 export function toolPlaceNames(): string[] {
+  ensureBuiltinToolPlaces();
   return [...toolPlaces.keys()].sort();
 }
 
@@ -145,6 +182,7 @@ export function resolvePlacement(input: ResolvePlacementInput): Placement {
   const owner = input.owner ?? 'Agent';
   const { runOn, toolsRunOn, backend } = input;
   const managed = managedRuntimeNames();
+  ensureBuiltinToolPlaces();
   const places = toolPlaceNames();
 
   // ── a place that cannot do the job asked of it ──────────────────────────

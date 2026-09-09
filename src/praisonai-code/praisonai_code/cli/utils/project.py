@@ -119,23 +119,103 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
     cwd = git_root if git_root else (Path(path) if path else Path.cwd())
     # Enumerate root commits across *all* refs (not just those reachable from
     # HEAD) so switching between unmerged orphan branches doesn't change the
-    # selected root commit and silently orphan session history. Choosing the
-    # lexicographically smallest SHA keeps the identity deterministic regardless
-    # of ref ordering or the currently checked-out branch.
-    out = _git_output(['rev-list', '--max-parents=0', '--all'], cwd)
+    # selected root commit and silently orphan session history.
+    #
+    # The choice among them must be stable as the repo GAINS roots, which
+    # picking the lexicographically smallest SHA is not: creating an orphan
+    # branch adds a root, and roughly half the time that new SHA sorts below
+    # the existing one -- reassigning the project id and orphaning exactly the
+    # history this is meant to protect. Measured at 10/20 on fresh repos.
+    #
+    # The oldest root is stable instead: a root created later cannot become the
+    # oldest. Ties (same commit second, common in scripted setups) fall back to
+    # the smallest SHA so the result stays deterministic.
+    out = _git_output(
+        ['log', '--max-parents=0', '--all', '--format=%ct %H'], cwd)
     if not out:
         # No refs yet (e.g. detached/unborn); fall back to HEAD's roots if any.
-        out = _git_output(['rev-list', '--max-parents=0', 'HEAD'], cwd)
+        out = _git_output(
+            ['log', '--max-parents=0', 'HEAD', '--format=%ct %H'], cwd)
     if not out:
         return None
-    roots = [line.strip() for line in out.splitlines() if line.strip()]
+    roots = []
+    for line in out.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        stamp, sha = parts
+        try:
+            roots.append((int(stamp), sha))
+        except ValueError:
+            # Unparseable timestamp: keep the commit, but sort it last so it
+            # only wins when nothing else is available.
+            roots.append((1 << 62, sha))
     if not roots:
         return None
-    return min(roots)
+    available = {sha for _, sha in roots}
+    chosen = min(roots)[1]
+
+    # Pin the choice on first resolve. Preferring the oldest root already stops
+    # a *later* orphan branch from winning, but two roots created in the same
+    # second tie and fall back to the SHA -- which flips about half the time.
+    # A pinned SHA cannot drift at all. Re-choose only if the pinned commit is
+    # no longer a root here (history rewritten, or a shallow/partial clone).
+    pinned_path = _git_meta_path(path, "praisonai-root-commit")
+    if pinned_path is not None:
+        try:
+            if pinned_path.exists():
+                pinned = pinned_path.read_text(encoding="utf-8").strip()
+                if pinned in available:
+                    return pinned
+                # A pin naming a commit that is no longer a root here (rewritten
+                # history, shallow/partial clone) can't be trusted. Re-pin the
+                # freshly chosen root so subsequent resolves stay stable rather
+                # than recomputing -- and flipping on same-second ties -- every
+                # time. Atomic replace keeps concurrent healers agreeing.
+                _atomic_write(pinned_path, chosen)
+            else:
+                # Exclusive create, like the cached id below: concurrent first
+                # runs must agree rather than each pinning its own choice.
+                try:
+                    with open(pinned_path, "x", encoding="utf-8") as fh:
+                        fh.write(chosen)
+                except FileExistsError:
+                    other = pinned_path.read_text(encoding="utf-8").strip()
+                    if other in available:
+                        return other
+                    _atomic_write(pinned_path, chosen)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    return chosen
 
 
-def _cached_id_path(path: Optional[str] = None) -> Optional[Path]:
-    """Return the path to the persisted project-id file inside ``.git``."""
+def _atomic_write(target: Path, content: str) -> None:
+    """Best-effort atomic overwrite of ``target`` with ``content``.
+
+    Writes to a unique temp file in the same directory and ``os.replace``s it
+    into place so a concurrent reader never sees a half-written pin and racing
+    healers converge on one file rather than corrupting each other. Failures are
+    swallowed: the caller already has the value it will return.
+    """
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, target)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _git_meta_path(path: Optional[str], name: str) -> Optional[Path]:
+    """Return ``<git-common-dir>/<name>`` for the repo containing ``path``.
+
+    ``--git-common-dir`` so every worktree of a repo shares one file.
+    """
     git_root = get_git_root(path)
     if not git_root:
         return None
@@ -147,7 +227,12 @@ def _cached_id_path(path: Optional[str] = None) -> Optional[Path]:
     git_dir_path = Path(git_dir)
     if not git_dir_path.is_absolute():
         git_dir_path = (git_root / git_dir_path).resolve()
-    return git_dir_path / "praisonai-project"
+    return git_dir_path / name
+
+
+def _cached_id_path(path: Optional[str] = None) -> Optional[Path]:
+    """Return the path to the persisted project-id file inside ``.git``."""
+    return _git_meta_path(path, "praisonai-project")
 
 
 def get_or_create_cached_id(path: Optional[str] = None) -> Optional[str]:

@@ -838,7 +838,76 @@ class AgentTeam(SpawnAnnounceProtocol):
         The class was renamed from `AgentManager` to `AgentTeam` in v1.0.
         `AgentManager` and `Agents` remain as silent aliases for backward compatibility.
     """
-    
+
+    @staticmethod
+    def _adapt_single_agent_execution_config(execution, multi_agent_cls):
+        """Accept the single-agent ``ExecutionConfig`` on a team, loudly.
+
+        ``ExecutionConfig`` is exported at the package top level;
+        ``MultiAgentExecutionConfig`` is not, so ``AgentTeam(execution=
+        ExecutionConfig(max_iter=99))`` is an easy and natural mistake. It used
+        to be resolved against the wrong class and silently discarded whole.
+
+        Shared fields are carried over (``max_iter``; ``max_retry_limit`` ->
+        ``max_retries``) and a ``UserWarning`` names the right class and lists
+        any settings that have no team-level counterpart. A shared field is only
+        carried when the caller actually changed it, so the team keeps its own
+        defaults for anything left untouched (``ExecutionConfig.max_retry_limit``
+        defaults to 2, but the team default ``max_retries`` is 5 — an
+        ``ExecutionConfig(max_iter=99)`` must not silently drop team retries).
+        """
+        if execution is None or multi_agent_cls is None:
+            return execution
+        if isinstance(execution, multi_agent_cls):
+            return execution
+        try:
+            from ..config.feature_configs import ExecutionConfig
+        except ImportError:
+            return execution
+        if not isinstance(execution, ExecutionConfig):
+            return execution
+
+        import warnings
+        from dataclasses import fields as _dc_fields
+
+        defaults = ExecutionConfig()
+        shared = {"max_iter", "max_retry_limit"}
+
+        def _is_set(name):
+            # A user object with an exotic __eq__ must not blow up the warning
+            # path; treat an uncomparable value as explicitly set.
+            try:
+                return getattr(execution, name) != getattr(defaults, name)
+            except Exception:
+                return True
+
+        # Only carry a shared field when the caller changed it; otherwise let
+        # the team config keep its own (different) default.
+        carried = {}
+        if _is_set("max_iter"):
+            carried["max_iter"] = execution.max_iter
+        if _is_set("max_retry_limit"):
+            carried["max_retries"] = execution.max_retry_limit
+
+        dropped = sorted(
+            f.name for f in _dc_fields(execution)
+            if f.name not in shared and _is_set(f.name)
+        )
+        message = (
+            "AgentTeam(execution=...) expects MultiAgentExecutionConfig, not the "
+            "single-agent ExecutionConfig. max_iter and max_retry_limit were "
+            "carried over; pass MultiAgentExecutionConfig(max_iter=..., "
+            "max_retries=...) at the team level and ExecutionConfig(...) to the "
+            "individual Agent(...) instances."
+        )
+        if dropped:
+            message += (
+                " These settings have no team-level counterpart and were "
+                f"ignored: {', '.join(dropped)}."
+            )
+        warnings.warn(message, UserWarning, stacklevel=3)
+        return multi_agent_cls(**carried)
+
     def __init__(
         self,
         agents,
@@ -988,6 +1057,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Resolve EXECUTION param using canonical resolver
         # Supports: None, str preset, list [preset, overrides], Config, dict
         # ─────────────────────────────────────────────────────────────────────
+        # The top-level-exported ``ExecutionConfig`` is the *single-agent* class;
+        # this container's own class is ``MultiAgentExecutionConfig``. Passing
+        # the exported one used to be resolved against the wrong class and
+        # dropped whole - including ``max_iter``, which both classes define -
+        # with no error and no warning. Adapt the shared fields and say so.
+        execution = self._adapt_single_agent_execution_config(
+            execution, MultiAgentExecutionConfig
+        )
         _exec_config = resolve(
             value=execution,
             param_name="execution",
@@ -2833,7 +2910,152 @@ class AgentTeam(SpawnAnnounceProtocol):
             "state": state_copy,
             "agents": [agent.display_name for agent in self.agents],
             "process": self.process,
+            # Task status and outputs, so a resumed team can SKIP work it has
+            # already done. Without these the payload carried only the shared
+            # _state dict, and a team that died on task 9 of 12 restarted from
+            # task 1 -- re-paying for eight completed tasks. The snapshot helper
+            # already existed for in-memory batch resets; this makes it durable.
+            "tasks": self._serialisable_task_state(),
+            # Task keys are POSITIONAL (0, 1, 2...), so a checkpoint from a
+            # different team would restore by index and put task 3's output on a
+            # different task 3 -- a resume that looks successful and is wrong.
+            # The YAML workflow path already guards this with a definition
+            # fingerprint; this is the same idea for a team.
+            "tasks_fingerprint": self._task_set_fingerprint(),
         }
+
+    def _task_set_fingerprint(self) -> str:
+        """Identify this team's task SET, so a checkpoint cannot cross teams.
+
+        Covers the fields that change what a task actually *does* -- its name,
+        full description, the agent that runs it, and its expected output. A
+        truncated description or a name-only fingerprint would let a materially
+        changed task keep the same fingerprint, so a restore would mark the
+        changed task completed and skip the new work.
+        """
+        import hashlib
+        parts = []
+        for task_id in sorted(self.tasks, key=lambda k: str(k)):
+            task = self.tasks[task_id]
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
+            parts.append("|".join([
+                str(task_id),
+                str(getattr(task, "name", "") or ""),
+                str(getattr(task, "description", "") or ""),
+                str(agent_name),
+                str(getattr(task, "expected_output", "") or ""),
+            ]))
+        blob = "\n".join(parts)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _json_safe(value: Any, fallback: Any = None) -> Any:
+        """Return ``value`` if it survives a JSON round-trip, else ``fallback``.
+
+        A nested ``datetime``/``set``/``bytes``/custom object inside a dict or
+        list result reaches the JSON encoder and fails the durable write, losing
+        the WHOLE checkpoint rather than one field. Probing each field here keeps
+        the rest of the checkpoint intact when one field is not portable.
+        """
+        try:
+            json.dumps(value)
+            return value
+        except (TypeError, ValueError):
+            return fallback
+
+    def _serialisable_task_state(self) -> Dict[str, Any]:
+        """``_snapshot_task_state`` reduced to what survives JSON.
+
+        A task result may be a TaskOutput object; only its text is portable, and
+        a half-serialised object that fails to write would lose the whole
+        checkpoint rather than one field. Nested non-JSON values inside a dict or
+        list result, or inside task variables, are dropped the same way.
+        """
+        snapshot = {}
+        for task_id, state in self._snapshot_task_state().items():
+            result = state.get("result")
+            if result is not None and not isinstance(result, (str, int, float, bool, dict, list)):
+                result = getattr(result, "raw", None) or str(result)
+            # A dict/list result may still carry a nested non-JSON value; fall
+            # back to its string form rather than forfeiting the checkpoint.
+            if isinstance(result, (dict, list)):
+                result = self._json_safe(result, fallback=str(result))
+            variables = state.get("variables")
+            if not isinstance(variables, dict):
+                variables = {}
+            variables = self._json_safe(variables, fallback={})
+            snapshot[str(task_id)] = {
+                "status": state.get("status"),
+                "result": result,
+                "retry_count": state.get("retry_count"),
+                "variables": variables,
+            }
+        return snapshot
+
+    def _restore_serialised_task_state(self, snapshot: Dict[str, Any]) -> int:
+        """Re-apply a persisted task snapshot. Returns how many tasks matched.
+
+        Tasks absent from this team are skipped rather than invented: a
+        checkpoint from a DIFFERENT team definition must not silently
+        half-restore, which would look like a resume and behave like a fresh run.
+        """
+        restored = 0
+        for task_id, state in (snapshot or {}).items():
+            task = self.tasks.get(task_id)
+            if task is None:
+                for key, candidate in self.tasks.items():
+                    if str(key) == str(task_id):
+                        task = candidate
+                        break
+            if task is None:
+                continue
+            task.status = state.get("status") or getattr(task, "status", "not started")
+            if state.get("result") is not None:
+                # The checkpoint reduced a TaskOutput to text; a remaining task
+                # that consumes this predecessor through workflow dependencies or
+                # task.context reads result.raw (see process.py). Restoring a bare
+                # string would raise AttributeError there, so rebuild a minimal
+                # TaskOutput carrying the text instead.
+                task.result = self._result_from_serialised(task, state["result"])
+            if state.get("retry_count") is not None:
+                task.retry_count = state["retry_count"]
+            if state.get("variables"):
+                task.variables = state["variables"]
+            restored += 1
+        return restored
+
+    @staticmethod
+    def _result_from_serialised(task: Any, value: Any) -> Any:
+        """Rebuild a ``TaskOutput`` from a checkpointed result string.
+
+        Consumers of a completed task read ``task.result.raw`` (dependency
+        context, routing decisions). A restored plain string has no ``.raw``, so
+        wrap it in a minimal ``TaskOutput`` preserving the text. A non-string
+        (already a structured/portable value) is returned unchanged so nothing is
+        lost. If ``TaskOutput`` cannot be constructed, fall back to the raw value
+        rather than failing the whole restore.
+        """
+        if not isinstance(value, str):
+            return value
+        try:
+            from ..main import TaskOutput
+        except Exception:
+            try:
+                from ..output.models import TaskOutput
+            except Exception:
+                return value
+        try:
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
+            return TaskOutput(
+                description=str(getattr(task, "description", "") or ""),
+                raw=value,
+                agent=str(agent_name),
+                output_format="RAW",
+            )
+        except Exception:
+            return value
 
     def save_session_state(self, session_id: str, include_memory: bool = True) -> bool:
         """Persist team session state for deterministic resume (Issue #3635).
@@ -2903,6 +3125,24 @@ class AgentTeam(SpawnAnnounceProtocol):
                 if isinstance(state_data, dict) and "state" in state_data:
                     with self._state_lock:
                         self._state.update(state_data["state"])
+                    # Completed tasks come back with their status and output, so
+                    # the process layer's "skip anything already completed" logic
+                    # sees them as done instead of re-running them.
+                    saved_fp = state_data.get("tasks_fingerprint")
+                    if saved_fp and saved_fp != self._task_set_fingerprint():
+                        # Shared state is still restored -- it is keyed by name
+                        # and safe -- but task outputs are NOT, because matching
+                        # them by position across a changed task set would skip
+                        # the wrong work.
+                        logging.warning(
+                            "Team session %s was saved against a different task set; "
+                            "shared state restored but task outputs were not, so no "
+                            "task will be wrongly skipped. Re-run from the start, or "
+                            "resume with the team definition that saved it.",
+                            session_id,
+                        )
+                        return True
+                    self._restore_serialised_task_state(state_data.get("tasks") or {})
                     return True
         except Exception as e:
             logger.debug(f"Durable team session restore failed for {session_id}: {e}")

@@ -238,4 +238,14 @@ __all__ = [
     "build_handoff_prompt",
     "MessageOrigin",
     "wrap_inter_agent",
+    # Encryption at rest
+    "EncryptedSessionStore",
+    "SessionEncryptionError",
+    "generate_session_key",
 ]
+
+from .encrypted_store import (  # noqa: E402
+    EncryptedSessionStore,
+    SessionEncryptionError,
+    generate_session_key,
+)

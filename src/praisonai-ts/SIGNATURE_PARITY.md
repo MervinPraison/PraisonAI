@@ -99,7 +99,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 
 ### `AgentTeam.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:842`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:911`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:91` (ctor `src/praisonai-ts/src/agent/team.ts:377`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
@@ -245,7 +245,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2308`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2385`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1076`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -277,7 +277,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:422`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:425`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 
@@ -445,7 +445,7 @@ TS-only members: none
 
 ### `Knowledge.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/knowledge/knowledge.py:54`
+- Python: `src/praisonai-agents/praisonaiagents/knowledge/knowledge.py:58`
 - TypeScript: `src/praisonai-ts/src/knowledge/knowledge.ts:166`
 - Counts: 2 python params: 2 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 2
 

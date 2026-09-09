@@ -176,6 +176,8 @@ describe('Task parity: every new field round-trips', () => {
       outputVariable: 'answer',
       failOnCallbackError: true,
       failOnMemoryError: true,
+      humanInput: true,
+      humanReviewPrompt: 'Is this safe to send?',
     };
     const t = new Task(cfg);
 

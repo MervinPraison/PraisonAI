@@ -39,6 +39,55 @@ class _CommandCancelled(Exception):
     process is still running, so the caller kills the process group and reports
     an ``interrupted`` outcome instead of waiting for the timeout."""
 
+# Shell metacharacters this executor cannot honour. Detection is quote-aware:
+# `git commit -m "fix: a > b"` is a legitimate command whose ">" is inside a
+# quoted argument, and rejecting it would be its own false failure.
+#
+# A newline separates commands just as ";" does: `echo first\ntouch proof.txt`
+# is two commands, and passing it to shell=False runs only `echo` while `touch`
+# silently never runs -- exactly the false-success this guard exists to stop.
+_SHELL_METACHARS = (">>", "<<", "&&", "||", ">", "<", "|", ";", "&", "`", "$(", "\n", "\r")
+
+# A command substitution keeps its power inside DOUBLE quotes -- POSIX shells
+# still evaluate `$(...)` and backticks there -- so `echo "$(whoami)"` is not an
+# inert literal. Single quotes DO make them literal, so those stay honoured.
+_DQUOTE_SUBSTITUTIONS = ("$(", "`")
+
+
+def _find_shell_syntax(command: str):
+    """Return the first unquoted shell metacharacter in *command*, else None.
+
+    Command substitutions (``$(`` and backticks) are also reported when they
+    appear inside double quotes, because a POSIX shell evaluates them there;
+    single-quoted content stays literal and is left alone.
+    """
+    if not isinstance(command, str):
+        return None
+    quote = None
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            if quote == '"':
+                for token in _DQUOTE_SUBSTITUTIONS:
+                    if command.startswith(token, i):
+                        return token
+            if ch == quote:
+                quote = None
+            elif ch == "\\" and quote == '"':
+                i += 1
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "\\":
+            i += 1
+        else:
+            for token in _SHELL_METACHARS:
+                if command.startswith(token, i):
+                    return token
+        i += 1
+    return None
+
+
 class ShellTools:
     """Tools for executing shell commands safely."""
     
@@ -89,6 +138,34 @@ class ShellTools:
             # Treat empty-string cwd same as None to avoid subprocess failure
             if not cwd:
                 cwd = None
+            # REFUSE shell syntax rather than silently mangling it.
+            #
+            # This executor runs shell=False, so a redirect, pipe, chain or
+            # substitution is NOT interpreted -- it is passed to the program as
+            # a literal argument. `echo written > redir.txt` therefore returned
+            # exit_code 0, success True, stdout "written > redir.txt", and
+            # created no file. The caller (often a model deciding what to do
+            # next) was told its redirect had SUCCEEDED, which is worse than an
+            # error: there is no signal to correct on.
+            #
+            # shell=True is not the fix -- running model-authored strings
+            # through a shell is the injection surface this executor exists to
+            # avoid. Failing loudly is.
+            _unsupported = _find_shell_syntax(command)
+            if _unsupported:
+                return {
+                    "error": (
+                        f"Shell syntax {_unsupported!r} is not supported by this executor, "
+                        "which runs commands directly (shell=False) so untrusted input cannot "
+                        "reach a shell. Run the steps separately, or use a tool that provides "
+                        "a real shell inside a sandbox."
+                    ),
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": 1,
+                    "success": False,
+                }
+
             # Always split command for safety (no shell execution)
             # Use shlex.split with appropriate posix flag
             if platform.system() == 'Windows':

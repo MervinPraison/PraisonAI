@@ -74,8 +74,16 @@ def register_knowledge_tools() -> None:
             from praisonaiagents.knowledge import Knowledge
 
             knowledge = Knowledge()
-            knowledge.reset()
-            return "Knowledge cleared"
+            # reset() returns False when the configured backend has no reset():
+            # it warns and no-ops. Reporting "cleared" there would tell the user
+            # a destructive operation succeeded when nothing was erased.
+            if knowledge.reset():
+                return "Knowledge cleared"
+            backend = type(getattr(knowledge, "memory", None)).__name__
+            return (
+                f"Error: knowledge was NOT cleared - the configured backend "
+                f"({backend}) does not support reset()"
+            )
         except ImportError:
             return "Error: Knowledge module not available"
         except Exception as e:

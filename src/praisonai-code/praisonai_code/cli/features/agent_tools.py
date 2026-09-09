@@ -115,22 +115,24 @@ def _sanitize_command(command: str) -> str:
     """
     if '\x00' in command:
         raise ValueError("Null bytes are not allowed in commands")
-    
-    # Reject command chaining operators that indicate injection
-    DANGEROUS_PATTERNS = [
-        '$(', '`',      # Command substitution
-        '&&', '||',     # Command chaining
-        '>>', '>',      # Output redirection
-        '|', ';', '&',  # Pipe and separators
-        '\n', '\r'      # Line breaks
-    ]
-    for pattern in DANGEROUS_PATTERNS:
-        if pattern in command:
-            raise ValueError(
-                f"Potentially unsafe command pattern detected: {pattern!r} "
-                f"in command: {command!r}. Use separate commands instead."
-            )
-    
+
+    # Quote-aware detection. The previous substring scan rejected
+    # ``git commit -m "fix: a > b"`` because ">" appeared *inside* a quoted
+    # argument, where it is not an operator at all. Reuse the single scanner
+    # so the ACP path and the basic ``execute_command`` path agree on what
+    # counts as shell syntax.
+    from .shell_exec import MODE_ENV_VAR, find_shell_syntax
+
+    operator = find_shell_syntax(command)
+    if operator is not None:
+        raise ValueError(
+            f"This command contains the shell operator {operator!r}, which the "
+            f"ACP executor does not interpret (it runs argv directly, not via a "
+            f"shell). Split it into separate steps, or ask the operator to set "
+            f"{MODE_ENV_VAR}=sandboxed so a real /bin/sh runs inside OS-native "
+            f"containment. Command: {command!r}"
+        )
+
     return command
 
 

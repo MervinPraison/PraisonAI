@@ -386,7 +386,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 print(f"    {desc}\n")
             
             if next_cursor:
-                print(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
+                self._print_rich(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
             
             return self.EXIT_SUCCESS
             
@@ -526,7 +526,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 print(f"    {desc}\n")
             
             if next_cursor:
-                print(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
+                self._print_rich(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
             
             return self.EXIT_SUCCESS
             
@@ -564,10 +564,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 return self.EXIT_SUCCESS
             
             self._print_rich(f"\n[bold cyan]Tool: {tool.name}[/bold cyan]\n")
-            print(f"[bold]Description:[/bold] {tool.description}")
+            self._print_rich(f"[bold]Description:[/bold] {tool.description}")
             
             annotations = schema.get("annotations", {})
-            print("\n[bold]Annotations:[/bold]")
+            self._print_rich("\n[bold]Annotations:[/bold]")
             print(f"  • readOnlyHint: {annotations.get('readOnlyHint', False)}")
             print(f"  • destructiveHint: {annotations.get('destructiveHint', True)}")
             print(f"  • idempotentHint: {annotations.get('idempotentHint', False)}")
@@ -583,7 +583,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             required = input_schema.get("required", []) or []
             
             if props:
-                print("\n[bold]Parameters:[/bold]")
+                self._print_rich("\n[bold]Parameters:[/bold]")
                 for param_name, param_info in props.items():
                     req = " (required)" if param_name in required else ""
                     ptype = param_info.get("type", "any")
@@ -643,7 +643,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 print("No resources registered")
                 return self.EXIT_SUCCESS
             
-            print(f"\n[bold]Available MCP Resources ({len(resources)}):[/bold]\n")
+            self._print_rich(f"\n[bold]Available MCP Resources ({len(resources)}):[/bold]\n")
             for res in resources:
                 uri = res.get("uri", "unknown")
                 desc = res.get("description", "No description")
@@ -670,7 +670,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 print("No prompts registered")
                 return self.EXIT_SUCCESS
             
-            print(f"\n[bold]Available MCP Prompts ({len(prompts)}):[/bold]\n")
+            self._print_rich(f"\n[bold]Available MCP Prompts ({len(prompts)}):[/bold]\n")
             for prompt in prompts:
                 name = prompt.get("name", "unknown")
                 desc = prompt.get("description", "No description")
@@ -718,7 +718,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 f.write(config_json)
             self._print_success(f"Config written to {parsed.output}")
         else:
-            print(f"\n[bold]{parsed.client} Configuration:[/bold]\n")
+            self._print_rich(f"\n[bold]{parsed.client} Configuration:[/bold]\n")
             print(config_json)
             print()
         
@@ -861,25 +861,25 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             skip_mark = "[yellow]\u25cb[/yellow]" if unicode_ok else "[yellow][--][/yellow]"
             fail_mark = "[red]\u2717[/red]" if unicode_ok else "[red][X][/red]"
 
-            print("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
+            self._print_rich("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
 
-            print(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
-            print(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
+            self._print_rich(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
+            self._print_rich(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
             print()
 
-            print("[bold]Registered Components:[/bold]")
+            self._print_rich("[bold]Registered Components:[/bold]")
             print(f"  {bullet} Tools: {len(tools)}")
             print(f"  {bullet} Resources: {len(resources)}")
             print(f"  {bullet} Prompts: {len(prompts)}")
             print()
 
-            print("[bold]Environment:[/bold]")
+            self._print_rich("[bold]Environment:[/bold]")
             for key, present in env_checks.items():
                 status = ok_mark if present else skip_mark
                 print(f"  {status} {key}")
             print()
 
-            print("[bold]Dependencies:[/bold]")
+            self._print_rich("[bold]Dependencies:[/bold]")
             for dep, available in deps.items():
                 status = ok_mark if available else fail_mark
                 print(f"  {status} {dep}")
@@ -891,7 +891,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 self._print_error("Missing required dependencies. Install with: pip install praisonai[mcp]")
                 return self.EXIT_ERROR
             else:
-                print("[yellow]Warning: No API keys configured. Some tools may not work.[/yellow]")
+                self._print_rich("[yellow]Warning: No API keys configured. Some tools may not work.[/yellow]")
 
             return self.EXIT_SUCCESS
 
