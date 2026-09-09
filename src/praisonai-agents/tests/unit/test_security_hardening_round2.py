@@ -5,6 +5,28 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_launch_token(monkeypatch):
+    """No launch token, and no generated one, before each test in this file.
+
+    resolve_launch_host() writes PRAISONAI_LAUNCH_AUTH_TOKEN into os.environ
+    DIRECTLY (not via monkeypatch) when it mints a token for a non-loopback
+    bind, and caches it in the module global _GENERATED_TOKEN. Depending on the
+    order these tests run in, that token was still set when
+    test_launch_auth_optional_by_default asked whether auth is optional by
+    default -- and it is not, once a token exists. Failed under a random seed,
+    passed in collection order.
+
+    A test about the DEFAULT has to establish the default rather than inherit it.
+    """
+    import praisonaiagents.agent.launch_security as ls
+
+    monkeypatch.delenv("PRAISONAI_LAUNCH_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(ls, "_GENERATED_TOKEN", None, raising=False)
+    yield
+    os.environ.pop("PRAISONAI_LAUNCH_AUTH_TOKEN", None)
+
+
 def test_launch_auth_optional_by_default():
     from praisonaiagents.agents.agents import _authorise_launch_request
 

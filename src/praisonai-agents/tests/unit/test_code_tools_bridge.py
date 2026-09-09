@@ -17,6 +17,24 @@ from praisonaiagents.tools.tool_proxy import (
 from praisonaiagents.tools.python_tools import execute_code_with_tools
 
 
+@pytest.fixture(autouse=True)
+def _clean_approval_context():
+    """Every test here starts with nothing pre-approved.
+
+    Approvals are remembered in a contextvar so a granted tool is not re-asked.
+    That is correct behaviour and fatal for these tests: an approval left by an
+    earlier test made a denial test see an already-approved tool and not raise
+    (DID NOT RAISE PermissionError), and made the every-call gate test count one
+    callback invocation instead of two. Both passed alone and failed under a
+    random seed.
+    """
+    from praisonaiagents.approval import clear_approval_context
+
+    clear_approval_context()
+    yield
+    clear_approval_context()
+
+
 @pytest.fixture
 def registry():
     reg = ToolRegistry()
@@ -222,15 +240,6 @@ def test_approval_gate_required_for_every_call(registry):
     def _cb(function_name, arguments, risk_level):
         calls["count"] += 1
         return ApprovalDecision(approved=True, reason="ok")
-
-    # Start from a clean approval context, not just end with one. This test
-    # only cleared it in its finally, so an approval left in the contextvar by
-    # an earlier test made the first fetch() record a remembered approval that
-    # covered the second -- the callback fired once instead of twice, which is
-    # exactly the "first approval silently unlocks later calls" behaviour this
-    # test exists to forbid. Passed alone, failed after
-    # test_mixed_tools_list_resolution.
-    clear_approval_context()
 
     add_approval_requirement("fetch", "high")
     set_approval_callback(_cb)
