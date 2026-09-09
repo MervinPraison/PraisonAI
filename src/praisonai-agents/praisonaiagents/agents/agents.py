@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 import logging
 import contextlib
 import contextvars
@@ -36,6 +37,11 @@ except ImportError:
 _RUN_LOCK_INIT_GUARD = threading.Lock()
 
 # Task status constants
+def _strip_rich_markup(text: str) -> str:
+    """Rich tags mean nothing in a log line."""
+    return re.sub(r"\[/?[a-z0-9 ]+\]", "", text)
+
+
 class TaskStatus(Enum):
     """Enumeration for task status values to ensure consistency"""
     COMPLETED = "completed"
@@ -2147,8 +2153,15 @@ class AgentTeam(SpawnAnnounceProtocol):
                         task.context = []
                     task.context.append(content)
 
-        await self.arun_all_tasks()
-        
+        # The sync path branches on self.planning in both of its arms; this one
+        # did not, so a team built with planning=True and driven through
+        # astart() -- which is every async/server entry point -- silently
+        # skipped plan generation, the todo list and the approval gate.
+        if self.planning:
+            await self._arun_with_planning()
+        else:
+            await self.arun_all_tasks()
+
         # Get results
         results = {
             "task_status": self.get_all_tasks_status(),
@@ -3840,6 +3853,163 @@ class AgentTeam(SpawnAnnounceProtocol):
             return result
         return False
     
+    def _plan_note(self, console, message: str) -> None:
+        """Report on plan construction: to the console when the sync path
+        supplies one, to the log otherwise, so the async path is not forced to
+        own a Rich console it never prints to."""
+        if console is not None:
+            console.print(message)
+        else:
+            logger.warning(_strip_rich_markup(message))
+
+    def _restore_tasks_after_plan(self, original_tasks: dict) -> None:
+        """Keep plan-step tasks and results under _plan_tasks for introspection,
+        then put the caller's own task set back as the canonical self.tasks.
+
+        Shared with the async path, which would otherwise leave a team holding
+        the plan's tasks instead of the ones it was built with.
+        """
+        self._plan_tasks = self.tasks
+        self.tasks = original_tasks
+        with self._task_id_lock:
+            self.task_id_counter = (
+                max(original_tasks.keys()) + 1 if original_tasks else 0
+            )
+
+    def _apply_plan(self, plan, console=None) -> dict:
+        """Replace the task list with one Task per plan step, and hand back the
+        original one so the caller can restore it when execution is done.
+
+        Extracted from _run_with_planning so the sync and async planning paths
+        build the same tasks. Each Task inherits memory, callbacks, guardrails,
+        retries and structured output from whichever original task shared its
+        agent, and a step's dependencies become task context so results chain.
+        """
+        from ..task import Task
+
+        # Step 4: Create proper Task objects from plan steps
+        
+        # Map agent names to agent instances
+        agent_map = {agent.display_name: agent for agent in self.agents}
+        
+        # Store original tasks and create new tasks from plan
+        original_tasks = self.tasks.copy()
+        self.tasks = {}
+        with self._task_id_lock:
+            self.task_id_counter = 0
+        
+        # Create Task objects from plan steps
+        plan_tasks = []
+        step_to_task = {}  # Map step_id to task for context chaining
+        
+        for i, step in enumerate(plan.steps):
+            # Get the appropriate agent
+            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
+            
+            if not agent:
+                self._plan_note(console, f"[yellow]⚠️ No agent found for '{step.agent}', using first available[/yellow]")
+                agent = self.agents[0] if self.agents else None
+            
+            if not agent:
+                self._plan_note(console, f"[red]❌ No agents available for step: {step.description}[/red]")
+                continue
+            
+            # Build context from dependencies (previous task results)
+            context = []
+            for dep_id in step.dependencies:
+                # Convert step_X format to actual step index
+                if dep_id.startswith("step_"):
+                    try:
+                        dep_index = int(dep_id.split("_")[1])
+                        if dep_index < len(plan_tasks):
+                            context.append(plan_tasks[dep_index])
+                    except (ValueError, IndexError):
+                        pass
+                elif dep_id in step_to_task:
+                    context.append(step_to_task[dep_id])
+            
+            # Find matching original task for additional config (memory, callbacks, etc.)
+            original_task = None
+            for orig_task in original_tasks.values():
+                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
+                    original_task = orig_task
+                    break
+            
+            # Create Task with full features from original task if available
+            task = Task(
+                description=step.description,
+                expected_output=f"Complete: {step.description}",
+                agent=agent,
+                name=f"Plan Step {i + 1}",
+                tools=agent.tools if agent.tools else [],
+                context=context if context else None,
+                # Inherit from original task if available
+                memory=original_task.memory if original_task else None,
+                on_task_complete=original_task.callback if original_task else None,
+                guardrails=original_task.guardrail if original_task else None,
+                max_retries=original_task.max_retries if original_task else 3,
+                output_json=original_task.output_json if original_task else None,
+                output_pydantic=original_task.output_pydantic if original_task else None,
+                config=original_task.config if original_task else {}
+            )
+            
+            # Add task to our task list
+            task_id = self.add_task(task)
+            plan_tasks.append(task)
+            step_to_task[step.id] = task
+
+        return original_tasks
+        
+
+    async def _arun_with_planning(self):
+        """The async counterpart of _run_with_planning.
+
+        Same five steps -- plan, approve, todo list, build tasks from the plan,
+        execute -- sharing _apply_plan with the sync path so the two cannot
+        build different tasks from the same plan. The Rich console output is
+        the one thing left out: it is display-only, and this path is what the
+        headless and server entry points use.
+        """
+        plan = await self._create_plan(
+            request=" AND ".join(task.description for task in self.tasks.values())
+        )
+
+        if not plan:
+            logger.warning("Planning failed, falling back to normal execution")
+            await self.arun_all_tasks()
+            return
+
+        if not self.auto_approve_plan:
+            approved = await self._request_approval(plan)
+            if not approved:
+                logger.info("Plan rejected. Aborting execution.")
+                return
+        else:
+            plan.approve()
+
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+
+        try:
+            from ..trace.protocol import get_default_emitter, ActionEvent
+
+            emitter = get_default_emitter()
+            if emitter and emitter.enabled:
+                emitter.emit(ActionEvent(
+                    event_type="plan_created",
+                    timestamp=time.time(),
+                    agent_name="PlanningAgent",
+                    metadata={"plan": self._todo_list.to_markdown()}
+                ))
+        except Exception:
+            pass
+
+        original_tasks = self._apply_plan(plan)
+        try:
+            await self.arun_all_tasks()
+        finally:
+            self._restore_tasks_after_plan(original_tasks)
+
     def _run_with_planning(self):
         """
         Run tasks with planning mode enabled.
@@ -3918,78 +4088,8 @@ class AgentTeam(SpawnAnnounceProtocol):
         except Exception:
             pass
         
-        # Step 4: Create proper Task objects from plan steps
-        console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
-        
-        # Map agent names to agent instances
-        agent_map = {agent.display_name: agent for agent in self.agents}
-        
-        # Store original tasks and create new tasks from plan
-        original_tasks = self.tasks.copy()
-        self.tasks = {}
-        with self._task_id_lock:
-            self.task_id_counter = 0
-        
-        # Create Task objects from plan steps
-        plan_tasks = []
-        step_to_task = {}  # Map step_id to task for context chaining
-        
-        for i, step in enumerate(plan.steps):
-            # Get the appropriate agent
-            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
-            
-            if not agent:
-                console.print(f"[yellow]⚠️ No agent found for '{step.agent}', using first available[/yellow]")
-                agent = self.agents[0] if self.agents else None
-            
-            if not agent:
-                console.print(f"[red]❌ No agents available for step: {step.description}[/red]")
-                continue
-            
-            # Build context from dependencies (previous task results)
-            context = []
-            for dep_id in step.dependencies:
-                # Convert step_X format to actual step index
-                if dep_id.startswith("step_"):
-                    try:
-                        dep_index = int(dep_id.split("_")[1])
-                        if dep_index < len(plan_tasks):
-                            context.append(plan_tasks[dep_index])
-                    except (ValueError, IndexError):
-                        pass
-                elif dep_id in step_to_task:
-                    context.append(step_to_task[dep_id])
-            
-            # Find matching original task for additional config (memory, callbacks, etc.)
-            original_task = None
-            for orig_task in original_tasks.values():
-                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
-                    original_task = orig_task
-                    break
-            
-            # Create Task with full features from original task if available
-            task = Task(
-                description=step.description,
-                expected_output=f"Complete: {step.description}",
-                agent=agent,
-                name=f"Plan Step {i + 1}",
-                tools=agent.tools if agent.tools else [],
-                context=context if context else None,
-                # Inherit from original task if available
-                memory=original_task.memory if original_task else None,
-                on_task_complete=original_task.callback if original_task else None,
-                guardrails=original_task.guardrail if original_task else None,
-                max_retries=original_task.max_retries if original_task else 3,
-                output_json=original_task.output_json if original_task else None,
-                output_pydantic=original_task.output_pydantic if original_task else None,
-                config=original_task.config if original_task else {}
-            )
-            
-            # Add task to our task list
-            task_id = self.add_task(task)
-            plan_tasks.append(task)
-            step_to_task[step.id] = task
-        
+        original_tasks = self._apply_plan(plan, console)
+
         # Step 5: Execute tasks using the proper Task execution system
         for i, (task_id, task) in enumerate(self.tasks.items()):
             # Update todo list progress
@@ -4030,14 +4130,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         console.print(f"[dim]Progress: [{'█' * 30}] 100%[/dim]")
         console.print(f"[green]Completed {completed_count}/{len(self.tasks)} tasks![/green]\n")
         
-        # Keep plan-step tasks/results under _plan_tasks for introspection,
-        # then restore the user's original task set as the canonical self.tasks.
-        self._plan_tasks = self.tasks
-        self.tasks = original_tasks
-        with self._task_id_lock:
-            self.task_id_counter = (
-                max(original_tasks.keys()) + 1 if original_tasks else 0
-            )
+        self._restore_tasks_after_plan(original_tasks)
 
     # Resource Lifecycle Management
     def close(self) -> None:
