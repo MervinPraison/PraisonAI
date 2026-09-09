@@ -42,6 +42,17 @@ def test_ollama_chaining_records_none_and_structured_results():
     assert mapping == {"empty": None, "structured": {"ok": True}}
 
 
+def test_ollama_chaining_does_not_record_error_payloads():
+    llm = LLM.__new__(LLM)
+    llm._provider_adapter = None
+    mapping = {}
+
+    llm._record_ollama_tool_result(mapping, "failed", {"error": "failed: 42"})
+    llm._record_ollama_tool_result(mapping, "failed-list", [{"error": "failed"}])
+
+    assert mapping == {}
+
+
 @pytest.mark.asyncio
 async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatch):
     class Response(SimpleNamespace):

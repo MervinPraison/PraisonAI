@@ -4594,7 +4594,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     timeout_ms=self.tool_timeout_ms,
                                 )
                                 tool_results.extend(_result)
-                                if _result:
+                                if _result and _result[0].error is None:
                                     self._record_ollama_tool_result(
                                         ollama_tool_result_mapping,
                                         _tool_call.function_name,
@@ -4609,11 +4609,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 for _tool_call, _result in zip(
                                     tool_calls_batch, tool_results
                                 ):
-                                    self._record_ollama_tool_result(
-                                        ollama_tool_result_mapping,
-                                        _tool_call.function_name,
-                                        _result.result,
-                                    )
+                                    if _result.error is None:
+                                        self._record_ollama_tool_result(
+                                            ollama_tool_result_mapping,
+                                            _tool_call.function_name,
+                                            _result.result,
+                                        )
                         _batch_elapsed = _perf_counter() - _batch_started
                         
                         for tool_result in tool_results:

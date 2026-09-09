@@ -52,8 +52,21 @@ def record_ollama_tool_result(
     tool_result: Any,
 ) -> None:
     """Record an Ollama tool result exactly as returned by the callback."""
-    if function_name:
-        tool_result_mapping[function_name] = tool_result
+    if not function_name:
+        return
+    # The agent executor represents failures as an ``error`` mapping (or a
+    # one-item list containing one). Never feed that diagnostic back as a
+    # successful value to a dependent call in the same turn.
+    if isinstance(tool_result, dict) and tool_result.get("error"):
+        return
+    if (
+        isinstance(tool_result, list)
+        and tool_result
+        and isinstance(tool_result[0], dict)
+        and tool_result[0].get("error")
+    ):
+        return
+    tool_result_mapping[function_name] = tool_result
 
 
 def collapse_union_param_types(tools):
