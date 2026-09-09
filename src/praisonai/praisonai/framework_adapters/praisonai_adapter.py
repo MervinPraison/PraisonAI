@@ -16,6 +16,37 @@ from .base import BaseFrameworkAdapter
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_TOKENS = 16000
+
+
+def _resolve_output_budget(model: str, requested: Any = None) -> Optional[int]:
+    """Resolve a YAML agent budget against LiteLLM's model ceiling."""
+    try:
+        value = _DEFAULT_MAX_TOKENS if requested is None else int(requested)
+    except (TypeError, ValueError, OverflowError):
+        logger.warning("Ignoring invalid max_tokens=%r for model %r", requested, model)
+        value = _DEFAULT_MAX_TOKENS
+    if not model or value <= 0:
+        return value
+    try:
+        from praisonaiagents.llm.model_capabilities import max_output_tokens
+
+        ceiling = max_output_tokens(model)
+    except Exception:
+        ceiling = None
+    if not ceiling or ceiling <= 0:
+        return value
+    if value > ceiling:
+        if requested is not None:
+            logger.warning(
+                "max_tokens=%s exceeds %s's output limit (%s); clamping to %s",
+                value, model, ceiling, ceiling,
+            )
+        return ceiling
+    # An omitted YAML budget follows the model's full known ceiling, including
+    # ceilings above the historical 16k default.
+    return ceiling if requested is None else value
+
 
 class PraisonAIAdapter(BaseFrameworkAdapter):
     """
@@ -345,7 +376,17 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             return llm_config[0]['model']
         return "gpt-4o-mini"
 
-    def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name, agent_tool_wrap_resolver=None):
+    def _build_agents_and_tasks(
+        self,
+        config,
+        topic,
+        tools_dict,
+        agent_callback,
+        task_callback,
+        model_name,
+        agent_tool_wrap_resolver=None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ):
         """Build agents and tasks from configuration."""
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask
         from ._config_builder import build_agent_specs
@@ -378,6 +419,18 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             
             # Resolve per-agent LLM model
             agent_model = self._resolve_agent_model(details, model_name)
+
+            # CLI max_tokens is an explicit global override when present;
+            # otherwise honour each YAML agent's own value and resolve an
+            # omitted value from that agent's model ceiling.
+            requested_max_tokens = (
+                (cli_config or {}).get("max_tokens")
+                if "max_tokens" in (cli_config or {})
+                else details.get("max_tokens")
+            )
+            resolved_max_tokens = _resolve_output_budget(
+                agent_model, requested_max_tokens
+            )
             
             # Resolve per-agent runtime configuration
             agent_runtime = self._resolve_agent_runtime(details, config)
@@ -392,7 +445,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'goal': goal_filled,
                 'backstory': backstory_filled,
                 'instructions': details.get('instructions'),
-                'llm': agent_model,
+                'llm': {
+                    'model': agent_model,
+                    'max_tokens': resolved_max_tokens,
+                },
                 'allow_delegation': details.get('allow_delegation', False),
                 'tools': agent_tool_list,
                 'toolsets': agent_toolsets,
@@ -780,6 +836,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             agents, tasks = self._build_agents_and_tasks(
                 config, topic, tools_dict, agent_callback, task_callback, model_name,
                 agent_tool_wrap_resolver=agent_tool_wrap_resolver,
+                cli_config=cli_config,
             )
 
             # Resolve CLI session continuity (--continue/--session/--fork) that the

@@ -2053,6 +2053,10 @@ class PraisonAI:
         if output_mode is not None:
             cli_config['output'] = output_mode
 
+        max_tokens = getattr(self.args, 'max_tokens', None)
+        if max_tokens is not None:
+            cli_config['max_tokens'] = max_tokens
+
         # Extract handoff configuration for YAML CLI parity
         handoff = getattr(self.args, 'handoff', None)
         if handoff:

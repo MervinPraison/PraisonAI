@@ -40,6 +40,7 @@ def _clear_caches():
         mc.supports_parallel_function_calling,
         mc.supports_web_search,
         mc.supports_prompt_caching,
+        mc.max_output_tokens,
     ):
         fn.cache_clear()
 
@@ -126,3 +127,36 @@ def test_empty_model_name_is_false():
         assert mc.supports_web_search("") is False
         assert mc.supports_prompt_caching("") is False
     _clear_caches()
+
+
+def test_max_output_tokens_uses_litellm_model_info():
+    _clear_caches()
+    fake = SimpleNamespace(
+        get_model_info=lambda *, model: {
+            "max_output_tokens": 8192,
+            "max_tokens": 16384,
+        }
+    )
+    with patch.object(mc, "_get_litellm", return_value=fake):
+        assert mc.max_output_tokens("anthropic/claude-test") == 8192
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_falls_back_to_model_cost():
+    mc.max_output_tokens.cache_clear()
+    fake = SimpleNamespace(
+        model_cost={"gpt-test": {"max_output_tokens": 4096}}
+    )
+    with patch.object(mc, "_get_litellm", return_value=fake):
+        assert mc.max_output_tokens("openai/gpt-test") == 4096
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_unknown_or_invalid_is_none():
+    mc.max_output_tokens.cache_clear()
+    fake = SimpleNamespace(
+        get_model_info=lambda *, model: {"max_output_tokens": "not-a-number"}
+    )
+    with patch.object(mc, "_get_litellm", return_value=fake):
+        assert mc.max_output_tokens("unknown-model") is None
+    mc.max_output_tokens.cache_clear()

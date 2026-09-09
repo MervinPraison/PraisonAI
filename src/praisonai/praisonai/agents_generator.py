@@ -729,7 +729,7 @@ class AgentsGenerator:
                 break
 
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
+        agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch', 'max_tokens']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
 
         if "tool_retry_policy" in agent_overrides:

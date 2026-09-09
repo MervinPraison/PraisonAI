@@ -26,6 +26,7 @@ Sources:
 """
 
 from functools import lru_cache
+from typing import Any, Dict, Optional
 
 from ._litellm_loader import get_litellm as _get_litellm
 
@@ -36,6 +37,62 @@ def _base_model_name(model_name: str) -> str:
     if "/" in name:
         name = name.split("/", 1)[1]
     return name
+
+
+def _model_info(litellm: Any, model_name: str) -> Optional[Dict[str, Any]]:
+    """Best-effort lookup of LiteLLM metadata for ``model_name``.
+
+    Newer LiteLLM releases expose ``get_model_info`` while older releases
+    expose the same records through ``model_cost``.  Keep both lookups lazy so
+    lean installs retain the existing optional-dependency behaviour.
+    """
+    getter = getattr(litellm, "get_model_info", None)
+    if getter is not None:
+        try:
+            info = getter(model=model_name)
+            if isinstance(info, dict):
+                return info
+        except Exception:
+            pass
+
+    model_cost = getattr(litellm, "model_cost", None)
+    if not isinstance(model_cost, dict):
+        return None
+    candidates = [model_name.lower(), _base_model_name(model_name)]
+    if "/" in model_name:
+        candidates.append(model_name.rsplit("/", 1)[-1].lower())
+    for candidate in candidates:
+        info = model_cost.get(candidate)
+        if isinstance(info, dict):
+            return info
+    return None
+
+
+@lru_cache(maxsize=256)
+def max_output_tokens(model_name: str) -> Optional[int]:
+    """Return LiteLLM's known maximum output tokens for a model.
+
+    ``None`` means the model is unknown or LiteLLM is unavailable.  The
+    accessor is intentionally best-effort: callers can preserve their current
+    defaults when metadata is missing without making model resolution fail.
+    """
+    if not model_name:
+        return None
+
+    litellm = _get_litellm()
+    if litellm is None:
+        return None
+    try:
+        info = _model_info(litellm, model_name)
+        if not info:
+            return None
+        value = info.get("max_output_tokens") or info.get("max_tokens")
+        if isinstance(value, bool) or value is None:
+            return None
+        value = int(value)
+        return value if value > 0 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _fallback_supports_structured_outputs(model_name: str) -> bool:
