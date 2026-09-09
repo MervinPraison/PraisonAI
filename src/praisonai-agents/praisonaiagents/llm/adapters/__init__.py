@@ -10,7 +10,50 @@ and integrates with Gap 2 (parallel tool execution).
 
 from ..protocols import LLMProviderAdapterProtocol
 import json
+import logging
 from typing import Dict, Any, List, Optional
+
+_logger = logging.getLogger(__name__)
+
+
+def resolve_ollama_chained_arguments(
+    arguments: Dict[str, Any],
+    tool_result_mapping: Dict[str, Any],
+    *,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve exact Ollama function-name references without coercing values.
+
+    Weak local models sometimes emit the name of an earlier function as a
+    later argument.  Keep the complete result (including mappings, lists,
+    negative numbers, and decimals) so the destination tool receives exactly
+    what the first tool returned.
+    """
+    if not tool_result_mapping:
+        return arguments
+    resolved = dict(arguments)
+    for arg_name, arg_value in resolved.items():
+        if isinstance(arg_value, str) and arg_value in tool_result_mapping:
+            replacement = tool_result_mapping[arg_value]
+            resolved[arg_name] = replacement
+            extra = {"correlation_id": correlation_id} if correlation_id else {}
+            _logger.debug(
+                "[OLLAMA_FIX] Replaced %s with a prior result in %s arguments",
+                arg_value,
+                arg_name,
+                extra=extra,
+            )
+    return resolved
+
+
+def record_ollama_tool_result(
+    tool_result_mapping: Dict[str, Any],
+    function_name: str,
+    tool_result: Any,
+) -> None:
+    """Record an Ollama tool result exactly as returned by the callback."""
+    if function_name:
+        tool_result_mapping[function_name] = tool_result
 
 
 def collapse_union_param_types(tools):
@@ -100,6 +143,25 @@ class DefaultAdapter:
         """Hosted providers get the schema untouched -- they support all of it."""
         return tools
 
+    def resolve_chained_arguments(
+        self,
+        arguments: Dict[str, Any],
+        tool_result_mapping: Dict[str, Any],
+        *,
+        correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Provider hook for same-turn tool-result references."""
+        return arguments
+
+    def record_tool_result(
+        self,
+        tool_result_mapping: Dict[str, Any],
+        function_name: str,
+        tool_result: Any,
+    ) -> None:
+        """Provider hook for recording results used by later tool calls."""
+        return None
+
     def supports_prompt_caching(self) -> bool:
         return False
     
@@ -178,6 +240,25 @@ class OllamaAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         # Ollama doesn't reliably support streaming with tools
         return False
+
+    def resolve_chained_arguments(
+        self,
+        arguments: Dict[str, Any],
+        tool_result_mapping: Dict[str, Any],
+        *,
+        correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return resolve_ollama_chained_arguments(
+            arguments, tool_result_mapping, correlation_id=correlation_id
+        )
+
+    def record_tool_result(
+        self,
+        tool_result_mapping: Dict[str, Any],
+        function_name: str,
+        tool_result: Any,
+    ) -> None:
+        record_ollama_tool_result(tool_result_mapping, function_name, tool_result)
     
     
     

@@ -8,6 +8,40 @@ import praisonaiagents.llm.llm as llm_module
 from praisonaiagents.llm.llm import LLM
 
 
+def test_ollama_chaining_preserves_exact_tool_results():
+    llm = LLM.__new__(LLM)
+    llm._provider_adapter = None
+    mapping = {
+        "lookup": {"city": "Paris", "temperature": -5.5},
+        "list_items": ["a", 2],
+        "text": "Paris: 21C sunny",
+    }
+
+    assert llm._resolve_ollama_chained_args(
+        {
+            "first": "lookup",
+            "second": "list_items",
+            "third": "text",
+        },
+        mapping,
+    ) == {
+        "first": {"city": "Paris", "temperature": -5.5},
+        "second": ["a", 2],
+        "third": "Paris: 21C sunny",
+    }
+
+
+def test_ollama_chaining_records_none_and_structured_results():
+    llm = LLM.__new__(LLM)
+    llm._provider_adapter = None
+    mapping = {}
+
+    llm._record_ollama_tool_result(mapping, "empty", None)
+    llm._record_ollama_tool_result(mapping, "structured", {"ok": True})
+
+    assert mapping == {"empty": None, "structured": {"ok": True}}
+
+
 @pytest.mark.asyncio
 async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatch):
     class Response(SimpleNamespace):

@@ -1771,39 +1771,60 @@ Respond with ONLY a valid JSON tool call in this format:
             adapter = OllamaAdapter()
         return adapter.format_tool_result_message(function_name, tool_result)
 
-    @staticmethod
+    def _ollama_correlation_id(self) -> str:
+        """Return the active trace/session id for Ollama chaining diagnostics."""
+        try:
+            from ..trace.context_events import get_context_emitter
+
+            session_id = getattr(get_context_emitter(), "_session_id", None)
+            if session_id:
+                return str(session_id)
+        except Exception:
+            pass
+        # A stable per-LLM fallback still lets interleaved debug logs be grouped.
+        return f"llm:{id(self):x}"
+
     def _resolve_ollama_chained_args(
+        self,
         arguments: Dict[str, Any],
         tool_result_mapping: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Replace Ollama's function-name references with prior tool results."""
-        if not tool_result_mapping:
-            return arguments
-        for arg_name, arg_value in list(arguments.items()):
-            if isinstance(arg_value, str) and arg_value in tool_result_mapping:
-                arguments[arg_name] = tool_result_mapping[arg_value]
-                logging.debug(
-                    "[OLLAMA_FIX] Replaced %s with %s in %s arguments",
-                    arg_value,
-                    tool_result_mapping[arg_value],
-                    arg_name,
+        """Delegate Ollama function-name substitution to the provider adapter."""
+        adapter = getattr(self, "_provider_adapter", None)
+        resolver = getattr(adapter, "resolve_chained_arguments", None)
+        if resolver is not None:
+            try:
+                return resolver(
+                    arguments,
+                    tool_result_mapping,
+                    correlation_id=self._ollama_correlation_id(),
                 )
-        return arguments
+            except TypeError:
+                # Keep compatibility with lightweight test/custom adapters.
+                return resolver(arguments, tool_result_mapping)
+        from .adapters import resolve_ollama_chained_arguments
 
-    @staticmethod
+        return resolve_ollama_chained_arguments(
+            arguments,
+            tool_result_mapping,
+            correlation_id=self._ollama_correlation_id(),
+        )
+
     def _record_ollama_tool_result(
+        self,
         tool_result_mapping: Dict[str, Any],
         function_name: str,
         tool_result: Any,
     ) -> None:
-        """Record a tool result in the form weak Ollama models can chain."""
-        if isinstance(tool_result, (int, float)):
-            tool_result_mapping[function_name] = tool_result
-        elif isinstance(tool_result, str):
-            match = re.search(r"\b(\d+)\b", tool_result)
-            tool_result_mapping[function_name] = (
-                int(match.group(1)) if match else tool_result
-            )
+        """Delegate exact Ollama result recording to the provider adapter."""
+        adapter = getattr(self, "_provider_adapter", None)
+        recorder = getattr(adapter, "record_tool_result", None)
+        if recorder is not None:
+            recorder(tool_result_mapping, function_name, tool_result)
+            return
+        from .adapters import record_ollama_tool_result
+
+        record_ollama_tool_result(tool_result_mapping, function_name, tool_result)
 
     def _try_append_multimodal_tool_result(
         self,
