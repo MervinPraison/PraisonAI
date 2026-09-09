@@ -247,6 +247,7 @@ __all__ = [
     "process_stream_chunks",
     "supports_structured_outputs",
     "supports_streaming_with_tools",
+    "max_output_tokens",
     "ModelRouter",
     "ModelProfile",
     "TaskComplexity",

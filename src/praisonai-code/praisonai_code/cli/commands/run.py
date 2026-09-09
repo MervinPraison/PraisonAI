@@ -1451,7 +1451,7 @@ def run_main(
     # generator resolve each agent against its own ceiling. Prompt/custom-agent
     # paths use the resolved top-level model here.
     is_yaml_target = bool(target and _is_yaml_file(target))
-    if target:  # Only check if we actually have something to run
+    if target or agent or command:  # Any execution surface may need model/budget resolution
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
 
@@ -1478,7 +1478,11 @@ def run_main(
 
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
         model = ensure_configured_or_onboard(model=model, interactive=not _headless)
-        if not is_yaml_target:
+        # A YAML file is a workflow target only when no named custom agent or
+        # command is selected. In the latter cases the file is merely the
+        # prompt/argument source and the named definition still needs its own
+        # model-aware budget resolution.
+        if not is_yaml_target or agent or command:
             max_tokens = _resolve_max_tokens(model, max_tokens, output=output)
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the

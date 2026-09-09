@@ -19,12 +19,43 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_TOKENS = 16000
 
 
+def _active_correlation_id() -> Optional[str]:
+    """Return the current workflow id for budget diagnostics when available."""
+    try:
+        from praisonaiagents.trace.context_events import get_context_emitter
+
+        session_id = getattr(get_context_emitter(), "_session_id", None)
+        if session_id:
+            return str(session_id)
+    except Exception:
+        pass
+    try:
+        from praisonaiagents.session.context import get_session_context
+
+        context = get_session_context()
+        for field in ("thread_id", "chat_id", "user_id"):
+            value = getattr(context, field, None)
+            if value:
+                return str(value)
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_output_budget(model: str, requested: Any = None) -> Optional[int]:
     """Resolve a YAML agent budget against LiteLLM's model ceiling."""
     try:
         value = _DEFAULT_MAX_TOKENS if requested is None else int(requested)
     except (TypeError, ValueError, OverflowError):
-        logger.warning("Ignoring invalid max_tokens=%r for model %r", requested, model)
+        correlation_id = _active_correlation_id()
+        logger.warning(
+            "Ignoring invalid max_tokens=%r for model %r",
+            requested,
+            model,
+            extra={"extra_data": {"correlation_id": correlation_id}}
+            if correlation_id
+            else {},
+        )
         value = _DEFAULT_MAX_TOKENS
     if not model or value <= 0:
         return value
@@ -38,14 +69,30 @@ def _resolve_output_budget(model: str, requested: Any = None) -> Optional[int]:
         return value
     if value > ceiling:
         if requested is not None:
+            correlation_id = _active_correlation_id()
             logger.warning(
                 "max_tokens=%s exceeds %s's output limit (%s); clamping to %s",
                 value, model, ceiling, ceiling,
+                extra={"extra_data": {"correlation_id": correlation_id}}
+                if correlation_id
+                else {},
             )
         return ceiling
     # An omitted YAML budget follows the model's full known ceiling, including
     # ceilings above the historical 16k default.
     return ceiling if requested is None else value
+
+
+def _build_agent_llm_spec(
+    raw_llm_spec: Any,
+    model: str,
+    max_tokens: Optional[int],
+) -> Dict[str, Any]:
+    """Overlay resolved model/budget fields without dropping YAML options."""
+    spec = dict(raw_llm_spec) if isinstance(raw_llm_spec, dict) else {}
+    spec["model"] = model
+    spec["max_tokens"] = max_tokens
+    return spec
 
 
 class PraisonAIAdapter(BaseFrameworkAdapter):
@@ -442,13 +489,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # sampling, retries, and provider-specific options) while adding
             # the resolved model/budget fields. Rebuilding from only ``model``
             # silently discarded those settings.
-            raw_llm_spec = details.get('llm')
-            if isinstance(raw_llm_spec, dict):
-                agent_llm = dict(raw_llm_spec)
-            else:
-                agent_llm = {}
-            agent_llm['model'] = agent_model
-            agent_llm['max_tokens'] = resolved_max_tokens
+            agent_llm = _build_agent_llm_spec(
+                details.get('llm'), agent_model, resolved_max_tokens
+            )
 
             # Create basic agent (pass both tools and toolsets)
             agent_kwargs = {
