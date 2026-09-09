@@ -37,20 +37,16 @@ def _docker_running() -> bool:
     would refuse, and run exactly when it would not.
     """
     try:
-        from praisonai_sandbox.docker import DockerSandbox
+        from praisonaiagents.managed._compute_bridge import resolve_compute
+
+        # Exactly what ComputeManagedAgent._ensure does, including how it reads
+        # is_available (a property on one provider, a method on another).
+        provider = resolve_compute("docker")
+        available = getattr(provider, "is_available", True)
+        available = available() if callable(available) else available
+        return available is not False
     except Exception:
-        # Provider not installed: fall back to a plain client+daemon probe.
-        if not shutil.which("docker"):
-            return False
-        try:
-            return subprocess.run(
-                ["docker", "version"], capture_output=True, timeout=25,
-            ).returncode == 0
-        except Exception:
-            return False
-    try:
-        return bool(DockerSandbox().is_available)
-    except Exception:
+        # Cannot even resolve the provider: the runtime could not either.
         return False
 
 
