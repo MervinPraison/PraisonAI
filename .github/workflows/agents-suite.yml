@@ -9,14 +9,15 @@
 # tests silently contributed nothing while still appearing to exist. A failing
 # test is loud; a test that never collects is not.
 #
-# This job does not run the suite. Running all 11,900 on every PR is a real
-# decision about Actions compute, and it would go red on arrival because there
-# are pre-existing failures nothing has been enforcing. A job that is red the
-# day it lands teaches people to ignore it.
+# This job started as collection-only, because running the suite would have gone
+# red on arrival: 297 pre-existing failures nothing had been enforcing, and a job
+# that is red the day it lands teaches people to ignore it. Then a curated
+# green-set, ratcheted upward.
 #
-# Collection alone takes ~40s, costs almost nothing, and would have caught both
-# dead modules the day they broke. It is the honest ratchet: it cannot pass
-# while a test file is unimportable.
+# Both are gone. The unit suite now runs in full and passes: 9373 tests, 0
+# failures. The `collect` job stays because it is the cheaper, stricter signal --
+# it cannot pass while a test file is unimportable, and it says so in 40s.
+#
 name: agents-suite
 
 on:
@@ -87,7 +88,7 @@ jobs:
           # handles it; the INSTALLED one did not.
           pip install -e src/praisonai-bot
           pip install pytest pytest-asyncio pytest-timeout
-      - name: Run the paths that pass clean
+      - name: Run the unit suite
         working-directory: src/praisonai-agents
         env:
           # Never used: PRAISONAI_ALLOW_NETWORK=0 and the live marker keep these
@@ -96,41 +97,37 @@ jobs:
           PRAISONAI_ALLOW_NETWORK: '0'
         run: |
           set -euo pipefail
-          # The list lives in tests/green-set.txt so it can be edited without
-          # touching CI, and so the reasoning travels with it.
+          # The whole suite, not a curated subset. tests/green-set.txt and
+          # tests/known-failures.txt are gone: 9373 pass, 0 fail.
           #
-          # The 250 remaining failures are NOT 250 broken tests. Every failing
-          # file was re-run in isolation:
-          #     94 failures (18 files) PASS ALONE  -> shared-state pollution
-          #    120 failures            fail alone  -> genuine
+          # The 297 failures this job was built around were, in the end:
+          #   83  environment  -- monorepo siblings not installed, dirty HOME
+          #   19  ONE line     -- a module-level os.environ.setdefault in
+          #                       tests/unit/tools/test_delegation_tools.py that
+          #                       turned auto-approval on for the whole process
+          #                       at COLLECTION time
+          #   ~5  deprecation warnings that fire once per process
+          #  ~85  tests asserting contracts the product had deliberately changed
+          #    5  real product bugs
+          #  the rest: tests built on Mocks whose auto-created attributes
+          #            defeated the very code path under test
           #
-          # The count moved 297 -> 250 -> 214 purely by cleaning the ENVIRONMENT:
-          # installing the monorepo praisonai-sandbox (-47), installing the
-          # monorepo praisonai-bot and using a clean HOME (-36). 83 of the
-          # original failures were never code. A fresh CI runner has neither
-          # problem, which is why this job installs both siblings.
-          # tests/unit/tools shows it starkly: 54 failures in a full run, 5 when
-          # that directory runs by itself.
-          #
-          # On the pollution, so nobody repeats the search:
-          #   - It is CUMULATIVE. Neither the first 18 directories nor the last
-          #     28, nor all top-level test_*.py files, reproduce it; only the
-          #     whole suite does.
-          #   - Its symptom for one victim is arguments not reaching the tool:
-          #     "fn() missing 1 required positional argument: 'x'" even though
-          #     execute_tool was passed {"x": "v"}.
-          #   - Resetting the approval and tool registries in an autouse fixture
-          #     changed NOTHING (still exactly 297 at the time), so neither is
-          #     the leak. That fixture was removed rather than shipped.
+          # Three traps worth knowing before adding a test here, each of which
+          # cost a full-suite bisect:
+          #   1. Module-level env mutation persists for the entire process, and
+          #      runs at collection. Use monkeypatch.
+          #   2. The approval registry is a process-global singleton. Anything
+          #      you add_requirement() stays for every later test.
+          #   3. `'litellm' in module_name` also matches praisonai's own
+          #      _litellm_loader; evicting it from sys.modules creates a second
+          #      module object with separate globals.
           #
           # No pipe: piping pytest into anything discards its exit code, which is
           # how a gate silently stops gating.
-          grep -v '^#' tests/green-set.txt | grep -v '^$' > /tmp/green.txt
-          # Excluded despite being green locally: this file passes on macOS and
+          #
+          # Excluded: tests/unit/memory/test_prefetch.py passes on macOS and
           # FAILS on the Linux runner (test_async_memory_search_enforces_...,
-          # search_long_term not called). The green set was derived on a
-          # developer machine, so CI is the first place a platform difference
-          # shows -- which is the ratchet working, not a reason to widen it.
-          # Needs its own look; excluded rather than left red.
-          xargs < /tmp/green.txt python -m pytest -q -p no:randomly --timeout=60 \
+          # search_long_term not called). A genuine platform difference that
+          # needs its own look; excluded rather than left red.
+          python -m pytest tests/unit/ -q -p no:randomly --timeout=120 \
             --disable-warnings --ignore=tests/unit/memory/test_prefetch.py

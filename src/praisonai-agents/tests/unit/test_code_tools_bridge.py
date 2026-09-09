@@ -223,6 +223,15 @@ def test_approval_gate_required_for_every_call(registry):
         calls["count"] += 1
         return ApprovalDecision(approved=True, reason="ok")
 
+    # Start from a clean approval context, not just end with one. This test
+    # only cleared it in its finally, so an approval left in the contextvar by
+    # an earlier test made the first fetch() record a remembered approval that
+    # covered the second -- the callback fired once instead of twice, which is
+    # exactly the "first approval silently unlocks later calls" behaviour this
+    # test exists to forbid. Passed alone, failed after
+    # test_mixed_tools_list_resolution.
+    clear_approval_context()
+
     add_approval_requirement("fetch", "high")
     set_approval_callback(_cb)
     try:
