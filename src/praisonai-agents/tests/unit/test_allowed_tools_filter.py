@@ -113,7 +113,13 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"})
+    # CI: "false" pinned deliberately. AllowedToolsFilter is STRICT when the
+    # CI env var is truthy -- an unknown tool raises instead of being warned
+    # about and stripped. These tests exercise the dev-mode warn path, so on a
+    # CI runner (where CI=true is already exported) they inherited the strict
+    # path and failed with "All specified tools must be available in CI mode".
+    # The convention is already used by test_filter_tools_with_unknown_tools_dev_mode.
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"})
     def test_filter_tools_partial_match(self):
         """Test filtering when only some whitelisted tools are available."""
         filter_instance = AllowedToolsFilter()
@@ -140,7 +146,8 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist"})
+    # See test_filter_tools_partial_match: dev-mode warn path, so CI must be off.
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist", "CI": "false"})
     def test_diagnostics_data(self):
         """Test diagnostics data collection."""
         filter_instance = AllowedToolsFilter()
@@ -281,7 +288,9 @@ class TestBackwardCompatibility:
     
     def test_empty_tools_edge_case(self):
         """Test filtering with empty available tools."""
-        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"}):
+        # CI off: with no available tools every whitelisted name is "unknown",
+        # which raises under the strict CI path. See test_filter_tools_partial_match.
+        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"}):
             filter_instance = AllowedToolsFilter()
             
             filtered = filter_instance.filter_tools(set())

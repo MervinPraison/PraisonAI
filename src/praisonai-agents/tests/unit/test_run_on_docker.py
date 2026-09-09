@@ -24,19 +24,38 @@ from praisonaiagents.agent.placement import managed_runtimes, tool_places
 
 
 def _docker_running() -> bool:
-    if not shutil.which("docker"):
-        return False
+    """Ask the PRODUCT whether docker is usable, not a probe of our own.
+
+    This used to run `docker version --format {{.Server.Version}}` with a 25s
+    timeout. The runtime asks the docker provider's `is_available`, which runs
+    `docker version` with a 5s timeout. On a cold CI runner those disagree: the
+    test's probe succeeds, the test runs, and the runtime then refuses with
+    "run_on='docker' cannot start: docker is not available on this machine".
+
+    A guard that can disagree with the thing it is guarding is not a guard.
+    Gating on the same answer means these tests skip exactly when the runtime
+    would refuse, and run exactly when it would not.
+    """
     try:
-        return subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=25,
-        ).returncode == 0
+        from praisonai_sandbox.docker import DockerSandbox
+    except Exception:
+        # Provider not installed: fall back to a plain client+daemon probe.
+        if not shutil.which("docker"):
+            return False
+        try:
+            return subprocess.run(
+                ["docker", "version"], capture_output=True, timeout=25,
+            ).returncode == 0
+        except Exception:
+            return False
+    try:
+        return bool(DockerSandbox().is_available)
     except Exception:
         return False
 
 
 needs_docker = pytest.mark.skipif(
-    not _docker_running(), reason="needs a running Docker daemon"
+    not _docker_running(), reason="needs a Docker daemon the runtime agrees is available"
 )
 
 
