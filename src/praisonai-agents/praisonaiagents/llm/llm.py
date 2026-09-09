@@ -1791,17 +1791,18 @@ Respond with ONLY a valid JSON tool call in this format:
     ) -> Dict[str, Any]:
         """Delegate Ollama function-name substitution to the provider adapter."""
         adapter = getattr(self, "_provider_adapter", None)
-        resolver = getattr(adapter, "resolve_chained_arguments", None)
-        if resolver is not None:
+        if adapter is not None:
             try:
-                return resolver(
+                return adapter.resolve_chained_arguments(
                     arguments,
                     tool_result_mapping,
                     correlation_id=self._ollama_correlation_id(),
                 )
-            except TypeError:
+            except (AttributeError, TypeError):
                 # Keep compatibility with lightweight test/custom adapters.
-                return resolver(arguments, tool_result_mapping)
+                resolver = getattr(adapter, "resolve_chained_arguments", None)
+                if resolver is not None:
+                    return resolver(arguments, tool_result_mapping)
         from .adapters import resolve_ollama_chained_arguments
 
         return resolve_ollama_chained_arguments(
@@ -1818,10 +1819,16 @@ Respond with ONLY a valid JSON tool call in this format:
     ) -> None:
         """Delegate exact Ollama result recording to the provider adapter."""
         adapter = getattr(self, "_provider_adapter", None)
-        recorder = getattr(adapter, "record_tool_result", None)
-        if recorder is not None:
-            recorder(tool_result_mapping, function_name, tool_result)
-            return
+        if adapter is not None:
+            try:
+                adapter.record_tool_result(
+                    tool_result_mapping, function_name, tool_result
+                )
+                return
+            except AttributeError:
+                # Lightweight custom adapters may not implement this optional
+                # hook; retain the module-level fallback below.
+                pass
         from .adapters import record_ollama_tool_result
 
         record_ollama_tool_result(tool_result_mapping, function_name, tool_result)
@@ -3803,13 +3810,14 @@ Respond with ONLY a valid JSON tool call in this format:
                                 messages.append(self._tool_parse_error_message(function_name, tool_call_id))
                                 continue
 
-                            # Validate and filter arguments for Ollama provider
-                            if is_ollama and tools:
-                                # First check if any argument references a previous tool result
+                            # First resolve any reference to a previous tool
+                            # result, then filter unknown argument keys.
+                            if is_ollama:
                                 arguments = self._resolve_ollama_chained_args(
                                     arguments, tool_result_mapping
                                 )
-                                
+                            # Validate and filter arguments for Ollama provider
+                            if is_ollama and tools:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
@@ -4539,22 +4547,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._tool_parse_error_message(function_name, tool_call_id)
                                 )
                                 continue
-                            # Validate and filter arguments for Ollama provider.
-                            # Pre-dispatch, so this is streaming-safe: nothing has
-                            # been yielded that would need retracting. Weak local
-                            # models routinely emit arguments belonging to a
-                            # different function, and dispatching those calls the
-                            # user's tool with parameters it never declared.
+                            # Resolve any same-turn result reference first.
+                            if is_ollama:
+                                arguments = self._resolve_ollama_chained_args(
+                                    arguments, ollama_tool_result_mapping
+                                )
+                            # Validate and filter before dispatch. Nothing has
+                            # been yielded yet, so streaming consumers remain
+                            # framed even when a weak model emits extra keys.
                             if is_ollama and tools:
-                                # In the sequential Ollama path, resolve and
-                                # validate immediately before each dispatch so
-                                # same-turn results are available to later calls.
-                                if parallel_tool_calls:
-                                    arguments = self._resolve_ollama_chained_args(
-                                        arguments, ollama_tool_result_mapping
-                                    )
-                                    arguments = self._validate_and_filter_ollama_arguments(
-                                        function_name, arguments, tools)
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools)
                             tool_calls_batch.append(ToolCall(
                                 function_name=function_name,
                                 arguments=arguments, 
@@ -4583,12 +4586,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 _tool_call.arguments = self._resolve_ollama_chained_args(
                                     _tool_call.arguments, ollama_tool_result_mapping
                                 )
-                                if tools:
-                                    _tool_call.arguments = self._validate_and_filter_ollama_arguments(
-                                        _tool_call.function_name,
-                                        _tool_call.arguments,
-                                        tools,
-                                    )
+                                # The batch-preparation filter above has
+                                # already removed unknown keys. Chained
+                                # substitution changes values only, so no
+                                # second filtering pass is needed here.
                                 _result = executor.execute_batch(
                                     [_tool_call], execute_tool_fn,
                                     timeout_ms=self.tool_timeout_ms,
