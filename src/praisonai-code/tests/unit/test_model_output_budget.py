@@ -86,3 +86,45 @@ def test_llm_spec_budget_preserves_existing_options():
         "max_tokens": 4096,
     }
     assert spec == {"model": "provider/model", "temperature": 0.2}
+
+
+def test_yaml_budget_resolution_preserves_nested_llm_value(monkeypatch):
+    from praisonai.framework_adapters.praisonai_adapter import (
+        _build_agent_llm_spec,
+        _requested_output_budget,
+        _resolve_output_budget,
+    )
+
+    monkeypatch.setattr(
+        "praisonaiagents.llm.model_capabilities.max_output_tokens",
+        lambda model: 8192,
+    )
+    details = {
+        "llm": {
+            "model": "provider/model",
+            "temperature": 0.2,
+            "max_tokens": 2048,
+        }
+    }
+
+    # A legacy parser default must not shadow an explicit nested YAML value.
+    assert _requested_output_budget(details, {"max_tokens": 16000}) == 2048
+    assert _resolve_output_budget("provider/model", 2048) == 2048
+    spec = _build_agent_llm_spec(details["llm"], "provider/model", 2048)
+    assert spec == {
+        "model": "provider/model",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+    }
+
+
+def test_yaml_explicit_cli_budget_wins_over_nested_value():
+    from praisonai.framework_adapters.praisonai_adapter import (
+        _requested_output_budget,
+    )
+
+    details = {"llm": {"model": "provider/model", "max_tokens": 2048}}
+    assert _requested_output_budget(
+        details,
+        {"max_tokens": 4096, "_max_tokens_explicit": True},
+    ) == 4096

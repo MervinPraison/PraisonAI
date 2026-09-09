@@ -1451,6 +1451,11 @@ def run_main(
     # generator resolve each agent against its own ceiling. Prompt/custom-agent
     # paths use the resolved top-level model here.
     is_yaml_target = bool(target and _is_yaml_file(target))
+    # Loading a named custom definition performs a complete discovery pass
+    # (including opt-in local tool modules). Keep the preview result so the
+    # execution path does not discover and execute the same definitions twice.
+    preloaded_agent_config = None
+    custom_agent_model = None
     if target or agent or command:  # Any execution surface may need model/budget resolution
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
@@ -1466,24 +1471,39 @@ def run_main(
                 )
 
                 _preview_config = load_agent_from_name(agent)
+                preloaded_agent_config = _preview_config
                 _preview_llm = (_preview_config or {}).get("llm")
                 if isinstance(_preview_llm, dict):
-                    _preview_llm = _preview_llm.get("model")
-                if isinstance(_preview_llm, str) and _preview_llm.strip():
-                    model = _preview_llm.strip()
+                    custom_agent_model = _preview_llm.get("model")
+                else:
+                    custom_agent_model = _preview_llm
+                if isinstance(custom_agent_model, str):
+                    custom_agent_model = custom_agent_model.strip() or None
             except Exception:
                 # The normal custom-agent load below reports missing/invalid
                 # definitions; preview is only for model-aware budgeting.
                 pass
 
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
-        model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+        # A frontmatter model is used for credential checks and budget
+        # resolution, but must not be passed as a synthetic ``--model``
+        # override: doing so replaces a mapping-valued LLM spec and discards
+        # endpoint, credentials, sampling, and retry options.
+        credential_model = model or custom_agent_model
+        resolved_model = ensure_configured_or_onboard(
+            model=credential_model, interactive=not _headless
+        )
+        if not (agent and model is None and custom_agent_model):
+            model = resolved_model
         # A YAML file is a workflow target only when no named custom agent or
         # command is selected. In the latter cases the file is merely the
         # prompt/argument source and the named definition still needs its own
         # model-aware budget resolution.
         if not is_yaml_target or agent or command:
-            max_tokens = _resolve_max_tokens(model, max_tokens, output=output)
+            budget_model = custom_agent_model or model
+            max_tokens = _resolve_max_tokens(
+                budget_model, max_tokens, output=output
+            )
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject
@@ -1549,7 +1569,11 @@ def run_main(
     # Handle custom agent or command
     if agent:
         from praisonai_code.cli.features.custom_definitions import load_agent_from_name
-        agent_config = load_agent_from_name(agent)
+        agent_config = (
+            preloaded_agent_config
+            if preloaded_agent_config is not None
+            else load_agent_from_name(agent)
+        )
         if not agent_config:
             output.print_error(f"Agent '{agent}' not found")
             raise typer.Exit(1)
@@ -1932,6 +1956,7 @@ def _run_from_file(
             args.cli_project_sessions = bool(session_id or auto_save_name)
             args.output = output_mode
             args.max_tokens = max_tokens
+            args._max_tokens_explicit = max_tokens is not None
             if effective_approval:
                 args.approval = effective_approval
             if approve_all_tools:
@@ -2251,6 +2276,7 @@ def _run_prompt(
         args.tools = tools
         args.toolset = toolset
         args.max_tokens = max_tokens
+        args._max_tokens_explicit = max_tokens is not None
         args.web_search = False
         args.web_fetch = False
         args.prompt_caching = False
@@ -2448,6 +2474,7 @@ def _run_from_file_profiled(
         args.cli_project_sessions = bool(session_id or auto_save_name)
         args.output = output_mode
         args.max_tokens = max_tokens
+        args._max_tokens_explicit = max_tokens is not None
         if approval:
             args.approval = approval
         if approve_all_tools:
@@ -2656,9 +2683,17 @@ def _run_custom_agent(
     try:
         from praisonaiagents import Agent
         
-        # Override model if specified
+        # Override only the model field when the definition supplies a full
+        # LLM mapping. Replacing the mapping wholesale would discard endpoint,
+        # credentials, sampling, retry, and provider-specific options.
         if model:
-            agent_config["llm"] = model
+            if isinstance(agent_config.get("llm"), dict):
+                agent_config["llm"] = {
+                    **agent_config["llm"],
+                    "model": model,
+                }
+            else:
+                agent_config["llm"] = model
         agent_config["llm"] = _llm_spec_with_max_tokens(
             agent_config.get("llm"), model, max_tokens
         )

@@ -95,6 +95,40 @@ def _build_agent_llm_spec(
     return spec
 
 
+def _requested_output_budget(
+    details: Dict[str, Any], cli_config: Optional[Dict[str, Any]] = None
+) -> Any:
+    """Select the raw per-agent budget before model-ceiling resolution.
+
+    An explicit CLI value wins over YAML. When the CLI option is omitted,
+    preserve the agent-level value and then a nested ``llm.max_tokens`` value;
+    the latter must not be mistaken for an omitted budget and overwritten by
+    the model ceiling. Older callers may pass the parser's historical 16k
+    default without an explicitness marker, so that value is treated as an
+    omission when a YAML value is available.
+    """
+    details = details or {}
+    cli = cli_config or {}
+    marker = cli.get("_max_tokens_explicit")
+    cli_value = cli.get("max_tokens")
+    if marker is None:
+        marker = (
+            "max_tokens" in cli
+            and cli_value is not None
+            and cli_value != _DEFAULT_MAX_TOKENS
+        )
+    if marker:
+        return cli_value
+
+    agent_value = details.get("max_tokens")
+    if agent_value is not None:
+        return agent_value
+    llm_spec = details.get("llm")
+    if isinstance(llm_spec, dict):
+        return llm_spec.get("max_tokens")
+    return None
+
+
 class PraisonAIAdapter(BaseFrameworkAdapter):
     """
     Adapter for running PraisonAI agents natively using praisonaiagents.
@@ -468,13 +502,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             agent_model = self._resolve_agent_model(details, model_name)
 
             # CLI max_tokens is an explicit global override when present;
-            # otherwise honour each YAML agent's own value and resolve an
-            # omitted value from that agent's model ceiling.
-            requested_max_tokens = (
-                (cli_config or {}).get("max_tokens")
-                if "max_tokens" in (cli_config or {})
-                else details.get("max_tokens")
-            )
+            # otherwise honour each YAML agent's own value (including a nested
+            # ``llm.max_tokens``) and resolve an omitted value from that
+            # agent's model ceiling.
+            requested_max_tokens = _requested_output_budget(details, cli_config)
             resolved_max_tokens = _resolve_output_budget(
                 agent_model, requested_max_tokens
             )
