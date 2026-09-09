@@ -1771,6 +1771,40 @@ Respond with ONLY a valid JSON tool call in this format:
             adapter = OllamaAdapter()
         return adapter.format_tool_result_message(function_name, tool_result)
 
+    @staticmethod
+    def _resolve_ollama_chained_args(
+        arguments: Dict[str, Any],
+        tool_result_mapping: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Replace Ollama's function-name references with prior tool results."""
+        if not tool_result_mapping:
+            return arguments
+        for arg_name, arg_value in list(arguments.items()):
+            if isinstance(arg_value, str) and arg_value in tool_result_mapping:
+                arguments[arg_name] = tool_result_mapping[arg_value]
+                logging.debug(
+                    "[OLLAMA_FIX] Replaced %s with %s in %s arguments",
+                    arg_value,
+                    tool_result_mapping[arg_value],
+                    arg_name,
+                )
+        return arguments
+
+    @staticmethod
+    def _record_ollama_tool_result(
+        tool_result_mapping: Dict[str, Any],
+        function_name: str,
+        tool_result: Any,
+    ) -> None:
+        """Record a tool result in the form weak Ollama models can chain."""
+        if isinstance(tool_result, (int, float)):
+            tool_result_mapping[function_name] = tool_result
+        elif isinstance(tool_result, str):
+            match = re.search(r"\b(\d+)\b", tool_result)
+            tool_result_mapping[function_name] = (
+                int(match.group(1)) if match else tool_result
+            )
+
     def _try_append_multimodal_tool_result(
         self,
         messages: List[Dict[str, Any]],
@@ -3751,13 +3785,9 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Validate and filter arguments for Ollama provider
                             if is_ollama and tools:
                                 # First check if any argument references a previous tool result
-                                if is_ollama and tool_result_mapping:
-                                    # Replace function names with their results in arguments
-                                    for arg_name, arg_value in list(arguments.items()):
-                                        if isinstance(arg_value, str) and arg_value in tool_result_mapping:
-                                            # Replace function name with its result
-                                            arguments[arg_name] = tool_result_mapping[arg_value]
-                                            logging.debug(f"[OLLAMA_FIX] Replaced {arg_value} with {tool_result_mapping[arg_value]} in {function_name} arguments")
+                                arguments = self._resolve_ollama_chained_args(
+                                    arguments, tool_result_mapping
+                                )
                                 
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
@@ -3795,16 +3825,9 @@ Respond with ONLY a valid JSON tool call in this format:
                             
                             # For Ollama, store the result for potential chaining
                             if is_ollama:
-                                # Extract numeric value from result if it contains one
-                                if isinstance(tool_result, (int, float)):
-                                    tool_result_mapping[function_name] = tool_result
-                                elif isinstance(tool_result, str):
-                                    import re
-                                    match = re.search(r'\b(\d+)\b', tool_result)
-                                    if match:
-                                        tool_result_mapping[function_name] = int(match.group(1))
-                                    else:
-                                        tool_result_mapping[function_name] = tool_result
+                                self._record_ollama_tool_result(
+                                    tool_result_mapping, function_name, tool_result
+                                )
 
                             if verbose:
                                 display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -4373,6 +4396,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     tool_calls = []
                     response_text = ""
+                    ollama_tool_result_mapping: Dict[str, Any] = {}
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
                     
@@ -4501,8 +4525,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # different function, and dispatching those calls the
                             # user's tool with parameters it never declared.
                             if is_ollama and tools:
-                                arguments = self._validate_and_filter_ollama_arguments(
-                                    function_name, arguments, tools)
+                                # In the sequential Ollama path, resolve and
+                                # validate immediately before each dispatch so
+                                # same-turn results are available to later calls.
+                                if parallel_tool_calls:
+                                    arguments = self._resolve_ollama_chained_args(
+                                        arguments, ollama_tool_result_mapping
+                                    )
+                                    arguments = self._validate_and_filter_ollama_arguments(
+                                        function_name, arguments, tools)
                             tool_calls_batch.append(ToolCall(
                                 function_name=function_name,
                                 arguments=arguments, 
@@ -4521,10 +4552,47 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # here; use a distinct alias.
                         from time import perf_counter as _perf_counter
                         _batch_started = _perf_counter()
-                        tool_results = executor.execute_batch(
-                            tool_calls_batch, execute_tool_fn,
-                            timeout_ms=self.tool_timeout_ms,
-                        )
+                        if is_ollama and not parallel_tool_calls:
+                            # Ollama models commonly emit a later call whose
+                            # argument is the name of an earlier call. Execute
+                            # these calls one at a time so each result can be
+                            # resolved before the next dispatch.
+                            tool_results = []
+                            for _tool_call in tool_calls_batch:
+                                _tool_call.arguments = self._resolve_ollama_chained_args(
+                                    _tool_call.arguments, ollama_tool_result_mapping
+                                )
+                                if tools:
+                                    _tool_call.arguments = self._validate_and_filter_ollama_arguments(
+                                        _tool_call.function_name,
+                                        _tool_call.arguments,
+                                        tools,
+                                    )
+                                _result = executor.execute_batch(
+                                    [_tool_call], execute_tool_fn,
+                                    timeout_ms=self.tool_timeout_ms,
+                                )
+                                tool_results.extend(_result)
+                                if _result:
+                                    self._record_ollama_tool_result(
+                                        ollama_tool_result_mapping,
+                                        _tool_call.function_name,
+                                        _result[0].result,
+                                    )
+                        else:
+                            tool_results = executor.execute_batch(
+                                tool_calls_batch, execute_tool_fn,
+                                timeout_ms=self.tool_timeout_ms,
+                            )
+                            if is_ollama:
+                                for _tool_call, _result in zip(
+                                    tool_calls_batch, tool_results
+                                ):
+                                    self._record_ollama_tool_result(
+                                        ollama_tool_result_mapping,
+                                        _tool_call.function_name,
+                                        _result.result,
+                                    )
                         _batch_elapsed = _perf_counter() - _batch_started
                         
                         for tool_result in tool_results:
@@ -4640,6 +4708,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     is_ollama = self._is_ollama_provider()
                     fallback_iterations = 0
                     tool_call_count = 0
+                    ollama_tool_result_mapping = {}
                     last_tool_call_fingerprint = None
                     stall_reason = None
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
@@ -4736,6 +4805,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # different function, and dispatching those calls the
                             # user's tool with parameters it never declared.
                             if is_ollama and tools:
+                                arguments = self._resolve_ollama_chained_args(
+                                    arguments, ollama_tool_result_mapping
+                                )
                                 arguments = self._validate_and_filter_ollama_arguments(
                                     function_name, arguments, tools)
                             try:
@@ -4746,6 +4818,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.warning(
                                     f"Tool '{function_name}' failed: {tool_error}")
                                 tool_result = {"error": str(tool_error)}
+                            if is_ollama:
+                                self._record_ollama_tool_result(
+                                    ollama_tool_result_mapping,
+                                    function_name,
+                                    tool_result,
+                                )
                             try:
                                 _get_display_functions()['execute_sync_callback'](
                                     'tool_call',
@@ -4985,6 +5063,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
+            ollama_tool_result_mapping: Dict[str, Any] = {}
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
 
@@ -5354,6 +5433,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # parallel_tool_calls is set) while preserving call order.
                     _call_plan = []  # ('error', msg) | ('call', fn, args, tc_id)
                     _dispatch_specs = []
+                    _batch_results = []
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
@@ -5366,12 +5446,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # Validate and filter arguments for Ollama provider
                         if is_ollama and tools:
-                            arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
+                            # In the sequential Ollama path, defer resolution
+                            # and validation until immediately before dispatch;
+                            # this lets a later call consume an earlier result
+                            # from the same assistant turn.
+                            if parallel_tool_calls:
+                                arguments = self._resolve_ollama_chained_args(
+                                    arguments, ollama_tool_result_mapping
+                                )
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools
+                                )
 
                         _call_plan.append(('call', function_name, arguments, tool_call_id))
-                        _dispatch_specs.append((function_name, arguments, tool_call_id))
+                        if is_ollama and not parallel_tool_calls:
+                            arguments = self._resolve_ollama_chained_args(
+                                arguments, ollama_tool_result_mapping
+                            )
+                            if tools:
+                                arguments = self._validate_and_filter_ollama_arguments(
+                                    function_name, arguments, tools
+                                )
+                            _call_plan[-1] = ('call', function_name, arguments, tool_call_id)
+                            _batch_results.append(await _dispatch_async_tool(
+                                execute_tool_fn,
+                                function_name,
+                                arguments,
+                                tool_call_id,
+                                iteration_count,
+                            ))
+                            self._record_ollama_tool_result(
+                                ollama_tool_result_mapping, function_name,
+                                _batch_results[-1],
+                            )
+                        else:
+                            _dispatch_specs.append((function_name, arguments, tool_call_id))
 
-                    _batch_results = await _dispatch_tool_batch(_dispatch_specs, iteration_count)
+                    if not (is_ollama and not parallel_tool_calls):
+                        _batch_results = await _dispatch_tool_batch(
+                            _dispatch_specs, iteration_count
+                        )
                     _result_iter = iter(_batch_results)
                     for _plan in _call_plan:
                         if _plan[0] == 'error':
@@ -5382,6 +5496,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations
+
+                        if is_ollama:
+                            self._record_ollama_tool_result(
+                                ollama_tool_result_mapping, function_name, tool_result
+                            )
 
                         if verbose:
                             display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
