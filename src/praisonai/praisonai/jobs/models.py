@@ -30,7 +30,7 @@ class JobSubmitRequest(BaseModel):
     agent_yaml: Optional[str] = Field(None, description="Inline agent YAML configuration")
     recipe_name: Optional[str] = Field(None, description="Recipe name to execute (mutually exclusive with agent_file)")
     recipe_config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Recipe configuration overrides")
-    framework: Optional[str] = Field("praisonai", description="Framework to use (praisonai, crewai, autogen)")
+    framework: Optional[str] = Field(None, description="Framework to use (praisonai, crewai, autogen). Omit to use the registry-selected default.")
     config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional configuration")
     webhook_url: Optional[str] = Field(None, description="URL to POST results when complete")
     timeout: Optional[int] = Field(3600, description="Timeout in seconds (default: 1 hour)")
