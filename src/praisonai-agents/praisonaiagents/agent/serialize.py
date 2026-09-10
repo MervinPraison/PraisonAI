@@ -15,6 +15,16 @@ is exported by NAME, because a callable cannot survive a round trip through
 JSON and pretending otherwise would produce a config that imports as a
 different agent. ``tools_resolvable`` says whether the names could be rebound,
 so a caller is told rather than left to discover it.
+
+Scope, stated plainly so a caller is not surprised: this exports the scalar
+constructor arguments that are JSON-safe and round-trip cleanly (identity, the
+model, and simple flags). It does not yet serialise the grouped feature-config
+objects (``output=``, ``reflection=``, ``execution=`` ...) -- those are rich
+dataclasses, not scalars, and rebuilding them faithfully is a separate,
+larger piece of work. An agent that relies on a customised grouped config will
+round-trip to one carrying that config's *defaults*, not the original. That is
+a known limit of v1, named here rather than hidden, in the same spirit as
+``tools_resolvable``.
 """
 
 from typing import Any, Callable, Dict, List, Optional
@@ -39,6 +49,7 @@ AGENT_CONFIG_VERSION = 1
 #: imported. Hardcoding the list alone produced exactly that.
 _AGENT_FIELDS = (
     "name", "role", "goal", "backstory", "instructions", "llm",
+    "reasoning_effort",
     "self_reflect", "max_reflect", "min_reflect", "respect_context_window",
     "max_iter", "reasoning_steps", "markdown", "stream", "verbose",
 )
@@ -147,12 +158,23 @@ def agent_from_dict(
 
 
 def team_to_dict(team: Any) -> Dict[str, Any]:
-    """An AgentTeam as a config dict, members included."""
+    """An AgentTeam as a config dict, members included.
+
+    A team's *members* export cleanly; its **task graph** does not yet. Tasks
+    carry agent bindings, ordering, and context wiring whose faithful
+    serialisation -- and a matching importer -- is a larger piece of work than
+    this v1. Rather than emit half a task graph that would import wrong, ``tasks``
+    are omitted and ``tasks_included`` reports whether any were dropped, so the
+    caller is told rather than handed a team that silently forgot its work.
+    """
     if team is None:
         raise SerializationError("Cannot export None as a team config.")
+    tasks = getattr(team, "tasks", None)
+    had_tasks = bool(tasks)
     return {
         "version": AGENT_CONFIG_VERSION,
         "name": getattr(team, "name", None),
         "process": getattr(team, "process", None),
         "agents": [agent_to_dict(a) for a in (getattr(team, "agents", None) or [])],
+        "tasks_included": not had_tasks,
     }

@@ -41,6 +41,14 @@ class TestRoundTrip:
         rebuilt = agent_from_dict(blob, tool_registry={"search": search})
         assert [t.__name__ for t in rebuilt.tools] == ["search"]
 
+    def test_reasoning_effort_is_a_current_param_and_must_survive(self):
+        """reasoning_effort is a live constructor arg (Issue #4452); dropping it
+        silently would round-trip a 'high' agent back to the default."""
+        agent = Agent(name="R", instructions="x", llm="gpt-4o", reasoning_effort="high")
+        blob = agent_to_dict(agent)
+        assert blob["reasoning_effort"] == "high"
+        assert agent_from_dict(blob).reasoning_effort == "high"
+
 
 class TestItRefusesToLoseThings:
     def test_tools_without_a_registry_are_refused(self):
@@ -94,3 +102,22 @@ class TestTeams:
         blob = team_to_dict(FakeTeam())
         assert blob["name"] == "ops"
         assert [a["name"] for a in blob["agents"]] == ["A", "B"]
+
+    def test_a_taskless_team_reports_tasks_included(self):
+        class FakeTeam:
+            name = "ops"
+            process = "sequential"
+            agents = [Agent(name="A", instructions="x", llm="gpt-4o")]
+
+        assert team_to_dict(FakeTeam())["tasks_included"] is True
+
+    def test_a_team_with_tasks_reports_them_as_not_included(self):
+        """The task graph is not serialised in v1; the flag says so plainly
+        rather than letting a diff or builder assume the work came across."""
+        class FakeTeam:
+            name = "ops"
+            process = "sequential"
+            agents = [Agent(name="A", instructions="x", llm="gpt-4o")]
+            tasks = {0: object()}
+
+        assert team_to_dict(FakeTeam())["tasks_included"] is False
