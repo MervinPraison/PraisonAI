@@ -395,7 +395,8 @@ class TestPluginManager:
         suffix = uuid.uuid4().hex
         first_name = f"shared_owner_first_{suffix}"
         second_name = f"shared_owner_second_{suffix}"
-        shared_tool = lambda: "shared"
+        def shared_tool():
+            return "shared"
 
         def make_plugin(name):
             class SharedToolPlugin(Plugin):
