@@ -1645,3 +1645,96 @@ class TestCompactedHistoryRecall:
             d_ids = {h.session_id for h in default_store.search("XZ99-SECRETVALUE")}
             s_ids = {h.session_id for h in sqlite_store.search("XZ99-SECRETVALUE")}
             assert d_ids == s_ids == {"s"}
+
+    def test_window_resolves_archived_anchor(self):
+        """A discovery hit whose anchor lands on an archived turn must resolve
+        to that same archived message when scrolled via ``window`` — search and
+        window share one archived-plus-active coordinate space (Issue #5031)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            self._seed_compacted_session(store)
+
+            hit = store.search("XZ99-SECRETVALUE")[0]
+            # Precondition: the hit anchors on an archived turn.
+            anchored = next(
+                m for m in hit.messages if m["index"] == hit.anchor_index
+            )
+            assert anchored["archived"] is True
+
+            scrolled = store.window("s", str(hit.anchor_index), window=0)
+            assert len(scrolled) == 1
+            assert scrolled[0]["index"] == hit.anchor_index
+            assert scrolled[0]["archived"] is True
+            assert "XZ99-SECRETVALUE" in scrolled[0]["content"]
+
+    def test_malformed_message_fields_do_not_abort_search(self):
+        """A session whose ``messages``/``archived_messages`` are non-list
+        scalars must be skipped, not raise and abort search across all
+        sessions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            # A valid, findable session…
+            store.add_user_message("good", "the deploy token is XZ99-SECRETVALUE")
+            # …plus a structurally malformed one written directly to disk.
+            with open(os.path.join(tmpdir, "bad.json"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {"session_id": "bad", "messages": 5, "archived_messages": 7},
+                    f,
+                )
+
+            hits = store.search("XZ99-SECRETVALUE")
+            assert {h.session_id for h in hits} == {"good"}
+
+    def test_sqlite_upgrade_rebuilds_stale_archived_index(self):
+        """An index built by a pre-#5031 release (archived turns absent) must be
+        rebuilt once on upgrade so archived-only queries work immediately,
+        without waiting for the next write to the session."""
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "sessions.db")
+            store = SqliteSessionStore(
+                session_dir=tmpdir, db_path=db_path, active_window=4
+            )
+            self._seed_compacted_session(store)
+
+            # Simulate a legacy index: strip archived content from the FTS row
+            # and mark the persisted content version as the old (active-only) v1.
+            conn = store._connect()
+            with store._db_lock:
+                active = " ".join(
+                    m.content for m in store.get_session("s").messages
+                )
+                conn.execute("DELETE FROM session_fts WHERE session_id = 's'")
+                conn.execute(
+                    "INSERT INTO session_fts (session_id, content) VALUES ('s', ?)",
+                    (active,),
+                )
+                store._set_index_content_version(conn, 1)
+                store._backfilled = False
+
+            # Fresh candidate lookup must trigger the one-time rebuild.
+            hits = store.search("XZ99-SECRETVALUE")
+            assert {h.session_id for h in hits} == {"s"}
+
+    def test_sqlite_transcript_store_recalls_archived_turn(self):
+        """The exported ``SqliteTranscriptStore`` must also recall archived
+        turns via the shared projection (Issue #5031)."""
+        from praisonaiagents.session.sqlite_transcript_store import (
+            SqliteTranscriptStore,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SqliteTranscriptStore(
+                db_path=os.path.join(tmpdir, "sessions.db"), active_window=4
+            )
+            self._seed_compacted_session(store)
+
+            hits = store.search("XZ99-SECRETVALUE")
+            assert len(hits) == 1
+            hit = hits[0]
+            anchored = next(
+                m for m in hit.messages if m["index"] == hit.anchor_index
+            )
+            assert anchored["archived"] is True
+            assert "XZ99-SECRETVALUE" in anchored["content"]

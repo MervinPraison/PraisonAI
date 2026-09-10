@@ -2019,15 +2019,17 @@ class DefaultSessionStore:
         current window. Both built-in stores use this single projection so
         their results cannot drift.
         """
-        archived = data.get("archived_messages") or []
-        active = data.get("messages") or []
+        archived = data.get("archived_messages")
+        active = data.get("messages")
         merged: List[Dict[str, Any]] = []
-        for msg in archived:
-            if isinstance(msg, dict):
-                merged.append({**msg, "archived": True})
-        for msg in active:
-            if isinstance(msg, dict):
-                merged.append(msg)
+        if isinstance(archived, list):
+            for msg in archived:
+                if isinstance(msg, dict):
+                    merged.append({**msg, "archived": True})
+        if isinstance(active, list):
+            for msg in active:
+                if isinstance(msg, dict):
+                    merged.append(msg)
         return merged
 
     def search(
@@ -2154,9 +2156,16 @@ class DefaultSessionStore:
         *,
         window: int = 5,
     ) -> List[Dict[str, Any]]:
-        """Return ±``window`` messages around an anchor message in a session."""
+        """Return ±``window`` messages around an anchor message in a session.
+
+        Scrolls the same archived-plus-active projection that :meth:`search`
+        anchors against, so an ``anchor_index`` handed back from a discovery
+        hit — including one that lands on an archived turn — resolves to the
+        exact same message here (Issue #5031). Each entry keeps its
+        ``archived`` marker so the compaction boundary stays visible.
+        """
         session = self._read_session_fresh(session_id)
-        messages = session.messages
+        messages = self._searchable_messages(session.to_dict())
         if not messages:
             return []
 
@@ -2173,9 +2182,10 @@ class DefaultSessionStore:
         return [
             {
                 "index": i,
-                "role": messages[i].role,
-                "content": messages[i].content,
-                "timestamp": messages[i].timestamp,
+                "role": messages[i].get("role", ""),
+                "content": messages[i].get("content", ""),
+                "timestamp": messages[i].get("timestamp"),
+                "archived": bool(messages[i].get("archived")),
             }
             for i in range(start, end)
         ]
