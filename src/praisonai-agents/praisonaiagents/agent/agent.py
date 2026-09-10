@@ -2544,7 +2544,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                         self.tools.extend(get_ast_grep_tools())
                     except ImportError:
                         pass  # No default tools available
-        
+
+        # Merge tools contributed by enabled PluginType.TOOL plugins so a plugin's
+        # get_tools() output is actually callable by this agent. Existing tools win
+        # on a name collision (reported, not silently shadowed).
+        self._merge_plugin_tools()
+
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
