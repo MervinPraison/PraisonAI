@@ -37,6 +37,7 @@ Memory Providers:
 # Import only essential protocols to avoid loading heavy implementations at import time
 # Following AGENTS.md principle: "No module-level imports of optional dependencies"
 from .protocols import (
+    MemoryTrust,
     MemoryProtocol, 
     AsyncMemoryProtocol, 
     ResettableMemoryProtocol,
@@ -250,6 +251,7 @@ __all__ = [
     "SearchResult",
     "ConsolidationResult",
     # Protocols
+    "MemoryTrust",
     "MemoryProtocol",
     "AsyncMemoryProtocol",
     "ResettableMemoryProtocol",
