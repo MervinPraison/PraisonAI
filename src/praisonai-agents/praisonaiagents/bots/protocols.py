@@ -509,9 +509,6 @@ class BotMessage:
             gateway control command (``is_command`` returns ``False``), even if
             its text starts with ``/`` and it is attributed to a privileged
             identity — it is handled as plain text instead.
-        internal: ``True`` for genuine internal system events (wake/heartbeat),
-            so synthetic-but-trusted system content stays distinguishable from
-            untrusted external content and the two are never conflated.
     """
     
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -525,7 +522,6 @@ class BotMessage:
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     allow_control: bool = True
-    internal: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -541,7 +537,6 @@ class BotMessage:
             "attachments": self.attachments,
             "metadata": self.metadata,
             "allow_control": self.allow_control,
-            "internal": self.internal,
         }
     
     @classmethod
@@ -568,7 +563,6 @@ class BotMessage:
             attachments=data.get("attachments", []),
             metadata=data.get("metadata", {}),
             allow_control=data.get("allow_control", True),
-            internal=data.get("internal", False),
         )
     
     @property

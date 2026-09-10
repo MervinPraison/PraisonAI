@@ -294,7 +294,6 @@ class TestBotMessage:
         """Interactive human turns keep today's behaviour by default."""
         msg = BotMessage(content="/compress")
         assert msg.allow_control is True
-        assert msg.internal is False
         assert msg.is_command is True
 
     def test_untrusted_provenance_not_a_command(self):
@@ -318,20 +317,17 @@ class TestBotMessage:
 
     def test_allow_control_round_trips(self):
         """The control-trust primitive survives to_dict/from_dict."""
-        msg = BotMessage(content="/new", allow_control=False, internal=True)
+        msg = BotMessage(content="/new", allow_control=False)
         data = msg.to_dict()
         assert data["allow_control"] is False
-        assert data["internal"] is True
         restored = BotMessage.from_dict(data)
         assert restored.allow_control is False
-        assert restored.internal is True
         assert restored.is_command is False
 
     def test_from_dict_defaults_allow_control_true(self):
         """Legacy payloads without the field default to trusted (backward compat)."""
         msg = BotMessage.from_dict({"content": "/help"})
         assert msg.allow_control is True
-        assert msg.internal is False
         assert msg.is_command is True
 
     def test_command_args(self):
