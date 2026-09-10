@@ -778,12 +778,18 @@ class Knowledge:
             self._emit_knowledge_event("add", source=input_path, chunk_count=len(memories), 
                                        metadata=metadata, agent_id=agent_id)
             
-            # ``failed_chunks`` lets the caller distinguish a clean store from a
-            # partial one. A file where some chunks landed and some were
-            # swallowed must not be reported as a silent success -- the index
-            # loop records it in ``errors`` so ``result.success`` reflects the
-            # loss.
-            return {'results': all_results, 'relations': [], 'failed_chunks': failed_chunks}
+            # A *partial* loss -- some chunks landed, some were swallowed -- is
+            # not caught by the all-or-nothing raise above, yet it still means
+            # the document is incompletely indexed. Report the count so the
+            # directory walk and index() can record it in ``errors`` (and flip
+            # ``success``) rather than accepting a half-indexed file as whole.
+            partial_failed = failed_chunks if (0 < failed_chunks < attempted) else 0
+            return {
+                'results': all_results,
+                'relations': [],
+                'failed_chunks': partial_failed,
+                'attempted_chunks': attempted,
+            }
 
         except Exception as e:
             logger.error(f"Error processing input {input_path}: {str(e)}", exc_info=True)
@@ -980,15 +986,14 @@ class Knowledge:
                         elif isinstance(entry, str):
                             new_memory_ids.append(entry)
 
-                    # A file where some chunks stored and some were swallowed by
-                    # the backend is a partial loss, not a clean index. Record it
-                    # so ``result.success`` (``not result.errors``) reflects that
-                    # the corpus is incomplete rather than reporting success.
-                    partial_failures = add_result.get('failed_chunks', 0)
-                    if partial_failures:
+                    # A file that stored only some of its chunks is indexed but
+                    # incomplete; record it so ``success`` reflects the loss.
+                    failed_chunks = add_result.get('failed_chunks', 0)
+                    if failed_chunks:
+                        attempted_chunks = add_result.get('attempted_chunks', 0)
                         result.errors.append(
-                            f"{filepath}: {partial_failures} chunk(s) failed to "
-                            f"store (partial index)"
+                            f"{filepath}: {failed_chunks} of {attempted_chunks} "
+                            f"chunk(s) failed to index"
                         )
                 
                 # Mark as indexed (with memory IDs for future stale-chunk
