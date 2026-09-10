@@ -266,10 +266,14 @@ class TestGoalLoopEvidence:
         # the next continuation prompt (not just a bare label).
         hook = CommandVerificationHook(
             name="fails",
-            command=(
-                f"{sys.executable} -c "
-                "\"import sys; sys.stderr.write('boom-detail'); sys.exit(1)\""
-            ),
+            # Pass the command as a list so an interpreter path containing
+            # spaces (common on Windows and some virtualenvs) is preserved as a
+            # single token instead of being shlex-split into broken arguments.
+            command=[
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('boom-detail'); sys.exit(1)",
+            ],
         )
         agent = _make_agent([hook])
         prompts = []

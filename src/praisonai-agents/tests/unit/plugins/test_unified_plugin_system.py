@@ -34,7 +34,7 @@ class TestPathCentralization:
         for d in dirs:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
-    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch):
+    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch, request):
         """skills/discovery.py should use paths.get_skills_dir().
 
         This asserted every returned directory is named "skills". Remote-skill
@@ -55,6 +55,13 @@ class TestPathCentralization:
         monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
         paths_mod._clear_cache()
         monkeypatch.chdir(tmp_path)
+
+        # The paths module caches its resolved directories process-wide. Clearing
+        # only on entry would leave this test's tmp_path cached after monkeypatch
+        # restores HOME, handing a deleted directory to later tests in the same
+        # process. Clear again on teardown so the cache is rebuilt from the real
+        # environment.
+        request.addfinalizer(paths_mod._clear_cache)
 
         # discovery only returns directories that exist, so create the one the
         # paths module designates.
