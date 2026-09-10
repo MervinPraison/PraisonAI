@@ -1575,3 +1575,73 @@ class TestRenameSession:
             "messages": [{"role": "user", "content": "hi"}],
         }
         assert DefaultSessionStore._session_title(data) == "my-conversation"
+
+
+class TestCompactedHistoryRecall:
+    """Recall must span compacted (archived) turns, not just the active
+    window (Issue #5031). A token that survives only in ``archived_messages``
+    after compaction must still be findable, in both built-in stores."""
+
+    @staticmethod
+    def _seed_compacted_session(store):
+        # A low-salience specific detail set up early, then buried by
+        # compaction so it lives only in archived_messages.
+        store.add_user_message("s", "the deploy token is XZ99-SECRETVALUE")
+        for i in range(12):
+            store.add_user_message("s", f"later chatter turn {i}")
+        session = store.get_session("s")
+        active = " ".join(m.content for m in session.messages)
+        archived = " ".join(m.content for m in session.archived_messages)
+        # Precondition: the detail was compacted out of the active window.
+        assert "XZ99-SECRETVALUE" not in active
+        assert "XZ99-SECRETVALUE" in archived
+
+    def test_default_store_recalls_archived_turn(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            self._seed_compacted_session(store)
+
+            hits = store.search("XZ99-SECRETVALUE")
+            assert len(hits) == 1
+            hit = hits[0]
+            # Anchor points at an archived turn, flagged as such in context.
+            anchored = next(
+                m for m in hit.messages if m["index"] == hit.anchor_index
+            )
+            assert anchored["archived"] is True
+            assert "XZ99-SECRETVALUE" in anchored["content"]
+
+    def test_sqlite_store_recalls_archived_turn(self):
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SqliteSessionStore(
+                session_dir=tmpdir, db_path=":memory:", active_window=4
+            )
+            self._seed_compacted_session(store)
+
+            hits = store.search("XZ99-SECRETVALUE")
+            assert len(hits) == 1
+            hit = hits[0]
+            anchored = next(
+                m for m in hit.messages if m["index"] == hit.anchor_index
+            )
+            assert anchored["archived"] is True
+            assert "XZ99-SECRETVALUE" in anchored["content"]
+
+    def test_both_stores_agree_on_archived_query(self):
+        """Both stores must return the same session for an archived-only query
+        (they share one projection, so results cannot drift)."""
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            default_store = DefaultSessionStore(session_dir=d1, active_window=4)
+            sqlite_store = SqliteSessionStore(
+                session_dir=d2, db_path=":memory:", active_window=4
+            )
+            self._seed_compacted_session(default_store)
+            self._seed_compacted_session(sqlite_store)
+
+            d_ids = {h.session_id for h in default_store.search("XZ99-SECRETVALUE")}
+            s_ids = {h.session_id for h in sqlite_store.search("XZ99-SECRETVALUE")}
+            assert d_ids == s_ids == {"s"}

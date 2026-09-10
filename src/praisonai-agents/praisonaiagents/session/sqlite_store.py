@@ -162,9 +162,15 @@ class SqliteSessionStore(DefaultSessionStore):
 
     @staticmethod
     def _flatten(session: SessionData) -> str:
-        """Concatenate a session's message content for indexing."""
+        """Concatenate a session's message content for indexing.
+
+        Includes ``archived_messages`` (turns rolled out of the active window
+        by ``retention="compact"``) ahead of the active ``messages`` so a
+        compaction re-index preserves — rather than deletes — the raw turns,
+        keeping the whole conversation searchable (Issue #5031).
+        """
         parts = []
-        for msg in session.messages:
+        for msg in (*session.archived_messages, *session.messages):
             content = getattr(msg, "content", "")
             if content:
                 parts.append(str(content))
@@ -487,8 +493,8 @@ class SqliteSessionStore(DefaultSessionStore):
             except (json.JSONDecodeError, IOError, OSError):
                 continue
 
-            messages = data.get("messages", [])
-            if not isinstance(messages, list):
+            messages = self._searchable_messages(data)
+            if not messages:
                 continue
 
             best_index = -1
@@ -521,6 +527,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     "role": messages[i].get("role", ""),
                     "content": messages[i].get("content", ""),
                     "timestamp": messages[i].get("timestamp"),
+                    "archived": bool(messages[i].get("archived")),
                 }
                 for i in range(start, end)
                 if isinstance(messages[i], dict)

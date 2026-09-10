@@ -2006,6 +2006,30 @@ class DefaultSessionStore:
             snippet = snippet + "…"
         return snippet
 
+    @staticmethod
+    def _searchable_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Project a persisted session into the list of messages to scan.
+
+        Archived turns (rolled out of the active window by ``retention=
+        "compact"``) are scanned *ahead* of the active window so a compacted
+        conversation stays fully recallable — a hit on an archived turn is
+        returned anchored in its context, exactly like an active-turn hit
+        (Issue #5031). Each archived entry is tagged ``archived=True`` so the
+        boundary is visible to callers rather than silently blended into the
+        current window. Both built-in stores use this single projection so
+        their results cannot drift.
+        """
+        archived = data.get("archived_messages") or []
+        active = data.get("messages") or []
+        merged: List[Dict[str, Any]] = []
+        for msg in archived:
+            if isinstance(msg, dict):
+                merged.append({**msg, "archived": True})
+        for msg in active:
+            if isinstance(msg, dict):
+                merged.append(msg)
+        return merged
+
     def search(
         self,
         query: str,
@@ -2017,6 +2041,8 @@ class DefaultSessionStore:
 
         Returns the best-matching sessions, each with a short window of
         messages around the first hit so the match is returned *in context*.
+        Spans both archived and active turns so compacted history stays
+        recallable (Issue #5031).
         """
         from .protocols import SessionHit
 
@@ -2043,8 +2069,8 @@ class DefaultSessionStore:
             except (json.JSONDecodeError, IOError):
                 continue
 
-            messages = data.get("messages", [])
-            if not isinstance(messages, list):
+            messages = self._searchable_messages(data)
+            if not messages:
                 continue
             best_index = -1
             best_score = 0.0
@@ -2081,6 +2107,7 @@ class DefaultSessionStore:
                         "role": msg_i.get("role", ""),
                         "content": msg_i.get("content", ""),
                         "timestamp": msg_i.get("timestamp"),
+                        "archived": bool(msg_i.get("archived")),
                     }
                 )
 
