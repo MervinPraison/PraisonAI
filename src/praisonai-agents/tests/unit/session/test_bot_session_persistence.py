@@ -37,6 +37,24 @@ def _run_async(coro):
         loop.close()
 
 
+def _import_bot_session_manager():
+    """Return ``BotSessionManager`` from the optional ``praisonai-bot`` package.
+
+    Skip only when the top-level ``praisonai_bot`` package is unavailable, then
+    import ``_session`` normally. Targeting the deep module with
+    ``importorskip`` would turn a genuine ``ImportError`` *inside* an installed
+    package into a skip, silently dropping these tests from CI instead of
+    surfacing the regression.
+    """
+    pytest.importorskip(
+        "praisonai_bot",
+        reason="praisonai-bot is not installed",
+    )
+    from praisonai_bot.bots._session import BotSessionManager
+
+    return BotSessionManager
+
+
 class TestBotSessionManagerWithStore:
     """Tests for BotSessionManager using persistent session store."""
     
@@ -49,15 +67,8 @@ class TestBotSessionManagerWithStore:
         ``praisonai-bot`` package, that directory no longer exists, and all
         eleven tests in this class had been failing with
         ``ModuleNotFoundError: No module named '_session'`` ever since.
-
-        Skipped rather than failed when the optional package is absent, so a
-        checkout without it reports "not installed" instead of a bare import
-        error that reads like a broken test.
         """
-        BotSessionManager = pytest.importorskip(
-            "praisonai_bot.bots._session",
-            reason="praisonai-bot is not installed",
-        ).BotSessionManager
+        BotSessionManager = _import_bot_session_manager()
         store = DefaultSessionStore(session_dir=tmpdir)
         return BotSessionManager(store=store, platform=platform)
     
@@ -183,10 +194,7 @@ class TestBotSessionManagerWithStore:
     
     def test_backward_compat_no_store(self):
         """BotSessionManager must still work without a store (in-memory fallback)."""
-        BotSessionManager = pytest.importorskip(
-            "praisonai_bot.bots._session",
-            reason="praisonai-bot is not installed",
-        ).BotSessionManager
+        BotSessionManager = _import_bot_session_manager()
         # No store parameter = backward compatible in-memory mode
         mgr = BotSessionManager()
         agent = FakeAgent()
