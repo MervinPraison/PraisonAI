@@ -1451,6 +1451,12 @@ def run_main(
     # generator resolve each agent against its own ceiling. Prompt/custom-agent
     # paths use the resolved top-level model here.
     is_yaml_target = bool(target and _is_yaml_file(target))
+    # Track whether the user explicitly asked for an output budget before it is
+    # resolved against the model ceiling. A model-derived default must not be
+    # mistaken for an explicit request downstream (e.g. the warm-runtime gate),
+    # otherwise every known model with a ceiling other than the historical 16k
+    # default would lose warm-client reuse.
+    max_tokens_explicit = max_tokens is not None
     # Loading a named custom definition performs a complete discovery pass
     # (including opt-in local tool modules). Keep the preview result so the
     # execution path does not discover and execute the same definitions twice.
@@ -1638,6 +1644,7 @@ def run_main(
             tools=tools,
             toolset=toolset,
             max_tokens=max_tokens,
+            max_tokens_explicit=max_tokens_explicit,
             output_mode=output_mode,
             approval=approval,
             approve_all_tools=approve_all_tools,
@@ -1824,6 +1831,7 @@ def run_main(
                 tools=tools,
                 toolset=toolset,
                 max_tokens=max_tokens,
+                max_tokens_explicit=max_tokens_explicit,
                 output_mode=output_mode,
                 approval=approval,
                 approve_all_tools=approve_all_tools,
@@ -2002,6 +2010,7 @@ def _run_prompt(
     tools: Optional[str] = None,
     toolset: Optional[str] = None,
     max_tokens: int = 16000,
+    max_tokens_explicit: bool = False,
     output_mode: Optional[str] = None,
     approval: Optional[str] = None,
     approve_all_tools: bool = False,
@@ -2115,10 +2124,13 @@ def _run_prompt(
         runtime_eligible = (
             (no_save or stateful_attach)
             and thinking_budget is None
-            # The warm runtime API has no per-request output-budget field. A
-            # resolved non-default budget must stay in-process so it cannot be
-            # silently replaced by the runtime's own default.
-            and max_tokens == DEFAULT_MAX_TOKENS
+            # The warm runtime API has no per-request output-budget field, so an
+            # *explicit* --max-tokens must stay in-process to avoid the runtime
+            # silently replacing it with its own default. A model-derived
+            # default (user omitted --max-tokens) is not an explicit request:
+            # keep warm-client reuse for it so known models whose ceiling
+            # differs from the historical 16k default do not lose warm reuse.
+            and not max_tokens_explicit
             and not isolated
             and not append_system_prompt
             and not image
