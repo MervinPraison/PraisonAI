@@ -2,8 +2,6 @@
 Real agentic test for tool retry policy - agent actually runs and calls LLM with retrying tools.
 This satisfies the AGENTS.md requirement (§9.4) for real agentic testing.
 """
-import os
-
 import pytest
 import time
 from unittest.mock import patch
@@ -13,17 +11,15 @@ from praisonaiagents.config import ToolConfig
 from praisonaiagents.tools.retry import RetryPolicy
 
 
-@pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "not-needed",
-    reason="Requires OpenAI API Key",
-)
+@pytest.mark.live
 class TestRetryPolicyAgentic:
     """Real agentic tests where the agent calls LLM and uses retrying tools.
 
-    These genuinely call the model (AGENTS.md 9.4) but live under tests/unit
-    with no gate, so running the unit suite issued live API calls and failed on
-    any machine without a key. Gated with the same condition
-    test_circuit_breaker.py already uses.
+    These genuinely call the model (AGENTS.md 9.4) but live under tests/unit,
+    so running the unit suite issued live API calls. Gated with the repo's
+    ``live`` marker (tests/conftest.py) so ``PRAISONAI_LIVE_TESTS=1`` is the
+    single explicit opt-in — a key merely being present no longer routes real
+    billable requests through the default unit run.
     """
     
     def test_agent_with_flaky_tool_real_llm(self):
