@@ -64,6 +64,24 @@ def _host_is_blocked(hostname: str) -> bool:
     except ValueError:
         pass
 
+    # Two parsers can disagree about the same host, and either may be the one
+    # the HTTP stack actually dials, so block when *either* reading is
+    # internal. The disagreement runs in both directions:
+    #
+    #   0177.0.0.1  inet_aton -> 127.0.0.1 (loopback)  getaddrinfo -> 177.0.0.1
+    #   010.0.0.1   inet_aton -> 8.0.0.1               getaddrinfo -> 10.0.0.1 (private)
+    #
+    # ipaddress.ip_address above rejects both (it refuses ambiguous leading
+    # zeros and short forms), so without this the octal loopback reached the
+    # resolver, came back public, and was allowed -- GHSA-5c6w-wwfq-7qqm.
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        pass
+    else:
+        if _ip_blocked(ipaddress.IPv4Address(packed)):
+            return True
+
     try:
         for info in socket.getaddrinfo(host, None):
             if _ip_blocked(ipaddress.ip_address(info[4][0])):

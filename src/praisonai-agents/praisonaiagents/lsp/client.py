@@ -22,6 +22,23 @@ from .config import LSPConfig, detect_root_uri, probe, path_to_uri
 
 logger = get_logger(__name__)
 
+
+def _to_location(data: Dict[str, Any]) -> Location:
+    """Normalise a ``Location`` or ``LocationLink`` dict into a ``Location``.
+
+    Navigation requests (``definition``/``implementation``) may return either a
+    ``Location`` (``uri``/``range``) or a ``LocationLink`` (``targetUri`` plus
+    ``targetSelectionRange``/``targetRange``).  Map the link shape onto the
+    plain location shape so a single conversion path handles both.
+    """
+    if "uri" in data and "range" in data:
+        return Location.from_dict(data)
+    uri = data.get("targetUri") or data.get("uri")
+    rng = (data.get("targetSelectionRange") or data.get("targetRange")
+           or data.get("range"))
+    return Location.from_dict({"uri": uri, "range": rng})
+
+
 class LSPClient:
     """
     Language Server Protocol client.
@@ -163,6 +180,8 @@ class LSPClient:
                         "definition": {},
                         "references": {},
                         "documentSymbol": {},
+                        "implementation": {},
+                        "callHierarchy": {},
                         "publishDiagnostics": {}
                     },
                     "workspace": {
@@ -474,6 +493,153 @@ class LSPClient:
         
         return result if isinstance(result, list) else []
     
+    async def get_implementations(
+        self,
+        file_path: str,
+        line: int,
+        character: int
+    ) -> List[Location]:
+        """
+        Get implementation location(s) for a symbol.
+
+        Resolves the concrete implementations behind an interface / abstract
+        method via ``textDocument/implementation``.
+
+        Args:
+            file_path: Path to the file
+            line: Line number (0-indexed)
+            character: Character position (0-indexed)
+
+        Returns:
+            List of locations
+        """
+        if not self._initialized:
+            return []
+
+        uri = path_to_uri(file_path)
+
+        try:
+            result = await self._send_request("textDocument/implementation", {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character}
+            })
+        except RuntimeError:
+            return []
+
+        if result is None:
+            return []
+
+        if isinstance(result, dict):
+            return [_to_location(result)]
+        elif isinstance(result, list):
+            return [_to_location(loc) for loc in result]
+
+        return []
+
+    async def prepare_call_hierarchy(
+        self,
+        file_path: str,
+        line: int,
+        character: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Prepare call-hierarchy items at a position.
+
+        Issues ``callHierarchy/prepareCallHierarchy`` to resolve the symbol at
+        the given position into ``CallHierarchyItem`` objects, which are then
+        passed to :meth:`get_incoming_calls` / :meth:`get_outgoing_calls`.
+
+        Args:
+            file_path: Path to the file
+            line: Line number (0-indexed)
+            character: Character position (0-indexed)
+
+        Returns:
+            List of ``CallHierarchyItem`` dicts as returned by the server.
+        """
+        if not self._initialized:
+            return []
+
+        uri = path_to_uri(file_path)
+
+        try:
+            result = await self._send_request(
+                "textDocument/prepareCallHierarchy", {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": character}
+                })
+        except RuntimeError:
+            return []
+
+        if not result:
+            return []
+
+        return result if isinstance(result, list) else []
+
+    async def get_incoming_calls(
+        self,
+        item: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Get the callers of a call-hierarchy *item*.
+
+        Issues ``callHierarchy/incomingCalls`` for an item resolved by
+        :meth:`prepare_call_hierarchy`.
+
+        Args:
+            item: A ``CallHierarchyItem`` dict.
+
+        Returns:
+            List of ``CallHierarchyIncomingCall`` dicts as returned by the
+            server, or an empty list when unavailable.
+        """
+        if not self._initialized:
+            return []
+
+        try:
+            result = await self._send_request("callHierarchy/incomingCalls", {
+                "item": item
+            })
+        except RuntimeError:
+            return []
+
+        if not result:
+            return []
+
+        return result if isinstance(result, list) else []
+
+    async def get_outgoing_calls(
+        self,
+        item: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Get the callees of a call-hierarchy *item*.
+
+        Issues ``callHierarchy/outgoingCalls`` for an item resolved by
+        :meth:`prepare_call_hierarchy`.
+
+        Args:
+            item: A ``CallHierarchyItem`` dict.
+
+        Returns:
+            List of ``CallHierarchyOutgoingCall`` dicts as returned by the
+            server, or an empty list when unavailable.
+        """
+        if not self._initialized:
+            return []
+
+        try:
+            result = await self._send_request("callHierarchy/outgoingCalls", {
+                "item": item
+            })
+        except RuntimeError:
+            return []
+
+        if not result:
+            return []
+
+        return result if isinstance(result, list) else []
+
     async def _send_request(self, method: str, params: Any) -> Any:
         """Send a request and wait for response."""
         if not self.is_running:

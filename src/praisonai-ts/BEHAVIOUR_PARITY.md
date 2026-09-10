@@ -21,9 +21,9 @@ needs a test proving the option changes what the code does.
 
 | Surface | Options not yet acted on |
 |---|---|
-| `AgentTeam.__init__` | 8 |
+| `AgentTeam.__init__` | 6 |
 | `Task.__init__` | 4 |
-| **Total** | **12** |
+| **Total** | **10** |
 
 Plus 17 options that work for some inputs and announce themselves for the rest.
 
@@ -32,16 +32,14 @@ Plus 17 options that work for some inputs and announce themselves for the rest.
 Each row is one unit of work: implement it, delete its entry from the ledger,
 add a test proving the option changes what the code does, and regenerate.
 
-### `AgentTeam.__init__` (8)
+### `AgentTeam.__init__` (6)
 
-- `autonomy`
 - `knowledge`
 - `guardrails`
 - `web`
 - `reflection`
 - `caching`
 - `learn`
-- `toolsRunOn`
 
 ### `Task.__init__` (4)
 

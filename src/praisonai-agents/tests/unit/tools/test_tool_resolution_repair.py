@@ -101,17 +101,18 @@ def test_runtime_valueerror_omits_parameter_hint():
 
 
 def test_unknown_tool_message_reaches_model_via_public_path():
-    """An unknown tool RETURNS actionable feedback; it does not abort the run.
+    """An unresolvable tool name must reach the model *without* ending the run.
 
-    This expected ToolExecutionError. #3309 ("self-repair and actionable
-    feedback on unknown tool calls") deliberately changed the unknown-tool case
-    to return {"error": ..., "available_tools": [...]} so the model can pick a
-    real tool and retry, instead of the run being finalized failed on what is a
-    recoverable mistake. The conversion at the agentic-loop boundary only raises
-    for results marked retryable or raised-exception, so this dict stays a dict.
+    This asserted ``pytest.raises(ToolExecutionError)`` until #4446 made a tool
+    error dict flow back as a normal tool result rather than a fatal error, so
+    the model can see it and retry. The unknown-tool dict is covered by that,
+    and rightly: ToolExecutionError is terminal and non-retryable
+    (agent/execution_mixin.py lets it propagate "to stop the run instead of
+    retrying or swallowing it into an error dict"), so raising here would kill
+    the run at the exact moment the runtime has just handed the model the list
+    of names it could have used -- defeating the self-repair #3309 added.
 
-    The sibling test below still expects a raise, and correctly: a bind failure
-    is the tool itself throwing, not a name the model can simply correct.
+    So the contract is the message and the inventory, not the exception.
     """
     def web_search(query: str) -> str:
         """Search the web."""
@@ -121,11 +122,34 @@ def test_unknown_tool_message_reaches_model_via_public_path():
 
     result = agent.execute_tool("totally_made_up_tool", {})
 
-    assert isinstance(result, dict)
+    assert isinstance(result, dict), (
+        "an unknown tool must return an error result the model can act on, "
+        "not raise a terminal ToolExecutionError"
+    )
     assert "not found" in result["error"]
-    # The available names must reach the model, or it cannot self-repair.
     assert "web_search" in result["error"]
+    # The inventory is the actionable half: it is what lets the model retry
+    # with a real name instead of guessing again.
     assert result["available_tools"] == ["web_search"]
+
+
+def test_an_unknown_tool_does_not_end_the_run():
+    """Pin the #4446 contract directly, so a 'fix' cannot quietly undo it."""
+    from praisonaiagents.errors import ToolExecutionError
+
+    def web_search(query: str) -> str:
+        """Search the web."""
+        return query
+
+    agent = _make_agent([web_search])
+
+    try:
+        agent.execute_tool("totally_made_up_tool", {})
+    except ToolExecutionError as exc:  # pragma: no cover - the regression
+        pytest.fail(
+            "unknown tool raised a terminal ToolExecutionError, ending the run "
+            f"instead of letting the model retry: {exc}"
+        )
 
 
 def test_bind_failure_parameter_hint_reaches_model_via_public_path():

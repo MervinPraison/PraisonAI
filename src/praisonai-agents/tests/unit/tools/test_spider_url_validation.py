@@ -7,6 +7,8 @@ URL whose authority disagrees with the actual destination so that hostname
 allow/deny checks cannot be smuggled past.
 """
 
+import pytest
+
 from praisonaiagents.tools.spider_tools import SpiderTools
 
 
@@ -27,7 +29,16 @@ def test_rejects_control_characters():
     assert spider._validate_url("http://example.com\r\n.evil.com") is False
 
 
-def test_allows_normal_public_url():
+def test_allows_normal_public_url(monkeypatch):
+    # Pin the resolver to a public address so the test does not depend on live
+    # DNS for ``example.com`` (which would fail on an offline CI runner).
+    import socket
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     spider = SpiderTools()
     assert spider._validate_url("https://example.com/path?q=1") is True
 
@@ -52,3 +63,62 @@ def test_rejects_non_string_input():
     spider = SpiderTools()
     assert spider._validate_url(None) is False  # type: ignore[arg-type]
     assert spider._validate_url(123) is False  # type: ignore[arg-type]
+
+
+def test_blocks_the_octal_dotted_quad_that_the_resolver_reads_as_public():
+    """The parser differential behind GHSA-5c6w-wwfq-7qqm.
+
+    ``ipaddress.ip_address`` refuses ambiguous leading zeros, so ``0177.0.0.1``
+    fell through to the resolver -- which reads it as the *public* 177.0.0.1
+    and let it through. ``inet_aton`` (and every libc-based HTTP client) reads
+    the same string as 127.0.0.1.
+    """
+    spider = SpiderTools()
+    assert spider._validate_url("http://0177.0.0.1:8765/") is False
+
+
+def _resolver_reads_as(host):
+    """What the local resolver makes of ``host``, or None if it will not say."""
+    import socket
+    try:
+        return socket.getaddrinfo(host, None)[0][4][0]
+    except Exception:
+        return None
+
+
+def test_blocks_a_host_only_the_resolver_reads_as_private():
+    """The differential also runs the other way, so both readings must count.
+
+    ``010.0.0.1``: inet_aton reads the octal and yields the public 8.0.0.1,
+    while the resolver yields the private 10.0.0.1. Trusting only inet_aton
+    would reopen the hole from the other side.
+
+    Which reading a resolver gives is a libc detail, so this asserts the
+    contract only on a machine that actually exhibits the disagreement --
+    rather than baking one platform's answer into CI.
+    """
+    if _resolver_reads_as("010.0.0.1") != "10.0.0.1":
+        pytest.skip("local resolver does not read 010.0.0.1 as 10.0.0.1")
+    spider = SpiderTools()
+    assert spider._validate_url("http://010.0.0.1:8765/") is False
+
+
+def test_a_trailing_dot_does_not_evade_the_check():
+    spider = SpiderTools()
+    assert spider._validate_url("http://0177.0.0.1.:8765/") is False
+
+
+def test_ordinary_public_hosts_are_still_allowed(monkeypatch):
+    """The guard must not become a blanket deny."""
+    import socket
+
+    # ``1.1.1.1`` is a literal and needs no resolver; pin DNS only so the
+    # ``example.com`` assertion stays hermetic on offline CI.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    spider = SpiderTools()
+    assert spider._validate_url("https://example.com/path") is True
+    assert spider._validate_url("http://1.1.1.1/") is True

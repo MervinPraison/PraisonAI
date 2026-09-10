@@ -69,19 +69,19 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1046 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3690 |
-| ✅ Security | 1 | 3 | 3558 |
+| ✅ Security | 1 | 3 | 3594 |
 | ✅ Sessions | 4 | 20 | 7972 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44423 |
+| ✅ Tools | 12 | 145 | 44430 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2811 |
-| ✅ Workflows | 5 | 20 | 8484 |
+| ✅ Workflows | 5 | 20 | 8488 |
 
 ## Documentation Without Features
 
@@ -89,6 +89,7 @@ These docs exist but don't match any implemented feature category:
 
 - ℹ️ Database (43 docs, 7580 lines)
 - ℹ️ Documents (1 docs, 810 lines)
+- ℹ️ Teams (1 docs, 214 lines)
 
 ---
 

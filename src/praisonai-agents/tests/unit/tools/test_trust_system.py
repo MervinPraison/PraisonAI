@@ -13,7 +13,7 @@ import pytest
 import json
 from unittest.mock import patch, MagicMock
 
-from praisonaiagents.tools import trust as trust_module
+import praisonaiagents.tools.trust as trust_module
 from praisonaiagents.tools.trust import (
     wrap_if_external, 
     wrap_request_payload,
@@ -114,11 +114,7 @@ class TestRegistryIntegration:
         assert registry.get_trust_level("trusted_tool") == "trusted"
         assert registry.get_trust_level("unknown_tool") is None
 
-    # get_registry is imported inside _is_tool_external as
-    # `from .registry import get_registry`, so it is never an attribute of
-    # trust -- patching it there raised AttributeError. The call resolves
-    # against the source module at call time.
-    @patch('praisonaiagents.tools.registry.get_registry')
+    @patch('praisonaiagents.tools.trust.get_registry')
     def test_wrap_if_external_uses_registry(self, mock_get_registry):
         """wrap_if_external should check registry for tool trust level."""
         mock_registry = MagicMock()
@@ -162,27 +158,11 @@ class TestExternalToolDetection:
 
     def test_add_external_tool(self):
         """Adding external tools should work."""
-        original = trust_module.EXTERNAL_TOOL_NAMES
-        original_count = len(original)
-        try:
-            self._check_add(original_count)
-        finally:
-            # add_external_tool mutates process-global state with no way to
-            # undo it, so restore the original set rather than leaking a fake
-            # tool name into every test that runs after this one.
-            trust_module.EXTERNAL_TOOL_NAMES = original
-
-    def _check_add(self, original_count):
+        original_count = len(EXTERNAL_TOOL_NAMES)
         add_external_tool("new_external_tool")
-
-        # Read through the module, not the name imported at the top of this
-        # file: add_external_tool REBINDS the module global
-        # (EXTERNAL_TOOL_NAMES = EXTERNAL_TOOL_NAMES | {...}) because the set is
-        # a frozenset, so a `from ... import EXTERNAL_TOOL_NAMES` binding still
-        # points at the old object. The behaviour is correct -- is_external_tool
-        # below returns True -- only this test's stale reference was wrong.
-        assert "new_external_tool" in trust_module.EXTERNAL_TOOL_NAMES
-        assert len(trust_module.EXTERNAL_TOOL_NAMES) == original_count + 1
+        
+        assert "new_external_tool" in EXTERNAL_TOOL_NAMES
+        assert len(EXTERNAL_TOOL_NAMES) == original_count + 1
         assert is_external_tool("new_external_tool")
 
 
@@ -316,3 +296,75 @@ class TestSecurityScenarios:
         content_lines = wrapped.split('\n')[1:-1]
         content = '\n'.join(content_lines)
         assert EXTERNAL_CONTENT_FENCE_CLOSE not in content
+
+class TestTrustLookupFailsClosed:
+    """A trust decision that cannot be made must not default to 'trusted'.
+
+    ``agent/tool_execution.py`` calls ``is_external_tool`` to decide whether to
+    fence a tool result against prompt injection. The registry lookup used to
+    sit under a blanket ``except Exception: return False``, so a registry that
+    existed and *failed to answer* was indistinguishable from one that said
+    "trusted" -- and an external tool's output reached the model unfenced.
+
+    Over-fencing a trusted tool costs a wrapper. Under-fencing an external one
+    is the thing the wrapper exists to prevent.
+    """
+
+    def test_a_registry_that_raises_is_treated_as_external(self, monkeypatch):
+        class Boom:
+            def get_trust_level(self, name):
+                raise RuntimeError("registry backend down")
+
+        monkeypatch.setattr(trust_module, "get_registry", lambda: Boom())
+        assert is_external_tool("some_mcp_tool") is True
+
+    def test_a_registry_that_cannot_be_constructed_falls_back_to_the_list(
+        self, monkeypatch
+    ):
+        """Distinct from the above: no registry at all is not a failed lookup.
+
+        With no registry the hardcoded list is the whole answer, so an unknown
+        tool is trusted -- otherwise every ordinary function tool would be
+        fenced.
+        """
+        def _unavailable():
+            raise RuntimeError("no registry in this build")
+
+        monkeypatch.setattr(trust_module, "get_registry", _unavailable)
+        assert is_external_tool("some_plain_tool") is False
+        # The hardcoded list still applies.
+        assert is_external_tool("internet_search") is True
+
+    def test_no_registry_binding_at_all_still_works(self, monkeypatch):
+        monkeypatch.setattr(trust_module, "get_registry", None)
+        assert is_external_tool("some_plain_tool") is False
+        assert is_external_tool("internet_search") is True
+
+
+class TestExternalRegistrationIsVisibleToEarlierImporters:
+    """``add_external_tool`` must mutate the set, not rebind the module global.
+
+    It replaced the frozenset with a new one, so a module that had already done
+    ``from .trust import EXTERNAL_TOOL_NAMES`` kept the pre-registration copy
+    and went on treating the tool as trusted.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_external_tool_names(self):
+        # The set is now mutated in place, so a registration here would leak
+        # into every later test and make ``is_external_tool`` order-dependent
+        # (AGENTS.md §4.6: deterministic tests). Snapshot and restore its
+        # contents in place -- restoring the *same object*, not a rebind, so an
+        # importer's held reference stays valid.
+        snapshot = set(trust_module.EXTERNAL_TOOL_NAMES)
+        try:
+            yield
+        finally:
+            trust_module.EXTERNAL_TOOL_NAMES.clear()
+            trust_module.EXTERNAL_TOOL_NAMES.update(snapshot)
+
+    def test_a_reference_taken_before_the_call_sees_the_addition(self):
+        held = trust_module.EXTERNAL_TOOL_NAMES  # as an importer would hold it
+        add_external_tool("late_registered_scraper")
+        assert "late_registered_scraper" in held
+        assert is_external_tool("late_registered_scraper")

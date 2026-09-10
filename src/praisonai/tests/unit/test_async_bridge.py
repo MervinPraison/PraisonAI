@@ -19,10 +19,17 @@ parameter and would fail fixture resolution.
 """
 
 import asyncio
+import logging
 import threading
 import unittest
+import weakref
 
-from praisonai._async_bridge import _BG, run_sync
+from praisonai._async_bridge import (
+    _BG,
+    DispatchKind,
+    dispatch_maybe_awaitable,
+    run_sync,
+)
 
 
 async def _coro(value: int) -> int:
@@ -140,6 +147,120 @@ class TestBackgroundThread(unittest.TestCase):
         finally:
             release.set()
             t.join(timeout=2.0)
+
+
+class TestDispatchMaybeAwaitable(unittest.TestCase):
+    """Contract of the shared sync→async dispatch helper.
+
+    ``dispatch_maybe_awaitable`` is the single owner of the submit/track/
+    done-callback policy the db adapter's ``_call_store``/``_merge_and_set``/
+    ``on_agent_end`` paths route through, so its four branches are pinned here.
+    """
+
+    def test_non_awaitable_passthrough(self):
+        """A plain (non-awaitable) value is returned as-is, unchanged."""
+        sentinel = object()
+        self.assertIs(
+            dispatch_maybe_awaitable(sentinel, kind=DispatchKind.READ),
+            sentinel,
+        )
+        self.assertEqual(
+            dispatch_maybe_awaitable(123, kind=DispatchKind.WRITE),
+            123,
+        )
+
+    def test_no_loop_read_blocks_and_returns_value(self):
+        """No running loop + READ blocks on the bridge and returns the value."""
+        self.assertEqual(
+            dispatch_maybe_awaitable(_coro(21), kind=DispatchKind.READ),
+            42,
+        )
+
+    def test_no_loop_write_blocks_and_returns_value(self):
+        """No running loop + WRITE also blocks and returns the value.
+
+        Outside a loop there is no reason to defer, so a write is run to
+        completion just like a read (fire-and-forget is a running-loop concern).
+        """
+        self.assertEqual(
+            dispatch_maybe_awaitable(_coro(5), kind=DispatchKind.WRITE),
+            10,
+        )
+
+    def test_running_loop_write_is_tracked_fire_and_forget(self):
+        """Running loop + WRITE submits to the bridge, tracks the future, and
+        returns ``None`` while the write still completes in the background."""
+        tracker: "weakref.WeakSet" = weakref.WeakSet()
+        lock = threading.Lock()
+        gate = threading.Event()
+        done = threading.Event()
+
+        async def _write() -> int:
+            # Park until the test has observed the tracked future so the
+            # WeakSet cannot GC a completed future before we assert on it.
+            await asyncio.get_running_loop().run_in_executor(None, gate.wait, 2.0)
+            done.set()
+            return 99
+
+        async def _outer():
+            return dispatch_maybe_awaitable(
+                _write(),
+                kind=DispatchKind.WRITE,
+                tracker=tracker,
+                tracker_lock=lock,
+                op_name="unit-write",
+            )
+
+        # Run the dispatch from *inside* a running loop (the bridge loop).
+        result = run_sync(_outer())
+        self.assertIsNone(result, "running-loop WRITE must return None")
+        # The in-flight (still-parked) future must be tracked at this point.
+        with lock:
+            self.assertEqual(len(tracker), 1, "the in-flight future must be tracked")
+        # Release the write and confirm it still runs to completion.
+        gate.set()
+        self.assertTrue(
+            done.wait(timeout=2.0),
+            "deferred write coroutine should still run to completion",
+        )
+
+    def test_running_loop_failed_write_logs_and_does_not_raise(self):
+        """A failed deferred write is swallowed (logged) via the done-callback,
+        never surfacing to the returning sync caller."""
+        tracker: "weakref.WeakSet" = weakref.WeakSet()
+        lock = threading.Lock()
+
+        async def _boom() -> None:
+            await asyncio.sleep(0)
+            raise ValueError("deferred failure")
+
+        async def _outer():
+            return dispatch_maybe_awaitable(
+                _boom(),
+                kind=DispatchKind.WRITE,
+                tracker=tracker,
+                tracker_lock=lock,
+                op_name="unit-fail",
+            )
+
+        # Must not raise even though the deferred coroutine fails. The helper's
+        # done-callback logs a warning; silence it so the expected traceback
+        # does not clutter the test output.
+        logging.getLogger("praisonai._async_bridge").setLevel(logging.CRITICAL)
+        try:
+            self.assertIsNone(run_sync(_outer()))
+            with lock:
+                futures = list(tracker)
+            for f in futures:
+                # Give the callback-bearing future a moment to settle.
+                try:
+                    f.exception(timeout=2.0)
+                except Exception:
+                    pass
+        finally:
+            logging.getLogger("praisonai._async_bridge").setLevel(logging.NOTSET)
+        # The failure was logged, not propagated to the caller — reaching here
+        # without an exception is the assertion.
 
 
 if __name__ == "__main__":

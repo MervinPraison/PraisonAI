@@ -19,12 +19,12 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 2980 |
+| ✅ Agent | 109 | 7 | 3041 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 290 |
 | ✅ Audio | 8 | 1 | 162 |
 | ✅ Auto Generation | 16 | 3 | 618 |
-| ✅ Autonomy | 5 | 1 | 168 |
+| ✅ Autonomy | 5 | 1 | 218 |
 | ✅ Bots | 14 | 1 | 184 |
 | ✅ Budget | 2 | 1 | 197 |
 | ✅ CLI | 14 | 1 | 159 |
