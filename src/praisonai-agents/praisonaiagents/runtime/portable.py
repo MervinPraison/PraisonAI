@@ -23,7 +23,7 @@ a second representation would be a second thing to keep correct.
 import json
 from typing import Any, Dict, Optional
 
-from .journal import JournalEvent, RunJournal
+from .journal import VALID_KINDS, JournalEvent, RunJournal
 
 __all__ = [
     "PORTABLE_RUN_VERSION",
@@ -117,6 +117,45 @@ def import_run(
             f"under a new id, or overwrite=True if replacing it is intended."
         )
 
+    # Build every event up front so a malformed blob is refused *before* any
+    # write: a partial import would leave a half-built ``running`` run that a
+    # clean retry could not replace.
+    events = []
+    for event in blob.get("events") or []:
+        if not isinstance(event, dict):
+            raise PortableRunError(
+                "Exported run has a malformed event; expected a dict, got "
+                + type(event).__name__
+            )
+        try:
+            seq = event["seq"]
+            kind = event["kind"]
+        except (KeyError, TypeError) as exc:
+            raise PortableRunError(
+                f"Exported run has an event missing {exc}; the blob is corrupt "
+                f"and would import a run that cannot replay."
+            ) from exc
+        if kind not in VALID_KINDS:
+            raise PortableRunError(
+                f"Exported run has an event of unknown kind {kind!r}; the blob "
+                f"is corrupt and would import a run that cannot replay."
+            )
+        events.append(
+            JournalEvent(
+                run_id=target,
+                seq=seq,
+                kind=kind,
+                payload=event.get("payload") or {},
+                created_at=event.get("created_at", 0.0),
+            )
+        )
+
+    # Replacing a run must not keep the destination's own events: appending only
+    # upserts matching keys, so any stale event would survive into a replay
+    # index belonging to neither run.
+    if overwrite:
+        journal.delete_run(target)
+
     journal.open_run(
         target,
         agent=run.get("agent", "") or "",
@@ -125,16 +164,19 @@ def import_run(
         metadata=run.get("metadata") or {},
     )
 
-    for event in blob.get("events") or []:
-        journal.append(
-            JournalEvent(
-                run_id=target,
-                seq=event["seq"],
-                kind=event["kind"],
-                payload=event.get("payload") or {},
-                created_at=event.get("created_at", 0.0),
-            )
-        )
+    for ev in events:
+        journal.append(ev)
+
+    # Restore the exported lifecycle so a terminal run (succeeded/failed/
+    # cancelled) does not resurrect as ``running`` and get resumed as if it were
+    # interrupted work. ``open_run`` always registers ``running``, so a terminal
+    # outcome is applied afterwards.
+    outcome = run.get("outcome")
+    status = run.get("status")
+    if outcome:
+        journal.close_run(target, outcome)
+    elif status and status != "running":
+        journal.close_run(target, status)
     return target
 
 
