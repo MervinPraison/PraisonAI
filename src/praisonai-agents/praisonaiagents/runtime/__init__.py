@@ -99,6 +99,12 @@ __all__ = [
     "RunJournal",
     "JournalEvent",
     "RunMeta",
+    # Portable run state (move a durable run between processes)
+    "export_run",
+    "export_run_json",
+    "import_run",
+    "import_run_json",
+    "PortableRunError",
 ]
 
 # Grouped lazy imports for efficient loading
@@ -190,6 +196,13 @@ _LAZY_GROUPS = {
         'RunJournal': ('praisonaiagents.runtime.journal', 'RunJournal'),
         'JournalEvent': ('praisonaiagents.runtime.journal', 'JournalEvent'),
         'RunMeta': ('praisonaiagents.runtime.journal', 'RunMeta'),
+    },
+    'portable': {
+        'export_run': ('praisonaiagents.runtime.portable', 'export_run'),
+        'export_run_json': ('praisonaiagents.runtime.portable', 'export_run_json'),
+        'import_run': ('praisonaiagents.runtime.portable', 'import_run'),
+        'import_run_json': ('praisonaiagents.runtime.portable', 'import_run_json'),
+        'PortableRunError': ('praisonaiagents.runtime.portable', 'PortableRunError'),
     },
 }
 

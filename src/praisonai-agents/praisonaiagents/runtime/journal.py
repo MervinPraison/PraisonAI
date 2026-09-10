@@ -270,6 +270,17 @@ class RunJournal:
                 (status, outcome, time.time(), run_id),
             )
 
+    def delete_run(self, run_id: str) -> None:
+        """Remove ``run_id`` and all its journal events.
+
+        Used when replacing a run wholesale (e.g. a portable import with
+        ``overwrite=True``) so the destination does not keep stale events that
+        would leave a replay index belonging to neither run.
+        """
+        with self._lock:
+            self._conn.execute("DELETE FROM journal WHERE run_id = ?", (run_id,))
+            self._conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+
     def run_meta(self, run_id: str) -> Optional[RunMeta]:
         """Return the :class:`RunMeta` for ``run_id`` or ``None`` if unknown."""
         with self._lock:
