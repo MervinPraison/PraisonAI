@@ -112,7 +112,9 @@ from .failure import (
 )
 from .admission import (
     IngressDecision,
+    MentionFacts,
     resolve_ingress_admission,
+    DEFAULT_IMPLICIT_MENTIONS,
 )
 from .run_status import (
     RunPhase,
@@ -208,7 +210,9 @@ __all__ = [
     "FailureReply",
     "render_failure_reply",
     "IngressDecision",
+    "MentionFacts",
     "resolve_ingress_admission",
+    "DEFAULT_IMPLICIT_MENTIONS",
     "RunPhase",
     "RunStatusController",
     "StallState",
