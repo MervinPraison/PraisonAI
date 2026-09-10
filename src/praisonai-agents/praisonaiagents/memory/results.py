@@ -174,9 +174,62 @@ class SearchResult:
         return self.results
 
 
+@dataclass
+class ConsolidationResult:
+    """
+    Structured result for a memory consolidation pass.
+
+    A consolidation pass runs off the hot path (typically on a schedule) and
+    merges near-duplicate memories, promotes durable high-value facts into a
+    curated tier, and prunes stale/low-value entries. This result reports what
+    the pass did so callers can log, observe, and enforce loss bounds.
+
+    The ``rejected`` flag is set when a proposed rewrite would drop more than
+    the allowed ``max_loss_fraction`` of existing entries; in that case the
+    consolidator MUST leave the store untouched (a bad rewrite cannot wipe
+    existing memory).
+
+    Example:
+        ```python
+        result = consolidator.consolidate(agent.memory, max_loss_fraction=0.25)
+        if result.rejected:
+            log_warning(f"Consolidation rejected: {result.reason}")
+        else:
+            log_info(f"Merged {result.merged}, promoted {result.promoted}, "
+                     f"pruned {result.pruned}")
+        ```
+    """
+
+    entries_before: int = 0
+    entries_after: int = 0
+    merged: int = 0
+    promoted: int = 0
+    pruned: int = 0
+    rejected: bool = False
+    reason: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if self.context is None:
+            self.context = {}
+
+    @property
+    def loss_fraction(self) -> float:
+        """Fraction of entries removed relative to the starting count."""
+        if self.entries_before <= 0:
+            return 0.0
+        removed = max(self.entries_before - self.entries_after, 0)
+        return removed / self.entries_before
+
+    def exceeds_loss(self, max_loss_fraction: float) -> bool:
+        """Return True if this pass would drop more than the allowed fraction."""
+        return self.loss_fraction > max_loss_fraction
+
+
 # Export main types
 __all__ = [
     "MemoryResultStatus",
     "MemoryResult", 
-    "SearchResult"
+    "SearchResult",
+    "ConsolidationResult",
 ]

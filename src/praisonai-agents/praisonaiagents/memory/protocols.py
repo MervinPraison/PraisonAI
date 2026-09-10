@@ -9,7 +9,10 @@ This enables:
 
 These protocols are lightweight and have zero performance impact.
 """
-from typing import Protocol, runtime_checkable, Optional, Any, Dict, List
+from typing import Protocol, runtime_checkable, Optional, Any, Dict, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .results import ConsolidationResult
 
 
 @runtime_checkable
@@ -503,6 +506,85 @@ class AgentMemoryLifecycleProtocol(Protocol):
 
 
 
+@runtime_checkable
+class MemoryConsolidationProtocol(Protocol):
+    """
+    Protocol for a scheduled, off-hot-path memory consolidation pass.
+
+    Long-running agents capture memories inline during a turn; over time the
+    store accretes near-duplicate, never-merged, never-pruned entries, which
+    degrades recall precision and grows context/token cost. A consolidation
+    pass runs on a schedule (never on the reply path) to:
+
+    - merge / deduplicate near-duplicate memories,
+    - promote durable, high-value facts into a curated tier,
+    - prune stale / low-importance entries,
+
+    all under a deterministic gate and a **maximum-loss guard** so a bad
+    rewrite cannot catastrophically wipe existing memory.
+
+    Core defines only this contract; the heavy implementation (an LLM
+    consolidation turn) and its scheduling live in a lifecycle plugin
+    (``PraisonAI-Plugins``), keeping core protocol-only and lightweight.
+
+    Implementations MUST refuse any rewrite that would drop more than
+    ``max_loss_fraction`` of existing entries, returning a
+    ``ConsolidationResult`` with ``rejected=True`` and leaving the store
+    untouched.
+
+    Example:
+        ```python
+        class MyConsolidator:
+            def consolidate(self, memory, *, max_loss_fraction=0.25):
+                before = memory.get_all_memories()
+                # ... merge/promote/prune to produce `after` ...
+                result = ConsolidationResult(
+                    entries_before=len(before), entries_after=len(after),
+                )
+                if result.exceeds_loss(max_loss_fraction):
+                    result.rejected = True
+                    result.reason = "loss guard tripped"
+                    return result  # leave store untouched
+                # ... apply the rewrite concurrency-safely ...
+                return result
+        ```
+    """
+
+    def consolidate(
+        self,
+        memory: "MemoryProtocol",
+        *,
+        max_loss_fraction: float = 0.25,
+    ) -> "ConsolidationResult":
+        """Run a consolidation pass over ``memory``.
+
+        Args:
+            memory: The memory store to consolidate.
+            max_loss_fraction: Maximum fraction of existing entries a single
+                pass is allowed to remove. A rewrite that would exceed this is
+                rejected and the store is left untouched.
+
+        Returns:
+            A ``ConsolidationResult`` describing what the pass did (or why it
+            was rejected).
+        """
+        ...
+
+
+@runtime_checkable
+class AsyncMemoryConsolidationProtocol(Protocol):
+    """Async variant of :class:`MemoryConsolidationProtocol`."""
+
+    async def aconsolidate(
+        self,
+        memory: "MemoryProtocol",
+        *,
+        max_loss_fraction: float = 0.25,
+    ) -> "ConsolidationResult":
+        """Async version of :meth:`MemoryConsolidationProtocol.consolidate`."""
+        ...
+
+
 __all__ = [
     'MemoryProtocol',
     'ResettableMemoryProtocol',
@@ -512,5 +594,7 @@ __all__ = [
     'EntityMemoryProtocol',
     'AgentMemoryProtocol',
     'AgentMemoryLifecycleProtocol',
+    'MemoryConsolidationProtocol',
+    'AsyncMemoryConsolidationProtocol',
 ]
 

@@ -44,6 +44,8 @@ from .protocols import (
     AsyncDeletableMemoryProtocol,
     EntityMemoryProtocol,
     AgentMemoryProtocol,
+    MemoryConsolidationProtocol,
+    AsyncMemoryConsolidationProtocol,
 )
 
 
@@ -144,6 +146,9 @@ def __getattr__(name):
     if name == "SearchResult":
         from .results import SearchResult
         return SearchResult
+    if name == "ConsolidationResult":
+        from .results import ConsolidationResult
+        return ConsolidationResult
     # Backward compatibility aliases
     if name == "StepInput":
         from ..workflows import WorkflowContext
@@ -239,6 +244,11 @@ __all__ = [
     "DecisionStore",
     "FeedbackStore",
     "ImprovementStore",
+    # Structured results
+    "MemoryResult",
+    "MemoryResultStatus",
+    "SearchResult",
+    "ConsolidationResult",
     # Protocols
     "MemoryProtocol",
     "AsyncMemoryProtocol",
@@ -246,4 +256,6 @@ __all__ = [
     "DeletableMemoryProtocol",
     "AsyncDeletableMemoryProtocol",
     "EntityMemoryProtocol",
+    "MemoryConsolidationProtocol",
+    "AsyncMemoryConsolidationProtocol",
 ] 
