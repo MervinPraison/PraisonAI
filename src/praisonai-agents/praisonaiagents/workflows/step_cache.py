@@ -17,12 +17,25 @@ call the user expected to happen again is the kind of quiet wrongness this
 codebase has been full of. Nothing caches unless asked.
 """
 
+import copy
 import hashlib
 import json
+import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 __all__ = ["StepCacheProtocol", "InMemoryStepCache", "make_step_key", "resolve_step_cache"]
+
+
+def _snapshot(value: Any) -> Any:
+    # Deep copy so a cached value cannot be mutated in place by later execution
+    # (or a caller) and corrupt a future hit. Some step outputs hold objects a
+    # deepcopy cannot handle (locks, live clients); a cache must never crash the
+    # workflow, so fall back to the original reference in that rare case.
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
 
 
 def _identify(step: Any) -> str:
@@ -52,7 +65,12 @@ def make_step_key(step: Any, previous_output: Any, input_text: str, variables: D
         "step": _identify(step),
         "previous": previous_output if isinstance(previous_output, str) else str(previous_output),
         "input": input_text,
-        "variables": {k: str(v) for k, v in sorted((variables or {}).items())},
+        # Tag each variable with its type so True and "True" (or 1 and "1") do
+        # not collapse to the same key and serve one call's answer to another.
+        "variables": {
+            k: [type(v).__name__, str(v)]
+            for k, v in sorted((variables or {}).items())
+        },
     }
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
@@ -82,27 +100,43 @@ class InMemoryStepCache:
         self._entries: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self.hits = 0
         self.misses = 0
+        # Parallel branches share one cache: a membership check racing an
+        # eviction on another thread would make move_to_end raise KeyError.
+        # One lock guards every read/write so no caller sees a torn state.
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[Dict[str, Any]]:
-        if key in self._entries:
-            self._entries.move_to_end(key)
-            self.hits += 1
-            return self._entries[key]
-        self.misses += 1
-        return None
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None:
+                self._entries.move_to_end(key)
+                self.hits += 1
+                # Snapshot out: a cached value contains live mutable objects
+                # (e.g. the workflow's variables dict) that later execution
+                # mutates. Handing back the stored object would let one run's
+                # later mutations corrupt a future hit.
+                return _snapshot(entry)
+            self.misses += 1
+            return None
 
     def set(self, key: str, value: Dict[str, Any]) -> None:
-        self._entries[key] = value
-        self._entries.move_to_end(key)
-        while len(self._entries) > self.max_entries:
-            self._entries.popitem(last=False)
+        # Snapshot in for the same reason: freeze the value at store time so
+        # the caller mutating it afterwards cannot alter what is cached.
+        snapshot = _snapshot(value)
+        with self._lock:
+            self._entries[key] = snapshot
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
 
     def clear(self) -> None:
-        self._entries.clear()
-        self.hits = self.misses = 0
+        with self._lock:
+            self._entries.clear()
+            self.hits = self.misses = 0
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
 def resolve_step_cache(cache: Any) -> Optional[Any]:

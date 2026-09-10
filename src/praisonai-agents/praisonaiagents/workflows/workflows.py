@@ -1868,9 +1868,18 @@ class AgentFlow:
 
             # Only a SUCCESSFUL step is cached. Caching a failure would serve
             # the failure again on every re-run, turning a transient error into
-            # a permanent one that no retry could clear.
+            # a permanent one that no retry could clear. The step's output
+            # variable is stored too: a fresh run starts with empty working
+            # variables, so a cache HIT that only restored `output` would leave
+            # `<step>_output` (or step.output_variable) missing and break the
+            # next step's substitutions. We snapshot exactly the delta this step
+            # writes below (var_name = output_variable or f"{name}_output").
             if _cache_key is not None and not step_failed:
-                _step_cache.set(_cache_key, {"output": output, "variables": {}})
+                _cached_var_name = step.output_variable or f"{step.name}_output"
+                _step_cache.set(
+                    _cache_key,
+                    {"output": output, "variables": {_cached_var_name: output}},
+                )
             
             if verbose:
                 print(f"✅ {step.name}: {str(output)}")
@@ -2593,7 +2602,13 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             step, previous_output, input, all_variables, model, verbose, index,
             stream=stream, depth=depth,
         )
-        cache.set(key, dict(result))
+        # Only cache a SUCCESSFUL result. A nested step that exhausts its
+        # retries or fails a guardrail returns a dict carrying an "error" key
+        # (see the failure branches of _execute_single_step_uncached); caching
+        # that would replay the failure on every identical re-run and never let
+        # the step retry -- turning a transient error into a permanent one.
+        if isinstance(result, dict) and not result.get("error"):
+            cache.set(key, result)
         return result
 
     def _execute_single_step_uncached(
@@ -5331,7 +5346,10 @@ class WorkflowManager:
             step, step_idx, results, all_variables, executor, default_agent,
             default_llm, memory, planning, verbose, on_step, on_result, original_input,
         )
-        cache.set(key, dict(result))
+        # Only cache a successful result -- a failed step must be free to retry
+        # on the next run rather than replay a cached failure forever.
+        if isinstance(result, dict) and not result.get("error"):
+            cache.set(key, result)
         return result
 
     def _execute_single_step_nocache(

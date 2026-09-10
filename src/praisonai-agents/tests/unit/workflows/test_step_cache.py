@@ -54,6 +54,47 @@ class TestCachingWorks:
         assert calls == ["p"]
 
 
+class TestCorrectnessOnAHit:
+    def test_a_cache_hit_still_exposes_the_step_output_variable(self):
+        """A fresh run starts with empty working variables. A hit that restored
+        only `output` would leave `<step>_output` missing from the run's
+        variable state -- so a downstream substitution would break. The step's
+        output variable must be present even on a fully cached re-run."""
+        flow = AgentFlow(steps=[_counting_step("upstream", [])], cache=True)
+        flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)  # served entirely from cache
+        assert second["variables"].get("upstream_output") == "upstream-output"
+
+    def test_a_transient_failure_inside_a_pattern_is_not_cached(self):
+        """A nested step that fails once must be free to retry and succeed on
+        the next run, not replay a cached failure forever."""
+        attempts = {"n": 0}
+
+        def flaky(ctx):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise RuntimeError("transient")
+            return "recovered"
+
+        flaky.__name__ = "flaky"
+        flow = AgentFlow(steps=[Parallel(steps=[flaky])], cache=True)
+        flow.run("same", verbose=False)   # first attempt fails
+        flow.run("same", verbose=False)   # must retry, not serve cached failure
+        assert attempts["n"] == 2
+
+    def test_a_mutated_hit_does_not_corrupt_the_cache(self):
+        """Values handed back on a hit are snapshots; mutating one must not
+        change what the next hit returns."""
+        cache = InMemoryStepCache()
+        cache.set("k", {"output": "v", "variables": {"a": 1}})
+        first = cache.get("k")
+        first["variables"]["a"] = 999
+        first["output"] = "tampered"
+        second = cache.get("k")
+        assert second["variables"]["a"] == 1
+        assert second["output"] == "v"
+
+
 class TestKeys:
     def test_the_same_inputs_key_the_same(self):
         a = make_step_key("step", "prev", "in", {"x": 1})
@@ -73,6 +114,13 @@ class TestKeys:
         calls; sharing an entry would serve one run's answer to another."""
         a = make_step_key("s", None, "in", {"user": "alice"})
         b = make_step_key("s", None, "in", {"user": "bob"})
+        assert a != b
+
+    def test_a_variable_value_keeps_its_type_in_the_key(self):
+        """True and the string "True" are different calls; collapsing both to
+        "True" would serve one's answer to the other."""
+        a = make_step_key("s", None, "in", {"flag": True})
+        b = make_step_key("s", None, "in", {"flag": "True"})
         assert a != b
 
 
