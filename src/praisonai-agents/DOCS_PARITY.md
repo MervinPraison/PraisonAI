@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2815 |
-| ✅ Workflows | 5 | 20 | 8488 |
+| ✅ Workflows | 5 | 20 | 8561 |
 
 ## Documentation Without Features
 
