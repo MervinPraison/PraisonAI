@@ -13,11 +13,9 @@ so the tool was dropped from the request with no exception and nothing above
 with the same name worked on the LiteLLM path -- same code, different dispatch,
 different behaviour.
 """
-import os
+import contextlib
 
 import pytest
-
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 from praisonaiagents.llm.openai_client import OpenAIClient
 from praisonaiagents.tools.registry import get_registry
@@ -30,14 +28,51 @@ def get_weather(city: str) -> str:
 
 @pytest.fixture
 def client():
+    # The fixture always passes an explicit key, so nothing here should touch
+    # the process-wide OPENAI_API_KEY and leak a fake credential into unrelated
+    # tests that exercise the no-key path.
     return OpenAIClient(api_key="sk-test-not-real")
+
+
+@contextlib.contextmanager
+def _registry_name(name, tool):
+    """Register ``name`` for the test and restore the registry afterwards.
+
+    get_registry() is a process-global singleton, so a test that overwrites or
+    removes an entry without restoring it makes later tests depend on execution
+    order. Snapshot the prior entry and put it back on exit.
+    """
+    registry = get_registry()
+    previous = registry._tools.get(name)
+    registry.register(tool, name=name, overwrite=True)
+    try:
+        yield name
+    finally:
+        if previous is not None:
+            registry._tools[name] = previous
+        else:
+            registry.unregister(name)
+
+
+@contextlib.contextmanager
+def _registry_absent(name):
+    """Ensure ``name`` is unregistered for the test and restore it afterwards."""
+    registry = get_registry()
+    previous = registry._tools.get(name)
+    registry.unregister(name)
+    try:
+        yield name
+    finally:
+        if previous is not None:
+            registry._tools[name] = previous
+        else:
+            registry.unregister(name)
 
 
 @pytest.fixture
 def registered_tool():
-    registry = get_registry()
-    registry.register(get_weather, name="get_weather", overwrite=True)
-    yield "get_weather"
+    with _registry_name("get_weather", get_weather) as name:
+        yield name
 
 
 def _names(tools):
@@ -67,9 +102,8 @@ def test_string_tool_resolved_from_main(client, monkeypatch):
     import __main__
 
     monkeypatch.setattr(__main__, "lookup_from_main", get_weather, raising=False)
-    get_registry().unregister("lookup_from_main")
-
-    formatted = client.format_tools(["lookup_from_main"])
+    with _registry_absent("lookup_from_main"):
+        formatted = client.format_tools(["lookup_from_main"])
 
     assert _names(formatted) == ["get_weather"]
 
@@ -86,15 +120,34 @@ def test_explicit_definition_dict_wins(client, monkeypatch):
         },
     }
     monkeypatch.setattr(__main__, "hand_written_definition", definition, raising=False)
-    get_registry().unregister("hand_written")
-
-    assert client.format_tools(["hand_written"]) == [definition]
+    with _registry_absent("hand_written"):
+        assert client.format_tools(["hand_written"]) == [definition]
 
 
 def test_unknown_string_tool_is_still_dropped(client):
     # Unchanged behaviour, and deliberately so: a name that resolves to nothing
     # cannot be turned into a schema. This pins that the fix did not start
     # inventing definitions.
-    get_registry().unregister("no_such_tool_anywhere")
+    with _registry_absent("no_such_tool_anywhere"):
+        assert client.format_tools(["no_such_tool_anywhere"]) in (None, [])
 
-    assert client.format_tools(["no_such_tool_anywhere"]) in (None, [])
+
+def test_string_tool_is_not_cached_across_registry_changes(client):
+    # A string name resolves against the mutable registry, so a re-registration
+    # between two format_tools() calls must reach the model as the new schema,
+    # never a stale cached one.
+    def get_weather(city: str, unit: str) -> str:
+        """Return the weather for a city in a given unit."""
+        return f"sunny in {city} ({unit})"
+
+    with _registry_name("get_weather", get_weather):
+        first = client.format_tools(["get_weather"])
+        assert set(first[0]["function"]["parameters"]["properties"]) == {"city", "unit"}
+
+        def get_weather(city: str) -> str:  # noqa: F811 - deliberate re-definition
+            """Return the weather for a city."""
+            return f"sunny in {city}"
+
+        get_registry().register(get_weather, name="get_weather", overwrite=True)
+        second = client.format_tools(["get_weather"])
+        assert set(second[0]["function"]["parameters"]["properties"]) == {"city"}

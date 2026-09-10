@@ -591,9 +591,13 @@ class OpenAIClient:
         if not tools:
             return None
         
-        # Check cache first
-        cache_key = self._get_tools_cache_key(tools)
-        if cache_key in self._formatted_tools_cache:
+        # String tool names resolve against the mutable tool registry and the
+        # process globals/__main__, so a cached result could advertise an
+        # obsolete schema after the tool is re-registered. Only cache when every
+        # tool is a stable, self-describing form (dict/callable/list).
+        cacheable = not any(isinstance(tool, str) for tool in tools)
+        cache_key = self._get_tools_cache_key(tools) if cacheable else None
+        if cacheable and cache_key in self._formatted_tools_cache:
             return self._formatted_tools_cache[cache_key]
             
         from ..tools.hosted import is_hosted_tool
@@ -661,9 +665,9 @@ class OpenAIClient:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return None
         
-        # Cache the result
+        # Cache the result (skipped for string tools, see above)
         result = formatted_tools if formatted_tools else None
-        if result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
+        if cacheable and result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
             self._formatted_tools_cache[cache_key] = result
                 
         return result
@@ -1020,8 +1024,22 @@ class OpenAIClient:
         if tool is not None:
             if hasattr(tool, 'get_schema'):
                 # A BaseTool declares its own schema, which honours an @tool
-                # name= override and excludes injected parameters.
-                return tool.get_schema()
+                # name= override and excludes injected parameters. Normalise the
+                # parameters exactly as LLM._generate_tool_definition does so the
+                # registry path and the callable path emit identical, provider-safe
+                # schemas (array 'items' fix) without mutating the tool's schema.
+                tool_def = tool.get_schema()
+                if (
+                    isinstance(tool_def, dict)
+                    and isinstance(tool_def.get("function"), dict)
+                    and isinstance(tool_def["function"].get("parameters"), dict)
+                ):
+                    tool_def = tool_def.copy()
+                    tool_def["function"] = tool_def["function"].copy()
+                    tool_def["function"]["parameters"] = self._fix_array_schemas(
+                        tool_def["function"]["parameters"]
+                    )
+                return tool_def
             if not callable(tool):
                 logging.debug(f"Tool '{function_name}' in registry is not callable")
                 return None
