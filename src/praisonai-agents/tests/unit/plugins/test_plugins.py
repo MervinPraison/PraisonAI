@@ -6,6 +6,7 @@ TDD: Tests for dynamic plugin loading and hook execution.
 
 import shutil
 import tempfile
+import uuid
 
 from praisonaiagents.plugins.plugin import (
     Plugin,
@@ -359,6 +360,33 @@ class TestPluginManager:
             assert {"name": "phantom_tool"} not in agent.tools
         finally:
             manager.unregister("meta_only")
+
+    def test_clone_does_not_duplicate_unnamed_hosted_plugin_tool(self):
+        """Cloning must not append the same unnamed hosted spec twice."""
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents import Agent
+
+        plugin_name = f"hosted_clone_{uuid.uuid4().hex}"
+        hosted_tool = {"type": "web_search"}
+
+        class HostedToolPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name=plugin_name)
+
+            def get_tools(self):
+                return [hosted_tool]
+
+        manager = get_plugin_manager()
+        assert manager.register(HostedToolPlugin())
+        try:
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            assert sum(tool is hosted_tool for tool in agent.tools) == 1
+
+            clone = agent.clone_for_channel()
+            assert sum(tool is hosted_tool for tool in clone.tools) == 1
+        finally:
+            manager.unregister(plugin_name)
 
     def test_shutdown(self):
         """Test shutting down all plugins."""
