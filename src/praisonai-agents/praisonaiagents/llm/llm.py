@@ -1951,6 +1951,45 @@ Respond with ONLY a valid JSON tool call in this format:
             
         return function_name, arguments, tool_call_id
 
+    def _resolve_ollama_chained_args(self, arguments: Dict[str, Any], tool_result_mapping: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolve Ollama tool-chaining references in tool call arguments.
+
+        Weak local models (via Ollama) sometimes emit a later tool call that
+        references a *previous* tool's result by that tool's function name
+        (e.g. ``second_tool(x="first_tool")``) instead of the resolved value.
+        This replaces any argument value that matches a recorded function name
+        with its stored result so the reference resolves instead of being
+        dispatched literally. Shared by ``get_response``, ``get_response_stream``
+        and ``get_response_async`` so behaviour is identical across all three.
+        """
+        if not tool_result_mapping:
+            return arguments
+        for arg_name, arg_value in list(arguments.items()):
+            if isinstance(arg_value, str) and arg_value in tool_result_mapping:
+                arguments[arg_name] = tool_result_mapping[arg_value]
+                logging.debug(
+                    f"[OLLAMA_FIX] Replaced {arg_value} with "
+                    f"{tool_result_mapping[arg_value]} in arguments"
+                )
+        return arguments
+
+    def _record_ollama_tool_result(self, tool_result_mapping: Dict[str, Any], function_name: str, tool_result: Any) -> None:
+        """Record a tool result by function name for later Ollama chaining.
+
+        Stores numeric results directly; for string results, extracts a leading
+        integer if present (matching the original inline logic) so a downstream
+        tool call referencing this function name resolves to a usable value.
+        """
+        if isinstance(tool_result, (int, float)):
+            tool_result_mapping[function_name] = tool_result
+        elif isinstance(tool_result, str):
+            import re
+            match = re.search(r'\b(\d+)\b', tool_result)
+            if match:
+                tool_result_mapping[function_name] = int(match.group(1))
+            else:
+                tool_result_mapping[function_name] = tool_result
+
     def _validate_and_filter_ollama_arguments(self, function_name: str, arguments: Dict[str, Any], available_tools: List) -> Dict[str, Any]:
         """
         Validate and filter tool call arguments for Ollama provider.
@@ -3750,15 +3789,8 @@ Respond with ONLY a valid JSON tool call in this format:
 
                             # Validate and filter arguments for Ollama provider
                             if is_ollama and tools:
-                                # First check if any argument references a previous tool result
-                                if is_ollama and tool_result_mapping:
-                                    # Replace function names with their results in arguments
-                                    for arg_name, arg_value in list(arguments.items()):
-                                        if isinstance(arg_value, str) and arg_value in tool_result_mapping:
-                                            # Replace function name with its result
-                                            arguments[arg_name] = tool_result_mapping[arg_value]
-                                            logging.debug(f"[OLLAMA_FIX] Replaced {arg_value} with {tool_result_mapping[arg_value]} in {function_name} arguments")
-                                
+                                # First resolve any argument that references a previous tool result
+                                arguments = self._resolve_ollama_chained_args(arguments, tool_result_mapping)
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
@@ -3795,16 +3827,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             
                             # For Ollama, store the result for potential chaining
                             if is_ollama:
-                                # Extract numeric value from result if it contains one
-                                if isinstance(tool_result, (int, float)):
-                                    tool_result_mapping[function_name] = tool_result
-                                elif isinstance(tool_result, str):
-                                    import re
-                                    match = re.search(r'\b(\d+)\b', tool_result)
-                                    if match:
-                                        tool_result_mapping[function_name] = int(match.group(1))
-                                    else:
-                                        tool_result_mapping[function_name] = tool_result
+                                self._record_ollama_tool_result(tool_result_mapping, function_name, tool_result)
 
                             if verbose:
                                 display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -4642,6 +4665,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_call_count = 0
                     last_tool_call_fingerprint = None
                     stall_reason = None
+                    tool_result_mapping = {}  # Store function results by name for Ollama chaining
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
                         fallback_iterations += 1
@@ -4736,6 +4760,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # different function, and dispatching those calls the
                             # user's tool with parameters it never declared.
                             if is_ollama and tools:
+                                arguments = self._resolve_ollama_chained_args(
+                                    arguments, tool_result_mapping)
                                 arguments = self._validate_and_filter_ollama_arguments(
                                     function_name, arguments, tools)
                             try:
@@ -4746,6 +4772,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.warning(
                                     f"Tool '{function_name}' failed: {tool_error}")
                                 tool_result = {"error": str(tool_error)}
+                            if is_ollama:
+                                self._record_ollama_tool_result(
+                                    tool_result_mapping, function_name, tool_result)
                             try:
                                 _get_display_functions()['execute_sync_callback'](
                                     'tool_call',
@@ -4985,6 +5014,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
+            tool_result_mapping = {}  # Store function results by name for Ollama chaining
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
 
@@ -5366,6 +5396,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # Validate and filter arguments for Ollama provider
                         if is_ollama and tools:
+                            arguments = self._resolve_ollama_chained_args(arguments, tool_result_mapping)
                             arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                         _call_plan.append(('call', function_name, arguments, tool_call_id))
@@ -5382,6 +5413,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations
+
+                        # For Ollama, store the result for potential chaining
+                        if is_ollama:
+                            self._record_ollama_tool_result(tool_result_mapping, function_name, tool_result)
 
                         if verbose:
                             display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"

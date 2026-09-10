@@ -987,11 +987,41 @@ class OpenAIClient:
             return None
     
     def _generate_tool_definition_from_name(self, function_name: str) -> Optional[Dict]:
-        """Generate a tool definition from a function name."""
-        # This is a placeholder - in agent.py this would look up the function
-        # For now, return None as the actual implementation would need access to the function
-        logging.debug(f"Tool definition generation from name '{function_name}' requires function reference")
-        return None
+        """Generate a tool definition from a function name via the shared tool registry.
+
+        Mirrors ``LLM._generate_tool_definition`` (llm.py) so a string tool name
+        resolves identically on the OpenAI-native path as on the LiteLLM path,
+        instead of being silently dropped.
+        """
+        try:
+            from ..tools.registry import get_registry
+            registry = get_registry()
+            tool = registry.get(function_name)
+            if tool is None:
+                logging.debug(f"Tool '{function_name}' not found in registry")
+                return None
+            # BaseTool instances expose their declared schema directly.
+            if hasattr(tool, 'get_schema'):
+                tool_def = tool.get_schema()
+                if (
+                    isinstance(tool_def, dict)
+                    and isinstance(tool_def.get("function"), dict)
+                    and isinstance(tool_def["function"].get("parameters"), dict)
+                ):
+                    tool_def = tool_def.copy()
+                    tool_def["function"] = tool_def["function"].copy()
+                    tool_def["function"]["parameters"] = self._fix_array_schemas(
+                        tool_def["function"]["parameters"]
+                    )
+                return tool_def
+            # Plain callables reuse the callable path.
+            if callable(tool):
+                return self._generate_tool_definition(tool)
+            logging.debug(f"Tool '{function_name}' in registry is not callable")
+            return None
+        except Exception as e:
+            logging.error(f"Error generating tool definition from name '{function_name}': {e}")
+            return None
     
     def process_stream_response(
         self,

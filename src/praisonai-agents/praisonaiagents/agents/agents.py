@@ -2147,7 +2147,10 @@ class AgentTeam(SpawnAnnounceProtocol):
                         task.context = []
                     task.context.append(content)
 
-        await self.arun_all_tasks()
+        if self.planning:
+            await self._arun_with_planning()
+        else:
+            await self.arun_all_tasks()
         
         # Get results
         results = {
@@ -4032,6 +4035,129 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # Keep plan-step tasks/results under _plan_tasks for introspection,
         # then restore the user's original task set as the canonical self.tasks.
+        self._plan_tasks = self.tasks
+        self.tasks = original_tasks
+        with self._task_id_lock:
+            self.task_id_counter = (
+                max(original_tasks.keys()) + 1 if original_tasks else 0
+            )
+
+    def _build_plan_tasks(self, plan, original_tasks):
+        """Create Task objects from plan steps (shared by sync/async planning).
+
+        Replaces ``self.tasks`` with plan-step tasks and returns the list of
+        created tasks. ``original_tasks`` is used to inherit per-task config
+        (memory, callbacks, guardrails, structured output).
+        """
+        from ..task import Task
+
+        agent_map = {agent.display_name: agent for agent in self.agents}
+        self.tasks = {}
+        with self._task_id_lock:
+            self.task_id_counter = 0
+
+        plan_tasks = []
+        step_to_task = {}
+        for i, step in enumerate(plan.steps):
+            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
+            if not agent:
+                agent = self.agents[0] if self.agents else None
+            if not agent:
+                logger.error(f"No agents available for step: {step.description}")
+                continue
+
+            context = []
+            for dep_id in step.dependencies:
+                if dep_id.startswith("step_"):
+                    try:
+                        dep_index = int(dep_id.split("_")[1])
+                        if dep_index < len(plan_tasks):
+                            context.append(plan_tasks[dep_index])
+                    except (ValueError, IndexError):
+                        pass
+                elif dep_id in step_to_task:
+                    context.append(step_to_task[dep_id])
+
+            original_task = None
+            for orig_task in original_tasks.values():
+                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
+                    original_task = orig_task
+                    break
+
+            task = Task(
+                description=step.description,
+                expected_output=f"Complete: {step.description}",
+                agent=agent,
+                name=f"Plan Step {i + 1}",
+                tools=agent.tools if agent.tools else [],
+                context=context if context else None,
+                memory=original_task.memory if original_task else None,
+                on_task_complete=original_task.callback if original_task else None,
+                guardrails=original_task.guardrail if original_task else None,
+                max_retries=original_task.max_retries if original_task else 3,
+                output_json=original_task.output_json if original_task else None,
+                output_pydantic=original_task.output_pydantic if original_task else None,
+                config=original_task.config if original_task else {}
+            )
+            self.add_task(task)
+            plan_tasks.append(task)
+            step_to_task[step.id] = task
+        return plan_tasks
+
+    async def _arun_with_planning(self):
+        """Async counterpart of ``_run_with_planning`` for the ``astart()`` path.
+
+        Mirrors the sync planning flow (create plan → approval gate → todo list
+        → execute plan-step tasks) minus the Rich console output, which is
+        display-only and not required for async/headless entry points.
+        """
+        task_descriptions = [task.description for task in self.tasks.values()]
+        request = " AND ".join(task_descriptions)
+
+        plan = await self._create_plan(request=request)
+        if not plan:
+            logger.warning("Planning failed, falling back to normal execution")
+            await self.arun_all_tasks()
+            return
+
+        if not self.auto_approve_plan:
+            approved = await self._request_approval(plan)
+            if not approved:
+                logger.info("Plan rejected. Aborting execution.")
+                return
+        else:
+            plan.approve()
+
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+
+        try:
+            from ..trace.protocol import get_default_emitter, ActionEvent
+            import time as _time
+            emitter = get_default_emitter()
+            if emitter and emitter.enabled:
+                emitter.emit(ActionEvent(
+                    event_type="plan_created",
+                    timestamp=_time.time(),
+                    agent_name="PlanningAgent",
+                    metadata={"plan": self._todo_list.to_markdown()}
+                ))
+        except Exception:
+            pass
+
+        original_tasks = self.tasks.copy()
+        self._build_plan_tasks(plan, original_tasks)
+
+        for i, (task_id, task) in enumerate(list(self.tasks.items())):
+            if i < len(self._todo_list.items):
+                self._todo_list.start(self._todo_list.items[i].id)
+            try:
+                await self.arun_task(task_id)
+                if task.status == "completed" and i < len(self._todo_list.items):
+                    self._todo_list.complete(self._todo_list.items[i].id)
+            except Exception as e:
+                logger.error(f"Error executing plan task {task_id}: {e}")
+
         self._plan_tasks = self.tasks
         self.tasks = original_tasks
         with self._task_id_lock:
