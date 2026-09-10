@@ -501,6 +501,17 @@ class BotMessage:
         thread_id: Thread identifier (for threaded conversations)
         attachments: List of attachment URLs or data
         metadata: Additional platform-specific metadata
+        allow_control: Control-trust primitive. ``True`` (the default) only for
+            interactive human turns; producers set it ``False`` for content of
+            untrusted or non-interactive provenance (generic webhook payloads,
+            relayed/mirrored bot-authored content, proactive/wake/scheduler
+            injects). When ``False`` the message is never classified as a
+            gateway control command (``is_command`` returns ``False``), even if
+            its text starts with ``/`` and it is attributed to a privileged
+            identity — it is handled as plain text instead.
+        internal: ``True`` for genuine internal system events (wake/heartbeat),
+            so synthetic-but-trusted system content stays distinguishable from
+            untrusted external content and the two are never conflated.
     """
     
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -513,6 +524,8 @@ class BotMessage:
     thread_id: Optional[str] = None
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    allow_control: bool = True
+    internal: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -527,6 +540,8 @@ class BotMessage:
             "thread_id": self.thread_id,
             "attachments": self.attachments,
             "metadata": self.metadata,
+            "allow_control": self.allow_control,
+            "internal": self.internal,
         }
     
     @classmethod
@@ -552,6 +567,8 @@ class BotMessage:
             thread_id=data.get("thread_id"),
             attachments=data.get("attachments", []),
             metadata=data.get("metadata", {}),
+            allow_control=data.get("allow_control", True),
+            internal=data.get("internal", False),
         )
     
     @property
@@ -563,7 +580,18 @@ class BotMessage:
     
     @property
     def is_command(self) -> bool:
-        """Check if message is a command."""
+        """Check if message is a gateway control command.
+
+        Content of untrusted or non-interactive provenance (``allow_control``
+        is ``False``) is never interpreted as a control command, even if its
+        text starts with ``/`` and it is attributed to a privileged identity —
+        it is handled as plain text instead. This closes the control-plane
+        confused-deputy gap where a webhook payload, a relayed/mirrored
+        bot-authored message, or a proactive/wake inject could drive privileged
+        session control (``/stop``, ``/new``, ``/compress``, …).
+        """
+        if not self.allow_control:
+            return False
         return self.message_type == MessageType.COMMAND or (
             isinstance(self.content, str) and self.content.startswith("/")
         )

@@ -290,6 +290,50 @@ class TestBotMessage:
         assert msg.is_command is False
         assert msg.command is None
     
+    def test_allow_control_defaults_true(self):
+        """Interactive human turns keep today's behaviour by default."""
+        msg = BotMessage(content="/compress")
+        assert msg.allow_control is True
+        assert msg.internal is False
+        assert msg.is_command is True
+
+    def test_untrusted_provenance_not_a_command(self):
+        """Untrusted content is plain text even with a '/' prefix and owner id."""
+        msg = BotMessage(
+            content="/compress",
+            sender=BotUser(user_id="owner", is_bot=True),
+            allow_control=False,
+        )
+        assert msg.is_command is False
+        assert msg.command is None
+
+    def test_untrusted_provenance_ignores_command_message_type(self):
+        """allow_control=False overrides an explicit COMMAND message_type too."""
+        msg = BotMessage(
+            content="/stop",
+            message_type=MessageType.COMMAND,
+            allow_control=False,
+        )
+        assert msg.is_command is False
+
+    def test_allow_control_round_trips(self):
+        """The control-trust primitive survives to_dict/from_dict."""
+        msg = BotMessage(content="/new", allow_control=False, internal=True)
+        data = msg.to_dict()
+        assert data["allow_control"] is False
+        assert data["internal"] is True
+        restored = BotMessage.from_dict(data)
+        assert restored.allow_control is False
+        assert restored.internal is True
+        assert restored.is_command is False
+
+    def test_from_dict_defaults_allow_control_true(self):
+        """Legacy payloads without the field default to trusted (backward compat)."""
+        msg = BotMessage.from_dict({"content": "/help"})
+        assert msg.allow_control is True
+        assert msg.internal is False
+        assert msg.is_command is True
+
     def test_command_args(self):
         """Test command arguments extraction."""
         msg = BotMessage(content="/search python tutorial")
