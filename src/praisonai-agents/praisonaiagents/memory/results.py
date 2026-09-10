@@ -6,6 +6,7 @@ and fallback scenarios for memory storage and retrieval operations.
 Enables proper error handling and observability in multi-agent workflows.
 """
 
+import math
 from typing import Optional, Any, Dict, Literal, Union
 from dataclasses import dataclass
 from enum import Enum
@@ -174,9 +175,93 @@ class SearchResult:
         return self.results
 
 
+@dataclass
+class ConsolidationResult:
+    """
+    Structured result for a memory consolidation pass.
+
+    A consolidation pass runs off the hot path (typically on a schedule) and
+    merges near-duplicate memories, promotes durable high-value facts into a
+    curated tier, and prunes stale/low-value entries. This result reports what
+    the pass did so callers can log, observe, and enforce loss bounds.
+
+    The ``rejected`` flag is set when a proposed rewrite would drop more than
+    the allowed ``max_loss_fraction`` of existing entries; in that case the
+    consolidator MUST leave the store untouched (a bad rewrite cannot wipe
+    existing memory).
+
+    Loss is measured against *original* entries, not the net entry count. When
+    a consolidator knows how many original entries survive the rewrite it should
+    set ``retained_originals``; ``loss_fraction`` is then derived from that so a
+    destructive equal-size rewrite (every original replaced by a brand-new
+    entry) still trips the guard. When ``retained_originals`` is left as ``None``
+    the loss falls back to the net change in entry count.
+
+    Example (schematic — ``consolidator``/``memory`` are illustrative):
+        ```python
+        # pseudocode: `consolidator` implements MemoryConsolidationProtocol
+        result = consolidator.consolidate(memory, max_loss_fraction=0.25)
+        if result.rejected:
+            print(f"Consolidation rejected: {result.reason}")
+        else:
+            print(f"Merged {result.merged}, promoted {result.promoted}, "
+                  f"pruned {result.pruned}")
+        ```
+    """
+
+    entries_before: int = 0
+    entries_after: int = 0
+    merged: int = 0
+    promoted: int = 0
+    pruned: int = 0
+    rejected: bool = False
+    reason: Optional[str] = None
+    retained_originals: Optional[int] = None
+    context: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if self.context is None:
+            self.context = {}
+
+    @property
+    def loss_fraction(self) -> float:
+        """Fraction of *original* entries removed relative to the starting count.
+
+        When ``retained_originals`` is provided, loss is measured as the
+        fraction of original entries that did not survive the rewrite. This
+        correctly flags destructive rewrites that keep the total count constant
+        by replacing originals with new entries. Otherwise it falls back to the
+        net change in entry count.
+        """
+        if self.entries_before <= 0:
+            return 0.0
+        if self.retained_originals is not None:
+            retained = max(0, min(self.retained_originals, self.entries_before))
+            removed = self.entries_before - retained
+        else:
+            removed = max(self.entries_before - self.entries_after, 0)
+        return removed / self.entries_before
+
+    def exceeds_loss(self, max_loss_fraction: float) -> bool:
+        """Return True if this pass would drop more than the allowed fraction.
+
+        The guard fails closed: a non-finite (``NaN``/``inf``) or out-of-range
+        ``max_loss_fraction`` raises ``ValueError`` rather than silently
+        permitting a destructive rewrite.
+        """
+        if not isinstance(max_loss_fraction, (int, float)) or isinstance(
+            max_loss_fraction, bool
+        ):
+            raise ValueError("max_loss_fraction must be a real number in [0.0, 1.0]")
+        if not math.isfinite(max_loss_fraction) or not 0.0 <= max_loss_fraction <= 1.0:
+            raise ValueError("max_loss_fraction must be finite and within [0.0, 1.0]")
+        return self.loss_fraction > max_loss_fraction
+
+
 # Export main types
 __all__ = [
     "MemoryResultStatus",
     "MemoryResult", 
-    "SearchResult"
+    "SearchResult",
+    "ConsolidationResult",
 ]
