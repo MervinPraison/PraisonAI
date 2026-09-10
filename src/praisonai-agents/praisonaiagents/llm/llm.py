@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
-from ..tools.call_executor import ToolCall, create_tool_call_executor
+from ..tools.call_executor import ToolCall, create_tool_call_executor, _durable_iteration_kwargs
 from ..tools.schema import build_tool_definition
 
 
@@ -35,12 +35,6 @@ from ..tools.schema import build_tool_definition
 # with the WRONG arguments and report success. Callers must detect this sentinel
 # and surface a tool-error so the model can re-emit the call instead.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
-
-
-def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
-    if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
-        return {"_durable_iteration_index": index}
-    return {}
 
 
 async def _dispatch_async_tool(
