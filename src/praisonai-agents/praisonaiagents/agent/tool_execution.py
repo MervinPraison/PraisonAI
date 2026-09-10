@@ -380,6 +380,50 @@ class ToolExecutionMixin:
 
         return resolve_tools_list(tools)
 
+    def _merge_plugin_tools(self):
+        """Merge tools contributed by enabled ``PluginType.TOOL`` plugins.
+
+        Plugins can return callables from ``get_tools()``. Those tools are only
+        callable by an agent if they are added to ``self.tools``; without this
+        merge they are collected by ``PluginManager.get_all_tools()`` yet reach
+        no agent. Existing agent tools take precedence on a name collision (the
+        clash is logged rather than silently shadowing the agent's own tool).
+        """
+        try:
+            from ..plugins import is_enabled as _plugins_is_enabled
+            if not _plugins_is_enabled():
+                return
+            from ..plugins.manager import get_plugin_manager
+            plugin_tools = get_plugin_manager().get_all_tools()
+        except Exception as exc:  # never let plugin wiring break agent init
+            logging.getLogger(__name__).debug("Plugin tool merge skipped: %s", exc)
+            return
+
+        if not plugin_tools:
+            return
+
+        existing = {
+            getattr(t, 'name', getattr(t, '__name__', str(t)))
+            for t in self.tools
+        }
+        added = []
+        for fn in plugin_tools:
+            name = getattr(fn, 'name', getattr(fn, '__name__', str(fn)))
+            if name in existing:
+                logging.getLogger(__name__).warning(
+                    "Plugin tool '%s' skipped: an agent tool with the same name "
+                    "already exists (existing tool wins).", name
+                )
+                continue
+            self.tools.append(fn)
+            existing.add(name)
+            added.append(name)
+
+        if added:
+            logging.getLogger(__name__).debug(
+                "Merged %d plugin tool(s) into agent: %s", len(added), added
+            )
+
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
         if not callable(func) or not arguments:

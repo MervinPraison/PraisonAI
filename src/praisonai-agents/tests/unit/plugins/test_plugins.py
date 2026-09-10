@@ -294,7 +294,50 @@ class TestPluginManager:
         
         assert len(tools) == 1
         assert tools[0]["name"] == "custom_tool"
-    
+
+    def test_plugin_tools_wired_into_agent(self):
+        """An enabled PluginType.TOOL plugin's tool must reach the agent.
+
+        Regression for the silent-failure where get_tools() output was
+        collected by get_all_tools() but never merged into any agent.
+        """
+        import praisonaiagents.plugins as plugins_pkg
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents import Agent
+
+        def random_number() -> int:
+            """Returns a random number"""
+            return 42
+
+        class BasicToolPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name="basic_tools")
+
+            def get_tools(self):
+                return [random_number]
+
+        manager = get_plugin_manager()
+        manager.register(BasicToolPlugin())
+        manager._enabled["basic_tools"] = True
+
+        prev_enabled = plugins_pkg._plugins_enabled
+        plugins_pkg._plugins_enabled = True
+        try:
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            names = [getattr(t, "__name__", str(t)) for t in agent.tools]
+            assert "random_number" in names
+
+            # Collision: agent's own tool wins, no duplicate.
+            agent2 = Agent(
+                instructions="test", llm="gpt-4o-mini", tools=[random_number]
+            )
+            names2 = [getattr(t, "__name__", str(t)) for t in agent2.tools]
+            assert names2.count("random_number") == 1
+        finally:
+            plugins_pkg._plugins_enabled = prev_enabled
+            manager.unregister("basic_tools")
+
     def test_shutdown(self):
         """Test shutting down all plugins."""
         manager = PluginManager()
