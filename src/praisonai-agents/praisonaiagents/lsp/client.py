@@ -22,6 +22,23 @@ from .config import LSPConfig, detect_root_uri, probe, path_to_uri
 
 logger = get_logger(__name__)
 
+
+def _to_location(data: Dict[str, Any]) -> Location:
+    """Normalise a ``Location`` or ``LocationLink`` dict into a ``Location``.
+
+    Navigation requests (``definition``/``implementation``) may return either a
+    ``Location`` (``uri``/``range``) or a ``LocationLink`` (``targetUri`` plus
+    ``targetSelectionRange``/``targetRange``).  Map the link shape onto the
+    plain location shape so a single conversion path handles both.
+    """
+    if "uri" in data and "range" in data:
+        return Location.from_dict(data)
+    uri = data.get("targetUri") or data.get("uri")
+    rng = (data.get("targetSelectionRange") or data.get("targetRange")
+           or data.get("range"))
+    return Location.from_dict({"uri": uri, "range": rng})
+
+
 class LSPClient:
     """
     Language Server Protocol client.
@@ -501,18 +518,21 @@ class LSPClient:
 
         uri = path_to_uri(file_path)
 
-        result = await self._send_request("textDocument/implementation", {
-            "textDocument": {"uri": uri},
-            "position": {"line": line, "character": character}
-        })
+        try:
+            result = await self._send_request("textDocument/implementation", {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character}
+            })
+        except RuntimeError:
+            return []
 
         if result is None:
             return []
 
         if isinstance(result, dict):
-            return [Location.from_dict(result)]
+            return [_to_location(result)]
         elif isinstance(result, list):
-            return [Location.from_dict(loc) for loc in result]
+            return [_to_location(loc) for loc in result]
 
         return []
 
@@ -542,11 +562,14 @@ class LSPClient:
 
         uri = path_to_uri(file_path)
 
-        result = await self._send_request(
-            "textDocument/prepareCallHierarchy", {
-                "textDocument": {"uri": uri},
-                "position": {"line": line, "character": character}
-            })
+        try:
+            result = await self._send_request(
+                "textDocument/prepareCallHierarchy", {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": character}
+                })
+        except RuntimeError:
+            return []
 
         if not result:
             return []
@@ -573,9 +596,12 @@ class LSPClient:
         if not self._initialized:
             return []
 
-        result = await self._send_request("callHierarchy/incomingCalls", {
-            "item": item
-        })
+        try:
+            result = await self._send_request("callHierarchy/incomingCalls", {
+                "item": item
+            })
+        except RuntimeError:
+            return []
 
         if not result:
             return []
@@ -602,9 +628,12 @@ class LSPClient:
         if not self._initialized:
             return []
 
-        result = await self._send_request("callHierarchy/outgoingCalls", {
-            "item": item
-        })
+        try:
+            result = await self._send_request("callHierarchy/outgoingCalls", {
+                "item": item
+            })
+        except RuntimeError:
+            return []
 
         if not result:
             return []

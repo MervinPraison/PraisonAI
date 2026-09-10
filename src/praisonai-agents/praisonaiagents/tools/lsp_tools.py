@@ -610,10 +610,27 @@ def _call_hierarchy(file_path: str, line: Optional[int], character: Optional[int
             safe_path, resolved_line, resolved_char)
         if not items:
             return None
-        item = items[0]
-        if incoming:
-            return await client.get_incoming_calls(item)
-        return await client.get_outgoing_calls(item)
+        side_key = "from" if incoming else "to"
+        combined = []
+        seen = set()
+        for item in items:
+            calls = (await client.get_incoming_calls(item) if incoming
+                     else await client.get_outgoing_calls(item))
+            for call in calls or []:
+                related = call.get(side_key) if isinstance(call, dict) else None
+                key = None
+                if isinstance(related, dict):
+                    rng = related.get("selectionRange") or related.get("range") or {}
+                    start = rng.get("start") if isinstance(rng, dict) else None
+                    key = (related.get("uri"), related.get("name"),
+                           start.get("line") if isinstance(start, dict) else None,
+                           start.get("character") if isinstance(start, dict) else None)
+                if key is not None and key in seen:
+                    continue
+                if key is not None:
+                    seen.add(key)
+                combined.append(call)
+        return combined
 
     result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
