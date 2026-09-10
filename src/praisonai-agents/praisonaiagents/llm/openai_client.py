@@ -996,31 +996,33 @@ class OpenAIClient:
         try:
             from ..tools.registry import get_registry
             registry = get_registry()
-            tool = registry.get(function_name)
-            if tool is None:
-                logging.debug(f"Tool '{function_name}' not found in registry")
+            # Use the registry's effective definition so dynamic schema overrides
+            # are applied and the advertised function name matches the registry
+            # key (alias-safe), then normalise array schemas for strict providers.
+            tool_def = registry.get_tool_definition(function_name)
+            if tool_def is None:
+                logging.debug(
+                    f"Tool '{function_name}' not found or unavailable in registry"
+                )
                 return None
-            # BaseTool instances expose their declared schema directly.
-            if hasattr(tool, 'get_schema'):
-                tool_def = tool.get_schema()
-                if (
-                    isinstance(tool_def, dict)
-                    and isinstance(tool_def.get("function"), dict)
-                    and isinstance(tool_def["function"].get("parameters"), dict)
-                ):
-                    tool_def = tool_def.copy()
-                    tool_def["function"] = tool_def["function"].copy()
-                    tool_def["function"]["parameters"] = self._fix_array_schemas(
-                        tool_def["function"]["parameters"]
-                    )
-                return tool_def
-            # Plain callables reuse the callable path.
-            if callable(tool):
-                return self._generate_tool_definition(tool)
-            logging.debug(f"Tool '{function_name}' in registry is not callable")
-            return None
-        except Exception as e:
-            logging.error(f"Error generating tool definition from name '{function_name}': {e}")
+            if (
+                isinstance(tool_def, dict)
+                and isinstance(tool_def.get("function"), dict)
+                and isinstance(tool_def["function"].get("parameters"), dict)
+            ):
+                tool_def = tool_def.copy()
+                tool_def["function"] = tool_def["function"].copy()
+                tool_def["function"]["parameters"] = self._fix_array_schemas(
+                    tool_def["function"]["parameters"]
+                )
+            return tool_def
+        except Exception:
+            # Keep the tool loop resilient (a single bad tool must not break the
+            # whole request), but preserve the traceback for diagnosis.
+            logging.error(
+                f"Error generating tool definition from name '{function_name}'",
+                exc_info=True,
+            )
             return None
     
     def process_stream_response(

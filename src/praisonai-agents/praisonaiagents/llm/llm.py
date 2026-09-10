@@ -5384,9 +5384,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # parallel_tool_calls is set) while preserving call order.
                     _call_plan = []  # ('error', msg) | ('call', fn, args, tc_id)
                     _dispatch_specs = []
+                    is_ollama = self._is_ollama_provider()
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
-                        is_ollama = self._is_ollama_provider()
                         function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                         if self._tool_arguments_parse_failed(arguments):
@@ -5394,22 +5394,38 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             _call_plan.append(('error', self._tool_parse_error_message(function_name, tool_call_id)))
                             continue
 
-                        # Validate and filter arguments for Ollama provider
-                        if is_ollama and tools:
-                            arguments = self._resolve_ollama_chained_args(arguments, tool_result_mapping)
-                            arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
+                        # For Ollama, defer chained-arg resolution/validation to
+                        # dispatch time so a producing call earlier in THIS batch
+                        # has its result recorded before a dependent call resolves
+                        # (matches the sync / streaming sequential loops).
+                        if not (is_ollama and tools):
+                            _dispatch_specs.append((function_name, arguments, tool_call_id))
 
                         _call_plan.append(('call', function_name, arguments, tool_call_id))
-                        _dispatch_specs.append((function_name, arguments, tool_call_id))
 
-                    _batch_results = await _dispatch_tool_batch(_dispatch_specs, iteration_count)
-                    _result_iter = iter(_batch_results)
+                    # Ollama chained calls must run sequentially (a later call may
+                    # reference an earlier call's result by function name), so skip
+                    # the concurrent batch and dispatch inside the consumption loop.
+                    if is_ollama and tools:
+                        _result_iter = None
+                    else:
+                        _batch_results = await _dispatch_tool_batch(_dispatch_specs, iteration_count)
+                        _result_iter = iter(_batch_results)
                     for _plan in _call_plan:
                         if _plan[0] == 'error':
                             messages.append(_plan[1])
                             continue
                         _, function_name, arguments, tool_call_id = _plan
-                        tool_result = next(_result_iter)
+                        if _result_iter is None:
+                            # Ollama: resolve against results recorded so far, then
+                            # execute this single call before moving to the next.
+                            arguments = self._resolve_ollama_chained_args(arguments, tool_result_mapping)
+                            arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
+                            tool_result = (await _dispatch_tool_batch(
+                                [(function_name, arguments, tool_call_id)], iteration_count
+                            ))[0]
+                        else:
+                            tool_result = next(_result_iter)
                         tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations

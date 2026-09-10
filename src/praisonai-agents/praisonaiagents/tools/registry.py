@@ -303,7 +303,42 @@ class ToolRegistry:
                     continue
             
             return definitions
-    
+
+    def get_tool_definition(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get the effective OpenAI-compatible definition for one registered name.
+
+        Unlike :meth:`get`, which returns the raw tool object, this applies any
+        dynamic ``schema_override`` (via ``ToolEntry.schema``) and forces the
+        advertised ``function.name`` to the registry key, so a callable
+        registered under an alias is offered — and later resolved — under that
+        alias rather than its underlying ``__name__``.
+
+        Returns ``None`` if the name is unknown or unavailable.
+        """
+        with self._lock:
+            entry = self._tools.get(name)
+            if entry is None and not self._discovered:
+                self.discover_plugins()
+                entry = self._tools.get(name)
+            if entry is None or not entry.available:
+                return None
+            try:
+                schema = entry.schema
+            except Exception as e:
+                logging.error(f"Failed to get schema for tool '{name}': {e}")
+                return None
+        # Force the advertised name to the requested registry key (copy so we
+        # never mutate a cached override result).
+        if (
+            isinstance(schema, dict)
+            and isinstance(schema.get("function"), dict)
+            and schema["function"].get("name") != name
+        ):
+            schema = dict(schema)
+            schema["function"] = dict(schema["function"])
+            schema["function"]["name"] = name
+        return schema
+
     def list_available_tools(
         self, 
         context: Optional[Dict[str, Any]] = None, 
