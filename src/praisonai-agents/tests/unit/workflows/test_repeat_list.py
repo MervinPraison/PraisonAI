@@ -73,3 +73,30 @@ class TestControls:
         ])
         flow.run("go", verbose=False)
         assert log == ["a", "b"]
+
+
+class TestControlFlowSafety:
+    def test_a_member_requesting_stop_halts_the_rest_of_the_list(self):
+        """An earlier member's stop must not be discarded by a later success."""
+        from praisonaiagents.workflows.workflows import StepResult
+
+        log = []
+
+        def a(ctx):
+            log.append("a")
+            return StepResult(output="A", stop_workflow=True)
+
+        def b(ctx):
+            log.append("b")
+            return "B"
+
+        a.__name__, b.__name__ = "a", "b"
+        flow = AgentFlow(steps=[Repeat([a, b], max_iterations=3)])
+        flow.run("go", verbose=False)
+        assert log == ["a"]
+
+    def test_an_empty_list_is_a_no_op_rather_than_a_crash(self):
+        """Repeat([]) used to raise UnboundLocalError on the stop check."""
+        flow = AgentFlow(steps=[Repeat([], max_iterations=2)])
+        result = flow.run("go", verbose=False)
+        assert result is not None
