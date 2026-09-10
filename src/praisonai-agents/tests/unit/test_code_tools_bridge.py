@@ -217,6 +217,13 @@ def test_approval_gate_required_for_every_call(registry):
         ApprovalDecision,
     )
 
+    # The registry remembers approvals for the life of the process, so a grant
+    # from an earlier test in the same run satisfied one of the two calls below
+    # and this counted 1. The precondition of "every call is gated" is that
+    # nothing is pre-approved, so establish it rather than inherit it.
+    from praisonaiagents.approval import get_approval_registry
+    get_approval_registry().clear_approved()
+
     calls = {"count": 0}
 
     def _cb(function_name, arguments, risk_level):

@@ -193,7 +193,11 @@ def add_external_tool(tool_name: str) -> None:
     """
     Add a tool name to the external tools set.
     
-    Note: This modifies a frozenset by creating a new one.
+    Note: This modifies a frozenset by creating a new one, rebinding the
+    module-level name. Callers that did ``from .trust import
+    EXTERNAL_TOOL_NAMES`` keep a reference to the pre-call set and will not
+    see the addition -- query through ``is_external_tool()`` (or read
+    ``trust.EXTERNAL_TOOL_NAMES`` off the module) instead.
     For dynamic registration, consider using ToolRegistry metadata instead.
     
     Args:

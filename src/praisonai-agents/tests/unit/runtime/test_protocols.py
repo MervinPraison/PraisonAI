@@ -34,6 +34,34 @@ class MockRuntime:
         for word in words:
             yield RuntimeDelta(type="text", content=word + " ")
 
+    # AgentRuntimeProtocol has grown beyond supports/run_turn/stream_turn.
+    # A conformance fixture has to implement the whole surface, or the
+    # isinstance() check below silently stops meaning anything.
+
+    @property
+    def runtime_name(self) -> str:
+        return "mock"
+
+    @property
+    def runtime_version(self) -> str:
+        return "0.0.0"
+
+    def capabilities(self):
+        from praisonaiagents.runtime.protocols import RuntimeCapabilityMatrix
+        return RuntimeCapabilityMatrix()
+
+    def health_check(self) -> dict:
+        return {"status": "ok"}
+
+    def validate_config(self, agent_config: dict) -> list:
+        return []
+
+    def execute_agent(self, agent_config: dict, prompt: str, **kwargs) -> dict:
+        return {"content": f"Response to: {prompt}"}
+
+    def stream_agent(self, agent_config: dict, prompt: str, **kwargs):
+        yield RuntimeDelta(type="text", content=prompt)
+
 
 def test_runtime_config():
     """Test RuntimeConfig dataclass."""
@@ -88,6 +116,10 @@ def test_protocol_compliance():
     assert hasattr(runtime, 'supports')
     assert hasattr(runtime, 'run_turn')
     assert hasattr(runtime, 'stream_turn')
+    for member in ('capabilities', 'health_check', 'validate_config',
+                   'execute_agent', 'stream_agent', 'runtime_name',
+                   'runtime_version'):
+        assert hasattr(runtime, member), f"missing protocol member: {member}"
 
 
 @pytest.mark.asyncio

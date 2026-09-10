@@ -308,10 +308,18 @@ class TestResolveRuntime:
         assert result.fallback_allowed is False
     
     def test_resolve_config_instance(self):
-        """Test resolving RuntimeConfig instance returns it unchanged."""
+        """Resolving a RuntimeConfig returns an equal, normalised config.
+
+        This asserted identity (`result is config`). resolve_runtime
+        deliberately returns a normalised copy instead, so that "a config
+        reused/compared after agent construction is unchanged" -- the caller's
+        object must not be mutated. Assert the contract that actually holds:
+        equal value, and the input left alone.
+        """
         config = RuntimeConfig(preferred_runtime="test")
         result = resolve_runtime(config)
-        assert result is config
+        assert result == config
+        assert config.preferred_runtime == "test", "the caller's config was mutated"
 
 
 class TestCapabilityValidationError:

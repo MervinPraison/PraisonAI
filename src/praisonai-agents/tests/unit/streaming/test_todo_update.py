@@ -115,7 +115,7 @@ class TestAsyncToolExecutionChannel:
             async def _check_tool_approval_async(self, function_name, arguments):
                 return (function_name, arguments)
 
-            def _check_tool_policy_and_guardrails(self, function_name, arguments):
+            def _check_tool_policy_and_guardrails(self, function_name, arguments, tools=None):
                 return (function_name, arguments)
 
         def my_tool():

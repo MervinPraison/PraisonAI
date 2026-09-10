@@ -389,7 +389,17 @@ class TestCircuitBreakerIntegration:
 
 # Real agentic test (MANDATORY per AGENTS.md)
 import os
-@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "not-needed", reason="Requires OpenAI API Key")
+@pytest.mark.live
+@pytest.mark.network
+@pytest.mark.skipif(
+    (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+     and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+    or not os.getenv("OPENAI_API_KEY")
+    or os.getenv("OPENAI_API_KEY") == "not-needed",
+    # Gating on the key alone treated owning one as consent to spend it, so
+    # this made a real billed call on any machine with OPENAI_API_KEY set.
+    reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 and a real OPENAI_API_KEY",
+)
 def test_circuit_breaker_real_agentic():
     """Real agentic test - create agent and test circuit breaker integration."""
     from praisonaiagents import Agent

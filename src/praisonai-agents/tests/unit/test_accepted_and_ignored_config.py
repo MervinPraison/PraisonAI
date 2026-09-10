@@ -152,6 +152,7 @@ def test_code_mode_changes_what_the_tool_can_do():
         """Return a marker string."""
         return "PROBE-OK"
 
+    _probe_tool_name = "code_mode_probe"
     get_registry().register(code_mode_probe)
     previous = get_approval_registry().get_backend()
     get_approval_registry().set_backend(AutoApproveBackend())
@@ -183,6 +184,16 @@ def test_code_mode_changes_what_the_tool_can_do():
     finally:
         get_approval_registry().set_backend(previous)
         clear_approval_context()
+        # The tool registry is process-global. Leaving these probe tools in it
+        # changed what later tests saw when they enumerated or dispatched
+        # tools -- test_presentation_poll, test_mixed_tools_list_resolution and
+        # test_code_tools_bridge all pass alone and failed after this file ran.
+        get_registry().unregister(_probe_tool_name)
+        # Approvals granted here are remembered by the process-global registry,
+        # so a later test asserting "every call is gated" saw one of its calls
+        # already approved (test_code_tools_bridge::
+        # test_approval_gate_required_for_every_call counted 1 instead of 2).
+        get_approval_registry().clear_approved()
 
     assert unsafe_result["success"] is True
     assert "PROBE-OK" in unsafe_result["stdout"]
@@ -208,6 +219,7 @@ def test_unsafe_code_mode_cannot_reach_tools_the_agent_was_not_granted():
         """Registered globally but never handed to the agent."""
         return "LEAK"
 
+    _probe_tool_name = "ungranted_global_tool"
     get_registry().register(ungranted_global_tool)
     previous = get_approval_registry().get_backend()
     get_approval_registry().set_backend(AutoApproveBackend())
@@ -230,6 +242,16 @@ def test_unsafe_code_mode_cannot_reach_tools_the_agent_was_not_granted():
     finally:
         get_approval_registry().set_backend(previous)
         clear_approval_context()
+        # The tool registry is process-global. Leaving these probe tools in it
+        # changed what later tests saw when they enumerated or dispatched
+        # tools -- test_presentation_poll, test_mixed_tools_list_resolution and
+        # test_code_tools_bridge all pass alone and failed after this file ran.
+        get_registry().unregister(_probe_tool_name)
+        # Approvals granted here are remembered by the process-global registry,
+        # so a later test asserting "every call is gated" saw one of its calls
+        # already approved (test_code_tools_bridge::
+        # test_approval_gate_required_for_every_call counted 1 instead of 2).
+        get_approval_registry().clear_approved()
 
     assert result["success"] is False
     assert "LEAK" not in (result.get("stdout") or "")

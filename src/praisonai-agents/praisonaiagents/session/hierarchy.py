@@ -671,9 +671,16 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         return False
     
-    def get_extended_session(self, session_id: str) -> ExtendedSessionData:
-        """Get extended session data."""
-        return self._read_session_fresh(session_id)
+    def get_extended_session(self, session_id: str,
+                             force_reload: bool = False) -> ExtendedSessionData:
+        """Get extended session data, using the mtime cache when it is valid.
+
+        This called _read_session_fresh unconditionally, so every read went to
+        disk and re-parsed the file: _is_cache_valid, _cache_mtimes and
+        _load_extended_session were all built and never reached from the public
+        API. Pass force_reload=True to re-read regardless.
+        """
+        return self._load_extended_session(session_id, force_reload=force_reload)
 
     def invalidate_cache(self, session_id: Optional[str] = None) -> None:
         """Invalidate base and extended in-memory caches atomically."""

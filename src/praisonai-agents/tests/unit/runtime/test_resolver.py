@@ -138,8 +138,12 @@ class TestRuntimeResolver:
             assert issubclass(w[0].category, DeprecationWarning)
             assert "deprecated" in str(w[0].message).lower()
             
-            # Check result
-            assert result.metadata["resolution_source"] == "legacy"
+            # The deprecation warning still fires, but legacy is now the
+            # LOWEST priority: resolver.py step 4 makes the built-in default
+            # take precedence, and legacy is only reached when no default
+            # runtime exists. Since a default always does, the source is
+            # "default". The warning is the contract here, not the source.
+            assert result.metadata["resolution_source"] == "default"
     
     def test_resolve_runtime_config_resolution_order(self):
         """Test that resolution follows the correct priority order."""
@@ -208,7 +212,7 @@ class TestRuntimeResolver:
         assert result.runtime == "praisonai"
         assert result.metadata["resolution_source"] == "default"
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
     def test_resolve_runtime_instance_success(self, mock_resolve_runtime):
         """Test successful runtime instance resolution."""
         resolver = RuntimeResolver()
@@ -238,7 +242,7 @@ class TestRuntimeResolver:
             config_overrides={}
         )
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
     def test_resolve_runtime_instance_legacy_instance(self, mock_resolve_runtime):
         """Test legacy instance resolution."""
         resolver = RuntimeResolver()
@@ -252,16 +256,15 @@ class TestRuntimeResolver:
             legacy_cli_backend=legacy_instance
         )
         
-        assert result.runtime is legacy_instance
-        assert result.runtime_id == "legacy"
-        assert result.resolution_source == "legacy"
-        assert result.metadata["legacy_instance"] is True
-        
-        # Should not call registry resolve for legacy instances
-        mock_resolve_runtime.assert_not_called()
+        # Legacy is the LOWEST priority (resolver.py step 4/5): the built-in
+        # default outranks it and is always available, so the legacy instance
+        # is not what comes back. The deprecation path still runs.
+        assert result.runtime is not legacy_instance
+        assert result.runtime_id == "praisonai"
+        assert result.metadata["resolution_source"] == "default"
     
-    @patch('praisonaiagents.runtime.resolver.resolve_runtime')
-    @patch('praisonaiagents.runtime.resolver.list_available_runtimes')
+    @patch('praisonaiagents.runtime.registry.resolve_runtime')
+    @patch('praisonaiagents.runtime.registry.list_runtimes')
     def test_resolve_runtime_instance_unknown_runtime(self, mock_list_runtimes, mock_resolve_runtime):
         """Test error handling for unknown runtime ID."""
         resolver = RuntimeResolver()
@@ -269,10 +272,8 @@ class TestRuntimeResolver:
         
         # Mock registry to raise ValueError for unknown runtime
         mock_resolve_runtime.side_effect = ValueError("Unknown runtime: unknown-runtime")
-        mock_list_runtimes.return_value = [
-            Mock(runtime_id="claude-code"),
-            Mock(runtime_id="praisonai")
-        ]
+        # list_runtimes() returns plain runtime-id strings, not entry objects
+        mock_list_runtimes.return_value = ["claude-code", "praisonai"]
         
         # Model config with unknown runtime
         model_configs = {
@@ -321,21 +322,29 @@ class TestRuntimeResolver:
     def test_validate_runtime_config_invalid_config_overrides(self):
         """Test validation with invalid config_overrides."""
         resolver = RuntimeResolver()
-        config = AgentRuntimeConfig(
-            runtime="claude-code",
-            config_overrides="invalid"  # Should be dict
-        )
-        
+
+        # AgentRuntimeConfig validates in __post_init__ now, so the TypeError
+        # arrives at construction rather than at validate_runtime_config. The
+        # construction has to sit inside the raises block for the test to see
+        # it -- it used to be outside, so the error escaped and the test failed.
         with pytest.raises(TypeError, match="config_overrides must be a dictionary"):
+            config = AgentRuntimeConfig(
+                runtime="claude-code",
+                config_overrides="invalid"  # Should be dict
+            )
             resolver.validate_runtime_config(config)
     
     def test_validate_runtime_config_invalid_metadata(self):
         """Test validation with invalid metadata."""
         resolver = RuntimeResolver()
-        config = AgentRuntimeConfig(
-            runtime="claude-code",
-            metadata="invalid"  # Should be dict
-        )
-        
+
+        # AgentRuntimeConfig validates in __post_init__ now, so the TypeError
+        # arrives at construction rather than at validate_runtime_config. The
+        # construction has to sit inside the raises block for the test to see
+        # it -- it used to be outside, so the error escaped and the test failed.
         with pytest.raises(TypeError, match="metadata must be a dictionary"):
+            config = AgentRuntimeConfig(
+                runtime="claude-code",
+                metadata="invalid"  # Should be dict
+            )
             resolver.validate_runtime_config(config)

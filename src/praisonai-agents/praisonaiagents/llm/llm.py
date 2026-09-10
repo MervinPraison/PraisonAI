@@ -887,7 +887,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription", "plan limit"
         ]):
             return "billing"
         
@@ -915,15 +915,16 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Empty or malformed responses
         if any(indicator in error_str for indicator in [
-            "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "empty response", "no response", "no content", "blank output",
+            "null response", "invalid response format"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "server busy", "try again later",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -937,6 +938,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Format errors
         if any(indicator in error_str for indicator in [
             "validation error", "invalid format", "parse error",
+            "parsing error", "decode error", "unexpected end of json",
             "malformed", "invalid json", "schema error"
         ]):
             return "format_error"
@@ -1024,12 +1026,23 @@ Respond with ONLY a valid JSON tool call in this format:
             )
         
         # Auth errors - try profile rotation if available
-        if error_kind == "auth" and self._failover_manager:
+        if error_kind == "auth":
+            if self._failover_manager:
+                return FailoverDecision(
+                    action="rotate_profile",
+                    reason=error_kind,
+                    backoff_ms=1000,  # Brief delay before trying new profile
+                    is_retryable=True
+                )
+            # Without a failover manager there is no rotation to attempt, and
+            # replaying the same rejected credential cannot start working. This
+            # fell through to the generic retry below, so an auth failure burned
+            # every remaining attempt and delayed the real error by the whole
+            # backoff schedule. Surface it now.
             return FailoverDecision(
-                action="rotate_profile",
+                action="surface_error",
                 reason=error_kind,
-                backoff_ms=1000,  # Brief delay before trying new profile
-                is_retryable=True
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
@@ -1824,6 +1837,97 @@ Respond with ONLY a valid JSON tool call in this format:
                     param_strs.append(f"{pname}{req}: {ptype}")
                 schemas.append(f"- {name}({', '.join(param_strs)})")
         return '\n'.join(schemas) if schemas else "None"
+
+    def _param_accepts_string(self, function_name, param_name, tools) -> bool:
+        """True when a tool declares this parameter as accepting a string.
+
+        Used to decide whether an argument whose value matches a previous tool's
+        name is a legitimate string or a weak model's way of referring to that
+        tool's result. A declared string parameter is left alone.
+        """
+        try:
+            for tool in tools or []:
+                fn = tool.get("function") if isinstance(tool, dict) else None
+                if not fn or fn.get("name") != function_name:
+                    continue
+                spec = (fn.get("parameters") or {}).get("properties", {}).get(param_name)
+                if not isinstance(spec, dict):
+                    return False
+                return self._schema_accepts_string(spec)
+        except Exception:  # noqa: BLE001 -- never break a tool call on a schema read
+            return False
+        return False
+
+    def _schema_accepts_string(self, spec) -> bool:
+        """True when a JSON-Schema fragment can accept a string value.
+
+        Handles the shapes this repo's own generator emits: a bare
+        ``{"type": "string"}``, a list type ``{"type": ["string", "null"]}``,
+        and the ``anyOf``/``oneOf``/``allOf`` unions produced for ``Optional[str]``
+        and ``Union`` parameters (``tools/schema.py``). Without the union case an
+        ``Optional[str]`` argument was still treated as a result reference and
+        silently overwritten.
+        """
+        if not isinstance(spec, dict):
+            return False
+        declared = spec.get("type")
+        if isinstance(declared, list):
+            if "string" in declared:
+                return True
+        elif declared == "string":
+            return True
+        # enum without an explicit type is string-typed in JSON Schema practice
+        if declared is None and isinstance(spec.get("enum"), list):
+            if any(isinstance(v, str) for v in spec["enum"]):
+                return True
+        for key in ("anyOf", "oneOf", "allOf"):
+            members = spec.get(key)
+            if isinstance(members, list) and any(
+                    self._schema_accepts_string(m) for m in members):
+                return True
+        return False
+
+    def _force_tool_usage_message(self, response_text, tool_calls, formatted_tools,
+                                  iteration_count):
+        """The nudge to send when a model ignored tools it should have used.
+
+        Returns the message content, or None when no nudge is warranted. Shared
+        so every response path applies the same policy -- this lived inline in
+        get_response only, so an agent that was awaited instead of called
+        silently lost a setting it had accepted.
+        """
+        if not self._should_force_tool_usage(
+                response_text, tool_calls, formatted_tools, iteration_count):
+            return None
+        tool_names = self._get_tool_names_for_prompt(formatted_tools)
+        logging.debug(
+            f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
+        return self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
+
+    def _tool_repair_message(self, tool_calls, formatted_tools):
+        """The correction to send when a model produced an invalid tool call.
+
+        Returns the message content and charges the repair budget, or None when
+        the calls are valid or the budget is spent. Shared for the same reason
+        as _force_tool_usage_message.
+        """
+        repair_attempt_count = getattr(self, '_current_repair_count', 0)
+        if not (tool_calls and self.max_tool_repairs > 0
+                and repair_attempt_count < self.max_tool_repairs):
+            return None
+        validation_errors = [e for e in
+                             (self._validate_tool_call(tc, formatted_tools) for tc in tool_calls)
+                             if e]
+        if not validation_errors:
+            return None
+        error_msg = "; ".join(validation_errors)
+        tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
+        logging.debug(
+            f"[OLLAMA_RELIABILITY] Tool call repair attempt "
+            f"{repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
+        self._current_repair_count = repair_attempt_count + 1
+        return self.TOOL_CALL_REPAIR_PROMPT.format(
+            error=error_msg, tool_schemas=tool_schemas)
 
     def _should_force_tool_usage(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> bool:
         """
@@ -3752,12 +3856,30 @@ Respond with ONLY a valid JSON tool call in this format:
                             if is_ollama and tools:
                                 # First check if any argument references a previous tool result
                                 if is_ollama and tool_result_mapping:
-                                    # Replace function names with their results in arguments
+                                    # A weak model sometimes writes a previous
+                                    # tool's NAME where it means that tool's
+                                    # RESULT, e.g. add(a="get_count", b=5).
+                                    # Substituting is right for that -- but only
+                                    # when the parameter cannot legitimately hold
+                                    # that string. Unguarded, a genuine argument
+                                    # like city="get_weather" was silently
+                                    # replaced by a number scraped out of an
+                                    # earlier result, corrupting the call with no
+                                    # error.
                                     for arg_name, arg_value in list(arguments.items()):
-                                        if isinstance(arg_value, str) and arg_value in tool_result_mapping:
-                                            # Replace function name with its result
-                                            arguments[arg_name] = tool_result_mapping[arg_value]
-                                            logging.debug(f"[OLLAMA_FIX] Replaced {arg_value} with {tool_result_mapping[arg_value]} in {function_name} arguments")
+                                        if not (isinstance(arg_value, str)
+                                                and arg_value in tool_result_mapping):
+                                            continue
+                                        if self._param_accepts_string(
+                                                function_name, arg_name, tools):
+                                            logging.debug(
+                                                f"[OLLAMA_FIX] Kept {arg_name}={arg_value!r} "
+                                                f"for {function_name}: the parameter is "
+                                                "declared as a string, so the value is "
+                                                "legitimate rather than a result reference")
+                                            continue
+                                        arguments[arg_name] = tool_result_mapping[arg_value]
+                                        logging.debug(f"[OLLAMA_FIX] Replaced {arg_value} with {tool_result_mapping[arg_value]} in {function_name} arguments")
                                 
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
@@ -4644,6 +4766,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     stall_reason = None
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
+                        # In-loop context management, as the other two paths do. Without it
+                        # this loop appended an assistant turn and a tool reply every
+                        # iteration with nothing ever trimming them, so a long tool chain
+                        # grew `messages` until the server truncated the head silently.
+                        messages = self._manage_context_in_loop(messages)
                         fallback_iterations += 1
                         response = self._completion_with_retry(
                             **self._build_completion_params(
@@ -5273,12 +5400,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 tool_calls = recovered
                                 logging.debug(
                                     f"Recovered tool calls from response text: {tool_calls}")
-                        
+
                         # Debug logging for Gemini responses
                         if self._is_gemini_model():
                             logging.debug(f"Gemini response content: {response_content} -> {response_text}")
                             logging.debug(f"Gemini tool calls: {tool_calls}")
-                        
+
                         if verbose and not interaction_displayed:
                             # Display the complete response at once
                             _get_display_functions()['display_interaction'](
@@ -5295,6 +5422,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 task_id=task_id
                             )
                             interaction_displayed = True
+
+                    # Apply the same tool-reliability policy the sync path uses. Both lived
+                    # inline in get_response only, so `max_tool_repairs` and `force_tool_usage`
+                    # were accepted from the caller -- and set by OllamaAdapter for every Ollama
+                    # LLM -- then silently ignored the moment the agent was awaited.
+                    # Placed after the streaming/non-streaming branches converge (as the sync
+                    # path does) so a streaming-with-tools provider that sets a repair budget
+                    # (e.g. LocalOpenAIAdapter) is not skipped.
+                    _force = self._force_tool_usage_message(
+                        response_text, tool_calls, formatted_tools, iteration_count)
+                    if _force:
+                        messages.append({"role": "user", "content": _force})
+                        iteration_count += 1
+                        continue
+
+                    _repair = self._tool_repair_message(tool_calls, formatted_tools)
+                    if _repair:
+                        messages.append({"role": "user", "content": _repair})
+                        iteration_count += 1
+                        tool_calls = None
+                        continue
+                    self._current_repair_count = 0
 
                 # For Ollama, if response is empty but we have tools, prompt for tool usage
                 if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:

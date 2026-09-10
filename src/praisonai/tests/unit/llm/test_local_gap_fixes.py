@@ -217,3 +217,68 @@ class TestNonOllamaEndpointGetsV1:
         from praisonaiagents import Agent
         agent = Agent(instructions="x", llm="local")
         assert agent.llm_instance.base_url == "http://127.0.0.1:11434"
+
+
+class TestMemoryQualityHonoursConfiguredEndpoint:
+    """The quality-metrics call read cfg['base_url'] only inside an `elif` that
+    never runs (litellm is always available), and even after that fix sent only
+    OPENAI_API_KEY or the literal 'local' -- so a secured custom endpoint got a
+    base_url with the wrong credential and rejected the request."""
+
+    def _memory(self, cfg):
+        from praisonaiagents.memory.memory import Memory
+        m = Memory.__new__(Memory)
+        m.cfg = cfg
+        m.provider = "none"
+        m.use_embedding = False
+        m.verbose = 0
+        m.graph_enabled = False
+        return m
+
+    def _capture_litellm(self, monkeypatch):
+        captured = {}
+
+        def fake_completion(**kwargs):
+            captured.update(kwargs)
+
+            class _Msg(dict):
+                def __init__(self, **kw):
+                    super().__init__(**kw)
+                    self.__dict__.update(kw)
+
+            return _Msg(choices=[_Msg(message=_Msg(
+                content='{"completeness":1,"relevance":1,"clarity":1,"accuracy":1}'))])
+
+        import litellm
+        monkeypatch.setattr(litellm, "completion", fake_completion)
+        return captured
+
+    def test_configured_base_url_and_api_key_reach_litellm(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        captured = self._capture_litellm(monkeypatch)
+        mem = self._memory({"base_url": "http://127.0.0.1:11434",
+                            "config": {"api_key": "secret-key"}})
+        mem.calculate_quality_metrics("out", "expected")
+        assert captured.get("api_base") == "http://127.0.0.1:11434"
+        assert captured.get("api_key") == "secret-key", (
+            "a config-supplied credential was dropped; the endpoint would 401")
+
+    def test_top_level_api_key_is_also_honoured(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        captured = self._capture_litellm(monkeypatch)
+        mem = self._memory({"base_url": "http://127.0.0.1:11434",
+                            "api_key": "top-key"})
+        mem.calculate_quality_metrics("out", "expected")
+        assert captured.get("api_key") == "top-key"
+
+    def test_no_endpoint_configured_is_unchanged(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        captured = self._capture_litellm(monkeypatch)
+        mem = self._memory({})
+        mem.calculate_quality_metrics("out", "expected")
+        assert "api_base" not in captured, (
+            "an unconfigured call must not pin an endpoint")
+        assert "api_key" not in captured

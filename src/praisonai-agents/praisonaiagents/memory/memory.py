@@ -2167,13 +2167,40 @@ class Memory(SearchMixin, MemoryCoreMixin):
             litellm_available = importlib.util.find_spec("litellm") is not None
             openai_available = importlib.util.find_spec("openai") is not None
 
+            # Resolve the endpoint ABOVE the branch. It used to be read only
+            # inside `elif openai_available:`, which never runs: litellm ships in
+            # both the `llm` and `memory` extras, so `litellm_available` is
+            # always true and a base_url supplied through config was silently
+            # discarded -- the request went to OpenAI regardless.
+            _cfg = getattr(self, "cfg", None) or {}
+            _cfg_inner = _cfg.get("config") if isinstance(_cfg.get("config"), dict) else {}
+            _configured_base_url = _cfg.get("base_url") or _cfg_inner.get("base_url")
+            _configured_base_url = (_configured_base_url
+                                    or os.getenv("OPENAI_BASE_URL")
+                                    or os.getenv("OPENAI_API_BASE"))
+
+            # Resolve the credential from config first. A custom endpoint that
+            # requires a key was previously sent only OPENAI_API_KEY or the
+            # literal "local", so an api_key supplied through config was dropped
+            # and the endpoint rejected the request.
+            _configured_api_key = (_cfg.get("api_key")
+                                   or _cfg_inner.get("api_key")
+                                   or os.getenv("OPENAI_API_KEY")
+                                   or "local")
+
             if litellm_available:
                 # Use LiteLLM for consistency with the rest of the codebase
                 import litellm
                 
                 # Convert model name if it's in litellm format
                 model_name = default_auxiliary_model(llm)
-                
+
+                _endpoint_kwargs = {}
+                if _configured_base_url:
+                    # litellm spells the endpoint `api_base`, not `base_url`.
+                    _endpoint_kwargs["api_base"] = _configured_base_url
+                    _endpoint_kwargs["api_key"] = _configured_api_key
+
                 response = litellm.completion(
                     model=model_name,
                     messages=[{
@@ -2181,7 +2208,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                         "content": custom_prompt or default_prompt
                     }],
                     response_format={"type": "json_object"},
-                    temperature=0.3
+                    temperature=0.3,
+                    **_endpoint_kwargs
                 )
             elif openai_available:
                 # Fallback to OpenAI client
@@ -2191,15 +2219,12 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 # base_url supplied through config -- which is the shape the rest
                 # of the memory layer uses.
                 _client_kwargs = {}
-                _cfg = getattr(self, "cfg", None) or {}
-                _base_url = _cfg.get("base_url")
-                if not _base_url and isinstance(_cfg.get("config"), dict):
-                    _base_url = _cfg["config"].get("base_url")
-                _base_url = _base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+                _base_url = _configured_base_url
                 if _base_url:
                     _client_kwargs["base_url"] = _base_url
                     # Local servers reject an empty key; any non-empty value works.
-                    _client_kwargs["api_key"] = os.getenv("OPENAI_API_KEY") or "local"
+                    # Prefer a config-supplied key so a secured endpoint is reached.
+                    _client_kwargs["api_key"] = _configured_api_key
                 client = OpenAI(**_client_kwargs)
                 
                 response = client.chat.completions.create(

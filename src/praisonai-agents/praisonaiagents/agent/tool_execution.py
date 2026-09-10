@@ -954,6 +954,16 @@ class ToolExecutionMixin:
                             # ``is_retryable`` above decides only whether the outer
                             # loop retries, not whether it raises.
                             raised_exception = "_praison_retryable" in result
+                            # NOTE: an unknown tool is deliberately NOT escalated
+                            # here. GHSA-gmjg-hv98-qggq's regression tests in
+                            # tests/unit/agent/test_tool_resolution_boundary.py
+                            # pin the contract that execute_tool returns None or
+                            # an error dict for an unresolved name rather than
+                            # raising, and the self-repair feature depends on it:
+                            # the corrective dict (with its "Did you mean" hint
+                            # and the tool inventory) is fed back so the model
+                            # can retry with a real tool name. Raising would
+                            # abort the run and make repair impossible.
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
                             result.pop("_praison_retryable", None)
