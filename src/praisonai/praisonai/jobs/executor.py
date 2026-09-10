@@ -288,7 +288,8 @@ class JobExecutor:
         
         # Determine agent configuration
         agent_file = job.agent_file or "agents.yaml"
-        framework = job.framework or "praisonai"
+        from ..framework_adapters.registry import get_default_registry
+        framework = get_default_registry().resolve_or_default(job.framework)
         
         # Check if we should use inline YAML
         if job.agent_yaml:
@@ -415,9 +416,10 @@ class JobExecutor:
         if job.config:
             cli_config.update(job.config)
 
+        from ..framework_adapters.registry import get_default_registry
         result = await arun(
             agent_file=agent_file,
-            framework=job.framework or "praisonai",
+            framework=get_default_registry().resolve_or_default(job.framework),
             cli_config=cli_config or None,
         )
         

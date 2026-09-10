@@ -110,6 +110,28 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             f"{self.list_all_names()}"
         )
     
+    def resolve_or_default(self, name: Optional[str]) -> str:
+        """Resolve an explicit framework name, or fall back to the default.
+
+        Single source of truth for the ``name or 'praisonai'`` fallbacks that
+        were previously scattered across the wrapper (agents_generator, jobs,
+        scheduler, workflow_framework). Callers pass whatever the user gave —
+        typically ``self.framework or config.get('framework')`` — and get back
+        either that name (stripped) or the registry-selected default.
+
+        When ``pick_default()`` cannot resolve (no adapter installed), fall back
+        to ``DEFAULT_PRIORITY[0]`` so downstream availability validation can
+        raise its own actionable error instead of this helper masking it.
+        """
+        if name:
+            resolved = str(name).strip()
+            if resolved:
+                return resolved
+        try:
+            return self.pick_default()
+        except RuntimeError:
+            return self.DEFAULT_PRIORITY[0]
+
     def _validate_adapter(self, name: str, adapter) -> None:
         """Validate that adapter implements the required protocol signature.
 

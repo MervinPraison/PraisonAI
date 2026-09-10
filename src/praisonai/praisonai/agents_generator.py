@@ -844,8 +844,11 @@ class AgentsGenerator:
         # Build tools dictionary using shared logic
         tools_dict = self._build_tools_dict(config)
         
-        # Select framework and resolve adapter variant
-        framework_name = self.framework or config.get('framework', 'praisonai')
+        # Select framework and resolve adapter variant. Registry is the single
+        # source of truth for the default, so no literal framework name here.
+        framework_name = self._adapter_registry.resolve_or_default(
+            self.framework or config.get('framework')
+        )
         adapter = self._select_framework(framework_name, config)
         
         # Validate framework availability through the injected registry so a
@@ -1376,10 +1379,14 @@ class AgentsGenerator:
         if self._is_workflow_yaml(config):
             # Bracket the workflow run in the same observability session the
             # sequential/hierarchical path uses so AgentOps init/finalize fires
-            # for workflow YAMLs too. Workflow YAMLs are native-only, so tag
-            # them 'praisonai'.
+            # for workflow YAMLs too. Tag with the config-resolved framework
+            # (registry default when omitted) rather than a hardcoded name.
             self._validate_workflow_cli_capabilities()
-            with observability_session("praisonai"):
+            from .framework_adapters.workflow_framework import framework_from_config
+            workflow_label = framework_from_config(
+                config, registry=self._adapter_registry
+            )
+            with observability_session(workflow_label):
                 return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
@@ -1432,10 +1439,15 @@ class AgentsGenerator:
         if self._is_workflow_yaml(config):
             # Bracket the async workflow run in the same observability session
             # the sequential/hierarchical path uses so AgentOps init/finalize
-            # fires for workflow YAMLs too. Workflow YAMLs are native-only, so
-            # tag them 'praisonai'.
+            # fires for workflow YAMLs too. Tag with the config-resolved
+            # framework (registry default when omitted) rather than a hardcoded
+            # name.
             self._validate_workflow_cli_capabilities()
-            with observability_session("praisonai"):
+            from .framework_adapters.workflow_framework import framework_from_config
+            workflow_label = framework_from_config(
+                config, registry=self._adapter_registry
+            )
+            with observability_session(workflow_label):
                 return await self._arun_yaml_workflow(config)
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
@@ -1509,7 +1521,10 @@ class AgentsGenerator:
         # cli_backend in a workflow YAML at build time instead of accepting it
         # silently. Workflow YAMLs are native-only, so validate against
         # 'praisonai'.
-        self._validate_cli_backend_compatibility(config, workflow_framework or 'praisonai')
+        self._validate_cli_backend_compatibility(
+            config,
+            self._adapter_registry.resolve_or_default(workflow_framework),
+        )
 
         # The framework-level check above passes for 'praisonai' because the
         # sequential/hierarchical adapter does support cli_backend — but
