@@ -435,17 +435,24 @@ class PluginManager:
     def get_all_tools(self) -> List[Dict[str, Any]]:
         """Get all tools from all enabled plugins."""
         tools = []
-        
-        for name, plugin in self._plugins.items():
-            if not self._enabled.get(name, False):
-                continue
-            
+
+        # Snapshot the enabled (name, plugin) pairs under the lock so a
+        # concurrent register/unregister cannot mutate the dict mid-iteration
+        # (which would raise RuntimeError and drop every plugin tool).
+        with self._lock:
+            enabled_plugins = [
+                (name, plugin)
+                for name, plugin in self._plugins.items()
+                if self._enabled.get(name, False)
+            ]
+
+        for name, plugin in enabled_plugins:
             try:
                 plugin_tools = plugin.get_tools()
                 tools.extend(plugin_tools)
             except Exception as e:
                 logger.error(f"Error getting tools from plugin {name}: {e}")
-        
+
         return tools
     
     def shutdown(self):

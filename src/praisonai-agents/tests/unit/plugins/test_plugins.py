@@ -299,9 +299,11 @@ class TestPluginManager:
         """An enabled PluginType.TOOL plugin's tool must reach the agent.
 
         Regression for the silent-failure where get_tools() output was
-        collected by get_all_tools() but never merged into any agent.
+        collected by get_all_tools() but never merged into any agent. Crucially
+        this does NOT flip the package-wide ``plugins.enable()`` flag: the docs
+        state tools work WITHOUT calling enable(), so a merely-registered tool
+        plugin must still reach the agent.
         """
-        import praisonaiagents.plugins as plugins_pkg
         from praisonaiagents.plugins.manager import get_plugin_manager
         from praisonaiagents import Agent
 
@@ -319,11 +321,9 @@ class TestPluginManager:
 
         manager = get_plugin_manager()
         manager.register(BasicToolPlugin())
-        manager._enabled["basic_tools"] = True
 
-        prev_enabled = plugins_pkg._plugins_enabled
-        plugins_pkg._plugins_enabled = True
         try:
+            # No plugins.enable() call — registration alone must suffice.
             agent = Agent(instructions="test", llm="gpt-4o-mini")
             names = [getattr(t, "__name__", str(t)) for t in agent.tools]
             assert "random_number" in names
@@ -335,8 +335,30 @@ class TestPluginManager:
             names2 = [getattr(t, "__name__", str(t)) for t in agent2.tools]
             assert names2.count("random_number") == 1
         finally:
-            plugins_pkg._plugins_enabled = prev_enabled
             manager.unregister("basic_tools")
+
+    def test_plugin_metadata_only_dict_tool_skipped(self):
+        """A metadata-only ``{"name": ...}`` descriptor with no executable
+        implementation must be skipped rather than advertised as a callable
+        tool the agent could never invoke."""
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents import Agent
+
+        class MetaOnlyPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name="meta_only")
+
+            def get_tools(self):
+                return [{"name": "phantom_tool"}]
+
+        manager = get_plugin_manager()
+        manager.register(MetaOnlyPlugin())
+        try:
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            assert {"name": "phantom_tool"} not in agent.tools
+        finally:
+            manager.unregister("meta_only")
 
     def test_shutdown(self):
         """Test shutting down all plugins."""
