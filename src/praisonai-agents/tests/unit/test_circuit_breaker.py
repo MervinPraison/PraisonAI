@@ -426,5 +426,45 @@ def test_circuit_breaker_real_agentic():
         assert "CircuitBreakerException" in str(type(e)) or "Tool failure" in str(e)
 
 
+class TestHealthMonitorDispatch:
+    """HealthMonitor must dispatch canonical and legacy health-check names."""
+
+    @pytest.mark.asyncio
+    async def test_canonical_protocol_object(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        class DbCheck:
+            def health_check(self):
+                return True
+            async def ahealth_check(self):
+                return True
+
+        monitor = HealthMonitor()
+        monitor.add_service("db", DbCheck())
+        assert await monitor.check_service_health("db") is True
+
+    @pytest.mark.asyncio
+    async def test_legacy_protocol_object(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        class LegacyCheck:
+            def check_health(self):
+                return True
+            async def acheck_health(self):
+                return True
+
+        monitor = HealthMonitor()
+        monitor.add_service("legacy", LegacyCheck())
+        assert await monitor.check_service_health("legacy") is True
+
+    @pytest.mark.asyncio
+    async def test_plain_callable(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        monitor = HealthMonitor()
+        monitor.add_service("fn", lambda: True)
+        assert await monitor.check_service_health("fn") is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

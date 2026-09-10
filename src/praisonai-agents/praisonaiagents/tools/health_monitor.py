@@ -233,10 +233,15 @@ class HealthMonitor:
         is_healthy = False
         
         try:
-            if hasattr(health_check, 'ahealth_check'):
+            # Prefer the canonical HealthCheckProtocol names (ahealth_check /
+            # health_check); fall back to the legacy names (acheck_health /
+            # check_health) for backward compatibility with existing services.
+            async_method = getattr(health_check, 'ahealth_check', None) or getattr(health_check, 'acheck_health', None)
+            sync_method = getattr(health_check, 'health_check', None) or getattr(health_check, 'check_health', None)
+            if async_method is not None:
                 # Protocol with async method
                 is_healthy = await asyncio.wait_for(
-                    health_check.ahealth_check(),
+                    async_method(),
                     timeout=config.timeout
                 )
             elif asyncio.iscoroutinefunction(health_check):
@@ -246,11 +251,11 @@ class HealthMonitor:
                     timeout=config.timeout
                 )
             else:
-                # Sync function - run in executor
+                # Sync function or protocol - run in executor
                 loop = asyncio.get_event_loop()
                 is_healthy = await loop.run_in_executor(
                     None,
-                    lambda: health_check() if callable(health_check) else health_check.health_check()
+                    lambda: sync_method() if sync_method is not None else health_check()
                 )
         except Exception as e:
             logger.warning(f"Health check failed for {name}: {e}")

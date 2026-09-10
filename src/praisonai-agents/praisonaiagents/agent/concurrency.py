@@ -33,18 +33,21 @@ logger = get_logger(__name__)
 
 class ConcurrencyRegistry:
     """Registry for per-agent concurrency limits.
-    
-    Thread-safe. Each agent name maps to an asyncio.Semaphore.
+
+    Thread-safe. Each agent name maps to a loop-neutral threading.Semaphore, so
+    the limit is a true global cap across every event loop and thread.
     Limit of 0 means unlimited (no throttling).
     """
 
     def __init__(self, default_limit: int = 0):
         self._default_limit = default_limit
         self._limits: Dict[str, int] = {}
-        # Keyed by (agent_name, running loop) so a cached asyncio.Semaphore is
-        # never shared across event loops (which would raise "bound to a
-        # different event loop" under multi-loop / multi-thread deployments).
-        self._semaphores: Dict[tuple, asyncio.Semaphore] = {}
+        # One loop-neutral threading.Semaphore per agent. Unlike asyncio.Semaphore
+        # (which binds to the loop it is first awaited on), a threading.Semaphore
+        # is shared safely across every event loop and thread, so the per-agent
+        # limit is a true global cap under multi-loop / multi-thread deployments.
+        # Async callers acquire it in an executor so they never block their loop.
+        self._semaphores: Dict[str, threading.Semaphore] = {}
         self._lock = threading.Lock()
 
     def set_limit(self, agent_name: str, max_concurrent: int) -> None:
@@ -56,8 +59,8 @@ class ConcurrencyRegistry:
         """
         with self._lock:
             self._limits[agent_name] = max_concurrent
-            # Reset semaphores (across all loops) so next acquire creates fresh ones
-            self._drop_agent_semaphores(agent_name)
+            # Reset semaphore so next acquire creates a fresh one at the new limit
+            self._semaphores.pop(agent_name, None)
 
     def get_limit(self, agent_name: str) -> int:
         """Get concurrency limit for an agent."""
@@ -68,81 +71,55 @@ class ConcurrencyRegistry:
         """Remove concurrency limit for an agent (reverts to default)."""
         with self._lock:
             self._limits.pop(agent_name, None)
-            self._drop_agent_semaphores(agent_name)
+            self._semaphores.pop(agent_name, None)
 
-    def _drop_agent_semaphores(self, agent_name: str) -> None:
-        """Drop all loop-keyed semaphores for an agent. Caller must hold the lock."""
-        for key in [k for k in self._semaphores if k[0] == agent_name]:
-            self._semaphores.pop(key, None)
+    def _get_semaphore(self, agent_name: str) -> Optional[threading.Semaphore]:
+        """Get or create the loop-neutral semaphore for an agent.
 
-    def _get_semaphore(self, agent_name: str) -> Optional[asyncio.Semaphore]:
-        """Get or create semaphore for agent on the running loop.
-
-        Returns None if unlimited. The semaphore is keyed per running event loop
-        so it is never reused across loops (which would raise a RuntimeError).
+        Returns None if unlimited. The same threading.Semaphore is shared across
+        every event loop and thread, so the configured limit is a true global cap.
         """
-        loop = asyncio.get_running_loop()
         with self._lock:
             limit = self._limits.get(agent_name, self._default_limit)
             if limit <= 0:
                 return None
-            key = (agent_name, loop)
-            sem = self._semaphores.get(key)
+            sem = self._semaphores.get(agent_name)
             if sem is None:
-                sem = asyncio.Semaphore(limit)
-                self._semaphores[key] = sem
+                sem = threading.Semaphore(limit)
+                self._semaphores[agent_name] = sem
             return sem
 
     async def acquire(self, agent_name: str) -> None:
-        """Acquire concurrency slot for agent. No-op if unlimited."""
+        """Acquire concurrency slot for agent. No-op if unlimited.
+
+        Waits on the loop-neutral semaphore in short, cancellable polls so the
+        running event loop is never blocked while other tasks hold permits, and
+        a cancelled/timed-out await never leaves a thread blocked on acquire().
+        """
         sem = self._get_semaphore(agent_name)
-        if sem is not None:
-            await sem.acquire()
+        if sem is None:
+            return
+        while True:
+            if sem.acquire(blocking=False):
+                return
+            # Yield to the loop; on cancellation this raises and no permit leaks.
+            await asyncio.sleep(0.005)
 
     def acquire_sync(self, agent_name: str) -> None:
         """Synchronous acquire — for non-async code paths.
-        
-        Prefer async acquire() when possible.
-        If called while an event loop is already running in the current thread,
-        this method raises RuntimeError to avoid deadlock.
+
+        Prefer async acquire() when possible. Blocks the calling thread until a
+        permit is available. Safe to call whether or not a loop is running in the
+        current thread, since the semaphore is loop-neutral.
         """
-        with self._lock:
-            limit = self._limits.get(agent_name, self._default_limit)
-        if limit <= 0:
-            return
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop — safe to create one. The semaphore must be
-            # created and acquired inside this loop so it binds to it.
-            loop = asyncio.new_event_loop()
-            try:
-                async def _acquire():
-                    sem = self._get_semaphore(agent_name)
-                    if sem is not None:
-                        await sem.acquire()
-                loop.run_until_complete(_acquire())
-            finally:
-                loop.close()
-        else:
-            raise RuntimeError(
-                f"acquire_sync('{agent_name}') cannot be called with a running event loop; "
-                "use async acquire() in async contexts."
-            )
+        sem = self._get_semaphore(agent_name)
+        if sem is not None:
+            sem.acquire()
 
     def release(self, agent_name: str) -> None:
         """Release concurrency slot for agent. No-op if unlimited."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
         with self._lock:
-            if loop is not None:
-                sem = self._semaphores.get((agent_name, loop))
-            else:
-                # No running loop: fall back to the sole semaphore if unambiguous
-                candidates = [v for k, v in self._semaphores.items() if k[0] == agent_name]
-                sem = candidates[0] if len(candidates) == 1 else None
+            sem = self._semaphores.get(agent_name)
         if sem is not None:
             try:
                 sem.release()

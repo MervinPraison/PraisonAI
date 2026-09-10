@@ -108,16 +108,59 @@ class TestConcurrencyLimiting:
         reg.release("sync_agent")
 
     @pytest.mark.asyncio
-    async def test_sync_acquire_running_loop_noop(self):
-        """Sync acquire in async context should fail fast without changing state."""
+    async def test_async_acquire_does_not_block_loop(self):
+        """Async acquire waits on a loop-neutral semaphore without blocking the loop."""
         from praisonaiagents.agent.concurrency import ConcurrencyRegistry
         reg = ConcurrencyRegistry()
         reg.set_limit("loop_agent", 1)
         await reg.acquire("loop_agent")
-        with pytest.raises(RuntimeError, match="running event loop"):
-            reg.acquire_sync("loop_agent")
+        # Second acquire must block (limit reached) but must not deadlock the loop.
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(reg.acquire("loop_agent"), timeout=0.05)
         reg.release("loop_agent")
-        await asyncio.wait_for(reg.acquire("loop_agent"), timeout=0.05)
+        await asyncio.wait_for(reg.acquire("loop_agent"), timeout=0.5)
         reg.release("loop_agent")
+
+    def test_sync_and_async_share_one_pool(self):
+        """Sync and async callers contend for the SAME per-agent permit pool."""
+        from praisonaiagents.agent.concurrency import ConcurrencyRegistry
+        reg = ConcurrencyRegistry()
+        reg.set_limit("shared_agent", 1)
+        reg.acquire_sync("shared_agent")
+
+        async def try_acquire():
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(reg.acquire("shared_agent"), timeout=0.05)
+
+        asyncio.run(try_acquire())
+        reg.release("shared_agent")
+
+    def test_limit_holds_across_threads(self):
+        """A limit of 1 is a true global cap even across many threads/loops."""
+        import threading
+        from praisonaiagents.agent.concurrency import ConcurrencyRegistry
+        reg = ConcurrencyRegistry()
+        reg.set_limit("mt_agent", 1)
+
+        active = [0]
+        max_active = [0]
+        state_lock = threading.Lock()
+
+        def worker():
+            async def run():
+                await reg.acquire("mt_agent")
+                with state_lock:
+                    active[0] += 1
+                    max_active[0] = max(max_active[0], active[0])
+                await asyncio.sleep(0.02)
+                with state_lock:
+                    active[0] -= 1
+                reg.release("mt_agent")
+            asyncio.run(run())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert max_active[0] == 1
