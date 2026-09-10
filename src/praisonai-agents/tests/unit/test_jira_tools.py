@@ -1,7 +1,17 @@
-"""Unit tests for JIRA tools."""
+"""Unit tests for JIRA tools.
+
+``jira`` is an optional dependency. Without it these failed rather than
+skipping -- four with ``ModuleNotFoundError: No module named 'jira'`` from
+``@patch('jira.JIRA')``, which cannot patch a module that is not importable,
+and two with the tools' own "JIRA library not installed" ImportError. A missing
+optional extra is not a defect, and reporting it as one trains you to ignore a
+red suite.
+"""
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
+
+pytest.importorskip("jira", reason="the optional 'jira' extra is not installed")
 from praisonaiagents.tools.jira_tools import (
     jira_watch_issue,
     jira_watch_project, 

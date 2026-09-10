@@ -333,8 +333,8 @@ class TestBackendWiring:
         on a machine that happens to be running MongoDB.
         """
         import logging as _logging
-        from unittest.mock import patch
 
+        from praisonaiagents.storage import backends as _backends
         from praisonaiagents.config.feature_configs import LearnBackend
         config = LearnConfig(
             persona=True,
@@ -344,13 +344,27 @@ class TestBackendWiring:
         def _unavailable(*args, **kwargs):
             raise RuntimeError("no MongoDB server")
 
-        with caplog.at_level(_logging.WARNING):
-            with patch("praisonaiagents.storage.backends.MongoDBBackend",
-                       side_effect=_unavailable):
+        # ``MongoDBBackend`` is a lazily resolved attribute whose real
+        # construction lives in the ``praisonai`` wrapper. ``mock.patch`` cannot
+        # target it: it resolves the original first, and the module's
+        # ``__getattr__`` raises ImportError (not AttributeError) when the
+        # wrapper is absent -- as in a base install -- so the patch blows up
+        # before the test runs. Injecting the stub straight into the module dict
+        # exercises the same offline fallback regardless of wrapper presence.
+        _had_attr = "MongoDBBackend" in _backends.__dict__
+        _prev = _backends.__dict__.get("MongoDBBackend")
+        _backends.MongoDBBackend = _unavailable
+        try:
+            with caplog.at_level(_logging.WARNING):
                 manager = LearnManager(
                     config=config, user_id="test", store_path=self.temp_dir
                 )
                 entry = manager.capture_persona("Mongo fallback test")
+        finally:
+            if _had_attr:
+                _backends.MongoDBBackend = _prev
+            else:
+                del _backends.MongoDBBackend
 
         # Falls back rather than crashing...
         assert entry is not None
