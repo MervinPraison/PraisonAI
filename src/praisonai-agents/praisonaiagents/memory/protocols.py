@@ -26,7 +26,10 @@ class MemoryTrust(str, Enum):
     - ``SYSTEM``: framework-generated content.
 
     Ordering (via :meth:`rank`) is ``untrusted < trusted < system`` so a
-    ``min_trust`` recall filter can drop lower-trust records.
+    ``min_trust`` recall filter can drop lower-trust records. An *absent* trust
+    field ranks as ``TRUSTED`` (legacy compatibility) while a *present but
+    unrecognised* value ranks as ``UNTRUSTED`` so malformed/forged provenance
+    fails closed rather than crossing a trusted boundary.
     """
 
     TRUSTED = "trusted"
@@ -35,14 +38,21 @@ class MemoryTrust(str, Enum):
 
     @classmethod
     def rank(cls, value: "MemoryTrust | str | None") -> int:
-        """Return an ordinal for trust comparison (higher == more trusted)."""
+        """Return an ordinal for trust comparison (higher == more trusted).
+
+        An absent value (``None``) is treated as ``TRUSTED`` so legacy,
+        unstamped records keep their historical behaviour. A *present but
+        unrecognised* value (e.g. a misspelled or forged ``"trust"`` label) is
+        ranked as ``UNTRUSTED`` — the lowest rank — so malformed provenance
+        fails closed instead of silently crossing a trusted boundary.
+        """
         order = {cls.UNTRUSTED: 0, cls.TRUSTED: 1, cls.SYSTEM: 2}
         if value is None:
             return order[cls.TRUSTED]
         try:
             return order[cls(value)]
         except ValueError:
-            return order[cls.TRUSTED]
+            return order[cls.UNTRUSTED]
 
 
 @runtime_checkable

@@ -69,3 +69,30 @@ def test_default_search_is_backward_compatible(store):
     store.store_long_term("trusted item", trust=MemoryTrust.TRUSTED)
     # No min_trust -> everything returned, as before.
     assert len(store.search_long_term("item", limit=5)) == 2
+
+
+def test_unknown_persisted_trust_label_fails_closed():
+    # A present-but-unrecognised label (misspelled or forged) must rank as the
+    # lowest trust so it cannot cross a trusted-only boundary.
+    assert MemoryTrust.rank("untrustd") == MemoryTrust.rank(MemoryTrust.UNTRUSTED)
+    filtered = Memory._filter_by_trust(
+        [{"metadata": {"trust": "untrustd"}}, {"metadata": {"trust": "trusted"}}],
+        min_trust=MemoryTrust.TRUSTED,
+    )
+    assert [r["metadata"]["trust"] for r in filtered] == ["trusted"]
+
+
+def test_malformed_min_trust_threshold_raises():
+    # A misspelled threshold must fail loudly, never silently weaken the gate.
+    with pytest.raises(ValueError):
+        Memory._filter_by_trust([{"metadata": {"trust": "trusted"}}], min_trust="sytem")
+
+
+def test_nullable_metadata_does_not_break_recall():
+    # Backends (e.g. Chroma / unnormalized adapters) may return metadata=None;
+    # such legacy records are treated as trusted rather than crashing recall.
+    filtered = Memory._filter_by_trust(
+        [{"metadata": None}, {"text": "no-metadata-key"}],
+        min_trust=MemoryTrust.TRUSTED,
+    )
+    assert len(filtered) == 2

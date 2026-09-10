@@ -814,10 +814,19 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if min_trust is None:
             return results
         from .protocols import MemoryTrust
-        threshold = MemoryTrust.rank(min_trust)
+        # Validate the requested threshold strictly: a misspelled/unknown
+        # ``min_trust`` must fail loudly rather than silently weakening the gate.
+        threshold = MemoryTrust.rank(MemoryTrust(min_trust))
+
+        def _record_trust(record: Dict[str, Any]):
+            meta = record.get("metadata")
+            if not isinstance(meta, dict):
+                return None  # legacy/unnormalized record → treated as TRUSTED
+            return meta.get("trust")
+
         return [
             r for r in results
-            if MemoryTrust.rank(r.get("metadata", {}).get("trust")) >= threshold
+            if MemoryTrust.rank(_record_trust(r)) >= threshold
         ]
 
     def search_short_term(
@@ -839,7 +848,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Over-fetch when a metadata_filter is present so scoped results
             # ranked beyond `limit` are still evaluated before truncation.
-            fetch_limit = limit * 10 if metadata_filter else limit
+            fetch_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
             # Pass rerank and other kwargs to Mem0 search
             search_params = {"query": query, "limit": fetch_limit, "rerank": rerank}
             search_params.update(kwargs)
@@ -853,7 +862,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 results = []
                 # Over-fetch when a metadata_filter is present so scoped results
                 # ranked beyond `limit` survive the post-filter below.
-                fetch_limit = limit * 10 if metadata_filter else limit
+                fetch_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
                 
                 # If vector search is enabled and we have embeddings
                 if self.use_vector_search and hasattr(self, "_get_embedding"):
@@ -925,7 +934,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 
                 # Over-fetch when a metadata_filter is present so scoped results
                 # ranked beyond `limit` survive the post-filter below.
-                fetch_limit = limit * 10 if metadata_filter else limit
+                fetch_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
                 resp = self.chroma_col.query(
                     query_embeddings=[query_embedding],
                     n_results=fetch_limit
@@ -961,7 +970,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 try:
                     # Over-fetch when a metadata_filter is present so post-filtering
                     # can still return up to `limit` scoped results.
-                    adapter_limit = limit * 10 if metadata_filter else limit
+                    adapter_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
                     adapter_results = self.memory_adapter.search_short_term(query, limit=adapter_limit, **kwargs)
                     adapter_results = self._apply_metadata_filter(adapter_results, metadata_filter)
                     if min_quality > 0:
@@ -985,7 +994,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
             # Local fallback
             conn = self._get_stm_conn()
             c = conn.cursor()
-            fetch_limit = limit * 10 if metadata_filter else limit
+            fetch_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
             rows = c.execute(
                 "SELECT id, content, meta FROM short_mem WHERE content LIKE ? LIMIT ?",
                 (f"%{query}%", fetch_limit)
@@ -1197,7 +1206,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # Over-fetch from every backend when a metadata_filter is present so
         # scoped records ranked beyond `limit` survive the post-filter applied
         # before the final `[:limit]` truncation below.
-        fetch_limit = limit * 10 if metadata_filter else limit
+        fetch_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Pass rerank and other kwargs to Mem0 search
@@ -1322,7 +1331,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
             try:
                 # Over-fetch when a metadata_filter is present so post-filtering
                 # can still return up to `limit` scoped results.
-                adapter_limit = limit * 10 if metadata_filter else limit
+                adapter_limit = limit * 10 if (metadata_filter or min_trust is not None) else limit
                 adapter_results = self.memory_adapter.search_long_term(query, limit=adapter_limit, **kwargs)
                 adapter_results = self._apply_metadata_filter(adapter_results, metadata_filter)
                 if min_quality > 0:
