@@ -526,25 +526,15 @@ class PraisonAIDB:
             )
             return session
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            run_sync(_do())
-            return
-
-        fut = current_bridge().submit(_do())
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred on_agent_end update failed", exc_info=True)
-
-        fut.add_done_callback(_on_done)
+        dispatch_maybe_awaitable(
+            _do(),
+            kind=DispatchKind.WRITE,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name="on_agent_end",
+        )
     
     def on_run_start(
         self,
@@ -885,26 +875,15 @@ class PraisonAIDB:
             await self._dispatch_async(store, "set", "async_set", key, merged)
             return merged
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return run_sync(_do())
-
-        bridge = current_bridge()
-        fut = bridge.submit(_do())
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred merge_and_set for %s failed", key, exc_info=True)
-
-        fut.add_done_callback(_on_done)
-        return None
+        return dispatch_maybe_awaitable(
+            _do(),
+            kind=DispatchKind.WRITE,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name=f"merge_and_set:{key}",
+        )
 
     def _call_store(self, store, sync_name, async_name, *args, **kwargs):
         """Call a store from a sync hook without ever blocking or losing data.
@@ -936,38 +915,21 @@ class PraisonAIDB:
         fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:
             return None
-        result = fn(*args, **kwargs)
-        if not inspect.isawaitable(result):
-            return result
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return run_sync(result)
-
-        if sync_name in PraisonAIDB._READ_OPS:
-            # Reads must return a real value; never fire-and-forget them.
-            from .._async_bridge import run_sync_or_offload
-
-            return run_sync_or_offload(
-                result, thread_name=f"praisonai-db-read-{sync_name}"
-            )
-
-        bridge = current_bridge()
-        fut = bridge.submit(result)
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f, name=sync_name):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred store %s failed", name, exc_info=True)
-
-        fut.add_done_callback(_on_done)
-        return None
+        kind = (
+            DispatchKind.READ
+            if sync_name in PraisonAIDB._READ_OPS
+            else DispatchKind.WRITE
+        )
+        return dispatch_maybe_awaitable(
+            fn(*args, **kwargs),
+            kind=kind,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name=sync_name,
+        )
 
     def flush_pending_writes(self, timeout: Optional[float] = 5.0) -> None:
         """Give this adapter's in-flight fire-and-forget writes a chance to complete.
