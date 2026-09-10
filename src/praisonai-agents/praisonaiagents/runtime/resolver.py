@@ -261,6 +261,16 @@ class RuntimeResolver:
             # produce, and it runs precisely when the user has typo'd a runtime
             # id: the one moment the list of valid ones is worth having.
             #
+            # Only the registry's unknown-id signal deserves this treatment.
+            # `resolve_runtime()` both looks up the id and *calls the factory*;
+            # a factory raising ValueError (bad config, construction failure)
+            # after a valid id was found is a different, actionable problem.
+            # Rewriting that as "Unknown runtime ID" would hide the real cause,
+            # so anything that is not the registry's "Unknown runtime:" message
+            # is re-raised untouched.
+            if not str(e).startswith("Unknown runtime:"):
+                raise
+            #
             # Best-effort: if the listing itself fails, the original ValueError
             # is still better than an error about error handling.
             try:
