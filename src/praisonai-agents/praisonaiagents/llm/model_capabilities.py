@@ -565,12 +565,19 @@ def max_output_tokens(model_name: str):
     if litellm is None:
         return None
 
+    # Only ``max_output_tokens`` is a true output ceiling. The generic
+    # ``max_tokens`` field is treated as a context-window limit elsewhere in
+    # this codebase (see ``context/budgeter.py``), so substituting it here would
+    # return an inflated ceiling and leave an over-limit request unclamped —
+    # exactly the 400 this accessor exists to prevent. When output-specific
+    # metadata is absent we return ``None`` and let the caller fall back.
+
     # Primary: litellm's get_model_info (handles provider inference).
     if hasattr(litellm, "get_model_info"):
         try:
             info = litellm.get_model_info(model=model_name)
             if info:
-                out = info.get("max_output_tokens") or info.get("max_tokens")
+                out = info.get("max_output_tokens")
                 if out:
                     return out
         except Exception:
@@ -587,7 +594,7 @@ def max_output_tokens(model_name: str):
             if info is None and "/" in model_name:
                 info = model_cost.get(model_name.split("/")[-1].lower())
             if info:
-                return info.get("max_output_tokens") or info.get("max_tokens")
+                return info.get("max_output_tokens")
     except Exception:
         pass
 
