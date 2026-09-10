@@ -9,10 +9,13 @@ This enables:
 
 These protocols are lightweight and have zero performance impact.
 """
-from typing import Protocol, runtime_checkable, Optional, Any, Dict, List, TYPE_CHECKING
+from typing import Protocol, runtime_checkable, Optional, Any, Dict, List
 
-if TYPE_CHECKING:
-    from .results import ConsolidationResult
+# Imported at module scope (not under TYPE_CHECKING) so that the string
+# annotations on the consolidation protocols resolve via typing.get_type_hints().
+# results.py has zero heavy dependencies and does not import protocols, so this
+# is import-safe and adds no measurable startup cost.
+from .results import ConsolidationResult
 
 
 @runtime_checkable
@@ -534,12 +537,17 @@ class MemoryConsolidationProtocol(Protocol):
 
     Example:
         ```python
+        from praisonaiagents.memory import ConsolidationResult
+
         class MyConsolidator:
             def consolidate(self, memory, *, max_loss_fraction=0.25):
                 before = memory.get_all_memories()
-                # ... merge/promote/prune to produce `after` ...
+                # ... merge/promote/prune to produce `after`, tracking how many
+                # ORIGINAL entries survive via `retained` ...
                 result = ConsolidationResult(
-                    entries_before=len(before), entries_after=len(after),
+                    entries_before=len(before),
+                    entries_after=len(after),
+                    retained_originals=retained,
                 )
                 if result.exceeds_loss(max_loss_fraction):
                     result.rejected = True
@@ -560,9 +568,12 @@ class MemoryConsolidationProtocol(Protocol):
 
         Args:
             memory: The memory store to consolidate.
-            max_loss_fraction: Maximum fraction of existing entries a single
-                pass is allowed to remove. A rewrite that would exceed this is
-                rejected and the store is left untouched.
+            max_loss_fraction: Maximum fraction of existing *original* entries a
+                single pass is allowed to remove (measured via
+                ``ConsolidationResult.retained_originals`` where available, so a
+                destructive equal-size rewrite still trips the guard). Must be a
+                finite value in ``[0.0, 1.0]``. A rewrite that would exceed this
+                is rejected and the store is left untouched.
 
         Returns:
             A ``ConsolidationResult`` describing what the pass did (or why it
