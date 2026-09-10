@@ -3937,13 +3937,41 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
         
+        # ``Repeat.step`` is typed ``Any`` and was handed straight to the
+        # single-step executor, so ``repeat([a, b])`` was ACCEPTED and then
+        # stringified into a prompt -- the list became text and the default
+        # agent answered it. Since there is no N-agent discussion loop, that is
+        # exactly the workaround people reach for, which made the silent
+        # misbehaviour worse than a rejection. A list now runs its members in
+        # order, once per iteration.
+        steps = repeat_step.step if isinstance(repeat_step.step, (list, tuple)) else [repeat_step.step]
+
         for iteration in range(repeat_step.max_iterations):
-            step_result = self._execute_single_step_internal(
-                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
-            )
-            results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
-            output = step_result["output"]
-            all_variables.update(step_result.get("variables", {}))
+            last_name = None
+            for position, inner_step in enumerate(steps):
+                step_result = self._execute_single_step_internal(
+                    inner_step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
+                )
+                last_name = step_result['step']
+                # Each member sees the previous member's output, so a two-step
+                # repeat composes the way a two-step flow does.
+                output = step_result["output"]
+                all_variables.update(step_result.get("variables", {}))
+                if len(steps) > 1:
+                    results.append({
+                        "step": f"{last_name}_{iteration}_{position}",
+                        "output": step_result["output"],
+                    })
+                # A member that requests a stop must halt the remaining members
+                # immediately; otherwise a later member's success would silently
+                # discard the stop request and let the flow continue.
+                if step_result.get("stop"):
+                    repeat_stopped = True
+                    break
+            if len(steps) == 1 and last_name is not None:
+                results.append({"step": f"{last_name}_{iteration}", "output": output})
+            if repeat_stopped:
+                break
             
             # Check until condition
             if repeat_step.until:
@@ -3960,12 +3988,8 @@ CONCISE SUMMARY:"""
                         break
                 except Exception as e:
                     logger.error(f"Repeat until condition failed: {e}")
-            
-            if step_result.get("stop"):
-                repeat_stopped = True
-                break
         
-        all_variables["repeat_iterations"] = iteration + 1
+        all_variables["repeat_iterations"] = iteration + 1 if repeat_step.max_iterations > 0 else 0
         return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped}
     
     def _execute_if(
