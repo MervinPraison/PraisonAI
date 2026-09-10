@@ -994,6 +994,17 @@ class Knowledge:
             indexed_at=datetime.now().isoformat(),
         )
         
+        # ``success`` was never assigned, so it kept the dataclass default of
+        # True no matter what happened: a run where every file failed to embed
+        # still returned success=True with files_indexed=0 and each failure
+        # sitting in ``errors``, and a caller doing ``if result.success`` went on
+        # believing the corpus was indexed.
+        #
+        # A partial failure counts. Losing one file out of ten from a knowledge
+        # base is precisely the kind of loss that should not be silent, and the
+        # caller still has ``errors`` and ``total_files`` for the detail.
+        result.success = not result.errors
+
         # Store corpus stats for later retrieval
         self._corpus_stats = result.corpus_stats
         
