@@ -288,8 +288,16 @@ class JobExecutor:
         
         # Determine agent configuration
         agent_file = job.agent_file or "agents.yaml"
-        from ..framework_adapters.registry import get_default_registry
-        framework = get_default_registry().resolve_or_default(job.framework)
+        # Resolve the default framework off the event loop: first-time registry
+        # construction scans entry-point metadata and probes adapters (blocking
+        # import machinery), which must not stall other jobs on a busy worker.
+        import asyncio
+
+        def _resolve_framework() -> str:
+            from ..framework_adapters.registry import get_default_registry
+            return get_default_registry().resolve_or_default(job.framework)
+
+        framework = await asyncio.to_thread(_resolve_framework)
         
         # Check if we should use inline YAML
         if job.agent_yaml:

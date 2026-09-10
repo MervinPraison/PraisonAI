@@ -1382,10 +1382,9 @@ class AgentsGenerator:
             # for workflow YAMLs too. Tag with the config-resolved framework
             # (registry default when omitted) rather than a hardcoded name.
             self._validate_workflow_cli_capabilities()
-            from .framework_adapters.workflow_framework import framework_from_config
-            workflow_label = framework_from_config(
-                config, registry=self._adapter_registry
-            )
+            workflow_label = self._adapter_registry.resolve_or_default(
+                self.framework or config.get('framework')
+            ).lower()
             with observability_session(workflow_label):
                 return self._run_yaml_workflow(config)
 
@@ -1443,10 +1442,9 @@ class AgentsGenerator:
             # framework (registry default when omitted) rather than a hardcoded
             # name.
             self._validate_workflow_cli_capabilities()
-            from .framework_adapters.workflow_framework import framework_from_config
-            workflow_label = framework_from_config(
-                config, registry=self._adapter_registry
-            )
+            workflow_label = self._adapter_registry.resolve_or_default(
+                self.framework or config.get('framework')
+            ).lower()
             with observability_session(workflow_label):
                 return await self._arun_yaml_workflow(config)
 
@@ -1505,16 +1503,23 @@ class AgentsGenerator:
         )
         # Validate the YAML-declared framework first so a non-native workflow
         # YAML (e.g. framework: crewai) can't slip through just because the
-        # generator instance still holds the default 'praisonai'.
-        workflow_framework = framework_from_config(config)
+        # generator instance still holds the default 'praisonai'. Resolve
+        # through the injected registry (not the process default) so the
+        # build-time framework agrees with the observability label and a
+        # tenant-scoped adapter is honoured.
+        workflow_framework = framework_from_config(
+            config, registry=self._adapter_registry
+        )
         validate_workflow_framework(
             workflow_framework,
             source="agents.yaml workflow section",
+            registry=self._adapter_registry,
         )
         if self.framework:
             validate_workflow_framework(
                 self.framework,
                 source="AgentsGenerator framework",
+                registry=self._adapter_registry,
             )
 
         # Parity with the sequential/hierarchical path: reject an incompatible
