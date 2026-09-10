@@ -101,3 +101,50 @@ class TestSessions:
     def test_sessions_are_listed(self):
         client = _client(session_store=FakeSessionStore([{"role": "user", "content": "hi"}]))
         assert client.get("/api/sessions").json()["count"] == 1
+
+    def test_store_without_session_exists_treats_empty_history_as_404(self):
+        # A store that cannot answer session_exists must not report an unknown
+        # id as a healthy 200 with an empty transcript.
+        client = _client(session_store=HistoryOnlyStore({"s1": [{"role": "user", "content": "hi"}]}))
+        assert client.get("/api/sessions/s1").status_code == 200
+        assert client.get("/api/sessions/nope").status_code == 404
+
+
+class TestBoundedLimits:
+    """Client-controlled limits are bounded -- a negative value must not remove
+    the SQL LIMIT (SQLite treats LIMIT -1 as unlimited)."""
+
+    @pytest.mark.parametrize(
+        "path", ["/api/runs?limit=-1", "/api/runs?limit=0", "/api/runs?limit=99999"]
+    )
+    def test_out_of_range_run_limit_is_rejected(self, path):
+        client = _client(run_ledger=FakeLedger([FakeRun("r1")]))
+        assert client.get(path).status_code == 422
+
+    def test_out_of_range_session_limit_is_rejected(self):
+        client = _client(session_store=FakeSessionStore([]))
+        assert client.get("/api/sessions?limit=-1").status_code == 422
+
+
+class TestApprovals:
+    def test_configured_requirements_are_listed(self):
+        from praisonaiagents.approval import get_approval_registry
+
+        registry = get_approval_registry()
+        registry.add_requirement("delete_file", risk_level="high")
+        try:
+            body = _client().get("/api/approvals").json()
+            tools = {r["tool"]: r["risk_level"] for r in body["requirements"]}
+            assert tools.get("delete_file") == "high"
+        finally:
+            registry.remove_requirement("delete_file")
+
+
+class HistoryOnlyStore:
+    """A session store that exposes only get_chat_history (no session_exists)."""
+
+    def __init__(self, histories):
+        self._histories = histories
+
+    def get_chat_history(self, session_id, max_messages=None):
+        return self._histories.get(session_id, [])

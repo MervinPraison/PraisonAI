@@ -149,7 +149,7 @@ class AgentOS:
     
     def _register_routes(self, app: Any) -> None:
         """Register API routes."""
-        from fastapi import HTTPException
+        from fastapi import HTTPException, Query
         from pydantic import BaseModel
         
         class ChatRequest(BaseModel):
@@ -194,7 +194,7 @@ class AgentOS:
             )
 
         @app.get(f"{self.config.api_prefix}/runs")
-        async def list_runs(limit: int = 50):
+        async def list_runs(limit: int = Query(50, ge=1, le=500)):
             ledger = getattr(self, "run_ledger", None)
             if ledger is None:
                 _unavailable(
@@ -219,7 +219,7 @@ class AgentOS:
             return _run_to_dict(record)
 
         @app.get(f"{self.config.api_prefix}/sessions")
-        async def list_sessions(limit: int = 20):
+        async def list_sessions(limit: int = Query(20, ge=1, le=200)):
             store = getattr(self, "session_store", None)
             if store is None or not hasattr(store, "recent"):
                 _unavailable(
@@ -236,14 +236,20 @@ class AgentOS:
             }
 
         @app.get(f"{self.config.api_prefix}/sessions/{{session_id}}")
-        async def get_session(session_id: str, limit: int = 100):
+        async def get_session(session_id: str, limit: int = Query(100, ge=1, le=500)):
             store = getattr(self, "session_store", None)
             if store is None:
                 _unavailable(
                     "Session history",
                     "no session store is configured on this AgentOS instance.",
                 )
-            if hasattr(store, "session_exists") and not store.session_exists(session_id):
+            if hasattr(store, "session_exists"):
+                if not store.session_exists(session_id):
+                    raise HTTPException(status_code=404, detail=f"No session {session_id!r}")
+            elif not store.get_chat_history(session_id, limit):
+                # Stores without session_exists cannot distinguish an unknown
+                # session from an empty one; treat an empty transcript as absent
+                # rather than returning a healthy-looking 200 for a bad id.
                 raise HTTPException(status_code=404, detail=f"No session {session_id!r}")
             return {
                 "session_id": session_id,
@@ -257,18 +263,35 @@ class AgentOS:
             except ImportError:
                 _unavailable("Approvals", "praisonaiagents.approval is not installed.")
             registry = get_approval_registry()
-            requirements = getattr(registry, "_requirements", None)
-            if requirements is None:
+
+            # The registry stores approval requirements across four fields --
+            # global tools plus per-agent overrides -- rather than a single
+            # dict. Reading the public accessors (is_required/get_risk_level)
+            # keeps this decoupled from that private shape. Fall back to the
+            # attributes only to enumerate which (agent, tool) pairs exist.
+            global_tools = getattr(registry, "_required_tools", None)
+            agent_tools = getattr(registry, "_agent_required_tools", None)
+            if global_tools is None and agent_tools is None:
                 _unavailable(
                     "Approvals",
                     "this build's approval registry exposes no requirement listing.",
                 )
-            return {
-                "requirements": [
-                    {"tool": tool, "agent": agent, "risk_level": str(level)}
-                    for (tool, agent), level in requirements.items()
-                ]
-            }
+
+            requirements = []
+            for tool in sorted(global_tools or ()):
+                requirements.append({
+                    "tool": tool,
+                    "agent": None,
+                    "risk_level": registry.get_risk_level(tool),
+                })
+            for agent, tools in (agent_tools or {}).items():
+                for tool in sorted(tools):
+                    requirements.append({
+                        "tool": tool,
+                        "agent": agent,
+                        "risk_level": registry.get_risk_level(tool, agent),
+                    })
+            return {"requirements": requirements}
 
         @app.get(f"{self.config.api_prefix}/agents")
         async def list_agents():
