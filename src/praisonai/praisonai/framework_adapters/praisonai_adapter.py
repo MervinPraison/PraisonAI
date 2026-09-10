@@ -16,6 +16,118 @@ from .base import BaseFrameworkAdapter
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_TOKENS = 16000
+
+
+def _active_correlation_id() -> Optional[str]:
+    """Return the current workflow id for budget diagnostics when available."""
+    try:
+        from praisonaiagents.trace.context_events import get_context_emitter
+
+        session_id = getattr(get_context_emitter(), "_session_id", None)
+        if session_id:
+            return str(session_id)
+    except Exception:
+        pass
+    try:
+        from praisonaiagents.session.context import get_session_context
+
+        context = get_session_context()
+        for field in ("thread_id", "chat_id", "user_id"):
+            value = getattr(context, field, None)
+            if value:
+                return str(value)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_output_budget(model: str, requested: Any = None) -> Optional[int]:
+    """Resolve a YAML agent budget against LiteLLM's model ceiling."""
+    try:
+        value = _DEFAULT_MAX_TOKENS if requested is None else int(requested)
+    except (TypeError, ValueError, OverflowError):
+        correlation_id = _active_correlation_id()
+        logger.warning(
+            "Ignoring invalid max_tokens=%r for model %r",
+            requested,
+            model,
+            extra={"extra_data": {"correlation_id": correlation_id}}
+            if correlation_id
+            else {},
+        )
+        value = _DEFAULT_MAX_TOKENS
+    if not model or value <= 0:
+        return value
+    try:
+        from praisonaiagents.llm.model_capabilities import max_output_tokens
+
+        ceiling = max_output_tokens(model)
+    except Exception:
+        ceiling = None
+    if not ceiling or ceiling <= 0:
+        return value
+    if value > ceiling:
+        if requested is not None:
+            correlation_id = _active_correlation_id()
+            logger.warning(
+                "max_tokens=%s exceeds %s's output limit (%s); clamping to %s",
+                value, model, ceiling, ceiling,
+                extra={"extra_data": {"correlation_id": correlation_id}}
+                if correlation_id
+                else {},
+            )
+        return ceiling
+    # An omitted YAML budget follows the model's full known ceiling, including
+    # ceilings above the historical 16k default.
+    return ceiling if requested is None else value
+
+
+def _build_agent_llm_spec(
+    raw_llm_spec: Any,
+    model: str,
+    max_tokens: Optional[int],
+) -> Dict[str, Any]:
+    """Overlay resolved model/budget fields without dropping YAML options."""
+    spec = dict(raw_llm_spec) if isinstance(raw_llm_spec, dict) else {}
+    spec["model"] = model
+    spec["max_tokens"] = max_tokens
+    return spec
+
+
+def _requested_output_budget(
+    details: Dict[str, Any], cli_config: Optional[Dict[str, Any]] = None
+) -> Any:
+    """Select the raw per-agent budget before model-ceiling resolution.
+
+    An explicit CLI value wins over YAML. When the CLI option is omitted,
+    preserve the agent-level value and then a nested ``llm.max_tokens`` value;
+    the latter must not be mistaken for an omitted budget and overwritten by
+    the model ceiling. Older callers may pass the parser's historical 16k
+    default without an explicitness marker, so that value is treated as an
+    omission when a YAML value is available.
+    """
+    details = details or {}
+    cli = cli_config or {}
+    marker = cli.get("_max_tokens_explicit")
+    cli_value = cli.get("max_tokens")
+    if marker is None:
+        marker = (
+            "max_tokens" in cli
+            and cli_value is not None
+            and cli_value != _DEFAULT_MAX_TOKENS
+        )
+    if marker:
+        return cli_value
+
+    agent_value = details.get("max_tokens")
+    if agent_value is not None:
+        return agent_value
+    llm_spec = details.get("llm")
+    if isinstance(llm_spec, dict):
+        return llm_spec.get("max_tokens")
+    return None
+
 
 class PraisonAIAdapter(BaseFrameworkAdapter):
     """
@@ -345,7 +457,17 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             return llm_config[0]['model']
         return "gpt-4o-mini"
 
-    def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name, agent_tool_wrap_resolver=None):
+    def _build_agents_and_tasks(
+        self,
+        config,
+        topic,
+        tools_dict,
+        agent_callback,
+        task_callback,
+        model_name,
+        agent_tool_wrap_resolver=None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ):
         """Build agents and tasks from configuration."""
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask
         from ._config_builder import build_agent_specs
@@ -378,6 +500,15 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             
             # Resolve per-agent LLM model
             agent_model = self._resolve_agent_model(details, model_name)
+
+            # CLI max_tokens is an explicit global override when present;
+            # otherwise honour each YAML agent's own value (including a nested
+            # ``llm.max_tokens``) and resolve an omitted value from that
+            # agent's model ceiling.
+            requested_max_tokens = _requested_output_budget(details, cli_config)
+            resolved_max_tokens = _resolve_output_budget(
+                agent_model, requested_max_tokens
+            )
             
             # Resolve per-agent runtime configuration
             agent_runtime = self._resolve_agent_runtime(details, config)
@@ -385,6 +516,14 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Resolve approval configuration
             agent_approval = self._resolve_agent_approval(details, config)
             
+            # Preserve the complete YAML LLM mapping (endpoint, credentials,
+            # sampling, retries, and provider-specific options) while adding
+            # the resolved model/budget fields. Rebuilding from only ``model``
+            # silently discarded those settings.
+            agent_llm = _build_agent_llm_spec(
+                details.get('llm'), agent_model, resolved_max_tokens
+            )
+
             # Create basic agent (pass both tools and toolsets)
             agent_kwargs = {
                 'name': role_filled,
@@ -392,7 +531,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'goal': goal_filled,
                 'backstory': backstory_filled,
                 'instructions': details.get('instructions'),
-                'llm': agent_model,
+                'llm': agent_llm,
                 'allow_delegation': details.get('allow_delegation', False),
                 'tools': agent_tool_list,
                 'toolsets': agent_toolsets,
@@ -780,6 +919,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             agents, tasks = self._build_agents_and_tasks(
                 config, topic, tools_dict, agent_callback, task_callback, model_name,
                 agent_tool_wrap_resolver=agent_tool_wrap_resolver,
+                cli_config=cli_config,
             )
 
             # Resolve CLI session continuity (--continue/--session/--fork) that the

@@ -20,6 +20,81 @@ app = typer.Typer(help="Run agents")
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
+DEFAULT_MAX_TOKENS = 16000
+
+
+def _resolve_max_tokens(
+    model: Optional[str],
+    requested: Optional[int],
+    *,
+    output: Any = None,
+) -> int:
+    """Resolve the output budget against the selected model's known limit.
+
+    LiteLLM metadata is optional and best-effort. Unknown models retain the
+    historical default, while an omitted budget uses the known model limit and
+    an explicit oversized value is capped with a diagnostic.
+    """
+    explicit = requested is not None
+    value = DEFAULT_MAX_TOKENS if requested is None else requested
+    if not model or value <= 0:
+        return value
+
+    try:
+        from praisonaiagents.llm.model_capabilities import max_output_tokens
+
+        ceiling = max_output_tokens(model)
+    except Exception:
+        ceiling = None
+
+    if not ceiling or ceiling <= 0:
+        return value
+    if not explicit:
+        # A known limit is authoritative.  Returning the full ceiling avoids
+        # retaining the historical 16k cap on models that can emit more.
+        return ceiling
+    if value <= ceiling:
+        return value
+
+    message = (
+        f"--max-tokens {value} exceeds {model}'s output limit ({ceiling}); "
+        f"clamping to {ceiling}"
+    )
+    if output is not None:
+        output_mode = getattr(getattr(output, "mode", None), "value", None)
+        if output_mode == "stream-json" and hasattr(output, "emit_event"):
+            # stream-json is an NDJSON protocol: never use print_json(), whose
+            # indentation emits a multi-line object and corrupts framing.
+            output.emit_event(
+                "warning",
+                message=message,
+                data={"code": "max_tokens_clamped"},
+            )
+        elif getattr(output, "is_json_mode", False) and hasattr(output, "print_json"):
+            # ``print_warning`` intentionally suppresses human text in JSON
+            # mode. Emit a structured diagnostic so automation can see that
+            # the requested value was lowered without corrupting stderr.
+            output.print_json({"warning": message, "code": "max_tokens_clamped"})
+        else:
+            output.print_warning(message)
+    return ceiling
+
+
+def _llm_spec_with_max_tokens(
+    llm_spec: Any,
+    model: Optional[str],
+    max_tokens: Optional[int],
+) -> Any:
+    """Add a resolved output budget to an LLM spec without losing options."""
+    if max_tokens is None:
+        return llm_spec
+    spec = dict(llm_spec) if isinstance(llm_spec, dict) else {}
+    if not spec.get("model"):
+        spec["model"] = llm_spec if isinstance(llm_spec, str) else model
+    if not spec.get("model"):
+        return llm_spec
+    spec["max_tokens"] = max_tokens
+    return spec
 
 
 def _run_succeeded(result: Any) -> bool:
@@ -1158,7 +1233,7 @@ def run_main(
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names (e.g. web_search,github) or a tools.py file path"),
     toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
     allow_local_tools: bool = typer.Option(False, "--allow-local-tools", help="Load project-local .praisonai/tools/*.py (equivalent to PRAISONAI_ALLOW_LOCAL_TOOLS=true)"),
-    max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Maximum output tokens (defaults to the known model limit; 16000 when unknown)"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: silent (default), actions, verbose, json, stream"),
@@ -1371,12 +1446,64 @@ def run_main(
     # identically instead of dead-ending on a raw provider error. Headless
     # (non-TTY / --output json) fails fast with the actionable hint; interactive
     # offers the wizard and re-checks.
-    if target:  # Only check if we actually have something to run
+    # YAML agents may select a different model (or an explicit per-agent
+    # max_tokens), so leave their raw option untouched and let the YAML
+    # generator resolve each agent against its own ceiling. Prompt/custom-agent
+    # paths use the resolved top-level model here.
+    is_yaml_target = bool(target and _is_yaml_file(target))
+    # Loading a named custom definition performs a complete discovery pass
+    # (including opt-in local tool modules). Keep the preview result so the
+    # execution path does not discover and execute the same definitions twice.
+    preloaded_agent_config = None
+    custom_agent_model = None
+    if target or agent or command:  # Any execution surface may need model/budget resolution
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
 
+        # A custom agent may declare its model in frontmatter. Resolve that
+        # model before deriving the default output budget; otherwise an omitted
+        # ``--model`` is budgeted at the generic 16k fallback and then attached
+        # to the frontmatter model, which can have a different ceiling.
+        if agent and model is None:
+            try:
+                from praisonai_code.cli.features.custom_definitions import (
+                    load_agent_from_name,
+                )
+
+                _preview_config = load_agent_from_name(agent)
+                preloaded_agent_config = _preview_config
+                _preview_llm = (_preview_config or {}).get("llm")
+                if isinstance(_preview_llm, dict):
+                    custom_agent_model = _preview_llm.get("model")
+                else:
+                    custom_agent_model = _preview_llm
+                if isinstance(custom_agent_model, str):
+                    custom_agent_model = custom_agent_model.strip() or None
+            except Exception:
+                # The normal custom-agent load below reports missing/invalid
+                # definitions; preview is only for model-aware budgeting.
+                pass
+
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
-        model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+        # A frontmatter model is used for credential checks and budget
+        # resolution, but must not be passed as a synthetic ``--model``
+        # override: doing so replaces a mapping-valued LLM spec and discards
+        # endpoint, credentials, sampling, and retry options.
+        credential_model = model or custom_agent_model
+        resolved_model = ensure_configured_or_onboard(
+            model=credential_model, interactive=not _headless
+        )
+        if not (agent and model is None and custom_agent_model):
+            model = resolved_model
+        # A YAML file is a workflow target only when no named custom agent or
+        # command is selected. In the latter cases the file is merely the
+        # prompt/argument source and the named definition still needs its own
+        # model-aware budget resolution.
+        if not is_yaml_target or agent or command:
+            budget_model = custom_agent_model or model
+            max_tokens = _resolve_max_tokens(
+                budget_model, max_tokens, output=output
+            )
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject
@@ -1442,7 +1569,11 @@ def run_main(
     # Handle custom agent or command
     if agent:
         from praisonai_code.cli.features.custom_definitions import load_agent_from_name
-        agent_config = load_agent_from_name(agent)
+        agent_config = (
+            preloaded_agent_config
+            if preloaded_agent_config is not None
+            else load_agent_from_name(agent)
+        )
         if not agent_config:
             output.print_error(f"Agent '{agent}' not found")
             raise typer.Exit(1)
@@ -1614,6 +1745,7 @@ def run_main(
                 approve_all_tools=approve_all_tools,
                 approval_timeout=approval_timeout,
                 output_mode=output_mode,
+                max_tokens=max_tokens,
             )
         else:
             # Profiling for direct prompt
@@ -1631,6 +1763,7 @@ def run_main(
                 approval=approval,
                 approve_all_tools=approve_all_tools,
                 approval_timeout=approval_timeout,
+                max_tokens=max_tokens,
             )
         return
     
@@ -1724,7 +1857,7 @@ def _run_from_file(
     trace: bool = False,
     memory: bool = False,
     tools: Optional[str] = None,
-    max_tokens: int = 16000,
+    max_tokens: Optional[int] = None,
     output_mode: Optional[str] = None,
     continue_session: bool = False,
     session: Optional[str] = None,
@@ -1812,6 +1945,7 @@ def _run_from_file(
             or effective_approval
             or approve_all_tools
             or output_mode
+            or max_tokens is not None
         ):
             class Args:
                 pass
@@ -1821,6 +1955,8 @@ def _run_from_file(
             args.resume_session = session_id
             args.cli_project_sessions = bool(session_id or auto_save_name)
             args.output = output_mode
+            args.max_tokens = max_tokens
+            args._max_tokens_explicit = max_tokens is not None
             if effective_approval:
                 args.approval = effective_approval
             if approve_all_tools:
@@ -1979,6 +2115,10 @@ def _run_prompt(
         runtime_eligible = (
             (no_save or stateful_attach)
             and thinking_budget is None
+            # The warm runtime API has no per-request output-budget field. A
+            # resolved non-default budget must stay in-process so it cannot be
+            # silently replaced by the runtime's own default.
+            and max_tokens == DEFAULT_MAX_TOKENS
             and not isolated
             and not append_system_prompt
             and not image
@@ -2021,6 +2161,9 @@ def _run_prompt(
             }
             if model:
                 agent_config["llm"] = model
+            agent_config["llm"] = _llm_spec_with_max_tokens(
+                agent_config.get("llm"), model, max_tokens
+            )
             
             # Resolve approval backend if specified
             if approval:
@@ -2133,6 +2276,7 @@ def _run_prompt(
         args.tools = tools
         args.toolset = toolset
         args.max_tokens = max_tokens
+        args._max_tokens_explicit = max_tokens is not None
         args.web_search = False
         args.web_fetch = False
         args.prompt_caching = False
@@ -2252,6 +2396,7 @@ def _run_from_file_profiled(
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
     output_mode: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2319,7 +2464,7 @@ def _run_from_file_profiled(
     # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
     # permission-gated identically to the non-profiled path instead of silently
     # dropping the deny policy.
-    if session_id or auto_save_name or approval or approve_all_tools or output_mode:
+    if session_id or auto_save_name or approval or approve_all_tools or output_mode or max_tokens is not None:
         class Args:
             pass
         
@@ -2328,6 +2473,8 @@ def _run_from_file_profiled(
         args.resume_session = session_id
         args.cli_project_sessions = bool(session_id or auto_save_name)
         args.output = output_mode
+        args.max_tokens = max_tokens
+        args._max_tokens_explicit = max_tokens is not None
         if approval:
             args.approval = approval
         if approve_all_tools:
@@ -2536,9 +2683,20 @@ def _run_custom_agent(
     try:
         from praisonaiagents import Agent
         
-        # Override model if specified
+        # Override only the model field when the definition supplies a full
+        # LLM mapping. Replacing the mapping wholesale would discard endpoint,
+        # credentials, sampling, retry, and provider-specific options.
         if model:
-            agent_config["llm"] = model
+            if isinstance(agent_config.get("llm"), dict):
+                agent_config["llm"] = {
+                    **agent_config["llm"],
+                    "model": model,
+                }
+            else:
+                agent_config["llm"] = model
+        agent_config["llm"] = _llm_spec_with_max_tokens(
+            agent_config.get("llm"), model, max_tokens
+        )
 
         # Compose the agent's toolset: frontmatter ``tools:`` (name strings)
         # + explicit --tools/--toolset + auto-discovered project-local
@@ -2734,6 +2892,7 @@ def _run_prompt_profiled(
     approval: Optional[str] = None,
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2770,6 +2929,9 @@ def _run_prompt_profiled(
     }
     if model:
         agent_config["llm"] = model
+    agent_config["llm"] = _llm_spec_with_max_tokens(
+        agent_config.get("llm"), model, max_tokens
+    )
 
     # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) into the
     # profiled agent so a read-only planning run stays read-only under
