@@ -748,7 +748,15 @@ class AgentFlow:
     # Status tracking
     status: str = "not_started"  # not_started, running, completed, failed
     step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
-    
+
+    #: Optional type for ``variables``: a Pydantic model or a dataclass. When
+    #: set, the initial variables are validated and ``flow.state`` gives typed
+    #: access, so a misspelled variable is an error instead of a value written
+    #: once and never read. Without it nothing changes -- ``variables`` stays
+    #: the untyped dict it has always been. Declared last so it never shifts
+    #: the positional binding of existing fields like ``file_path``.
+    state_model: Optional[type] = None
+
     # Private resolved fields (set in __post_init__)
     _verbose: bool = field(default=False, repr=False)
     _stream: bool = field(default=True, repr=False)
@@ -795,6 +803,13 @@ class AgentFlow:
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
         from ..utils.model_alias import resolve_model_name
+
+        # Validate the declared state up front. A misspelled variable found when
+        # the flow is BUILT costs nothing; found mid-run it has already burned
+        # the steps before it, and may never be found at all.
+        if self.state_model is not None:
+            from .state import validate_variables as _validate_state
+            _validate_state(self.state_model, self.variables)
 
         # One rule for the alias pair, shared with Agent and AgentTeam. Must
         # UNWRAP an LLMConfig to its model string: this value seeds the agents
@@ -1261,6 +1276,27 @@ class AgentFlow:
         """
         from .diagram import flow_to_mermaid
         return flow_to_mermaid(self)
+
+    @property
+    def state(self):
+        """The flow's variables as the declared ``state_model``.
+
+        Returns None when no model was declared, so callers can tell "untyped"
+        from "typed and empty" rather than being handed a misleading blank.
+        """
+        from .state import build_state
+        if self.state_model is None:
+            return None
+        return build_state(self.state_model, self.variables)
+
+    def validate_variables(self) -> None:
+        """Raise unless the current variables fit ``state_model``.
+
+        Called for you at construction; exposed so a step that writes variables
+        can re-check before the next step reads them.
+        """
+        from .state import validate_variables
+        validate_variables(self.state_model, self.variables)
 
     def __repr__(self):
         """Show where this workflow's steps run.
