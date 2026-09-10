@@ -32,16 +32,32 @@ class TestPathCentralization:
         for d in dirs:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
-    def test_skills_discovery_uses_paths_module(self):
-        """skills/discovery.py should use paths.get_skills_dir()."""
+    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch):
+        """skills/discovery.py should use paths.get_skills_dir().
+
+        Two problems with the original. It asserted every returned directory
+        was named "skills", but discovery also returns cached remote-skill
+        directories, which are named after the cache layout
+        (~/.praisonai/cache/remote-skills/<hash>/current) -- so the assertion
+        failed on any machine that had ever fetched a remote skill, and passed
+        on CI only because HOME there is empty. And it read the real home
+        directory, so its result depended on the developer running it.
+
+        HOME is redirected to a temp dir, and the assertion now checks the
+        claim in the docstring: the paths module's skills dir is what
+        discovery uses.
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("PRAISONAI_HOME", raising=False)
+
         from praisonaiagents.skills.discovery import get_default_skill_dirs
         from praisonaiagents.paths import get_skills_dir
-        
+
         dirs = get_default_skill_dirs()
-        
-        # Should return paths that end with 'skills'
-        for d in dirs:
-            assert d.name == "skills", f"Expected 'skills' dir, got {d}"
+
+        assert get_skills_dir() in dirs, (
+            f"discovery must use paths.get_skills_dir(); got {dirs}"
+        )
     
     def test_paths_module_returns_praisonai_dir(self):
         """paths.py should return ~/.praisonai/ as default."""

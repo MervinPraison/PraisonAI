@@ -234,9 +234,19 @@ Now provide your final answer using this result. Summarize the information natur
         # Ollama 400s the whole request on a union-typed parameter.
         return collapse_union_param_types(tools)
 
-    # A JSON grammar and tools cannot coexist here: the grammar makes the
-    # tool-call tag unemittable and the model fabricates instead.
-    format_and_tools_conflict = True
+    # Read from the quirk catalogue rather than restating it. Hard-coding this
+    # created a second source of truth: correcting the quirk note would have
+    # left the behaviour unchanged, which is the drift the catalogue exists to
+    # prevent.
+    @property
+    def format_and_tools_conflict(self) -> bool:
+        try:
+            from ...local.quirktable import Quirk, quirks_for
+            from ...local.capabilities import ApiStyle, LocalEngine
+            return Quirk.FORMAT_AND_TOOLS_MUTUALLY_DESTRUCTIVE in quirks_for(
+                LocalEngine.OLLAMA, ApiStyle.OPENAI_CHAT)
+        except Exception:  # noqa: BLE001 -- the catalogue must never break a request
+            return True
     
     
     def get_default_settings(self) -> Dict[str, Any]:

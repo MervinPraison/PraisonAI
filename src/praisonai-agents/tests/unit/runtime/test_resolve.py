@@ -88,7 +88,7 @@ class TestRuntimeResolvers:
         assert runtime.model_ref == "gpt-4o"
         mock_llm_class.assert_called_once_with(model="gpt-4o")
     
-    @patch('praisonaiagents.runtime.resolve.LLM', side_effect=ImportError("LLM not available"))
+    @patch('praisonaiagents.llm.llm.LLM', side_effect=ImportError("LLM not available"))
     def test_default_resolver_fallback(self, mock_llm_class):
         """Test DefaultRuntimeResolver fallback when LLM is not available."""
         resolver = DefaultRuntimeResolver()
@@ -106,7 +106,9 @@ class TestRuntimeWrappers:
     
     def test_llm_runtime_wrapper(self):
         """Test LLMRuntimeWrapper functionality."""
-        mock_llm = Mock()
+        # spec= is required: a bare Mock() auto-creates .provider, which makes
+        # hasattr(llm, 'provider') true and hides the model_ref inference below.
+        mock_llm = Mock(spec=['chat'])
         mock_llm.chat.return_value = "Hello response"
         
         wrapper = LLMRuntimeWrapper(
@@ -128,7 +130,7 @@ class TestRuntimeWrappers:
     @pytest.mark.asyncio
     async def test_llm_runtime_wrapper_async(self):
         """Test LLMRuntimeWrapper async functionality."""
-        mock_llm = Mock()
+        mock_llm = Mock(spec=['achat'])
         mock_llm.achat = Mock(return_value=asyncio.Future())
         mock_llm.achat.return_value.set_result("Async response")
         
@@ -148,9 +150,10 @@ class TestRuntimeWrappers:
     @pytest.mark.asyncio  
     async def test_llm_runtime_wrapper_async_fallback(self):
         """Test LLMRuntimeWrapper async fallback to sync execution."""
-        mock_llm = Mock()
+        # spec=['chat'] genuinely removes achat; a bare Mock() auto-creates it,
+        # so the wrapper took the async branch and awaited a Mock.
+        mock_llm = Mock(spec=['chat'])
         mock_llm.chat.return_value = "Sync response"
-        # No achat method - should fall back to sync in executor
         
         wrapper = LLMRuntimeWrapper(
             llm=mock_llm,

@@ -13,6 +13,21 @@ import os
 import sys
 import pytest
 
+# Keep the test suite off the network for things it never meant to fetch.
+# These are set before any praisonaiagents/litellm import so they take effect.
+#
+#   litellm downloads model_prices_and_context_window.json from
+#   raw.githubusercontent.com the first time it prices a response, so even a
+#   fully-mocked LLM test reached out. Its bundled copy is equivalent for
+#   tests, and using it also stops the suite failing or stalling when offline.
+#
+#   huggingface_hub downloads tokenizers on first use, which pulled
+#   huggingface.co into knowledge tests that only construct a config.
+#
+# A test that genuinely needs live data opts back in with monkeypatch.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 # Add the local package to the path for development testing
 _package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _package_root not in sys.path:
@@ -68,12 +83,124 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip live tests unless PRAISONAI_LIVE_TESTS=1 is set."""
+    """Skip live and network tests unless explicitly enabled.
+
+    PRAISONAI_ALLOW_NETWORK was already set to '0' by two workflows and by the
+    praisonai-code test CLI, but nothing on this side read it -- a switch wired
+    to nothing, while network-marked tests ran anyway. Honouring it here makes
+    "unit: pure unit tests - no network" (pytest.ini) actually hold, and stops
+    the suite depending on a reachable third-party service.
+    """
     if os.environ.get("PRAISONAI_LIVE_TESTS") != "1":
         skip_live = pytest.mark.skip(reason="Live tests disabled. Set PRAISONAI_LIVE_TESTS=1 to enable.")
         for item in items:
             if "live" in item.keywords:
                 item.add_marker(skip_live)
+
+    if os.environ.get("PRAISONAI_ALLOW_NETWORK") != "1":
+        skip_net = pytest.mark.skip(
+            reason="Network tests disabled. Set PRAISONAI_ALLOW_NETWORK=1 to enable."
+        )
+        for item in items:
+            if "network" in item.keywords:
+                item.add_marker(skip_net)
+
+
+_ALLOWED_HOST_PREFIXES = ("127.", "10.", "192.168.", "169.254.")
+_ALLOWED_HOSTS = {"::1", "localhost", "0.0.0.0", ""}
+
+
+def _is_local(host):
+    if not isinstance(host, str):
+        return False
+    return host in _ALLOWED_HOSTS or host.startswith(_ALLOWED_HOST_PREFIXES)
+
+
+@pytest.fixture(autouse=True)
+def _no_unmarked_network(request, monkeypatch):
+    """Fail a unit test that reaches the internet instead of letting it bill.
+
+    Several tests here made real, billed provider calls on every run simply
+    because nothing stopped them -- a module-level skipif on key *presence*
+    reads as "we have a key, so go ahead" rather than "the operator asked for
+    this". Silent egress is the failure mode: the test passes, the bill grows,
+    and nobody looks. Anything genuinely needing the network says so with the
+    `network` or `live` marker (both gated by env in
+    pytest_collection_modifyitems above), and is exempt here.
+
+    Loopback and private ranges stay open, so local servers, fixtures and
+    sandboxes are unaffected.
+    """
+    if request.node.get_closest_marker("network") or request.node.get_closest_marker("live"):
+        return
+    if os.environ.get("PRAISONAI_ALLOW_NETWORK") == "1":
+        return
+
+    import socket
+
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def _blocked(addr):
+        host = addr[0] if isinstance(addr, tuple) else addr
+        return not _is_local(host)
+
+    def _explain(addr):
+        return (
+            f"{request.node.nodeid} tried to connect to {addr!r}. Unit tests must "
+            "not reach the network: stub the call, or mark the test "
+            "@pytest.mark.network (or @pytest.mark.live for a paid provider) so "
+            "it is skipped unless explicitly enabled."
+        )
+
+    def guarded_connect(self, addr):
+        if _blocked(addr):
+            raise RuntimeError(_explain(addr))
+        return real_connect(self, addr)
+
+    def guarded_connect_ex(self, addr):
+        if _blocked(addr):
+            raise RuntimeError(_explain(addr))
+        return real_connect_ex(self, addr)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+
+
+@pytest.fixture(autouse=True)
+def _clear_warning_registries():
+    """Let a test see a warning an earlier test already triggered.
+
+    Python records each (message, category, lineno) it has warned about in the
+    emitting module's __warningregistry__ and stays silent thereafter. So a
+    test asserting `pytest.warns(DeprecationWarning)` passed alone and failed
+    in a full run purely because some earlier test had already tripped the same
+    warning -- five tests across test_parameter_naming, test_param_consolidation
+    and test_gap_closure behaved that way, with nothing wrong in either the
+    test or the code.
+
+    Clearing the registries before each test makes the assertion depend on the
+    code under test rather than on what ran before it.
+    """
+    import sys
+
+    for module in list(sys.modules.values()):
+        registry = getattr(module, "__warningregistry__", None)
+        if registry:
+            registry.clear()
+
+    # praisonaiagents.utils.deprecation keeps its own "warn once per process"
+    # set (_warned_params) to keep Agent.__init__ off a hot path. That is the
+    # right production behaviour, but it means only the FIRST test in a process
+    # can ever observe a given parameter deprecation. Clear it too, so these
+    # tests assert the code's behaviour rather than their position in the run.
+    try:
+        from praisonaiagents.utils import deprecation as _deprecation
+        _deprecation._warned_params.clear()
+    except Exception:  # noqa: BLE001 - never let test setup fail on this
+        pass
+
+    yield
 
 
 @pytest.fixture

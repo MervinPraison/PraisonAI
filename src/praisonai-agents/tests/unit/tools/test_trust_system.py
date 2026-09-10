@@ -113,7 +113,7 @@ class TestRegistryIntegration:
         assert registry.get_trust_level("trusted_tool") == "trusted"
         assert registry.get_trust_level("unknown_tool") is None
 
-    @patch('praisonaiagents.tools.trust.get_registry')
+    @patch('praisonaiagents.tools.registry.get_registry')
     def test_wrap_if_external_uses_registry(self, mock_get_registry):
         """wrap_if_external should check registry for tool trust level."""
         mock_registry = MagicMock()
@@ -157,12 +157,21 @@ class TestExternalToolDetection:
 
     def test_add_external_tool(self):
         """Adding external tools should work."""
-        original_count = len(EXTERNAL_TOOL_NAMES)
+        # add_external_tool rebinds the module-level EXTERNAL_TOOL_NAMES to a
+        # new frozenset rather than mutating it, so the name this test module
+        # imported still refers to the pre-call set. Read it through the module
+        # to see the update; is_external_tool() reads the global at call time
+        # and is the supported query path.
+        from praisonaiagents.tools import trust
+
+        original_count = len(trust.EXTERNAL_TOOL_NAMES)
         add_external_tool("new_external_tool")
-        
-        assert "new_external_tool" in EXTERNAL_TOOL_NAMES
-        assert len(EXTERNAL_TOOL_NAMES) == original_count + 1
+
+        assert "new_external_tool" in trust.EXTERNAL_TOOL_NAMES
+        assert len(trust.EXTERNAL_TOOL_NAMES) == original_count + 1
         assert is_external_tool("new_external_tool")
+        # the stale module-level import demonstrates the rebinding footgun
+        assert "new_external_tool" not in EXTERNAL_TOOL_NAMES
 
 
 class TestSystemPromptIntegration:

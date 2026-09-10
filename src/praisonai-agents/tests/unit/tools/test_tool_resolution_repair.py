@@ -48,9 +48,9 @@ def test_unknown_tool_returns_available_inventory():
 
     agent = _make_agent([web_search, calculator])
 
-    # The corrective dict is produced by the dispatch impl; the public
-    # execute_tool() wrapper escalates it as a ToolExecutionError whose message
-    # carries the same actionable text back to the model.
+    # The corrective dict is produced by the dispatch impl and passes through
+    # the public execute_tool() wrapper unchanged -- see the test below. It is
+    # returned, not raised, so the model can act on it and retry.
     result = agent._execute_tool_impl("totally_made_up_tool", {})
     assert isinstance(result, dict)
     assert "not found" in result["error"]
@@ -101,18 +101,27 @@ def test_runtime_valueerror_omits_parameter_hint():
 
 
 def test_unknown_tool_message_reaches_model_via_public_path():
+    """The corrective text must survive the public execute_tool() wrapper.
+
+    It arrives as a returned error dict, not an exception. GHSA-gmjg-hv98-qggq
+    pins that contract in tests/unit/agent/test_tool_resolution_boundary.py --
+    "execute_tool with an unknown name should return None or an error dict, not
+    raise" -- and self-repair depends on it: the model is handed the message and
+    retries with a real tool name. Raising would abort the run instead, which is
+    precisely what repair exists to avoid.
+    """
     def web_search(query: str) -> str:
         """Search the web."""
         return query
 
-    from praisonaiagents.errors import ToolExecutionError
-
     agent = _make_agent([web_search])
 
-    with pytest.raises(ToolExecutionError) as exc:
-        agent.execute_tool("totally_made_up_tool", {})
-    assert "not found" in str(exc.value)
-    assert "web_search" in str(exc.value)
+    result = agent.execute_tool("totally_made_up_tool", {})
+
+    assert isinstance(result, dict)
+    assert "not found" in result["error"]
+    assert "web_search" in result["error"]
+    assert result["available_tools"] == ["web_search"]
 
 
 def test_bind_failure_parameter_hint_reaches_model_via_public_path():

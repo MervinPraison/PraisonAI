@@ -7,6 +7,8 @@ per-user session isolation instead of in-memory-only storage.
 
 import asyncio
 import tempfile
+
+import pytest
 from typing import Any, Dict, List
 
 from praisonaiagents.session.store import DefaultSessionStore
@@ -48,12 +50,19 @@ class TestBotSessionManagerWithStore:
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__))
             )))),
-            "praisonai", "praisonai", "bots"
+            # The bots package moved to praisonai-bot in the C9 split. This
+            # still pointed at the wrapper, so every test here died on
+            # `No module named '_session'` -- unnoticed, because no workflow
+            # ran this directory. It must be imported as part of its package,
+            # not as a loose module: _session.py uses relative imports.
+            "praisonai-bot"
         )
+        if not os.path.isdir(os.path.join(wrapper_path, "praisonai_bot", "bots")):
+            pytest.skip("praisonai-bot is not present in this checkout")
         if wrapper_path not in sys.path:
             sys.path.insert(0, wrapper_path)
         
-        from _session import BotSessionManager
+        from praisonai_bot.bots._session import BotSessionManager
         store = DefaultSessionStore(session_dir=tmpdir)
         return BotSessionManager(store=store, platform=platform)
     
@@ -185,12 +194,19 @@ class TestBotSessionManagerWithStore:
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__))
             )))),
-            "praisonai", "praisonai", "bots"
+            # The bots package moved to praisonai-bot in the C9 split. This
+            # still pointed at the wrapper, so every test here died on
+            # `No module named '_session'` -- unnoticed, because no workflow
+            # ran this directory. It must be imported as part of its package,
+            # not as a loose module: _session.py uses relative imports.
+            "praisonai-bot"
         )
+        if not os.path.isdir(os.path.join(wrapper_path, "praisonai_bot", "bots")):
+            pytest.skip("praisonai-bot is not present in this checkout")
         if wrapper_path not in sys.path:
             sys.path.insert(0, wrapper_path)
         
-        from _session import BotSessionManager
+        from praisonai_bot.bots._session import BotSessionManager
         # No store parameter = backward compatible in-memory mode
         mgr = BotSessionManager()
         agent = FakeAgent()

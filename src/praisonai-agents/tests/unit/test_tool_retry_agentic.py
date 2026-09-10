@@ -7,7 +7,28 @@ import time
 from unittest.mock import patch
 
 from praisonaiagents import Agent, tool
+
+import os
+
+# Every test here drives a real provider turn -- the names say so. Nothing
+# gated them, so they billed a real account on any machine with a key and now
+# fail against the suite's egress guard. Marked live/network like the rest.
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.network,
+    pytest.mark.skipif(
+        (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+         and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+        or not os.environ.get("OPENAI_API_KEY"),
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+    ),
+]
 from praisonaiagents.tools.retry import RetryPolicy
+from praisonaiagents.config.feature_configs import ToolConfig
+
+# Agent(tool_retry_policy=...) was consolidated into the ToolConfig object:
+# agent.py sets self._tool_retry_policy from _tool_config.retry_policy, and the
+# constructor now rejects the old keyword outright.
 
 
 class TestRetryPolicyAgentic:
@@ -48,7 +69,7 @@ class TestRetryPolicyAgentic:
             name="research_assistant",
             instructions="You are a helpful research assistant. When asked to search for information, use the flaky_web_search tool. Be concise in your response.",
             tools=[flaky_web_search],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         # Mock time.sleep to speed up test
@@ -89,7 +110,7 @@ class TestRetryPolicyAgentic:
             name="data_analyst", 
             instructions="You are a data analyst. If you cannot access the database, explain what happened and suggest alternatives. Keep it brief.",
             tools=[restricted_database_query],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         # ✅ REAL agent call with actual LLM interaction
@@ -141,7 +162,7 @@ class TestRetryPolicyAgentic:
             name="api_client",
             instructions="You help users get information. Try the primary_api first. If it fails completely, you can try fallback_api. Be brief.",
             tools=[primary_api, fallback_api],
-            tool_retry_policy=agent_retry_policy
+            tool_config=ToolConfig(retry_policy=agent_retry_policy)
         )
         
         with patch('time.sleep'):
@@ -185,7 +206,7 @@ class TestRetryPolicyAgentic:
             name="weather_assistant",
             instructions="You provide weather information using the async_weather_api tool. Keep responses concise.",
             tools=[async_weather_api],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         with patch('time.sleep'), patch('asyncio.sleep'):

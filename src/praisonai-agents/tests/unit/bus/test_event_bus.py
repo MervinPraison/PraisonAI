@@ -386,9 +386,13 @@ class TestEventBusOptimization:
         real_event = Event(type="test.event", data={})
         result = bus.publish_event(real_event)
         
-        # Should return the event without storing in history
+        # The same event object comes back, and no dispatch happened. History
+        # still records it: an event that was published happened, whether or
+        # not anything was subscribed at the time, and test_event_history*
+        # above depend on that. The fast path skips the subscriber walk, which
+        # is the expensive part -- the append is O(1) into a capped list.
         assert result is real_event
-        assert len(bus.get_history()) == 0  # No history when no subscribers
+        assert bus.get_history() == [real_event]
     
     def test_publish_normal_path_with_subscribers(self):
         """Test that publishing with subscribers works normally."""

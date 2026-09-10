@@ -14,6 +14,30 @@ import subprocess
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _auto_approve_rewrites():
+    """ast_grep_rewrite is approval-gated; without a backend it reads stdin.
+
+    Calling the tool directly sent the approval flow to the console, which
+    under pytest raises "reading from stdin while output is captured" and the
+    tool then denied itself with a PermissionError. These tests are about the
+    rewrite behaviour, not the approval gate, so approve automatically for the
+    duration. tests/unit/test_approval_protocol.py covers the gate itself.
+    """
+    from praisonaiagents.approval import get_approval_registry, AutoApproveBackend
+
+    registry = get_approval_registry()
+    registry.set_backend(AutoApproveBackend())
+    try:
+        yield
+    finally:
+        # remove_backend, not a conditional restore: the registry is a global,
+        # so leaving an auto-approver installed would silently approve every
+        # later test in the same process.
+        registry.remove_backend()
+
+
+
 class TestAstGrepToolAvailability:
     """Test ast-grep tool availability detection."""
     

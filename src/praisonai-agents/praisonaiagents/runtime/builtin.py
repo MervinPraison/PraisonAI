@@ -103,6 +103,20 @@ class PraisonAIRuntime:
                             metadata=metadata,
                             error="OPENAI_API_KEY environment variable is required"
                         )
+                    # A key being present does not mean the call succeeded: a
+                    # 403, a rate limit or a dropped connection also yield an
+                    # empty result. Returning error=None there hands the caller
+                    # a silently empty response with nothing to diagnose.
+                    return RuntimeResult(
+                        content="",
+                        metadata=metadata,
+                        error=(
+                            "Runtime returned no content for model "
+                            f"{metadata.get('model') or model_ref or 'default'}. "
+                            "The provider call failed or produced an empty response; "
+                            "check credentials, model access and connectivity."
+                        )
+                    )
                 
                 return RuntimeResult(
                     content=str(result) if result else "",

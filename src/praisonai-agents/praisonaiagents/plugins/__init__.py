@@ -91,6 +91,19 @@ _auto_enable_attempted: bool = False
 _auto_enable_lock = threading.Lock()
 
 
+def _plugin_name(plugin_info) -> str:
+    """Read a plugin's name from a PluginInfo, or from a dict.
+
+    list_plugins() returns PluginInfo dataclasses, which have no .get(), so
+    calling .get("name") raised AttributeError and made enable_all_plugins()
+    and disable_all_plugins() fail outright. Both shapes are accepted here so a
+    future dict-returning implementation keeps working.
+    """
+    if isinstance(plugin_info, dict):
+        return plugin_info.get("name", "")
+    return getattr(plugin_info, "name", "") or ""
+
+
 def maybe_enable_from_config() -> None:
     """Enable plugins once per process when config or env requests it."""
     global _auto_enable_attempted
@@ -181,7 +194,7 @@ def enable(plugins: list = None, options_by_name: dict = None) -> None:
     else:
         # Enable all discovered plugins
         for plugin_info in manager.list_plugins():
-            manager.enable(plugin_info.get("name", ""))
+            manager.enable(_plugin_name(plugin_info))
     
     import logging
     # Bridge enabled plugins into the runtime hook engine so their lifecycle
@@ -232,7 +245,7 @@ def disable(plugins: list = None) -> None:
             _plugins_enabled = False
             _enabled_plugin_names = None
         for plugin_info in manager.list_plugins():
-            manager.disable(plugin_info.get("name", ""))
+            manager.disable(_plugin_name(plugin_info))
 
 
 def list_plugins() -> list:

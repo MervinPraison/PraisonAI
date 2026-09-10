@@ -1174,8 +1174,15 @@ class AgentTeam(SpawnAnnounceProtocol):
             has_handler_only_task = any(
                 _task_has_custom_handler(t) for t in (tasks or [])
             )
-            if not has_handler_only_task:
-                raise ValueError("At least one agent must be provided")
+            # An empty team is legitimate for the spawn-announce pattern:
+            # AgentTeam.spawn_sub_agent and SpawnAnnounceProtocol are exported
+            # public API, and their documented use is a team created with no
+            # agents that spawns them dynamically at runtime. Refusing to
+            # construct one made that shipped feature unusable. The mistake
+            # this guard exists to catch -- forgetting to pass agents -- is
+            # still caught loudly by _require_runnable_agents() before any
+            # work starts.
+            self._constructed_without_agents = not has_handler_only_task
         
         # ─────────────────────────────────────────────────────────────────────
         # Core initialization
@@ -2112,6 +2119,25 @@ class AgentTeam(SpawnAnnounceProtocol):
             self._run_owner_ident = None
             lock.release()
 
+    def _require_runnable_agents(self):
+        """Fail before execution if the team has nothing that can run.
+
+        Construction of an empty team is allowed so the spawn-announce pattern
+        works, so the "you forgot the agents" error moves here, where we can
+        also see anything spawned in the meantime.
+        """
+        if not getattr(self, "_constructed_without_agents", False):
+            return
+        if self.agents:
+            return
+        if getattr(self, "_spawned_agents", None):
+            return
+        raise ValueError(
+            "At least one agent must be provided. This team was created with "
+            "an empty agents list and nothing was spawned into it before "
+            "starting -- pass agents=[...] or call spawn_sub_agent() first."
+        )
+
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
         
@@ -2120,6 +2146,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             return_dict: If True, returns the full results dictionary instead of only the final response
             **kwargs: Additional arguments
         """
+        self._require_runnable_agents()
         # Same shared sandbox as start(). Without this, an async team with
         # tools_run_on= ran every tool on the host and said nothing.
         if self._needs_tools_scope():
@@ -2406,6 +2433,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             result = agents.start(output="silent")
             ```
         """
+        self._require_runnable_agents()
         # Remote execution: provision ONE sandbox shared by every agent on the
         # team, and tear it down even if execution raises.
         if self._needs_tools_scope():

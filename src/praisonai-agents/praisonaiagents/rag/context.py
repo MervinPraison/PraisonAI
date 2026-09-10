@@ -42,10 +42,15 @@ def _extract_value(item: ResultItem, key: str, default: Any = None) -> Any:
     Returns:
         Extracted value or default
     """
+    # A present-but-None value counts as absent. SearchResultItem declares
+    # `source` (and friends) with a None default, so getattr(item, key,
+    # default) always found the attribute and never returned the caller's
+    # default -- callers asking for "unknown.pdf" got None instead.
     if isinstance(item, dict):
-        return item.get(key, default)
+        value = item.get(key)
     else:
-        return getattr(item, key, default)
+        value = getattr(item, key, None)
+    return default if value is None else value
 
 
 def _extract_metadata_value(

@@ -18,6 +18,22 @@ from praisonaiagents.agent.handoff import (
 from praisonaiagents import Agent
 
 
+def _tool(tool_name):
+    """A stand-in tool whose name the policy can actually read.
+
+    _tool("x") is not enough: _compute_effective_tools resolves a name
+    with getattr(tool, 'name', getattr(tool, '__name__', ...)), and a bare Mock
+    auto-creates `.name` as a fresh Mock object. Every tool therefore had a
+    unique, non-string "name", so intersect mode found no overlap at all and
+    blocked-tool lists never matched. Set both attributes explicitly.
+    """
+    tool = Mock()
+    tool.__name__ = tool_name
+    tool.name = tool_name
+    return tool
+
+
+
 class TestHandoffToolPolicySecurity:
     """Test HandoffToolPolicy security boundary enforcement."""
 
@@ -43,12 +59,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="source_only")]
+        source_agent.tools = [_tool("shared_tool"), _tool("source_only")]
 
         # Mock target agent with tools
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="target_only")]
+        target_agent.tools = [_tool("shared_tool"), _tool("target_only")]
 
         # Create handoff with intersect mode (default)
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -66,12 +82,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with different tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="source_only")]
+        source_agent.tools = [_tool("source_only")]
 
         # Mock target agent with different tools
         target_agent = Mock()
         target_agent.name = "target" 
-        target_agent.tools = [Mock(__name__="target_only")]
+        target_agent.tools = [_tool("target_only")]
 
         # Create handoff with intersect mode
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -90,7 +106,7 @@ class TestHandoffToolPolicySecurity:
         
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="tool1"), Mock(__name__="tool2")]
+        target_agent.tools = [_tool("tool1"), _tool("tool2")]
 
         # Create handoff with passthrough mode, no blocked tools
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="passthrough"))
@@ -109,8 +125,8 @@ class TestHandoffToolPolicySecurity:
         
         target_agent = Mock()
         target_agent.name = "target"
-        tool1 = Mock(__name__="safe_tool")
-        tool2 = Mock(__name__="dangerous_tool")
+        tool1 = _tool("safe_tool")
+        tool2 = _tool("dangerous_tool")
         target_agent.tools = [tool1, tool2]
 
         # Create handoff with passthrough mode and blocked tools
@@ -148,34 +164,41 @@ class TestHandoffToolPolicySecurity:
         effective_tools = handoff_obj._compute_effective_tools(source_agent)
         assert effective_tools == []
 
-    @patch('praisonaiagents.agent.handoff.time.time')
-    def test_handoff_execution_respects_tool_boundary_sync(self, mock_time):
-        """Test that programmatic handoff execution enforces tool boundaries."""
-        mock_time.return_value = 123.0
-        
-        source_agent = Mock()
-        source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool")]
+    def test_handoff_execution_respects_tool_boundary_sync(self):
+        """A programmatic handoff hands the target only the intersected tools.
 
-        target_agent = Mock()
-        target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="private_tool")]
+        Built on real Agents. A bare Mock agent cannot carry this path: the
+        source's chat_history is sliced into prior_messages (a Mock is not
+        iterable) and the runtime resolution enters a context manager (a Mock
+        does not support the protocol). Each failure was swallowed by
+        execute_programmatic's except clause and surfaced only as "chat was
+        never called", hiding the real cause. Only chat() is stubbed, so the
+        tool-policy computation under test runs for real.
+        """
+        def shared_tool(q: str) -> str:
+            """Shared by both agents."""
+            return q
+
+        def private_tool(q: str) -> str:
+            """Only the target has this one."""
+            return q
+
+        source_agent = Agent(name="source", instructions="x", tools=[shared_tool])
+        target_agent = Agent(name="target", instructions="x",
+                             tools=[shared_tool, private_tool])
         target_agent.chat = Mock(return_value="response")
 
-        # Create handoff with intersect mode
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
         handoff_obj = Handoff(agent=target_agent, config=config)
 
-        # Execute programmatic handoff
         result = handoff_obj.execute_programmatic(source_agent, "test prompt")
 
-        # Verify that target agent's chat was called with restricted tools
+        assert result.success, f"handoff failed: {getattr(result, 'error', None)}"
         target_agent.chat.assert_called_once()
-        call_args = target_agent.chat.call_args
-        assert "tools" in call_args.kwargs
-        effective_tools = call_args.kwargs["tools"]
-        assert len(effective_tools) == 1
-        assert effective_tools[0].__name__ == "shared_tool"
+        effective_tools = target_agent.chat.call_args.kwargs["tools"]
+        assert [getattr(t_, "__name__", None) for t_ in effective_tools] == ["shared_tool"], (
+            "the target must receive only the tools both agents share"
+        )
 
     def test_handoff_factory_function_tool_policy_kwargs(self):
         """Test that handoff() factory function properly handles tool policy kwargs."""
@@ -238,32 +261,37 @@ class TestToolSecurityBoundaryIntegration:
     """Integration tests for tools=[] vs tools=None security boundary."""
 
     def test_agent_chat_tools_none_inherits_agent_tools(self):
-        """Test that tools=None in agent.chat() inherits agent's configured tools."""
-        # Create mock agent with tools
-        agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
-        agent.chat_history = []
-        agent._memory_instance = None
-        
-        # Mock the _format_tools_for_completion method
-        agent._format_tools_for_completion = Mock(return_value=[{"type": "function", "function": {"name": "agent_tool"}}])
-        
-        # Import and call the fixed method
-        from praisonaiagents.agent.chat_mixin import ChatMixin
-        # Temporarily bind the method to test the security fix
-        bound_method = ChatMixin._format_tools_for_completion.__get__(agent)
-        
-        # Test tools=None should inherit from agent.tools
-        result = bound_method(tools=None)
-        
-        # Should call with agent's tools
-        agent._format_tools_for_completion.assert_called_once_with(agent.tools)
+        """tools=None inherits the agent's tools; tools=[] denies them all.
+
+        Rewritten against a real Agent. The original could not pass: it
+        replaced agent._format_tools_for_completion with a Mock, bound the REAL
+        method, then asserted the Mock had been called -- the real method never
+        calls itself. It also left _cache_get as a bare Mock, which returns a
+        truthy Mock, so the cache-hit branch ran and
+        `cached_tools, cached_metadata = cached_entry` raised TypeError first.
+        And a Mock-based agent cannot produce a formatted payload at all: the
+        JSON-serialisability check rejects it, so the result was [] whatever
+        the tools were. The behaviour itself is correct and worth asserting.
+        """
+        def agent_tool(query: str) -> str:
+            """A real callable -- Mock tools are not JSON serializable."""
+            return query
+
+        agent = Agent(name="boundary", instructions="x", tools=[agent_tool])
+
+        inherited = agent._format_tools_for_completion(None)
+        assert [f["function"]["name"] for f in inherited] == ["agent_tool"], (
+            "tools=None must inherit the agent's configured tools"
+        )
+        assert agent._format_tools_for_completion([]) == [], (
+            "tools=[] must deny every tool, not fall back to the agent's"
+        )
 
     def test_agent_chat_tools_empty_list_enforces_boundary(self):
         """Test that tools=[] in agent.chat() enforces empty tool boundary."""
         # Create mock agent with tools
         agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
+        agent.tools = [_tool("agent_tool")]
         
         # Import and call the fixed method
         from praisonaiagents.agent.chat_mixin import ChatMixin
@@ -274,37 +302,37 @@ class TestToolSecurityBoundaryIntegration:
         # Should return empty list immediately (security boundary)
         assert result == []
 
-    @patch('praisonaiagents.agent.handoff.time.time')
-    @patch('praisonaiagents.agent.agent.Agent')
-    def test_handoff_tool_boundary_end_to_end(self, MockAgent, mock_time):
-        """End-to-end test of handoff tool boundary enforcement."""
-        mock_time.return_value = 123.0
-        
-        # Create real-ish agents with tools
-        source = MockAgent()
-        source.name = "orchestrator"
-        source.tools = [Mock(__name__="search")]  # Only has search tool
-        
-        target = MockAgent()
-        target.name = "automation"
-        target.tools = [Mock(__name__="search"), Mock(__name__="execute_code")]  # Has both tools
+    def test_handoff_tool_boundary_end_to_end(self):
+        """End to end: the target must not gain a tool the source lacks.
+
+        Rebuilt on real Agents for the same reason as the sync test above -- a
+        Mock agent cannot carry the handoff path, and its failures were
+        swallowed and reported as an unrelated assertion.
+        """
+        def search(q: str) -> str:
+            """Both agents have this."""
+            return q
+
+        def execute_code(q: str) -> str:
+            """Only the target has this -- it must not cross the boundary."""
+            return q
+
+        source = Agent(name="orchestrator", instructions="x", tools=[search])
+        target = Agent(name="automation", instructions="x",
+                       tools=[search, execute_code])
         target.chat = Mock(return_value="automation response")
 
-        # Create handoff with default intersect mode (secure)
-        h = handoff(agent=target)
-
-        # Execute handoff
+        h = handoff(agent=target)          # default policy is intersect
         result = h.execute_programmatic(source, "automate this task")
 
-        # Verify target agent only gets shared tools (search), not execute_code
+        assert result.success, f"handoff failed: {getattr(result, 'error', None)}"
         target.chat.assert_called_once()
-        call_kwargs = target.chat.call_args.kwargs
-        effective_tools = call_kwargs.get("tools", [])
-        
-        # Should only have the shared "search" tool, not "execute_code"
-        tool_names = [t.__name__ for t in effective_tools if hasattr(t, '__name__')]
+        effective_tools = target.chat.call_args.kwargs.get("tools", [])
+        tool_names = [t_.__name__ for t_ in effective_tools if hasattr(t_, "__name__")]
         assert "search" in tool_names
-        assert "execute_code" not in tool_names
+        assert "execute_code" not in tool_names, (
+            "a tool the source does not have must not cross the handoff boundary"
+        )
 
 
 class TestHandoffConfigSerialization:

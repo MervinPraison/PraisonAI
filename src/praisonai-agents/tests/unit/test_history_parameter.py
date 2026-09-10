@@ -11,7 +11,7 @@ to keep the API simple and consistent with other memory presets.
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch, PropertyMock
 
 
 class TestDefaultHistoryDisabled:
@@ -148,9 +148,21 @@ class TestHistoryInjection:
         mock_store.get_working_history.return_value = history
         agent._session_store = mock_store
         agent._history_session_id = "test-session"
-        
-        # Build messages
-        messages, _ = agent._build_messages("New question")
+        # Two gates had to be met for this to exercise anything.
+        # chat_mixin injects only when `self._history_enabled and
+        # self._session_store is not None`, and the flag defaults False.
+        agent._history_enabled = True
+        agent._history_limit = 10
+        # _build_messages delegates to the OpenAI client whenever one exists,
+        # and only the manual branch below that injects session history. The
+        # _openai_client property returns None solely when construction RAISES
+        # (no API key) -- so this test passed on CI and failed on any machine
+        # with OPENAI_API_KEY exported, where a client is built and the
+        # injection block is never reached. Force the manual branch instead of
+        # depending on whoever runs it.
+        with patch.object(type(agent), "_openai_client",
+                          new_callable=PropertyMock, return_value=None):
+            messages, _ = agent._build_messages("New question")
         
         # Should contain the injected history
         message_contents = [m.get("content", "") for m in messages]
@@ -181,9 +193,17 @@ class TestHistoryInjection:
         mock_store.get_working_history.return_value = history
         agent._session_store = mock_store
         agent._history_session_id = "test-session"
-        
-        # Build messages
-        agent._build_messages("New question")
+        # Two gates had to be met for this to exercise anything.
+        # chat_mixin injects only when `self._history_enabled and
+        # self._session_store is not None`, and the flag defaults False.
+        agent._history_enabled = True
+        # Only the manual branch injects session history, and the
+        # _openai_client property returns None solely when construction RAISES
+        # (no API key) -- so this passed on CI and failed wherever
+        # OPENAI_API_KEY was exported. Force the branch instead.
+        with patch.object(type(agent), "_openai_client",
+                          new_callable=PropertyMock, return_value=None):
+            agent._build_messages("New question")
         
         # Should have called with limit=2. Resume prefers get_working_history
         # (Issue #2741), which is the canonical compacted-resume entry point.

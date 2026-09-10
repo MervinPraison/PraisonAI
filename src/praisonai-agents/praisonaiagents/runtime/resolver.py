@@ -254,8 +254,11 @@ class RuntimeResolver:
             
         except ValueError as e:
             # Enhance error message with available runtimes
-            from .registry import list_available_runtimes
-            available = [entry.runtime_id for entry in list_available_runtimes()]
+            # registry exposes list_runtimes() -> list[str]; there is no
+            # list_available_runtimes, so the old import raised ImportError
+            # and masked the ValueError this branch exists to improve.
+            from .registry import list_runtimes
+            available = list_runtimes()
             raise ValueError(
                 f"Unknown runtime ID: {config.runtime}. Available runtimes: {available}. "
                 f"Original error: {e}"

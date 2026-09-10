@@ -182,7 +182,11 @@ class ChromaKnowledgeAdapter:
         carrying api_base when the embedder points at a local server, so the
         request cannot escape to a remote provider.
         """
-        block = self._embedder or {}
+        # getattr, not attribute access: the adapter is legitimately built
+        # without __init__ in places (and in tests), and an embedding call must
+        # not die on a missing attribute -- it should fall back to the
+        # environment default exactly as it did before the embedder was wired.
+        block = getattr(self, "_embedder", None) or {}
         provider = (block.get("provider") or "").strip().lower()
         cfg = block.get("config") or {}
         model = cfg.get("model")

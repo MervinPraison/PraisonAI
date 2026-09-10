@@ -214,10 +214,15 @@ class TestBusSinkWiring:
 
     def test_no_sink_preserves_fast_path(self):
         bus = EventBus()
-        # No subscribers, no sinks: publish returns an event, stores nothing.
+        # No subscribers and no sinks: publish still returns the event and
+        # does no dispatch work. It DOES record the event in history -- three
+        # tests in test_event_bus.py (test_event_history and friends) publish
+        # with no subscribers and expect exactly that, and the old behaviour
+        # made get_history() silently depend on whether anyone happened to be
+        # listening. What the fast path saves is the dispatch, not the record.
         ev = bus.publish("custom", {"session_id": "s1"})
         assert ev.type == "custom"
-        assert bus.get_history() == []
+        assert [e.type for e in bus.get_history()] == ["custom"]
 
     def test_sink_failure_never_breaks_publish(self):
         bus = EventBus()

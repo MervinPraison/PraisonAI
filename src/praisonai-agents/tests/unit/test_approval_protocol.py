@@ -119,7 +119,11 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="write_file", arguments={"path": "/tmp"}, risk_level="high")
 
-        with patch.object(backend, '_prompt_user', return_value=True):
+        # _prompt_user returns (approved, scope, scope_pattern, feedback);
+        # patching it with a bare bool made the caller read a
+        # non-approval, so these asserted the opposite of their name.
+        with patch.object(backend, '_prompt_user',
+                          return_value=(True, "once", None, None)):
             decision = backend.request_approval_sync(req)
         assert decision.approved is True
 
@@ -129,7 +133,11 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="kill_process", arguments={}, risk_level="critical")
 
-        with patch.object(backend, '_prompt_user', return_value=False):
+        # _prompt_user returns (approved, scope, scope_pattern, feedback);
+        # patching it with a bare bool made the caller read a
+        # non-approval, so these asserted the opposite of their name.
+        with patch.object(backend, '_prompt_user',
+                          return_value=(False, "once", None, None)):
             decision = backend.request_approval_sync(req)
         assert decision.approved is False
 
@@ -139,7 +147,11 @@ class TestConsoleBackend:
         backend = ConsoleBackend()
         req = ApprovalRequest(tool_name="x", arguments={}, risk_level="low")
 
-        with patch.object(backend, '_prompt_user', return_value=True):
+        # _prompt_user returns (approved, scope, scope_pattern, feedback);
+        # patching it with a bare bool made the caller read a
+        # non-approval, so these asserted the opposite of their name.
+        with patch.object(backend, '_prompt_user',
+                          return_value=(True, "once", None, None)):
             decision = asyncio.run(backend.request_approval(req))
         assert decision.approved is True
 
@@ -364,12 +376,34 @@ class TestApprovalRegistry:
         assert reg.is_already_approved("write_file", {}, agent_name="permissive") is True
 
     def test_yaml_approved_skips_backend(self):
+        """A yaml-approved tool is approved without asking the backend.
+
+        The tool used to be "execute_command", which is classified critical --
+        and is_yaml_approved deliberately refuses critical tools however the
+        config is written, so the call fell through to the console backend and
+        was denied (it also printed a prompt into the test run). Use a
+        high-risk tool for the skip, and pin the critical carve-out separately
+        so the safety rule cannot be removed unnoticed.
+        """
         from praisonaiagents.approval.registry import ApprovalRegistry
         reg = ApprovalRegistry()
+        assert reg.get_risk_level("write_file") != "critical"
+
+        token = reg.set_yaml_approved_tools(["write_file"])
+        try:
+            decision = reg.approve_sync("agent", "write_file", {})
+            assert decision.approved is True
+            assert decision.approver == "yaml"
+        finally:
+            reg.reset_yaml_approved_tools(token)
+
+        # yaml must never pre-approve a critical tool
+        assert reg.get_risk_level("execute_command") == "critical"
         token = reg.set_yaml_approved_tools(["execute_command"])
-        decision = reg.approve_sync("agent", "execute_command", {})
-        assert decision.approved is True
-        reg.reset_yaml_approved_tools(token)
+        try:
+            assert reg.is_yaml_approved("execute_command") is False
+        finally:
+            reg.reset_yaml_approved_tools(token)
 
     def test_remove_backend(self):
         from praisonaiagents.approval.registry import ApprovalRegistry

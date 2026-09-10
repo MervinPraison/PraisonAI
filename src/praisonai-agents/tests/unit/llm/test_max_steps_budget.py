@@ -231,9 +231,33 @@ def test_litellm_last_stop_reason_default():
 # Real agentic test (AGENTS.md §9.4) — gated on a real key.
 # ---------------------------------------------------------------------------
 
+def _has_real_openai_key() -> bool:
+    """A real key, not the placeholder CI exports for offline suites.
+
+    CI sets OPENAI_API_KEY to a dummy string so provider construction works
+    without a live account; that value must not be mistaken for a real key and
+    trip a network call that returns None.
+    """
+    key = os.getenv("OPENAI_API_KEY", "")
+    if not key or "test" in key.lower() or "not-real" in key.lower():
+        return False
+    return os.getenv("PRAISONAI_ALLOW_NETWORK", "1") != "0"
+
+
+def _live_tests_opt_in() -> bool:
+    # "0"/"false"/"" all mean off; anything else is an explicit opt-in.
+    return os.getenv("PRAISONAI_LIVE_TESTS", "").strip().lower() not in ("", "0", "false", "no")
+
+
+@pytest.mark.network
+@pytest.mark.live
 @pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY") and not os.getenv("PRAISONAI_LIVE_TESTS"),
-    reason="Requires OPENAI_API_KEY / PRAISONAI_LIVE_TESTS for a real LLM call",
+    not (_live_tests_opt_in() and _has_real_openai_key()),
+    # Owning a key is not consent to spend money on it. The old condition
+    # (no key AND no opt-in) meant any developer or CI runner with
+    # OPENAI_API_KEY exported made a real billed call on an ordinary unit
+    # run. Opt-in is now required as well as the key.
+    reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 and a real OPENAI_API_KEY",
 )
 def test_real_agent_completes_with_raised_max_steps():
     agent = Agent(

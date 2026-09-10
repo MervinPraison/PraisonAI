@@ -110,6 +110,7 @@ class TestInternetSearchReliability:
         assert 'retries' in params, "internet_search should have 'retries' parameter"
         assert 'max_results' in params, "internet_search should have 'max_results' parameter"
     
+    @pytest.mark.network
     def test_internet_search_returns_list(self):
         """internet_search should always return a list."""
         from praisonaiagents.tools import internet_search
@@ -134,6 +135,7 @@ class TestInternetSearchReliability:
 class TestSearchWebReliability:
     """Tests for search_web reliability improvements."""
     
+    @pytest.mark.network
     def test_search_web_tries_multiple_providers(self):
         """search_web should try multiple providers on failure."""
         from praisonaiagents.tools import search_web
