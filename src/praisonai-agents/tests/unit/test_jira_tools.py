@@ -1,5 +1,7 @@
 """Unit tests for JIRA tools."""
 
+import importlib.util
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from praisonaiagents.tools.jira_tools import (
@@ -11,6 +13,15 @@ from praisonaiagents.tools.jira_tools import (
 )
 
 
+# The jira package is an OPTIONAL integration dependency and is not installed by
+# CI. These four tests reach the real library (patching jira.JIRA, or hitting the
+# connection path that imports it), so without it they fail with
+# ModuleNotFoundError rather than testing anything. The other 13 tests in this
+# file mock at a higher level and run fine either way.
+@pytest.mark.skipif(
+    importlib.util.find_spec("jira") is None,
+    reason="jira package not installed (optional integration dependency)",
+)
 class TestJIRAConnection:
     """Test JIRA connection utility."""
     

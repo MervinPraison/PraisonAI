@@ -418,7 +418,13 @@ class TestCircuitBreakerIntegration:
 
 # Real agentic test (MANDATORY per AGENTS.md)
 import os
-@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "not-needed", reason="Requires OpenAI API Key")
+# Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
+# PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
+# key ('sk-not-a-real-key') because some modules bail at import without one,
+# so a presence check never skipped and the test ran against a fake
+# credential. Excluding one known placeholder by value does not help -- the
+# next harness uses a different string.
+@pytest.mark.live
 def test_circuit_breaker_real_agentic():
     """Real agentic test - create agent and test circuit breaker integration."""
     from praisonaiagents import Agent

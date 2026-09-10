@@ -318,7 +318,18 @@ class TestLazyLoadingPreserved:
         import sys
         
         # Clear any cached imports
-        modules_to_clear = [k for k in sys.modules.keys() if 'litellm' in k]
+        # Match the litellm PACKAGE only. `'litellm' in k` also matched
+        # praisonaiagents.llm._litellm_loader and evicted it, so the next
+        # `import praisonaiagents.llm._litellm_loader` re-executed the module
+        # and produced a SECOND module object with fresh globals -- while
+        # praisonaiagents.llm._cost still called get_litellm bound to the
+        # original one. test_cost.py::test_lazy_litellm_import then reset and
+        # asserted the new object's _litellm_import_attempted while the calls
+        # updated the old object's, and failed on "assert False is True".
+        modules_to_clear = [
+            k for k in sys.modules.keys()
+            if k == 'litellm' or k.startswith('litellm.')
+        ]
         for mod in modules_to_clear:
             del sys.modules[mod]
         
@@ -333,7 +344,18 @@ class TestLazyLoadingPreserved:
         import sys
         
         # Clear any cached imports
-        modules_to_clear = [k for k in sys.modules.keys() if 'litellm' in k]
+        # Match the litellm PACKAGE only. `'litellm' in k` also matched
+        # praisonaiagents.llm._litellm_loader and evicted it, so the next
+        # `import praisonaiagents.llm._litellm_loader` re-executed the module
+        # and produced a SECOND module object with fresh globals -- while
+        # praisonaiagents.llm._cost still called get_litellm bound to the
+        # original one. test_cost.py::test_lazy_litellm_import then reset and
+        # asserted the new object's _litellm_import_attempted while the calls
+        # updated the old object's, and failed on "assert False is True".
+        modules_to_clear = [
+            k for k in sys.modules.keys()
+            if k == 'litellm' or k.startswith('litellm.')
+        ]
         for mod in modules_to_clear:
             del sys.modules[mod]
         

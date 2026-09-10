@@ -115,7 +115,12 @@ class TestAsyncToolExecutionChannel:
             async def _check_tool_approval_async(self, function_name, arguments):
                 return (function_name, arguments)
 
-            def _check_tool_policy_and_guardrails(self, function_name, arguments):
+            # Signature must track the real one, which gained a `tools`
+            # argument: the async path calls it with four positionals, so the
+            # old three-arg stub raised TypeError and the failure surfaced as
+            # {"error": "Error in execute_tool_async: ... takes 3 positional
+            # arguments but 4 were given"} rather than a missing progress channel.
+            def _check_tool_policy_and_guardrails(self, function_name, arguments, tools=None):
                 return (function_name, arguments)
 
         def my_tool():

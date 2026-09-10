@@ -307,11 +307,26 @@ class TestResolveRuntime:
         assert result.preferred_runtime == "native"
         assert result.fallback_allowed is False
     
-    def test_resolve_config_instance(self):
-        """Test resolving RuntimeConfig instance returns it unchanged."""
+    def test_resolve_config_instance_returns_a_normalised_copy(self):
+        """A RuntimeConfig with a preferred_runtime comes back normalised, not identical.
+
+        This asserted `result is config`. resolve_runtime now canonicalises
+        preferred_runtime and returns dataclasses.replace(...) instead, so that
+        "a config reused/compared after agent construction is unchanged" -- the
+        caller's object is deliberately not mutated. The guarantee worth pinning
+        is that non-mutation, plus the identity shortcut that still holds when
+        there is nothing to normalise.
+        """
         config = RuntimeConfig(preferred_runtime="test")
         result = resolve_runtime(config)
-        assert result is config
+
+        assert result == config          # same content
+        assert config.preferred_runtime == "test"  # caller's object untouched
+
+    def test_resolve_config_instance_without_preferred_runtime_is_identical(self):
+        """Nothing to normalise, so the very same object comes back."""
+        config = RuntimeConfig(required_capabilities=["native_hooks"])
+        assert resolve_runtime(config) is config
 
 
 class TestCapabilityValidationError:

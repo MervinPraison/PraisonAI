@@ -379,16 +379,27 @@ class TestEventBusOptimization:
         assert not bus.has_subscribers
     
     def test_publish_fast_path_no_subscribers(self):
-        """Test that publishing with no subscribers skips expensive work."""
+        """With no subscribers, dispatch is skipped but the event is still recorded.
+
+        This test used to assert `len(bus.get_history()) == 0`, blessing the
+        no-subscriber fast path that returned before the history append. That
+        directly contradicted test_event_history / _with_filter / _limit in this
+        same file, which publish with no subscribers and expect history back --
+        and those three were the ones failing. History is the record of what the
+        bus did; making it conditional on who happened to be listening makes
+        get_history() useless for the auditing and debugging it exists for.
+        The fast path still skips subscriber matching and dispatch, which is the
+        expensive part; appending to a list capped at _max_history is not.
+        """
         bus = EventBus()
-        
-        # Create a real event and publish directly
+
         real_event = Event(type="test.event", data={})
         result = bus.publish_event(real_event)
-        
-        # Should return the event without storing in history
+
         assert result is real_event
-        assert len(bus.get_history()) == 0  # No history when no subscribers
+        history = bus.get_history()
+        assert len(history) == 1
+        assert history[0] is real_event
     
     def test_publish_normal_path_with_subscribers(self):
         """Test that publishing with subscribers works normally."""

@@ -880,6 +880,19 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
                 ),
+                # Same migration, different container: these two were flat
+                # kwargs before they were grouped into tool_config. Without a
+                # hint the user gets a bare "unexpected keyword argument" and
+                # has to search a 41-parameter signature for a name that is not
+                # in it.
+                "tool_retry_policy": (
+                    "tool retries moved into tool_config=; use "
+                    "tool_config=ToolConfig(retry_policy=...)."
+                ),
+                "tool_timeout": (
+                    "tool timeout moved into tool_config=; use "
+                    "tool_config=ToolConfig(timeout=...)."
+                ),
             }
             _hint = "".join(
                 f"\n  {name}: {_HINTS[name]}" for name in sorted(_unknown) if name in _HINTS

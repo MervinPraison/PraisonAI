@@ -26,12 +26,18 @@ class TestManagedBackendProtocol:
         assert ManagedConfig is not None
 
     def test_config_defaults(self):
-        from praisonai.integrations.managed_agents import ManagedConfig
+        from praisonai.integrations.managed_agents import (
+            ManagedConfig,
+            NetworkingConfig,
+        )
         cfg = ManagedConfig()
         assert cfg.model == "claude-haiku-4-5"
         assert cfg.name == "Agent"
         assert cfg.tools == [{"type": "agent_toolset_20260401"}]
-        assert cfg.networking == {"type": "unrestricted"}
+        # networking became a typed NetworkingConfig; NetworkingType is a str
+        # Enum, so the value on the wire is still "unrestricted".
+        assert cfg.networking == NetworkingConfig()
+        assert cfg.networking.type == "unrestricted"
         assert cfg.packages is None
         assert cfg.mcp_servers == []
         assert cfg.skills == []
@@ -168,7 +174,9 @@ class TestManagedAgent:
 
     def test_init_default_provider(self):
         """Default provider should be anthropic."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
             m = ManagedAgent()
@@ -177,7 +185,9 @@ class TestManagedAgent:
 
     def test_init_custom_config_dict(self):
         """Dict config should be stored correctly."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(
             api_key="test-key",
@@ -203,7 +213,9 @@ class TestManagedAgent:
 
     def test_init_no_api_key_no_env(self):
         """Should not crash without API key — will fail at execute time."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         with patch.dict("os.environ", {}, clear=True):
             m = ManagedAgent(api_key=None)
@@ -211,7 +223,15 @@ class TestManagedAgent:
 
     def test_get_client_raises_without_key(self):
         """_get_client should raise if no API key."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
+
+        # The anthropic SDK is optional and CI does not install it. Without it
+        # _get_client raises ImportError about the missing SDK before it ever
+        # reaches the missing-key check this test is about -- which is the very
+        # case test_get_client_raises_without_sdk covers next.
+        pytest.importorskip("anthropic", reason="anthropic SDK not installed")
 
         m = ManagedAgent(api_key=None)
         m.api_key = None  # Force no key
@@ -220,7 +240,9 @@ class TestManagedAgent:
 
     def test_get_client_raises_without_sdk(self):
         """_get_client should raise if anthropic SDK not installed."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         with patch.dict("sys.modules", {"anthropic": None}):
@@ -230,7 +252,9 @@ class TestManagedAgent:
 
     def test_reset_session(self):
         """reset_session should clear cached session."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m._session_id = "sess-123"
@@ -239,7 +263,9 @@ class TestManagedAgent:
 
     def test_reset_all(self):
         """reset_all should clear everything including usage counters."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.agent_id = "agent-123"
@@ -275,7 +301,9 @@ class TestManagedAgent:
 
     def test_execute_sync_with_mock_sdk(self):
         """_execute_sync should orchestrate create+stream correctly."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
 
@@ -295,7 +323,9 @@ class TestManagedAgent:
 
     def test_cached_ids_reused(self):
         """Second call should reuse cached agent/env/session IDs."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.agent_id = "agent-cached"
@@ -318,7 +348,9 @@ class TestManagedAgent:
 
     def test_usage_tracking(self):
         """Token usage should accumulate across events."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
 
@@ -340,7 +372,9 @@ class TestManagedAgent:
 
     def test_custom_tool_callback(self):
         """on_custom_tool should be called for agent.custom_tool_use events."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         calls = []
         def my_tool(name, inp):
@@ -368,7 +402,9 @@ class TestManagedAgent:
 
     def test_tool_confirmation_callback(self):
         """on_tool_confirmation should be called for needs_confirmation events."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         confirmations = []
         def confirm(info):
@@ -393,7 +429,9 @@ class TestManagedAgent:
 
     def test_ensure_agent_passes_optional_fields(self):
         """Optional agent fields (mcp_servers, skills, etc.) should be forwarded."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(
             api_key="test-key",
@@ -419,7 +457,9 @@ class TestManagedAgent:
 
     def test_ensure_session_passes_resources_and_vaults(self):
         """resources and vault_ids should be forwarded to session creation."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(
             api_key="test-key",
@@ -442,7 +482,9 @@ class TestManagedAgent:
 
     def test_update_agent(self):
         """update_agent should call client.beta.agents.update and invalidate session."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.agent_id = "agent-001"
@@ -461,14 +503,18 @@ class TestManagedAgent:
 
     def test_update_agent_no_agent(self):
         """update_agent with no existing agent should be a no-op."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.update_agent(system="ignored")  # Should not raise
 
     def test_interrupt(self):
         """interrupt should send user.interrupt event."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m._session_id = "sess-active"
@@ -483,14 +529,18 @@ class TestManagedAgent:
 
     def test_interrupt_no_session(self):
         """interrupt with no session should be a no-op."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.interrupt()  # Should not raise
 
     def test_retrieve_session(self):
         """retrieve_session should return session info dict."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m._session_id = "sess-123"
@@ -512,7 +562,9 @@ class TestManagedAgent:
 
     def test_retrieve_session_no_session(self):
         """retrieve_session with no session returns SessionInfo defaults (per #1429 unified schema)."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         info = m.retrieve_session()
@@ -522,7 +574,9 @@ class TestManagedAgent:
 
     def test_list_sessions(self):
         """list_sessions should return list of session dicts."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         m.agent_id = "agent-001"
@@ -540,14 +594,18 @@ class TestManagedAgent:
 
     def test_list_sessions_no_agent(self):
         """list_sessions with no agent returns empty list."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         assert m.list_sessions() == []
 
     def test_managed_session_id_property(self):
         """managed_session_id should expose _session_id."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
         assert m.managed_session_id is None
@@ -556,7 +614,9 @@ class TestManagedAgent:
 
     def test_multi_turn_reuses_session(self):
         """Multiple _execute_sync calls should reuse the same session (multi-turn)."""
-        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent as ManagedAgent,
+        )
 
         m = ManagedAgent(api_key="test-key")
 
@@ -710,3 +770,44 @@ class TestToolMapping:
 
         result = map_managed_tools([])
         assert result == []
+
+
+class TestManagedAgentFactoryRouting:
+    """ManagedAgent() is a FACTORY whose default routing reads the environment.
+
+    With no explicit provider it returns AnthropicManagedAgent when
+    ANTHROPIC_API_KEY (or CLAUDE_API_KEY) is set, and LocalManagedAgent when it
+    is not. Nothing pinned that, and TestManagedAgent obtained its subject from
+    this factory -- so 16 tests asserting Anthropic-only behaviour (_get_client,
+    usage tracking, session reuse) passed on any machine with a key exported and
+    failed everywhere else with a bare AttributeError. Those tests now name
+    AnthropicManagedAgent directly; this class covers the routing itself.
+    """
+
+    def test_defaults_to_anthropic_when_key_present(self):
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent,
+            ManagedAgent,
+        )
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            assert isinstance(ManagedAgent(), AnthropicManagedAgent)
+
+    def test_defaults_to_local_when_no_key(self):
+        from praisonai.integrations.managed_agents import ManagedAgent
+        from praisonai.integrations.managed_local import LocalManagedAgent
+
+        with patch.dict("os.environ", {}, clear=True):
+            assert isinstance(ManagedAgent(), LocalManagedAgent)
+
+    def test_explicit_provider_ignores_the_environment(self):
+        """The escape hatch the tests should have been using all along."""
+        from praisonai.integrations.managed_agents import (
+            AnthropicManagedAgent,
+            ManagedAgent,
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            assert isinstance(
+                ManagedAgent(provider="anthropic"), AnthropicManagedAgent
+            )

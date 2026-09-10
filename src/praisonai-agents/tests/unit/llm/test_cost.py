@@ -164,20 +164,33 @@ class TestCostModule:
     def test_lazy_litellm_import(self):
         """_get_litellm should cache the import result."""
         import praisonaiagents.llm._cost as cost_module
-        import praisonaiagents.llm._litellm_loader as loader_module
-        
+
+        # Reach the loader's state through the FUNCTION'S OWN GLOBALS, not by
+        # importing the module by name and not via sys.modules.
+        #
+        # get_litellm mutates its module globals with `global
+        # _litellm_module, _litellm_import_attempted`. Several test modules in
+        # this suite evict every sys.modules key matching 'praison' or 'litellm'
+        # and re-import, which can leave TWO live module objects with separate
+        # globals -- one that _cost's get_litellm was defined in, another that a
+        # by-name lookup returns. This test then reset and asserted one dict
+        # while the calls updated the other, and failed with
+        # "assert False is True" under some orderings. __globals__ is by
+        # definition the dict the function writes to, so it cannot drift.
+        loader_globals = cost_module._get_litellm.__globals__["get_litellm"].__globals__
+
         # Reset shared loader state
-        loader_module._litellm_module = None
-        loader_module._litellm_import_attempted = False
-        
+        loader_globals["_litellm_module"] = None
+        loader_globals["_litellm_import_attempted"] = False
+
         # First call
         result1 = cost_module._get_litellm()
-        
+
         # Second call should use cache
         result2 = cost_module._get_litellm()
-        
+
         assert result1 is result2
-        assert loader_module._litellm_import_attempted is True
+        assert loader_globals["_litellm_import_attempted"] is True
 
     def test_on_missing_fires_regardless_of_call_order(self):
         """on_missing must fire even if another caller attempted the import first.

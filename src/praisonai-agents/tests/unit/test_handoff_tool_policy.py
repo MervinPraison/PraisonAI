@@ -9,6 +9,7 @@ Tests the critical security fix that ensures:
 """
 import pytest
 from unittest.mock import Mock, patch
+from praisonaiagents.agent.async_safety import DualLock
 from praisonaiagents.agent.handoff import (
     HandoffToolPolicy, 
     Handoff, 
@@ -16,6 +17,22 @@ from praisonaiagents.agent.handoff import (
     handoff
 )
 from praisonaiagents import Agent
+
+def _tool(name):
+    """A stand-in tool whose NAME resolves the way a real tool's does.
+
+    Mock is the wrong shape here: _compute_effective_tools reads
+    getattr(tool, 'name', getattr(tool, '__name__', ...)), and a Mock
+    AUTO-CREATES .name -- so every mock tool got a unique Mock object as its
+    name and the intersection was always empty. A plain function has no .name,
+    so the __name__ fallback runs, which is what a real callable tool does.
+    """
+    def fn():
+        return name
+    fn.__name__ = name
+    return fn
+
+
 
 
 class TestHandoffToolPolicySecurity:
@@ -43,12 +60,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="source_only")]
+        source_agent.tools = [_tool("shared_tool"), _tool("source_only")]
 
         # Mock target agent with tools
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="target_only")]
+        target_agent.tools = [_tool("shared_tool"), _tool("target_only")]
 
         # Create handoff with intersect mode (default)
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -66,12 +83,12 @@ class TestHandoffToolPolicySecurity:
         # Mock source agent with different tools
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="source_only")]
+        source_agent.tools = [_tool("source_only")]
 
         # Mock target agent with different tools
         target_agent = Mock()
         target_agent.name = "target" 
-        target_agent.tools = [Mock(__name__="target_only")]
+        target_agent.tools = [_tool("target_only")]
 
         # Create handoff with intersect mode
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -109,8 +126,8 @@ class TestHandoffToolPolicySecurity:
         
         target_agent = Mock()
         target_agent.name = "target"
-        tool1 = Mock(__name__="safe_tool")
-        tool2 = Mock(__name__="dangerous_tool")
+        tool1 = _tool("safe_tool")
+        tool2 = _tool("dangerous_tool")
         target_agent.tools = [tool1, tool2]
 
         # Create handoff with passthrough mode and blocked tools
@@ -155,12 +172,24 @@ class TestHandoffToolPolicySecurity:
         
         source_agent = Mock()
         source_agent.name = "source"
-        source_agent.tools = [Mock(__name__="shared_tool")]
+        source_agent.tools = [_tool("shared_tool")]
+        # _prepare_context does getattr(source_agent, 'chat_history', []) and
+        # then iterates it. A Mock always HAS the attribute, so the [] default
+        # never applies and the handoff died on "'Mock' object is not iterable"
+        # -- caught and logged, leaving chat uncalled and the assertion below
+        # reading like a broken tool boundary.
+        source_agent.chat_history = []
 
         target_agent = Mock()
         target_agent.name = "target"
-        target_agent.tools = [Mock(__name__="shared_tool"), Mock(__name__="private_tool")]
+        target_agent.tools = [_tool("shared_tool"), _tool("private_tool")]
         target_agent.chat = Mock(return_value="response")
+        target_agent.chat_history = []
+        # _get_handoff_seed_lock does getattr(agent, '_handoff_seed_lock', None)
+        # and creates a real DualLock only when that is None. A Mock returns a
+        # Mock, so the seeding context manager got something that is not a
+        # context manager at all.
+        target_agent._handoff_seed_lock = DualLock()
 
         # Create handoff with intersect mode
         config = HandoffConfig(tool_policy=HandoffToolPolicy(mode="intersect"))
@@ -238,32 +267,38 @@ class TestToolSecurityBoundaryIntegration:
     """Integration tests for tools=[] vs tools=None security boundary."""
 
     def test_agent_chat_tools_none_inherits_agent_tools(self):
-        """Test that tools=None in agent.chat() inherits agent's configured tools."""
-        # Create mock agent with tools
-        agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
-        agent.chat_history = []
-        agent._memory_instance = None
-        
-        # Mock the _format_tools_for_completion method
-        agent._format_tools_for_completion = Mock(return_value=[{"type": "function", "function": {"name": "agent_tool"}}])
-        
-        # Import and call the fixed method
-        from praisonaiagents.agent.chat_mixin import ChatMixin
-        # Temporarily bind the method to test the security fix
-        bound_method = ChatMixin._format_tools_for_completion.__get__(agent)
-        
-        # Test tools=None should inherit from agent.tools
-        result = bound_method(tools=None)
-        
-        # Should call with agent's tools
-        agent._format_tools_for_completion.assert_called_once_with(agent.tools)
+        """tools=None inherits the agent's tools; tools=[] denies them all.
+
+        This bound the REAL _format_tools_for_completion to a Mock and then
+        asserted the MOCK's own _format_tools_for_completion had been called --
+        which could only pass if the real method delegated to itself. It does
+        not (that would recurse); it assigns `tools = self.tools` and formats
+        them. So the assertion could never hold, and the Mock made the failure
+        look like a security regression rather than a test that tested nothing.
+
+        Uses a real Agent and asserts the OUTPUT, which is the security property
+        that matters: None must not silently become "no tools", and an explicit
+        empty list must not silently become "all the agent's tools".
+        """
+        from praisonaiagents import Agent
+
+        def agent_tool(x: str = "") -> str:
+            """A tool."""
+            return x
+
+        agent = Agent(name="t", instructions="x", tools=[agent_tool])
+
+        inherited = agent._format_tools_for_completion(tools=None)
+        assert [t["function"]["name"] for t in inherited] == ["agent_tool"]
+
+        # The control: the same call with an explicit empty list denies them.
+        assert agent._format_tools_for_completion(tools=[]) == []
 
     def test_agent_chat_tools_empty_list_enforces_boundary(self):
         """Test that tools=[] in agent.chat() enforces empty tool boundary."""
         # Create mock agent with tools
         agent = Mock()
-        agent.tools = [Mock(__name__="agent_tool")]
+        agent.tools = [_tool("agent_tool")]
         
         # Import and call the fixed method
         from praisonaiagents.agent.chat_mixin import ChatMixin
@@ -280,15 +315,26 @@ class TestToolSecurityBoundaryIntegration:
         """End-to-end test of handoff tool boundary enforcement."""
         mock_time.return_value = 123.0
         
-        # Create real-ish agents with tools
-        source = MockAgent()
+        # Two DISTINCT agents. MockAgent() is a patched class, so calling it
+        # twice returns the SAME return_value -- source and target were one
+        # object, target.tools overwrote source.tools, and intersecting a set
+        # with itself returned both tools. That looked like the tool boundary
+        # failing when it was the test collapsing two agents into one.
+        source = Mock()
         source.name = "orchestrator"
-        source.tools = [Mock(__name__="search")]  # Only has search tool
-        
-        target = MockAgent()
+        source.tools = [_tool("search")]  # Only has search tool
+        # See the sync test above: _prepare_context iterates chat_history, and a
+        # Mock's auto-created attribute is not iterable.
+        source.chat_history = []
+
+        target = Mock()
         target.name = "automation"
-        target.tools = [Mock(__name__="search"), Mock(__name__="execute_code")]  # Has both tools
+        target.tools = [_tool("search"), _tool("execute_code")]  # Has both tools
         target.chat = Mock(return_value="automation response")
+        target.chat_history = []
+        # _get_handoff_seed_lock only builds a real DualLock when
+        # getattr(agent, '_handoff_seed_lock', None) is None, which a Mock never is.
+        target._handoff_seed_lock = DualLock()
 
         # Create handoff with default intersect mode (secure)
         h = handoff(agent=target)

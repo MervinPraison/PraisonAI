@@ -13,6 +13,37 @@ import os
 from praisonaiagents.approval import get_approval_registry
 
 
+@pytest.fixture(autouse=True)
+def _restore_approval_requirements():
+    """Undo global approval-registry edits made by these tests.
+
+    The registry is a process-wide singleton, and add_requirement("read_file",
+    "high") below was never removed. read_file therefore stayed an
+    approval-gated HIGH-risk tool for every test that ran afterwards, so an
+    unrelated tools test calling read_file hit the interactive console prompt
+    and failed with "reading from stdin while output is captured". It passed on
+    its own and failed in the suite, on collection order alone.
+    """
+    registry = get_approval_registry()
+    saved_required = set(registry._required_tools)
+    saved_risk = dict(registry._risk_levels)
+    saved_agent_required = {k: set(v) for k, v in registry._agent_required_tools.items()}
+    saved_agent_risk = dict(registry._agent_risk_levels)
+    try:
+        yield
+    finally:
+        registry._required_tools.clear()
+        registry._required_tools.update(saved_required)
+        registry._risk_levels.clear()
+        registry._risk_levels.update(saved_risk)
+        registry._agent_required_tools.clear()
+        registry._agent_required_tools.update(saved_agent_required)
+        registry._agent_risk_levels.clear()
+        registry._agent_risk_levels.update(saved_agent_risk)
+        registry._agent_tool_auto_approve.clear()
+        registry.clear_approved()
+
+
 def test_skill_allowed_tools_do_not_leak_across_agents():
     """G-A regression test: skill allowed-tools should not leak across agents.
 

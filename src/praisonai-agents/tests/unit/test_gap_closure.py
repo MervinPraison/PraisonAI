@@ -85,10 +85,13 @@ class TestAutoAgentsConsolidation:
         assert "function_calling_llm=self.function_calling_llm" not in source, \
             "AutoAgents._create_agents_and_tasks still passes function_calling_llm= to Agent()"
     
-    @pytest.mark.skipif(
-        not os.environ.get("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY not set"
-    )
+    # Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
+    # PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
+    # key ('sk-not-a-real-key') because some modules bail at import without one,
+    # so a presence check never skipped and the test ran against a fake
+    # credential. Excluding one known placeholder by value does not help -- the
+    # next harness uses a different string.
+    @pytest.mark.live
     def test_autoagents_accepts_llm_param(self):
         """AutoAgents should accept llm= parameter."""
         from praisonaiagents.agents.autoagents import AutoAgents

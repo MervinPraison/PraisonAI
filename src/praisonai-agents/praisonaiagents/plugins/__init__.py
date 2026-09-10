@@ -181,7 +181,8 @@ def enable(plugins: list = None, options_by_name: dict = None) -> None:
     else:
         # Enable all discovered plugins
         for plugin_info in manager.list_plugins():
-            manager.enable(plugin_info.get("name", ""))
+            # list_plugins() returns PluginInfo dataclasses, not dicts.
+            manager.enable(plugin_info.name)
     
     import logging
     # Bridge enabled plugins into the runtime hook engine so their lifecycle
@@ -232,7 +233,8 @@ def disable(plugins: list = None) -> None:
             _plugins_enabled = False
             _enabled_plugin_names = None
         for plugin_info in manager.list_plugins():
-            manager.disable(plugin_info.get("name", ""))
+            # list_plugins() returns PluginInfo dataclasses, not dicts.
+            manager.disable(plugin_info.name)
 
 
 def list_plugins() -> list:

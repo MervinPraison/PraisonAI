@@ -224,3 +224,57 @@ def test_async_breaker_is_per_instance():
         agent_b._execute_tool_async_impl("flaky", {}, None, None)
     )
     assert not b_first.get("circuit_open")
+
+
+def _drive_until_open(tool_fn, calls=7):
+    """Call the tool impl `calls` times; return the index of the first rejection."""
+    agent = Agent(name="t", instructions="x", tools=[tool_fn])
+
+    async def _run():
+        for i in range(calls):
+            r = await agent._execute_tool_async_impl(tool_fn.__name__, {}, None, None)
+            if r.get("circuit_open"):
+                return i
+        return None
+
+    return asyncio.run(_run())
+
+
+def test_breaker_counts_each_failure_once_not_twice():
+    """failure_threshold=5 must mean 5 failures, not 3.
+
+    _invoke_guarded already records every outcome against the breaker: it raises
+    _ToolFailure for an error dict so breaker.acall counts it, and acall records
+    plain successes and raised exceptions itself. Two further breaker_record
+    calls -- one after the invoke, one in the except block -- counted every
+    failure a SECOND time, so the breaker configured with failure_threshold=5
+    opened on the 3rd failure. Both failure shapes were affected.
+
+    Only one test pinned this, and only for raises; the sibling
+    per-instance test drives 5 failures then asserts the 6th is open, which
+    holds whether the breaker opens at 3 or at 5.
+    """
+    def raises(x: str = "") -> str:
+        raise RuntimeError("upstream 503")
+
+    def returns_error_dict(x: str = "") -> dict:
+        return {"error": "tool said no"}
+
+    assert _drive_until_open(raises) == 5, "raised failures counted twice"
+    assert _drive_until_open(returns_error_dict) == 5, "error dicts counted twice"
+
+
+def test_denials_never_trip_the_breaker():
+    """Approval/permission/policy/guardrail denials are not tool failures.
+
+    _invoke_for_breaker applies these exclusions before raising _ToolFailure, so
+    a gated tool returns its dict through the breaker as a success and never
+    accumulates toward the threshold.
+    """
+    def denied(x: str = "") -> dict:
+        return {"error": "not allowed", "approval_denied": True}
+
+    # 7 calls is well past the threshold of 5 that the two failure shapes above
+    # trip at. It stops short of 8, where the loop guard escalates to a halt --
+    # a different guard, and not what this test is about.
+    assert _drive_until_open(denied, calls=7) is None

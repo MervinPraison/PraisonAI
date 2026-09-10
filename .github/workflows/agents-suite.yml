@@ -1,0 +1,142 @@
+# Why this exists
+#
+# praisonai-agents has ~11,900 tests. Until this gate, CI executed 15 of them:
+# one smoke step in test-optimized.yml naming two files. Everything else was
+# collected by nobody.
+#
+# The cost of that showed up as two test modules that could not even be
+# IMPORTED -- they referenced symbols moved or replaced months earlier, so 19
+# tests silently contributed nothing while still appearing to exist. A failing
+# test is loud; a test that never collects is not.
+#
+# This job started as collection-only, because running the suite would have gone
+# red on arrival: 297 pre-existing failures nothing had been enforcing, and a job
+# that is red the day it lands teaches people to ignore it. Then a curated
+# green-set, ratcheted upward.
+#
+# Both are gone. The unit suite now runs in full and passes: 9373 tests, 0
+# failures. The `collect` job stays because it is the cheaper, stricter signal --
+# it cannot pass while a test file is unimportable, and it says so in 40s.
+#
+name: agents-suite
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-suite.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-agents/**'
+      - '.github/workflows/agents-suite.yml'
+
+jobs:
+  collect:
+    name: every praisonai-agents test file imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Collect the whole suite
+        working-directory: src/praisonai-agents
+        env:
+          # A key must be present or some modules bail at import; it is never
+          # used, because collection does not execute test bodies.
+          OPENAI_API_KEY: 'sk-collect-only-not-a-real-key'
+        run: |
+          set -euo pipefail
+          # No pipe here: piping pytest into tail discards its exit code, which
+          # is how a gate silently stops gating.
+          python -m pytest tests/ --collect-only -q --disable-warnings
+
+  unit:
+    name: praisonai-agents unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # Extras, not decoration. Tests across workflows/embedding/eval/context
+          # patch litellm and construct LLM(...), and the knowledge suite needs
+          # chonkie for chunking -- without [knowledge] 22 tests fail on
+          # "chonkie package not found", an install gap that reads as 22 code
+          # failures.
+          pip install -e "src/praisonai-agents[llm,knowledge]"
+          # praisonai-sandbox is a MONOREPO sibling, not a third-party optional.
+          # Without it 47 tests fail with "No module named
+          # praisonai_sandbox.compute" -- an install gap reported as 47 code
+          # failures. Installing it took the suite from 297 failures to 250.
+          pip install -e src/praisonai-sandbox
+          # Same story: a stale praisonai-bot in the environment made 22 gateway
+          # tests fail on a malformed pairing file. The monorepo version already
+          # handles it; the INSTALLED one did not.
+          pip install -e src/praisonai-bot
+          # The wrapper. tests/unit/test_managed_backend.py imports
+          # praisonai.integrations.managed_agents; without it 47 tests fail with
+          # "No module named 'praisonai'". Found by running the suite on 3.11 in
+          # a CI-shaped environment rather than trusting a developer machine
+          # where every sibling is already installed.
+          pip install -e src/praisonai
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Run the unit suite
+        working-directory: src/praisonai-agents
+        env:
+          # Never used: PRAISONAI_ALLOW_NETWORK=0 and the live marker keep these
+          # offline. Present because some modules bail at import without a key.
+          OPENAI_API_KEY: 'sk-not-a-real-key'
+          PRAISONAI_ALLOW_NETWORK: '0'
+        run: |
+          set -euo pipefail
+          # The whole suite, not a curated subset. tests/green-set.txt and
+          # tests/known-failures.txt are gone: 9373 pass, 0 fail.
+          #
+          # The 297 failures this job was built around were, in the end:
+          #   83  environment  -- monorepo siblings not installed, dirty HOME
+          #   19  ONE line     -- a module-level os.environ.setdefault in
+          #                       tests/unit/tools/test_delegation_tools.py that
+          #                       turned auto-approval on for the whole process
+          #                       at COLLECTION time
+          #   ~5  deprecation warnings that fire once per process
+          #  ~85  tests asserting contracts the product had deliberately changed
+          #    5  real product bugs
+          #  the rest: tests built on Mocks whose auto-created attributes
+          #            defeated the very code path under test
+          #
+          # Three traps worth knowing before adding a test here, each of which
+          # cost a full-suite bisect:
+          #   1. Module-level env mutation persists for the entire process, and
+          #      runs at collection. Use monkeypatch.
+          #   2. The approval registry is a process-global singleton. Anything
+          #      you add_requirement() stays for every later test.
+          #   3. `'litellm' in module_name` also matches praisonai's own
+          #      _litellm_loader; evicting it from sys.modules creates a second
+          #      module object with separate globals.
+          #
+          # No pipe: piping pytest into anything discards its exit code, which is
+          # how a gate silently stops gating.
+          #
+          # Nothing is excluded. test_prefetch.py used to be, recorded as "passes
+          # on macOS, fails on Linux" -- wrong variable. It was Python 3.12 vs the
+          # 3.11 pinned above: isinstance() against a runtime_checkable Protocol
+          # used hasattr on 3.11 (which any MagicMock satisfies) and
+          # inspect.getattr_static from 3.12 (which does not see Mock's
+          # auto-created attributes). The mock now names its methods, so both
+          # versions take the same branch.
+          python -m pytest tests/unit/ -q -p no:randomly --timeout=120 \
+            --disable-warnings

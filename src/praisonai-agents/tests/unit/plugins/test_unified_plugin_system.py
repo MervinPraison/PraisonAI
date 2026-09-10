@@ -32,14 +32,28 @@ class TestPathCentralization:
         for d in dirs:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
-    def test_skills_discovery_uses_paths_module(self):
+    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch):
         """skills/discovery.py should use paths.get_skills_dir()."""
         from praisonaiagents.skills.discovery import get_default_skill_dirs
         from praisonaiagents.paths import get_skills_dir
-        
+
+        # Hermetic: this asserted on whatever directories happened to exist on
+        # the machine. get_default_skill_dirs() walks every cwd ancestor for
+        # .claude/skills and .praisonai/skills AND appends the remote-skills
+        # cache, whose leaf is "remote-skills"/"current" -- not "skills". So a
+        # cache directory created by an earlier test made the loop fail, under
+        # some orderings only. Pointing PRAISONAI_HOME and cwd at a temp tree
+        # gives the function a known input instead of the developer's disk.
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
+        monkeypatch.chdir(tmp_path)
+
+        expected = get_skills_dir()
+        expected.mkdir(parents=True, exist_ok=True)
+
         dirs = get_default_skill_dirs()
-        
-        # Should return paths that end with 'skills'
+
+        # The user skills dir from paths.py is the one discovery must return.
+        assert expected in dirs
         for d in dirs:
             assert d.name == "skills", f"Expected 'skills' dir, got {d}"
     

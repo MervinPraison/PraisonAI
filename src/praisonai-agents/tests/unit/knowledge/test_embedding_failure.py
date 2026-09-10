@@ -20,6 +20,12 @@ def _make_adapter():
     adapter = ChromaKnowledgeAdapter.__new__(ChromaKnowledgeAdapter)
     adapter.collection = MagicMock()
     adapter.client = MagicMock()
+    # __init__ sets this (config.get("embedder") or {}) and _resolve_embedder
+    # reads it on every add/search. Skipping __init__ to avoid the chromadb
+    # dependency means every attribute it sets has to be mirrored here; this one
+    # was added later and the helper was not updated, so all three tests died on
+    # AttributeError inside the product instead of exercising the failure path.
+    adapter._embedder = {}
     return adapter
 
 

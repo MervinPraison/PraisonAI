@@ -145,18 +145,25 @@ class RuntimeResolver:
                 stacklevel=3
             )
             
-            # Only use legacy if no default is available
-            # In practice, default is always available, so this preserves existing behavior
-            # while maintaining correct priority order in the spec
+            # An already-constructed runtime INSTANCE is honoured regardless of
+            # the default. The default-wins order below is about choosing
+            # between runtime *ids*, and an instance is not an id: it cannot be
+            # expressed as model-scoped configuration, so the migration this
+            # warning recommends does not apply to it and the default cannot
+            # stand in for it. Dropping it silently ran the agent on a different
+            # runtime than the caller handed over -- and resolve_runtime_instance
+            # still carries the branch to unwrap it, which had become unreachable.
+            if not isinstance(legacy_cli_backend, str):
+                legacy_config = AgentRuntimeConfig(runtime="legacy")
+                legacy_config.config_overrides["instance"] = legacy_cli_backend
+                legacy_config.metadata["resolution_source"] = "legacy"
+                return legacy_config
+
+            # A legacy backend NAME stays at the documented priority: the
+            # built-in default outranks it, so this is reachable only when no
+            # default is configured.
             if self.default_runtime_id is None:
-                # Convert legacy cli_backend to runtime config
-                if isinstance(legacy_cli_backend, str):
-                    legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
-                else:
-                    # Assume it's already a config or protocol instance
-                    legacy_config = AgentRuntimeConfig(runtime="legacy")
-                    legacy_config.config_overrides["instance"] = legacy_cli_backend
-                
+                legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
                 legacy_config.metadata["resolution_source"] = "legacy"
                 return legacy_config
         
@@ -254,8 +261,14 @@ class RuntimeResolver:
             
         except ValueError as e:
             # Enhance error message with available runtimes
-            from .registry import list_available_runtimes
-            available = [entry.runtime_id for entry in list_available_runtimes()]
+            # list_runtimes() already returns runtime IDs as strings. This
+            # imported a `list_available_runtimes` that the registry has never
+            # defined, so the handler meant to SAY "Unknown runtime ID: X.
+            # Available: [...]" raised ImportError instead -- the error path
+            # crashed where the error was supposed to be explained, and only
+            # ever on the branch nobody exercises.
+            from .registry import list_runtimes
+            available = list_runtimes()
             raise ValueError(
                 f"Unknown runtime ID: {config.runtime}. Available runtimes: {available}. "
                 f"Original error: {e}"

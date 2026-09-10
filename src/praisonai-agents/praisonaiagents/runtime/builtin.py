@@ -93,19 +93,27 @@ class PraisonAIRuntime:
                     'runtime': self.runtime_id
                 }
                 
-                # Check if result is empty (might indicate API key issue)
+                # An empty result ALWAYS carries an error. This used to set one
+                # only when OPENAI_API_KEY was absent, so an invalid key, a
+                # rate limit, a network failure or a refusal all returned
+                # content="" with error=None -- indistinguishable from "the
+                # model had nothing to say". The caller cannot tell those apart,
+                # and the absent-key check is the one case that was already
+                # obvious to the user.
                 if not result:
-                    # Check for common API key issues
                     import os
                     if not os.environ.get('OPENAI_API_KEY'):
-                        return RuntimeResult(
-                            content="",
-                            metadata=metadata,
-                            error="OPENAI_API_KEY environment variable is required"
+                        error = "OPENAI_API_KEY environment variable is required"
+                    else:
+                        error = (
+                            "Runtime produced no content. The model returned an "
+                            "empty response -- check credentials, quota and "
+                            "connectivity for the configured provider."
                         )
-                
+                    return RuntimeResult(content="", metadata=metadata, error=error)
+
                 return RuntimeResult(
-                    content=str(result) if result else "",
+                    content=str(result),
                     metadata=metadata
                 )
             

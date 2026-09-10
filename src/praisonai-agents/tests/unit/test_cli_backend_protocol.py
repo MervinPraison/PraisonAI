@@ -91,12 +91,20 @@ def test_cli_backend_protocol_interface():
     mock_backend.config = CliBackendConfig(command="test")
     mock_backend.execute = AsyncMock(return_value=CliBackendResult(content="test"))
     mock_backend.stream = AsyncMock()
-    
+    # capabilities() joined the protocol with the runtime capability system
+    # ("all CLI backends must declare their capabilities"). It has to be ASSIGNED,
+    # not left to Mock's __getattr__: isinstance() against a runtime_checkable
+    # Protocol uses inspect.getattr_static, which does not call __getattr__, so an
+    # auto-created Mock attribute is invisible to the check and the assertion
+    # failed even though hasattr() was True.
+    mock_backend.capabilities = Mock(return_value=None)
+
     # Verify it satisfies the protocol
     assert isinstance(mock_backend, CliBackendProtocol)
     assert hasattr(mock_backend, 'config')
     assert hasattr(mock_backend, 'execute')
     assert hasattr(mock_backend, 'stream')
+    assert hasattr(mock_backend, 'capabilities')
 
 
 @pytest.mark.asyncio

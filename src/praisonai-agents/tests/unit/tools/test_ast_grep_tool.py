@@ -14,6 +14,37 @@ import subprocess
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _auto_approve(monkeypatch):
+    """These tests cover ast-grep's behaviour, not the approval gate.
+
+    ast_grep_rewrite is @require_approval(risk_level="high"). With no approval
+    callback configured the gate falls back to an interactive stdin prompt,
+    which under pytest raises "reading from stdin while output is captured" --
+    surfaced as "Execution of ast_grep_rewrite denied: Approval error: ...".
+    That reads like the tool crashing, which is exactly what
+    test_tool_does_not_crash_when_not_installed set out to disprove.
+    """
+    monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
+
+@pytest.fixture(autouse=True)
+def _reset_availability_cache():
+    """Clear the module-level availability cache around each test.
+
+    is_ast_grep_available() memoises its answer in a module global, so the FIRST
+    test to call it fixes the result for the whole process. A later test that
+    patches shutil.which to simulate the binary being present then got the
+    cached answer instead -- "assert False is True" under some orderings and
+    correct under others.
+    """
+    import praisonaiagents.tools.ast_grep_tool as mod
+
+    mod._availability_cache = None
+    yield
+    mod._availability_cache = None
+
+
 class TestAstGrepToolAvailability:
     """Test ast-grep tool availability detection."""
     

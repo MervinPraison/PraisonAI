@@ -151,7 +151,12 @@ def test_poll_result_handler_routes_result():
         user_id="u1",
         platform_data={"poll_result": PollResult("slot", {"a": 1, "b": 4})},
     )
-    out = asyncio.get_event_loop().run_until_complete(handler(ctx))
+    # asyncio.run, not get_event_loop().run_until_complete(...): since 3.12
+    # get_event_loop() no longer creates a loop when none is set, so this raised
+    # "There is no current event loop" as soon as any earlier test had called
+    # asyncio.run() and left the main thread without one. Passed alone, failed
+    # in the suite, on nothing but ordering.
+    out = asyncio.run(handler(ctx))
     assert out == "ok"
     assert captured["winner"] == "b"
 
@@ -166,7 +171,12 @@ def test_poll_result_handler_accepts_dict_payload():
         user_id="u1",
         platform_data={"poll_result": {"poll_id": "slot", "counts": {"a": 1}}},
     )
-    out = asyncio.get_event_loop().run_until_complete(handler(ctx))
+    # asyncio.run, not get_event_loop().run_until_complete(...): since 3.12
+    # get_event_loop() no longer creates a loop when none is set, so this raised
+    # "There is no current event loop" as soon as any earlier test had called
+    # asyncio.run() and left the main thread without one. Passed alone, failed
+    # in the suite, on nothing but ordering.
+    out = asyncio.run(handler(ctx))
     assert out == "slot"
 
 

@@ -196,7 +196,20 @@ async def test_async_memory_search_enforces_configured_identity_scope():
         user_id="user-7",
         session_id="session-9",
     ))
-    backend = MagicMock()
+    # spec=, so this mock is a SYNC backend on every Python version.
+    #
+    # asearch_memory branches on isinstance(backend, AsyncMemoryProtocol), a
+    # runtime_checkable Protocol -- and that check changed in 3.12. On 3.11 it
+    # used hasattr, which a bare MagicMock always satisfies, so the async branch
+    # ran, asearch_long_term was called instead, and this assertion failed with
+    # "search_long_term not called". On 3.12 isinstance uses
+    # inspect.getattr_static, which does not see Mock's auto-created attributes,
+    # so the sync branch ran and the test passed.
+    #
+    # That is why this file was green locally and red in CI: not macOS vs Linux,
+    # as first recorded, but Python 3.12 vs the 3.11 the workflow pins. Naming
+    # the methods removes the ambiguity on both.
+    backend = MagicMock(spec=["search_long_term", "search_short_term"])
     backend.search_long_term.return_value = []
     agent._memory_instance = backend
 

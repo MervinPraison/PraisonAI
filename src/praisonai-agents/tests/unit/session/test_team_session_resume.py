@@ -38,6 +38,12 @@ def _bare_team():
     team.agents = []
     team.process = "sequential"
     team.shared_memory = None
+    # Mirrors AgentTeam.__init__ (`self.tasks: Dict[int, Task] = {}`). Building
+    # the team with object.__new__ skips __init__, so every attribute the code
+    # under test can reach has to be mirrored here -- and the save/restore path
+    # reaches this one on Linux, where it failed with "'AgentTeam' object has no
+    # attribute 'tasks'" while passing on macOS.
+    team.tasks = {}
     return team
 
 
