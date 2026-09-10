@@ -160,15 +160,17 @@ async def test_the_original_task_set_is_put_back_after_a_planned_run(team):
 
     def _apply_plan(plan, console=None):
         previous = agents.tasks
-        agents.tasks = {0: SimpleNamespace(description="a plan step")}
+        agents.tasks = {0: SimpleNamespace(description="a plan step", status="completed")}
         return previous
 
-    async def arun_all_tasks():
+    async def arun_task(task_id):
+        # The plan's steps are executed one at a time; record what self.tasks
+        # held at execution so the test can prove the plan ran, not the original.
         ran.append(dict(agents.tasks))
 
     agents._create_plan = _create_plan
     agents._apply_plan = _apply_plan
-    agents.arun_all_tasks = arun_all_tasks
+    agents.arun_task = arun_task
     agents._task_id_lock = __import__("threading").Lock()
 
     await PraisonAIAgents._arun_with_planning(agents)
@@ -176,3 +178,97 @@ async def test_the_original_task_set_is_put_back_after_a_planned_run(team):
     assert [t.description for t in ran[0].values()] == ["a plan step"]  # ran the plan
     assert agents.tasks == original                                     # gave the original back
     assert [t.description for t in agents._plan_tasks.values()] == ["a plan step"]
+
+
+@pytest.mark.asyncio
+async def test_every_plan_step_runs_and_the_todo_list_advances(team):
+    # The async path must execute each plan step (not just the first, as it
+    # would under process="workflow" without next_tasks links) and mark the
+    # matching todo items done as it goes -- parity with the sync path.
+    agents = team(planning=True)
+    agents.tasks = {0: SimpleNamespace(description="the caller's task")}
+
+    class _Plan:
+        name = "a plan"
+        steps = []
+
+        def approve(self):
+            pass
+
+    class _Item:
+        def __init__(self, _id):
+            self.id = _id
+            self.state = "pending"
+
+    class _Todo:
+        def __init__(self):
+            self.items = [_Item("a"), _Item("b"), _Item("c")]
+
+        def start(self, _id):
+            next(i for i in self.items if i.id == _id).state = "in_progress"
+
+        def complete(self, _id):
+            next(i for i in self.items if i.id == _id).state = "done"
+
+    executed = []
+
+    async def _create_plan(request=None, context=None):
+        return _Plan()
+
+    def _apply_plan(plan, console=None):
+        previous = agents.tasks
+        agents.tasks = {
+            n: SimpleNamespace(description=f"step {n}", status="completed")
+            for n in range(3)
+        }
+        agents._todo_list = _Todo()
+        return previous
+
+    async def arun_task(task_id):
+        executed.append(task_id)
+
+    agents._create_plan = _create_plan
+    agents._apply_plan = _apply_plan
+    agents.arun_task = arun_task
+    agents._task_id_lock = __import__("threading").Lock()
+
+    await PraisonAIAgents._arun_with_planning(agents)
+
+    assert executed == [0, 1, 2]                                  # every step ran
+    assert [i.state for i in agents._todo_list.items] == [
+        "done",
+        "done",
+        "done",
+    ]  # the todo list advanced
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_fails_to_apply_restores_the_original_tasks(team):
+    # _apply_plan mutates self.tasks; if it raises mid-construction the caller
+    # must not be left holding a half-built plan task set.
+    agents = team(planning=True)
+    original = {0: SimpleNamespace(description="the caller's task")}
+    agents.tasks = dict(original)
+
+    class _Plan:
+        name = "a plan"
+        steps = []
+
+        def approve(self):
+            pass
+
+    async def _create_plan(request=None, context=None):
+        return _Plan()
+
+    def _apply_plan(plan, console=None):
+        agents.tasks = {}  # publish a partial set, then fail
+        raise ValueError("bad plan step")
+
+    agents._create_plan = _create_plan
+    agents._apply_plan = _apply_plan
+    agents._task_id_lock = __import__("threading").Lock()
+
+    with pytest.raises(ValueError):
+        await PraisonAIAgents._arun_with_planning(agents)
+
+    assert agents.tasks == original  # restored despite the failure

@@ -4004,9 +4004,32 @@ class AgentTeam(SpawnAnnounceProtocol):
         except Exception:
             pass
 
-        original_tasks = self._apply_plan(plan)
+        # _apply_plan mutates self.tasks and the id counter before returning, so
+        # snapshot first and guard the whole apply/execute in try/finally: a
+        # plan that raises mid-construction must not leave the team holding a
+        # half-built task set for every later run.
+        original_tasks = self.tasks.copy()
         try:
-            await self.arun_all_tasks()
+            self._apply_plan(plan)
+
+            # Execute plan-step tasks directly rather than via arun_all_tasks:
+            # _apply_plan builds no next_tasks links, so under process="workflow"
+            # the workflow walker would stop after the first step. Iterating the
+            # tasks in order matches the sync path and also lets the todo list
+            # advance in lockstep, which arun_all_tasks would not do.
+            for i, task_id in enumerate(list(self.tasks.keys())):
+                if self._todo_list and i < len(self._todo_list.items):
+                    self._todo_list.start(self._todo_list.items[i].id)
+                try:
+                    await self.arun_task(task_id)
+                    if (
+                        self.tasks[task_id].status == "completed"
+                        and self._todo_list
+                        and i < len(self._todo_list.items)
+                    ):
+                        self._todo_list.complete(self._todo_list.items[i].id)
+                except Exception as e:
+                    logger.error(f"Error executing plan task {task_id}: {e}")
         finally:
             self._restore_tasks_after_plan(original_tasks)
 
@@ -4088,49 +4111,55 @@ class AgentTeam(SpawnAnnounceProtocol):
         except Exception:
             pass
         
-        original_tasks = self._apply_plan(plan, console)
+        # Snapshot before _apply_plan mutates self.tasks so a construction
+        # failure cannot leave the team holding a half-built plan task set.
+        original_tasks = self.tasks.copy()
+        try:
+            self._apply_plan(plan, console)
 
-        # Step 5: Execute tasks using the proper Task execution system
-        for i, (task_id, task) in enumerate(self.tasks.items()):
-            # Update todo list progress
-            if i < len(self._todo_list.items):
-                item = self._todo_list.items[i]
-                
-                # Display progress bar
-                progress = self._todo_list.progress
-                bar_length = 30
-                filled = int(bar_length * progress)
-                bar = "█" * filled + "░" * (bar_length - filled)
-                console.print(f"[dim]Progress: [{bar}] {progress * 100:.0f}%[/dim]")
-                
-                console.print(f"\n[bold]📌 Step {i + 1}/{len(self.tasks)}:[/bold] {task.description[:60]}...")
-                console.print(f"[dim]   Agent: {task.agent.display_name if task.agent else 'Unknown'}[/dim]")
-                
-                # Mark as in progress
-                self._todo_list.start(item.id)
-            
-            # Execute using the full Task execution system
-            # This includes: memory, callbacks, guardrails, structured output, retry logic
-            try:
-                self.run_task(task_id)
-                
-                if task.status == "completed":
-                    if i < len(self._todo_list.items):
-                        self._todo_list.complete(self._todo_list.items[i].id)
-                    console.print("[green]   ✅ Completed[/green]")
-                else:
-                    console.print(f"[yellow]   ⚠️ Task status: {task.status}[/yellow]")
-            except Exception as e:
-                console.print(f"[red]   ❌ Error: {e}[/red]")
-                logger.error(f"Error executing plan task {task_id}: {e}")
-        
-        # Final progress
-        completed_count = len([t for t in self.tasks.values() if t.status == "completed"])
-        console.print(f"\n[bold green]🎉 EXECUTION COMPLETE[/bold green]")
-        console.print(f"[dim]Progress: [{'█' * 30}] 100%[/dim]")
-        console.print(f"[green]Completed {completed_count}/{len(self.tasks)} tasks![/green]\n")
-        
-        self._restore_tasks_after_plan(original_tasks)
+            console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
+
+            # Step 5: Execute tasks using the proper Task execution system
+            for i, (task_id, task) in enumerate(self.tasks.items()):
+                # Update todo list progress
+                if i < len(self._todo_list.items):
+                    item = self._todo_list.items[i]
+
+                    # Display progress bar
+                    progress = self._todo_list.progress
+                    bar_length = 30
+                    filled = int(bar_length * progress)
+                    bar = "█" * filled + "░" * (bar_length - filled)
+                    console.print(f"[dim]Progress: [{bar}] {progress * 100:.0f}%[/dim]")
+
+                    console.print(f"\n[bold]📌 Step {i + 1}/{len(self.tasks)}:[/bold] {task.description[:60]}...")
+                    console.print(f"[dim]   Agent: {task.agent.display_name if task.agent else 'Unknown'}[/dim]")
+
+                    # Mark as in progress
+                    self._todo_list.start(item.id)
+
+                # Execute using the full Task execution system
+                # This includes: memory, callbacks, guardrails, structured output, retry logic
+                try:
+                    self.run_task(task_id)
+
+                    if task.status == "completed":
+                        if i < len(self._todo_list.items):
+                            self._todo_list.complete(self._todo_list.items[i].id)
+                        console.print("[green]   ✅ Completed[/green]")
+                    else:
+                        console.print(f"[yellow]   ⚠️ Task status: {task.status}[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]   ❌ Error: {e}[/red]")
+                    logger.error(f"Error executing plan task {task_id}: {e}")
+
+            # Final progress
+            completed_count = len([t for t in self.tasks.values() if t.status == "completed"])
+            console.print(f"\n[bold green]🎉 EXECUTION COMPLETE[/bold green]")
+            console.print(f"[dim]Progress: [{'█' * 30}] 100%[/dim]")
+            console.print(f"[green]Completed {completed_count}/{len(self.tasks)} tasks![/green]\n")
+        finally:
+            self._restore_tasks_after_plan(original_tasks)
 
     # Resource Lifecycle Management
     def close(self) -> None:
