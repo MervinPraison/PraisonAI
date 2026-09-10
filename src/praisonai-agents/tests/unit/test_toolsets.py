@@ -215,9 +215,17 @@ class TestAgentIntegration:
 class TestAgenticExecution:
     """Test real agentic execution with toolsets (requires LLM)."""
     
+    @pytest.mark.live
+    @pytest.mark.network
     @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "test-key",
-        reason="Real LLM test requires OPENAI_API_KEY environment variable"
+        (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+         and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+        or not os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY") == "test-key",
+        # Gating on the key alone treated owning one as consent to spend it,
+        # so this billed a real account on any machine with the key exported.
+        # Either opt-in variable works; the suite uses both names.
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
     )
     def test_agent_real_agentic_execution_with_toolsets(self):
         """
@@ -249,9 +257,15 @@ class TestAgenticExecution:
         print(f"\n🤖 Agent Response: {result}")
         print(f"✅ Real agentic test passed - Agent successfully used toolsets and called LLM")
     
+    @pytest.mark.live
+    @pytest.mark.network
     @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "test-key",
-        reason="Real LLM test requires OPENAI_API_KEY environment variable"
+        (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+         and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+        or not os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY") == "test-key",
+        # Owning a key is not consent to spend it.
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
     )
     def test_agent_with_research_toolset_real(self):
         """

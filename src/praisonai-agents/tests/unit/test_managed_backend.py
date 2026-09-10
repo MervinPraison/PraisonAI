@@ -31,7 +31,8 @@ class TestManagedBackendProtocol:
         assert cfg.model == "claude-haiku-4-5"
         assert cfg.name == "Agent"
         assert cfg.tools == [{"type": "agent_toolset_20260401"}]
-        assert cfg.networking == {"type": "unrestricted"}
+        # networking became a typed NetworkingConfig; it was a plain dict.
+        assert cfg.networking.type.value == "unrestricted"
         assert cfg.packages is None
         assert cfg.mcp_servers == []
         assert cfg.skills == []

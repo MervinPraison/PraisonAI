@@ -259,36 +259,32 @@ class TestEventBus:
         assert len(history) == 5
         assert history[0].type == "event.5"
     
-    def test_history_is_not_recorded_without_a_subscriber(self):
-        """The contract that replaced the three tests above (#2066).
+    def test_history_is_recorded_without_a_subscriber(self):
+        """History records every published event, subscribers or not (#2066).
 
-        The fast path skips the lock, Event construction and the history append
-        when nothing is listening, because memory and sub-agent lifecycle
-        publishes were paying uuid4 + lock + append on every call with no
-        subscribers.
-
-        Stated here as its own test rather than left implicit, because the file
-        previously asserted both this and its opposite -- three tests expecting
-        history from a bare bus, two pinning that there is none -- which cannot
-        both hold, and left the suite red for three months while looking like
-        flake.
+        ``publish`` appends to history before the no-subscriber fast path
+        returns, on the same principle as ``_dispatch_to_sinks``: an event that
+        was published happened, whether or not anyone was listening, and
+        ``get_history()`` exists precisely for the debugging that needs it. The
+        fast path still skips the subscriber walk -- the append is an O(1) cost
+        into a capped list.
         """
         bus = EventBus()
 
         bus.publish("event.1", {})
         bus.publish("event.2", {})
 
-        assert bus.get_history() == []
+        assert [e.type for e in bus.get_history()] == ["event.1", "event.2"]
 
-    def test_a_subscriber_added_later_does_not_backfill_history(self):
-        """Only events published *while* subscribed are recorded."""
+    def test_history_records_events_published_before_a_subscriber(self):
+        """Events published before subscribing are still in history."""
         bus = EventBus()
 
         bus.publish("before", {})
         bus.subscribe(lambda e: None)   # catch-all: event_types defaults to None
         bus.publish("after", {})
 
-        assert [e.type for e in bus.get_history()] == ["after"]
+        assert [e.type for e in bus.get_history()] == ["before", "after"]
 
     def test_clear_history(self):
         """Test clearing event history."""
@@ -429,9 +425,13 @@ class TestEventBusOptimization:
         real_event = Event(type="test.event", data={})
         result = bus.publish_event(real_event)
         
-        # Should return the event without storing in history
+        # The same event object comes back, and no dispatch happened. History
+        # still records it: an event that was published happened, whether or
+        # not anything was subscribed at the time, and test_event_history*
+        # above depend on that. The fast path skips the subscriber walk, which
+        # is the expensive part -- the append is O(1) into a capped list.
         assert result is real_event
-        assert len(bus.get_history()) == 0  # No history when no subscribers
+        assert bus.get_history() == [real_event]
     
     def test_publish_normal_path_with_subscribers(self):
         """Test that publishing with subscribers works normally."""

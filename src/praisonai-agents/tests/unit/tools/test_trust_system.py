@@ -157,10 +157,15 @@ class TestExternalToolDetection:
         assert not is_external_tool("internal_function")
 
     def test_add_external_tool(self):
-        """Adding external tools should work."""
+        """Adding external tools should work.
+
+        add_external_tool mutates EXTERNAL_TOOL_NAMES in place (it is a set,
+        not a rebind of a frozenset), so a module that imported the name still
+        sees the addition -- no stale-reference footgun.
+        """
         original_count = len(EXTERNAL_TOOL_NAMES)
         add_external_tool("new_external_tool")
-        
+
         assert "new_external_tool" in EXTERNAL_TOOL_NAMES
         assert len(EXTERNAL_TOOL_NAMES) == original_count + 1
         assert is_external_tool("new_external_tool")

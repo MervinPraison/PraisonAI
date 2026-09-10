@@ -13,6 +13,34 @@ import os
 from praisonaiagents.approval import get_approval_registry
 
 
+@pytest.fixture(autouse=True)
+def _restore_auto_approve_grants():
+    """Keep this file's registry surgery from escaping it.
+
+    Every test here calls registry._agent_tool_auto_approve.clear() on the
+    PROCESS-GLOBAL approval registry and then adds grants of its own. Both
+    directions leaked: grants made by earlier tests were discarded, and the
+    grants added here outlived the file -- which is why
+    tests/unit/tools/test_mixed_tools_list_resolution.py passes alone and
+    failed once this file had run.
+    """
+    registry = get_approval_registry()
+    saved = {
+        name: (dict(value) if isinstance(value, dict)
+               else set(value) if isinstance(value, set) else value)
+        for name, value in vars(registry).items()
+        if isinstance(value, (dict, set))
+    }
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            current = getattr(registry, name, None)
+            if isinstance(current, (dict, set)):
+                current.clear()
+                current.update(value)
+
+
 def test_skill_allowed_tools_do_not_leak_across_agents():
     """G-A regression test: skill allowed-tools should not leak across agents.
 

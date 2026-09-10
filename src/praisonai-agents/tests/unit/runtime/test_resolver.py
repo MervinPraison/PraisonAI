@@ -279,11 +279,14 @@ class TestRuntimeResolver:
             legacy_cli_backend=legacy_instance
         )
         
+        # With no built-in default (default_runtime_id=None), legacy is reached
+        # (resolver.py only falls to legacy when no default exists), so the
+        # caller's already-resolved instance is returned as-is.
         assert result.runtime is legacy_instance
         assert result.runtime_id == "legacy"
         assert result.resolution_source == "legacy"
         assert result.metadata["legacy_instance"] is True
-        
+
         # Should not call registry resolve for legacy instances
         mock_resolve_runtime.assert_not_called()
 
