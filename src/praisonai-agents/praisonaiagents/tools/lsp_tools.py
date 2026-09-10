@@ -12,6 +12,9 @@ Tools:
     - ``lsp_hover(file_path, line, character)``
     - ``lsp_document_symbols(file_path)``
     - ``lsp_workspace_symbols(query)``
+    - ``lsp_implementations(file_path, line=None, character=None, symbol=None)``
+    - ``lsp_incoming_calls(file_path, line=None, character=None, symbol=None)``
+    - ``lsp_outgoing_calls(file_path, line=None, character=None, symbol=None)``
 
 All tools:
     - Are path-safe (contained to the workspace, no traversal).
@@ -511,3 +514,154 @@ def lsp_workspace_symbols(query: str, file_path: Optional[str] = None) -> str:
     if rerr:
         return rerr
     return _format_symbols(result or [], "Workspace symbols", include_container=True)
+
+
+def lsp_implementations(file_path: str, line: Optional[int] = None,
+                        character: Optional[int] = None,
+                        symbol: Optional[str] = None) -> str:
+    """Find concrete implementations of a symbol (LSP ``textDocument/implementation``).
+
+    Resolves the concrete types/methods behind an interface or abstract method,
+    where a text ``grep`` would miss dynamic dispatch or over-match unrelated
+    same-named identifiers.
+
+    Args:
+        file_path: File to query (workspace-relative or absolute).
+        line: 0-indexed line of the symbol (LSP convention). Optional if
+            ``symbol`` is given.
+        character: 0-indexed character/column of the symbol. Optional.
+        symbol: Symbol name to locate in the file when a position is not
+            provided; the first word-boundary occurrence is used.
+
+    Returns:
+        ``file:line:col  snippet`` for each implementation, or a clear message
+        when no language server is installed / nothing is found.
+    """
+    safe_path, language, err = _prepare(file_path)
+    if err:
+        return err
+
+    resolved_line, resolved_char, perr = _resolve_position(
+        safe_path, line, character, symbol)
+    if perr:
+        return perr
+
+    async def _query(client):
+        return await client.get_implementations(
+            safe_path, resolved_line, resolved_char)
+
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
+    if rerr:
+        return rerr
+    return _format_locations(result or [], "Implementations")
+
+
+def _format_calls(calls: List, header: str, side_key: str) -> str:
+    """Render ``callHierarchy`` incoming/outgoing results compactly.
+
+    Each entry is a ``CallHierarchyIncomingCall``/``OutgoingCall`` dict holding
+    the related item under *side_key* (``from`` for incoming, ``to`` for
+    outgoing) plus the ``fromRanges`` call sites.  Rendered as
+    ``kind name  file:line:col`` mirroring the location format used elsewhere.
+    """
+    if not calls:
+        return f"{header}: none found"
+    lines = [header + ":"]
+    for call in calls[:_MAX_RESULTS]:
+        if not isinstance(call, dict):
+            continue
+        item = call.get(side_key)
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name", "?")
+        kind = _SYMBOL_KIND.get(item.get("kind"), "symbol")
+        uri = item.get("uri")
+        rng = item.get("selectionRange") or item.get("range") or {}
+        start = rng.get("start") if isinstance(rng, dict) else None
+        entry = f"  {kind} {name}"
+        if start is not None:
+            ln = start.get("line", 0) + 1
+            col = start.get("character", 0) + 1
+            display = _uri_to_display(uri) if uri else ""
+            prefix = f"{display}:" if display else ""
+            entry += f"  {prefix}{ln}:{col}"
+        lines.append(entry)
+    if len(calls) > _MAX_RESULTS:
+        lines.append(f"  ... ({len(calls) - _MAX_RESULTS} more; narrow your query)")
+    return "\n".join(lines)
+
+
+def _call_hierarchy(file_path: str, line: Optional[int], character: Optional[int],
+                    symbol: Optional[str], direction: str) -> str:
+    """Shared driver for incoming/outgoing call-hierarchy queries."""
+    safe_path, language, err = _prepare(file_path)
+    if err:
+        return err
+
+    resolved_line, resolved_char, perr = _resolve_position(
+        safe_path, line, character, symbol)
+    if perr:
+        return perr
+
+    incoming = direction == "incoming"
+
+    async def _query(client):
+        items = await client.prepare_call_hierarchy(
+            safe_path, resolved_line, resolved_char)
+        if not items:
+            return None
+        item = items[0]
+        if incoming:
+            return await client.get_incoming_calls(item)
+        return await client.get_outgoing_calls(item)
+
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
+    if rerr:
+        return rerr
+    if result is None:
+        header = "Incoming calls" if incoming else "Outgoing calls"
+        return f"{header}: no call-hierarchy symbol at this position"
+    if incoming:
+        return _format_calls(result or [], "Incoming calls", "from")
+    return _format_calls(result or [], "Outgoing calls", "to")
+
+
+def lsp_incoming_calls(file_path: str, line: Optional[int] = None,
+                       character: Optional[int] = None,
+                       symbol: Optional[str] = None) -> str:
+    """Find the callers of a symbol (LSP ``callHierarchy/incomingCalls``).
+
+    Answers "who calls this function?" with resolved-symbol accuracy, unlike a
+    text ``grep`` that over- or under-matches same-named identifiers.
+
+    Args:
+        file_path: File to query (workspace-relative or absolute).
+        line: 0-indexed line of the symbol. Optional if ``symbol`` is given.
+        character: 0-indexed character/column of the symbol. Optional.
+        symbol: Symbol name to locate when a position is not provided.
+
+    Returns:
+        ``kind name  file:line:col`` for each caller, or a clear message when no
+        language server is installed / nothing is found.
+    """
+    return _call_hierarchy(file_path, line, character, symbol, "incoming")
+
+
+def lsp_outgoing_calls(file_path: str, line: Optional[int] = None,
+                       character: Optional[int] = None,
+                       symbol: Optional[str] = None) -> str:
+    """Find the callees of a symbol (LSP ``callHierarchy/outgoingCalls``).
+
+    Answers "what does this function call?" with resolved-symbol accuracy.
+
+    Args:
+        file_path: File to query (workspace-relative or absolute).
+        line: 0-indexed line of the symbol. Optional if ``symbol`` is given.
+        character: 0-indexed character/column of the symbol. Optional.
+        symbol: Symbol name to locate when a position is not provided.
+
+    Returns:
+        ``kind name  file:line:col`` for each callee, or a clear message when no
+        language server is installed / nothing is found.
+    """
+    return _call_hierarchy(file_path, line, character, symbol, "outgoing")

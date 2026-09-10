@@ -24,9 +24,11 @@ def test_lsp_tools_are_registered():
     from praisonaiagents.tools import (
         lsp_definition, lsp_references, lsp_hover,
         lsp_document_symbols, lsp_workspace_symbols,
+        lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls,
     )
     for fn in (lsp_definition, lsp_references, lsp_hover,
-               lsp_document_symbols, lsp_workspace_symbols):
+               lsp_document_symbols, lsp_workspace_symbols,
+               lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls):
         assert callable(fn)
 
 
@@ -235,6 +237,65 @@ def test_references_live_pylsp(tmp_path, monkeypatch):
     # The comment (line 4) and string (line 5) must NOT be reported as refs.
     assert "mod.py:4:" not in out
     assert "mod.py:5:" not in out
+
+
+# ---------------------------------------------------------------------------
+# Call hierarchy / implementations: degradation & formatting
+# ---------------------------------------------------------------------------
+
+def test_new_tools_degrade_without_server(tmp_path, monkeypatch):
+    from praisonaiagents.tools import (
+        lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls,
+    )
+    (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
+    monkeypatch.chdir(tmp_path)
+    with patch("shutil.which", return_value=None):
+        for fn in (lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls):
+            out = fn("mod.py", symbol="foo")
+            assert out.startswith("Error:")
+            assert "not installed" in out
+
+
+def test_format_calls_incoming():
+    from praisonaiagents.tools import lsp_tools
+    calls = [
+        {"from": {"name": "caller", "kind": 12,
+                  "uri": "file:///x.py",
+                  "selectionRange": {"start": {"line": 5, "character": 4}}}},
+    ]
+    out = lsp_tools._format_calls(calls, "Incoming calls", "from")
+    assert "function caller" in out
+    assert "6:5" in out  # 0-indexed 5 -> 1-indexed 6
+
+
+def test_format_calls_outgoing_empty():
+    from praisonaiagents.tools import lsp_tools
+    assert "none found" in lsp_tools._format_calls([], "Outgoing calls", "to")
+
+
+# ---------------------------------------------------------------------------
+# Live pylsp integration for call hierarchy (opt-in)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(shutil.which("pylsp") is None,
+                    reason="pylsp language server not installed")
+def test_incoming_calls_live_pylsp(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_incoming_calls
+    src = (
+        "def compute(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "def caller():\n"
+        "    return compute(41)\n"
+    )
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+    monkeypatch.chdir(tmp_path)
+
+    out = lsp_incoming_calls("mod.py", symbol="compute")
+    # Either the caller is resolved, or the server does not advertise the
+    # capability — both are acceptable, non-error outputs.
+    assert not out.startswith("Error:")
 
 
 if __name__ == "__main__":

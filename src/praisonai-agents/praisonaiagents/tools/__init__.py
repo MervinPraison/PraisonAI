@@ -246,6 +246,9 @@ TOOL_MAPPINGS = {
     'lsp_hover': ('.lsp_tools', None),
     'lsp_document_symbols': ('.lsp_tools', None),
     'lsp_workspace_symbols': ('.lsp_tools', None),
+    'lsp_implementations': ('.lsp_tools', None),
+    'lsp_incoming_calls': ('.lsp_tools', None),
+    'lsp_outgoing_calls': ('.lsp_tools', None),
     
     # Memory Tools (active memory store/search for agents)
     'store_memory': ('.memory', None),
