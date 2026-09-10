@@ -21,6 +21,47 @@ _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
 
+# Model-independent fallback used only when the resolved model's real output
+# ceiling is unknown (litellm absent or model not in its registry). Keeping this
+# equal to the historical CLI default makes the derivation backward-compatible.
+_PREFERRED_DEFAULT_MAX_TOKENS = 16000
+
+
+def _resolve_max_tokens(
+    model_name: Optional[str],
+    max_tokens: int,
+    was_explicit: bool,
+    output,
+) -> int:
+    """Derive/clamp ``--max-tokens`` against the resolved model's output ceiling.
+
+    - Unset by the user/config: default to ``min(preferred, ceiling)`` so a
+      large-output model is not silently capped at the constant and a small one
+      is not sent an over-limit request.
+    - Explicitly set above the ceiling: clamp down with a one-line diagnostic so
+      the provider does not 400.
+    - Ceiling unknown (no litellm / unknown model): return the value unchanged,
+      preserving today's behaviour.
+    """
+    if not model_name:
+        return max_tokens
+    try:
+        from praisonaiagents.llm.model_capabilities import max_output_tokens
+        ceiling = max_output_tokens(model_name)
+    except Exception:
+        ceiling = None
+    if not ceiling:
+        return max_tokens
+    if was_explicit:
+        if max_tokens > ceiling:
+            output.print_warning(
+                f"--max-tokens {max_tokens} exceeds {model_name} limit; "
+                f"clamping to {ceiling}"
+            )
+            return ceiling
+        return max_tokens
+    return min(_PREFERRED_DEFAULT_MAX_TOKENS, ceiling)
+
 
 def _run_succeeded(result: Any) -> bool:
     """Whether an agent run result represents a genuine success.
@@ -1377,6 +1418,18 @@ def run_main(
 
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
         model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+
+    # Derive/clamp the output budget from the now-resolved model's real ceiling
+    # (Issue #5017). A bare `run` no longer 400s on lower-ceiling models nor
+    # truncates silently on higher-ceiling ones; an explicit over-limit value is
+    # clamped with a diagnostic. Unknown-metadata models keep today's constant.
+    try:
+        import click as _click
+        _mt_src = _click.get_current_context().get_parameter_source("max_tokens")
+        _max_tokens_explicit = _mt_src is not None and _mt_src.name != "DEFAULT"
+    except Exception:
+        _max_tokens_explicit = False
+    max_tokens = _resolve_max_tokens(model, max_tokens, _max_tokens_explicit, output)
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject
