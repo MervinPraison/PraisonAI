@@ -62,7 +62,6 @@ def test_run_wrapper_command_exits_one_without_traceback(monkeypatch):
         ("memory", ["show"]),
         ("skills", ["list"]),
         ("hooks", ["list"]),
-        ("rules", ["list"]),
         ("eval", ["accuracy", "agent", "--input", "x", "--expected", "y"]),
         ("package", ["list"]),
         ("templates", ["list"]),
@@ -90,6 +89,38 @@ def test_stub_command_no_traceback_standalone(monkeypatch, module_name, argv):
     assert "Traceback" not in result.output
     assert "argparse_builder" not in result.output
     assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("module_name,argv", [
+    ("rules", ["list"]),
+])
+def test_natively_migrated_commands_work_without_the_wrapper(
+    monkeypatch, tmp_path, module_name, argv
+):
+    """Commands made *native* to praisonai-code must succeed standalone.
+
+    ``rules`` sat in the stub table above, which asserts exit 1, until
+    448b7bb912 made it native (#4337) -- and the table was never updated, so
+    this had been red ever since. It is the opposite assertion now: the point
+    of that change is that the command works with no wrapper installed.
+
+    HOME is redirected because the command reads the user's real rules
+    directory otherwise, which made the outcome depend on whose machine ran it.
+    """
+    typer_testing = pytest.importorskip("typer.testing")
+    import praisonai_code._wrapper_bridge as bridge
+
+    monkeypatch.setattr(bridge, "wrapper_available", lambda: False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    module = __import__(
+        f"praisonai_code.cli.commands.{module_name}", fromlist=["app"]
+    )
+    result = typer_testing.CliRunner().invoke(module.app, argv)
+
+    assert "Traceback" not in result.output
+    assert result.exit_code == 0, result.output
 
 
 def test_no_legacy_main_reentry_in_stub_modules():
