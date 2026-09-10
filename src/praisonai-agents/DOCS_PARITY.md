@@ -25,7 +25,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3879 |
 | ✅ Autonomy | 3 | 7 | 2794 |
-| ✅ Bots | 7 | 33 | 13934 |
+| ✅ Bots | 7 | 35 | 14385 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 124 | 38873 |
 | ✅ Chunking | 2 | 2 | 424 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 87 | 32893 |
+| ✅ Gateway | 7 | 87 | 32899 |
 | ✅ Guardrails | 5 | 4 | 2470 |
 | ✅ Handoffs | 11 | 6 | 2748 |
 | ✅ Hooks | 2 | 9 | 4985 |
@@ -52,7 +52,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5917 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 63 | 14755 |
-| ✅ Memory | 6 | 20 | 7949 |
+| ✅ Memory | 6 | 21 | 8186 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2842 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1046 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3690 |
-| ✅ Security | 1 | 3 | 3594 |
+| ✅ Security | 1 | 3 | 3598 |
 | ✅ Sessions | 4 | 20 | 7982 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 8 | 3266 |
@@ -80,7 +80,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
-| ✅ Web | 3 | 10 | 2811 |
+| ✅ Web | 3 | 10 | 2815 |
 | ✅ Workflows | 5 | 20 | 8488 |
 
 ## Documentation Without Features
