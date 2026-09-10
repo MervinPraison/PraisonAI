@@ -34,6 +34,38 @@ class MockRuntime:
         for word in words:
             yield RuntimeDelta(type="text", content=word + " ")
 
+    # AgentRuntimeProtocol grew beyond supports/run_turn/stream_turn to cover
+    # identity, capability reporting and health, and this mock was not updated
+    # -- so isinstance(runtime, AgentRuntimeProtocol) was correctly False and
+    # test_protocol_compliance had been red. A mock claiming to demonstrate
+    # protocol compliance has to actually implement the protocol, otherwise the
+    # test asserts nothing about the real contract.
+
+    @property
+    def runtime_name(self) -> str:
+        return "mock"
+
+    @property
+    def runtime_version(self) -> str:
+        return "0.0.0"
+
+    @property
+    def capabilities(self):
+        return {}
+
+    def validate_config(self, config) -> bool:
+        return True
+
+    def health_check(self) -> bool:
+        return True
+
+    async def execute_agent(self, agent, prompt: str, **kwargs) -> RuntimeResult:
+        return await self.run_turn(prompt, **kwargs)
+
+    async def stream_agent(self, agent, prompt: str, **kwargs) -> AsyncIterator[RuntimeDelta]:
+        async for delta in self.stream_turn(prompt, **kwargs):
+            yield delta
+
 
 def test_runtime_config():
     """Test RuntimeConfig dataclass."""
@@ -81,7 +113,12 @@ def test_protocol_compliance():
     """Test that our mock runtime implements the protocol correctly."""
     runtime = MockRuntime()
     
-    # Check that it's recognized as implementing the protocol
+    # Check that it's recognized as implementing the protocol. Name what is
+    # missing: a bare `assert isinstance(...)` failing as "assert False" gives
+    # no clue which member the protocol gained.
+    required = getattr(AgentRuntimeProtocol, "__protocol_attrs__", set())
+    missing = sorted(m for m in required if not hasattr(runtime, m))
+    assert not missing, f"MockRuntime does not implement: {missing}"
     assert isinstance(runtime, AgentRuntimeProtocol)
     
     # Check method signatures exist

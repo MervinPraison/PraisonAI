@@ -506,6 +506,7 @@ class Knowledge:
         if isinstance(file_path, (list, tuple)):
             results = []
             errors = []
+            failed_chunks = 0
             for path in file_path:
                 result = self._process_single_input(path, user_id, agent_id, run_id, metadata)
                 results.extend(result.get('results', []))
@@ -513,7 +514,9 @@ class Knowledge:
                 # embed) must survive aggregation; otherwise a list input hides
                 # them behind the old success-shaped response.
                 errors.extend(result.get('errors', []))
-            return {'results': results, 'relations': [], 'errors': errors}
+                failed_chunks += result.get('failed_chunks', 0)
+            return {'results': results, 'relations': [], 'errors': errors,
+                    'failed_chunks': failed_chunks}
         
         return self._process_single_input(file_path, user_id, agent_id, run_id, metadata)
 
@@ -577,6 +580,7 @@ class Knowledge:
                 # believed the knowledge base was populated. Collect them and
                 # hand them back.
                 all_errors = []
+                dir_failed_chunks = 0
                 
                 # Walk through directory and process all supported files
                 for root, dirs, files in os.walk(input_path):
@@ -589,6 +593,7 @@ class Knowledge:
                                     file_path, user_id, agent_id, run_id, metadata
                                 )
                                 all_results.extend(result.get('results', []))
+                                dir_failed_chunks += result.get('failed_chunks', 0)
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
                                 all_errors.append({'file': file_path, 'error': str(e)})
@@ -623,7 +628,8 @@ class Knowledge:
                     else:
                         logger.warning(f"No supported files found in directory: {input_path}")
                 
-                return {'results': all_results, 'relations': [], 'errors': all_errors}
+                return {'results': all_results, 'relations': [], 'errors': all_errors,
+                        'failed_chunks': dir_failed_chunks}
 
             # Check if input ends with any supported extension
             is_supported_file = any(input_path.lower().endswith(ext) 
@@ -772,7 +778,12 @@ class Knowledge:
             self._emit_knowledge_event("add", source=input_path, chunk_count=len(memories), 
                                        metadata=metadata, agent_id=agent_id)
             
-            return {'results': all_results, 'relations': []}
+            # ``failed_chunks`` lets the caller distinguish a clean store from a
+            # partial one. A file where some chunks landed and some were
+            # swallowed must not be reported as a silent success -- the index
+            # loop records it in ``errors`` so ``result.success`` reflects the
+            # loss.
+            return {'results': all_results, 'relations': [], 'failed_chunks': failed_chunks}
 
         except Exception as e:
             logger.error(f"Error processing input {input_path}: {str(e)}", exc_info=True)
@@ -968,6 +979,17 @@ class Knowledge:
                             new_memory_ids.append(entry['id'])
                         elif isinstance(entry, str):
                             new_memory_ids.append(entry)
+
+                    # A file where some chunks stored and some were swallowed by
+                    # the backend is a partial loss, not a clean index. Record it
+                    # so ``result.success`` (``not result.errors``) reflects that
+                    # the corpus is incomplete rather than reporting success.
+                    partial_failures = add_result.get('failed_chunks', 0)
+                    if partial_failures:
+                        result.errors.append(
+                            f"{filepath}: {partial_failures} chunk(s) failed to "
+                            f"store (partial index)"
+                        )
                 
                 # Mark as indexed (with memory IDs for future stale-chunk
                 # cleanup). Any old IDs that failed to delete are retained so the

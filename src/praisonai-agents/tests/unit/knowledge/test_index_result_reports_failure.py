@@ -75,6 +75,39 @@ def test_success_is_false_on_a_partial_failure():
         assert result.success is False
 
 
+def test_success_is_false_on_partial_chunk_loss_within_a_file():
+    """Some chunks of a file storing and some being swallowed is a partial loss.
+
+    ``_process_single_input`` only raises when *every* chunk fails, so a file
+    where a subset of chunks fell into ``store()``'s falsy-return path returned
+    normally with a shorter ``results`` list and no error -- leaving
+    ``result.success`` True while part of the document was silently dropped.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "doc.txt"), "w") as fh:
+            fh.write("content")
+
+        knowledge = Knowledge()
+
+        call_count = {"n": 0}
+
+        def flaky_store(memory, *args, **kwargs):
+            # First chunk lands, second is swallowed (store() returns falsy).
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {"results": [{"id": "1"}]}
+            return []
+
+        # Two chunks so one can succeed and one fail.
+        with patch.object(knowledge.chunker, "chunk",
+                          return_value=["chunk one", "chunk two"]), \
+             patch.object(knowledge, "store", side_effect=flaky_store):
+            result = knowledge.index(tmpdir)
+
+        assert result.errors, "partial chunk loss was not recorded"
+        assert result.success is False
+
+
 def test_success_is_true_when_nothing_failed():
     """The guard must not become a blanket False."""
     with tempfile.TemporaryDirectory() as tmpdir:

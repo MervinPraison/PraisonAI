@@ -322,17 +322,42 @@ class TestBackendWiring:
         entry = manager.capture_persona("Redis fallback test")
         assert entry is not None
 
-    def test_mongodb_warns_and_falls_back(self):
-        """MongoDB warns and falls back to FILE."""
+    def test_mongodb_warns_and_falls_back(self, caplog):
+        """MongoDB warns and falls back to FILE.
+
+        The backend construction is stubbed to fail. Unstubbed, this reached a
+        real ``mongodb://localhost:27017/`` and waited out the driver's ~20s
+        server-selection timeout before falling back -- so a unit test made a
+        network connection and took 20 seconds to assert an offline code path.
+        Stubbing exercises the same fallback in milliseconds, and deterministically
+        on a machine that happens to be running MongoDB.
+        """
+        import logging as _logging
+        from unittest.mock import patch
+
         from praisonaiagents.config.feature_configs import LearnBackend
         config = LearnConfig(
             persona=True,
             backend=LearnBackend.MONGODB,
         )
-        # Should not crash, falls back to FILE
-        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
-        entry = manager.capture_persona("Mongo fallback test")
+
+        def _unavailable(*args, **kwargs):
+            raise RuntimeError("no MongoDB server")
+
+        with caplog.at_level(_logging.WARNING):
+            with patch("praisonaiagents.storage.backends.MongoDBBackend",
+                       side_effect=_unavailable):
+                manager = LearnManager(
+                    config=config, user_id="test", store_path=self.temp_dir
+                )
+                entry = manager.capture_persona("Mongo fallback test")
+
+        # Falls back rather than crashing...
         assert entry is not None
+        # ...and says so, which is the half that keeps it from being silent.
+        assert any("Falling back to FILE" in r.message for r in caplog.records), (
+            [r.message for r in caplog.records]
+        )
 
 
 class TestWasUpdated:
