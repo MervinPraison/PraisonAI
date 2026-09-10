@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2811 |
-| ✅ Workflows | 5 | 20 | 8484 |
+| ✅ Workflows | 5 | 20 | 8488 |
 
 ## Documentation Without Features
 
@@ -89,6 +89,7 @@ These docs exist but don't match any implemented feature category:
 
 - ℹ️ Database (43 docs, 7580 lines)
 - ℹ️ Documents (1 docs, 810 lines)
+- ℹ️ Teams (1 docs, 214 lines)
 
 ---
 
