@@ -190,6 +190,83 @@ class TestDefaultStoreSearchEnhancements:
         assert "messages" in d
 
 
+class TestArchivedRecall:
+    """Issue #5031: compaction must not silently drop turns from recall.
+
+    A conversation compacted under ``retention="compact"`` moves its raw turns
+    into ``archived_messages``; recall must still span the whole conversation,
+    and both built-in stores must agree so their recall can't drift.
+    """
+
+    def _seed_with_archive(self, store, session_id, archived, active):
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        session = SessionData(session_id=session_id)
+        for role, content in archived:
+            session.archived_messages.append(
+                SessionMessage(role=role, content=content)
+            )
+        for role, content in active:
+            session.messages.append(SessionMessage(role=role, content=content))
+        store._save_session(session)
+
+    def test_default_store_recalls_archived_turn(self, tmp_dir):
+        store = DefaultSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert len(hits) == 1
+        assert hits[0].session_id == "s1"
+        # The anchoring context marks the compaction boundary.
+        assert any(m.get("archived") for m in hits[0].messages)
+
+    def test_sqlite_store_recalls_archived_turn(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert len(hits) == 1
+        assert hits[0].session_id == "s1"
+        assert any(m.get("archived") for m in hits[0].messages)
+
+    def test_both_stores_agree_on_archived_only_query(self, tmp_dir):
+        default = DefaultSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            default,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        indexed = SqliteSessionStore(session_dir=tmp_dir)
+
+        default_ids = [h.session_id for h in default.search("zx-9271-alpha")]
+        indexed_ids = [h.session_id for h in indexed.search("zx-9271-alpha")]
+        assert default_ids == indexed_ids == ["s1"]
+
+    def test_real_compaction_stays_searchable(self, tmp_dir):
+        # Drive an actual compaction: the early turn is rolled into the archive
+        # and must remain recallable afterwards.
+        store = DefaultSessionStore(session_dir=tmp_dir, active_window=3)
+        store.add_message("s", "user", "the special value was zx-9271-alpha")
+        for i in range(8):
+            store.add_message("s", "user", f"later message {i}")
+
+        session = store.get_session("s")
+        archived = [m.content for m in session.archived_messages]
+        assert "the special value was zx-9271-alpha" in archived
+
+        hits = store.search("zx-9271-alpha")
+        assert [h.session_id for h in hits] == ["s"]
+
+
 class TestIndexedSessionRoute:
     """Indexed gateway/agent routing lookups (Issue #2956)."""
 
