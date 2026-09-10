@@ -9,7 +9,40 @@ This enables:
 
 These protocols are lightweight and have zero performance impact.
 """
+from enum import Enum
 from typing import Protocol, runtime_checkable, Optional, Any, Dict, List
+
+
+class MemoryTrust(str, Enum):
+    """Provenance/trust signal for a memory write.
+
+    Recorded in a dedicated metadata field the model cannot forge through
+    prose, so recall can be gated on origin trust:
+
+    - ``TRUSTED``: operator/first-party content (default, backward compatible).
+    - ``UNTRUSTED``: third-party channel input (e.g. a gateway bot ingesting a
+      Telegram/Discord/Slack group message). By default this is not recalled as
+      trusted context and is kept out of long-term promotion by gateway callers.
+    - ``SYSTEM``: framework-generated content.
+
+    Ordering (via :meth:`rank`) is ``untrusted < trusted < system`` so a
+    ``min_trust`` recall filter can drop lower-trust records.
+    """
+
+    TRUSTED = "trusted"
+    UNTRUSTED = "untrusted"
+    SYSTEM = "system"
+
+    @classmethod
+    def rank(cls, value: "MemoryTrust | str | None") -> int:
+        """Return an ordinal for trust comparison (higher == more trusted)."""
+        order = {cls.UNTRUSTED: 0, cls.TRUSTED: 1, cls.SYSTEM: 2}
+        if value is None:
+            return order[cls.TRUSTED]
+        try:
+            return order[cls(value)]
+        except ValueError:
+            return order[cls.TRUSTED]
 
 
 @runtime_checkable
@@ -61,7 +94,10 @@ class MemoryProtocol(Protocol):
         Args:
             text: The content to store
             metadata: Optional metadata dictionary
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``trust`` (:class:`MemoryTrust`) and
+                ``origin`` (str) keyword, recording provenance in a metadata
+                field the model cannot forge through prose.
             
         Returns:
             An identifier for the stored content
@@ -80,7 +116,9 @@ class MemoryProtocol(Protocol):
         Args:
             query: The search query
             limit: Maximum number of results
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``min_trust`` (:class:`MemoryTrust`)
+                keyword that filters out records below the given trust level.
             
         Returns:
             List of matching memory entries
@@ -99,7 +137,10 @@ class MemoryProtocol(Protocol):
         Args:
             text: The content to store
             metadata: Optional metadata dictionary
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``trust`` (:class:`MemoryTrust`) and
+                ``origin`` (str) keyword, recording provenance in a metadata
+                field the model cannot forge through prose.
             
         Returns:
             An identifier for the stored content
@@ -118,7 +159,9 @@ class MemoryProtocol(Protocol):
         Args:
             query: The search query
             limit: Maximum number of results
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``min_trust`` (:class:`MemoryTrust`)
+                keyword that filters out records below the given trust level.
             
         Returns:
             List of matching memory entries
@@ -504,6 +547,7 @@ class AgentMemoryLifecycleProtocol(Protocol):
 
 
 __all__ = [
+    'MemoryTrust',
     'MemoryProtocol',
     'ResettableMemoryProtocol',
     'DeletableMemoryProtocol',
