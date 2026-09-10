@@ -28,6 +28,12 @@ from .path_validation import validate_agent_file_path
 logger = logging.getLogger(__name__)
 
 
+def _resolve_framework(name: Optional[str]) -> str:
+    """Resolve a framework name via the registry (single source of truth)."""
+    from ..framework_adapters.registry import get_default_registry
+    return get_default_registry().resolve_or_default(name)
+
+
 def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
     """
     Create the jobs API router.
@@ -89,7 +95,7 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
             agent_yaml=body.agent_yaml,
             recipe_name=body.recipe_name,
             recipe_config=body.recipe_config or {},
-            framework=body.framework or "praisonai",
+            framework=_resolve_framework(body.framework),
             config=body.config or {},
             webhook_url=body.webhook_url,
             timeout=body.timeout or 3600,
