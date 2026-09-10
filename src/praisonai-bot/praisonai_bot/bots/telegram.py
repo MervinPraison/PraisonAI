@@ -2428,6 +2428,28 @@ def _record_passive_group_message(bot: "TelegramBot", message) -> None:
         logger.debug(f"Failed to record passive group message: {e}")
 
 
+def _is_reply_to_bot(update, bot: "TelegramBot") -> bool:
+    """Whether an inbound update replies to one of the bot's own messages.
+
+    Issue #5029: in a ``mention_only`` group the most natural way to continue a
+    conversation is to tap "Reply" on the bot's answer without re-typing
+    ``@bot``. Telegram carries this as ``message.reply_to_message.from_user`` —
+    when that sender is the bot itself the reply is an implicit mention.
+    Best-effort: any missing field or error means "not a reply to the bot".
+    """
+    try:
+        replied = getattr(update.message, "reply_to_message", None)
+        if replied is None:
+            return False
+        from_user = getattr(replied, "from_user", None)
+        if from_user is None:
+            return False
+        bot_id = bot._bot_user.user_id if bot._bot_user else None
+        return bool(bot_id) and str(from_user.id) == str(bot_id)
+    except Exception:  # pragma: no cover — defensive
+        return False
+
+
 async def process_inbound_telegram_message(
     update,  # Telegram Update
     bot: TelegramBot,
@@ -2525,10 +2547,19 @@ async def process_inbound_telegram_message(
             # Check if bot was mentioned in the message
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
-            bot_mentioned = (
+            explicit_mention = bool(
                 mention_handle and mention_handle in message.content.lower()
-            ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
-            
+            )
+            # Issue #5029: a reply to the bot's own message counts as an
+            # implicit mention, so continuing a conversation by tapping "Reply"
+            # is answered without re-typing @bot.
+            reply_to_bot = _is_reply_to_bot(update, bot)
+            bot_mentioned = (
+                explicit_mention
+                or reply_to_bot
+                or message.message_type == MessageType.COMMAND  # Commands are always allowed
+            )
+
             if not bot_mentioned:
                 # Issue #3380: under ``observe`` an unmentioned group message is
                 # recorded into the session transcript as passive context (no
@@ -2548,9 +2579,11 @@ async def process_inbound_telegram_message(
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
             bot_mentioned = (
-                mention_handle and mention_handle in message.content.lower()
-            ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
-            
+                bool(mention_handle and mention_handle in message.content.lower())
+                or _is_reply_to_bot(update, bot)  # Issue #5029: reply-to-bot is implicit
+                or message.message_type == MessageType.COMMAND  # Commands are always allowed
+            )
+
             if not bot_mentioned:
                 logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
                 return None
