@@ -5486,12 +5486,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             _call_plan.append(('error', self._tool_parse_error_message(function_name, tool_call_id)))
                             continue
 
-                        # Validate and filter arguments for Ollama provider
+                        # Validate and filter arguments for Ollama provider.
+                        # In the sequential Ollama path, defer resolution and
+                        # validation until immediately before dispatch; this
+                        # lets a later call consume an earlier result from the
+                        # same assistant turn.
                         if is_ollama and tools:
-                            # In the sequential Ollama path, defer resolution
-                            # and validation until immediately before dispatch;
-                            # this lets a later call consume an earlier result
-                            # from the same assistant turn.
                             if parallel_tool_calls:
                                 arguments = self._resolve_ollama_chained_args(
                                     arguments, ollama_tool_result_mapping
@@ -5500,7 +5500,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     function_name, arguments, tools
                                 )
 
-                        _call_plan.append(('call', function_name, arguments, tool_call_id))
                         if is_ollama and not parallel_tool_calls:
                             arguments = self._resolve_ollama_chained_args(
                                 arguments, ollama_tool_result_mapping
@@ -5509,7 +5508,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 arguments = self._validate_and_filter_ollama_arguments(
                                     function_name, arguments, tools
                                 )
-                            _call_plan[-1] = ('call', function_name, arguments, tool_call_id)
+
+                        _call_plan.append(('call', function_name, arguments, tool_call_id))
+                        if is_ollama and not parallel_tool_calls:
                             _batch_results.append(await _dispatch_async_tool(
                                 execute_tool_fn,
                                 function_name,
