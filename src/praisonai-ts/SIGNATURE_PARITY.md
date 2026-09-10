@@ -25,7 +25,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 |---|---|---|---|---|---|---|---|---|---|
 | `Agent.__init__` | 42 | 29 | 8 | 2 | 3 | 0 | 8 | 8 | 13 / 59 |
 | `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 3 / 26 |
-| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 1 / 62 |
+| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 3 / 64 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 20 / 21 |
 | `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 0 | 0 | 2 / 19 |
 | `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 / 4 |
@@ -40,7 +40,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 224 | 123 | 88 | 8 | 3 | 2 | 28 | 30 | 84 / 312 |
+| **Total (17 surfaces)** | 224 | 123 | 88 | 8 | 3 | 2 | 28 | 30 | 86 / 314 |
 
 ## Surfaces
 
@@ -100,7 +100,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:911`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:91` (ctor `src/praisonai-ts/src/agent/team.ts:377`)
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:93` (ctor `src/praisonai-ts/src/agent/team.ts:381`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
 
@@ -135,8 +135,8 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 ### `Task.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:48`
-- TypeScript: `src/praisonai-ts/src/agent/types.ts:115` (ctor `src/praisonai-ts/src/agent/types.ts:379`)
-- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 62
+- TypeScript: `src/praisonai-ts/src/agent/types.ts:115` (ctor `src/praisonai-ts/src/agent/types.ts:394`)
+- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 3 TS-only of 64
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -201,12 +201,12 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 | `fail_on_callback_error` | positional | false | `bool` | camelCase | `failOnCallbackError` | false | `boolean` | ok |
 | `fail_on_memory_error` | positional | false | `bool` | camelCase | `failOnMemoryError` | false | `boolean` | ok |
 
-TS-only members: `dependencies`?
+TS-only members: `dependencies`?, `humanInput`?, `humanReviewPrompt`?
 
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2424`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2468`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -218,7 +218,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3495`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3539`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -246,7 +246,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2385`
-- TypeScript: `src/praisonai-ts/src/agent/team.ts:1076`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:1112`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |

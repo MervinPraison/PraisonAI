@@ -1814,7 +1814,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3495",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3539",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2073,7 +2073,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2424",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2468",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2741,8 +2741,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/team.ts:377",
-        "location": "src/praisonai-ts/src/agent/team.ts:91",
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:381",
+        "location": "src/praisonai-ts/src/agent/team.ts:93",
         "options_parameters": [
           "configOrAgents"
         ]
@@ -2859,7 +2859,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:1076",
+        "location": "src/praisonai-ts/src/agent/team.ts:1112",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
@@ -5145,8 +5145,8 @@
         "mismatches": 7,
         "missing": 0,
         "params": 60,
-        "ts_only": 1,
-        "ts_total": 62,
+        "ts_only": 3,
+        "ts_total": 64,
         "waived": 7
       },
       "params": [
@@ -6760,11 +6760,31 @@
           "required": false,
           "type_class": "array",
           "type_text": "Task[]"
+        },
+        {
+          "canonical": "humanInput",
+          "default": false,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "humanInput",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "humanReviewPrompt",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "humanReviewPrompt",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
         }
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/types.ts:379",
+        "ctor_location": "src/praisonai-ts/src/agent/types.ts:394",
         "location": "src/praisonai-ts/src/agent/types.ts:115",
         "options_parameters": [
           "config"
@@ -7331,8 +7351,8 @@
     "missing": 2,
     "params": 224,
     "surfaces": 17,
-    "ts_only": 84,
-    "ts_total": 312,
+    "ts_only": 86,
+    "ts_total": 314,
     "waived": 30
   },
   "waivers": [
