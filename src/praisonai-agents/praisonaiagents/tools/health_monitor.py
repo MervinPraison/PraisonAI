@@ -15,7 +15,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable, Union
 from datetime import datetime, timedelta
 
-from .circuit_breaker import CircuitBreaker, CircuitState, CircuitBreakerStats, get_all_circuit_breaker_stats
+from .circuit_breaker import (
+    CircuitBreaker, CircuitState, CircuitBreakerStats,
+    get_all_circuit_breaker_stats, HealthCheckProtocol,
+)
 
 logger = get_logger(__name__)
 
@@ -62,18 +65,6 @@ class ServiceHealthConfig:
             "unhealthy_threshold": self.unhealthy_threshold,
             "enable_metrics": self.enable_metrics,
         }
-
-@runtime_checkable
-class HealthCheckProtocol(Protocol):
-    """Protocol for health check implementations."""
-    
-    def check_health(self) -> bool:
-        """Perform synchronous health check."""
-        ...
-    
-    async def acheck_health(self) -> bool:
-        """Perform asynchronous health check."""
-        ...
 
 @runtime_checkable
 class TelemetryProtocol(Protocol):
@@ -242,10 +233,10 @@ class HealthMonitor:
         is_healthy = False
         
         try:
-            if hasattr(health_check, 'acheck_health'):
+            if hasattr(health_check, 'ahealth_check'):
                 # Protocol with async method
                 is_healthy = await asyncio.wait_for(
-                    health_check.acheck_health(),
+                    health_check.ahealth_check(),
                     timeout=config.timeout
                 )
             elif asyncio.iscoroutinefunction(health_check):
@@ -259,7 +250,7 @@ class HealthMonitor:
                 loop = asyncio.get_event_loop()
                 is_healthy = await loop.run_in_executor(
                     None,
-                    lambda: health_check() if callable(health_check) else health_check.check_health()
+                    lambda: health_check() if callable(health_check) else health_check.health_check()
                 )
         except Exception as e:
             logger.warning(f"Health check failed for {name}: {e}")

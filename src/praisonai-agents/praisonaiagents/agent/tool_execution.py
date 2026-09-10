@@ -54,7 +54,8 @@ class BackoffPolicy:
         # Cap the base delay to prevent excessively long waits
         base = min(base, max_delay)
         jitter_amount = random.uniform(0, jitter * base)
-        return base + jitter_amount
+        # Re-clamp after jitter so max_delay is a hard ceiling
+        return min(base + jitter_amount, max_delay)
 
 
 # Cap on encoded image bytes injected back into the conversation to avoid

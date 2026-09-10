@@ -57,7 +57,8 @@ class RetryPolicy:
             # Add random jitter: delay * (1 ± jitter_factor)
             jitter_range = delay * self.jitter_factor
             delay = delay + random.uniform(-jitter_range, jitter_range)
-            delay = max(0, delay)  # Ensure non-negative
+            # Re-clamp after jitter so max_delay_ms is a hard ceiling (not just floor at 0)
+            delay = max(0, min(delay, self.max_delay_ms))
         
         return int(delay)
 
