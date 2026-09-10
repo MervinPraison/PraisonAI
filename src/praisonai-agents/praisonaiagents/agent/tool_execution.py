@@ -470,12 +470,15 @@ class ToolExecutionMixin:
             return
 
         current_tools = self.tools if isinstance(self.tools, list) else [self.tools]
+        existing_ids = {id(tool) for tool in current_tools}
         existing_names = {
             name
             for tool in current_tools
             if (name := self._tool_name_for_plugin_merge(tool))
         } | {name for name, _tool in self._iter_active_named_tools()}
         for owner, tool in plugin_entries:
+            if id(tool) in existing_ids:
+                continue
             name = self._tool_name_for_plugin_merge(tool)
             function = tool.get("function") if isinstance(tool, dict) else None
             if (
@@ -512,6 +515,7 @@ class ToolExecutionMixin:
             if not isinstance(self.tools, list):
                 self.tools = [self.tools] if self.tools else []
             self.tools.append(tool)
+            existing_ids.add(id(tool))
             if name:
                 existing_names.add(name)
             if owner:

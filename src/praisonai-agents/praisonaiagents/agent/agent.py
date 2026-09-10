@@ -3413,11 +3413,18 @@ Your Goal: {self.goal}
         clone = self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
         plugin_owners = getattr(self, "_plugin_tool_owners", None)
         if plugin_owners:
-            clone._plugin_tool_owners = {
+            inherited_owners = {
                 id(tool): plugin_owners[id(tool)]
                 for tool in (clone.tools if isinstance(clone.tools, (list, tuple)) else [])
                 if id(tool) in plugin_owners
             }
+            if inherited_owners:
+                # Keep ownership recorded while the constructor merged any
+                # plugins that became enabled after the source was created.
+                # Those entries are needed to revoke newly attached tools.
+                current_owners = dict(getattr(clone, "_plugin_tool_owners", {}) or {})
+                current_owners.update(inherited_owners)
+                clone._plugin_tool_owners = current_owners
         return clone
 
     @property
