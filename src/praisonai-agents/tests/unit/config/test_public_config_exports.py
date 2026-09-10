@@ -84,3 +84,43 @@ def test_the_documented_usage_actually_runs():
         tool_config=ToolConfig(retry_policy=RetryPolicy(max_attempts=5)),
     )
     assert agent is not None
+
+
+def _config_classes_named_in(annotation):
+    """Every ``*Config`` class name referenced by a parameter's annotation.
+
+    Annotations here are forward-ref strings inside ``Union`` / ``Optional``
+    (e.g. ``Optional[Union[bool, 'ToolConfig']]``). Walk the annotation's own
+    text so the check needs no import of the target and follows the signature
+    itself -- a new config-backed parameter is picked up without editing a list.
+    """
+    import re
+
+    text = annotation if isinstance(annotation, str) else str(annotation)
+    return {
+        name
+        for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text)
+        if name.endswith("Config") and hasattr(feature_configs, name)
+    }
+
+
+@pytest.mark.parametrize("owner", [Agent, PraisonAIAgents])
+def test_config_classes_in_signatures_are_all_exported(owner):
+    """Completeness guard: derive from annotations, not a hand-kept table.
+
+    The parametrized tables above only assert the parameters already known.
+    This walks *every* parameter's annotation, so a future config-backed
+    parameter whose class is left unexported fails here even if nobody updates
+    the tables -- the exact regression this module exists to prevent.
+    """
+    missing = {}
+    for param in inspect.signature(owner.__init__).parameters.values():
+        if param.annotation is inspect.Parameter.empty:
+            continue
+        for cls in _config_classes_named_in(param.annotation):
+            if not _exported(cls):
+                missing.setdefault(param.name, set()).add(cls)
+    assert not missing, (
+        f"{owner.__name__} parameters reference config classes defined in "
+        f"feature_configs but not importable from praisonaiagents.config: {missing}"
+    )
