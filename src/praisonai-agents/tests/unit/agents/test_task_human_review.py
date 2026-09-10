@@ -4,6 +4,8 @@ Two things already existed and neither did this: the approval system gates a
 TOOL CALL, and guardrails validate automatically. Nothing let an orchestrator
 say "a person must approve this before the next task consumes it".
 """
+import asyncio
+
 import pytest
 
 from praisonaiagents import Agent, AgentTeam, Task
@@ -41,8 +43,23 @@ class TestReview:
         task = _task(human_input=True)
         _, should_retry = team._apply_human_review(task, "t1", "draft")
         assert should_retry is True
-        assert task.validation_feedback == "needs a citation"
+        # The feedback must be the SAME shape the guardrail retry writes, because
+        # Process._build_task_context indexes feedback['validation_response'].
+        assert isinstance(task.validation_feedback, dict)
+        assert task.validation_feedback["validation_response"] == "needs a citation"
         assert task.retry_count == 1
+
+    def test_the_rejection_feedback_is_consumable_by_the_process_engine(self, team):
+        # A bare string here would raise the moment the workflow engine indexed
+        # feedback['validation_response']; assert the reason survives that path.
+        from praisonaiagents.process.process import Process
+
+        get_approval_registry().set_backend(_Backend(False, "add a source"))
+        task = _task(human_input=True)
+        team._apply_human_review(task, "t1", "draft")
+        proc = Process.__new__(Process)
+        context = proc._build_task_context(task)
+        assert "add a source" in context
 
     def test_an_approval_lets_the_output_through(self, team):
         get_approval_registry().set_backend(_Backend(True))
@@ -85,6 +102,30 @@ class TestBounds:
         get_approval_registry().set_backend(_Backend(False, "no"))
         _, should_retry = team._apply_human_review(_task(human_input=True), "t1", "draft")
         assert should_retry is True
+
+
+class TestAsync:
+    def test_async_review_gates_output_too(self, team):
+        # The async task path (arun_task) must also require the sign-off; before
+        # the fix it applied the guardrail and released output unreviewed.
+        backend = _Backend(False, "not yet")
+        get_approval_registry().set_backend(backend)
+        task = _task(human_input=True)
+        _, should_retry = asyncio.run(
+            team._aapply_human_review(task, "t1", "draft")
+        )
+        assert should_retry is True
+        assert backend.requests, "the async path must call the backend"
+        assert task.validation_feedback["validation_response"] == "not yet"
+
+    def test_control_async_without_human_input_never_calls_backend(self, team):
+        backend = _Backend(False, "would reject")
+        get_approval_registry().set_backend(backend)
+        _, should_retry = asyncio.run(
+            team._aapply_human_review(_task(), "t1", "draft")
+        )
+        assert should_retry is False
+        assert backend.requests == []
 
 
 class TestDeclaration:

@@ -1547,7 +1547,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         task.status = "in progress"
         # Reuse the slot the guardrail retry already fills, so the reviewer's
         # reason reaches the re-run's prompt through machinery that exists.
-        task.validation_feedback = reason
+        # Must be the SAME shape the guardrail writes: Process._build_task_context
+        # indexes feedback['validation_response'], so a bare string would raise
+        # the moment the workflow engine consumed it.
+        task.validation_feedback = {
+            'validation_response': reason,
+            'validated_task': getattr(task, 'name', None) or getattr(task, 'description', None),
+            'rejected_output': str(getattr(task_output, 'raw', task_output)),
+        }
         return task_output, True
 
     def _apply_task_guardrail(self, task, task_id, task_output):
@@ -1639,6 +1646,25 @@ class AgentTeam(SpawnAnnounceProtocol):
             ),
         )
 
+    async def _aapply_human_review(self, task, task_id, task_output):
+        """Async wrapper for _apply_human_review.
+
+        The approval backend's ``request_approval_sync`` blocks (console input,
+        a bot round-trip, a UI wait). Offload it to a thread so the review does
+        not stall the event loop and every other task running concurrently under
+        asyncio.gather, mirroring _aapply_task_guardrail.
+        """
+        if not getattr(task, "human_input", False):
+            return task_output, False
+        loop = asyncio.get_event_loop()
+        from ..trace.context_events import copy_context_to_callable
+        return await loop.run_in_executor(
+            None,
+            copy_context_to_callable(
+                lambda: self._apply_human_review(task, task_id, task_output)
+            ),
+        )
+
     def _run_task_start_hook(self, task, task_id):
         """Run the on_task_start hook and propagate global variables to the task.
 
@@ -1727,6 +1753,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     # Apply guardrail validation using shared helper (offloaded to
                     # a thread so a blocking LLM guardrail does not stall the loop)
                     task_output, should_retry = await self._aapply_task_guardrail(task, task_id, task_output)
+                    if not should_retry:
+                        # A person reviews only what already passed the automatic
+                        # checks, mirroring run_task. Without this an async task
+                        # with human_input=True would release unreviewed output.
+                        task_output, should_retry = await self._aapply_human_review(task, task_id, task_output)
                     if should_retry:
                         retries += 1
                         continue
