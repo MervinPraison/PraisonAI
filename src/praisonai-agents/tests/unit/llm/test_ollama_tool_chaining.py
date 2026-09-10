@@ -109,6 +109,28 @@ async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatc
             ]
         ),
         Response(
+            choices=[
+                Choice(
+                    message={
+                        "content": "ok",
+                        "tool_calls": [],
+                    }
+                )
+            ]
+        ),
+        Response(
+            choices=[
+                Choice(
+                    message={
+                        "content": "continue",
+                        "tool_calls": [
+                            {"id": "call-3", "function": {"name": "second"}},
+                        ],
+                    }
+                )
+            ]
+        ),
+        Response(
             choices=[Choice(message={"content": "final answer", "tool_calls": []})]
         ),
         Response(
@@ -136,4 +158,8 @@ async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatc
     )
 
     assert result == "final answer"
-    assert seen == [("first", {}), ("second", {"value": 3})]
+    assert seen == [
+        ("first", {}),
+        ("second", {"value": 3}),
+        ("second", {"value": "first"}),
+    ]

@@ -4750,12 +4750,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     is_ollama = self._is_ollama_provider()
                     fallback_iterations = 0
                     tool_call_count = 0
-                    ollama_tool_result_mapping = {}
                     last_tool_call_fingerprint = None
                     stall_reason = None
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
                         fallback_iterations += 1
+                        # Chaining references are scoped to one assistant turn;
+                        # do not let a later turn reuse an earlier result.
+                        ollama_tool_result_mapping = {}
                         response = self._completion_with_retry(
                             **self._build_completion_params(
                                 messages=messages,
@@ -5105,7 +5107,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
-            ollama_tool_result_mapping: Dict[str, Any] = {}
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
 
@@ -5125,6 +5126,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 response_text = ""
                 reasoning_content = None
                 tool_calls = []
+                # Chaining references are scoped to one assistant turn;
+                # do not let a later turn reuse an earlier result.
+                ollama_tool_result_mapping: Dict[str, Any] = {}
                 
                 # ── Responses API path (async) ──────────────────────────
                 if self._supports_responses_api():

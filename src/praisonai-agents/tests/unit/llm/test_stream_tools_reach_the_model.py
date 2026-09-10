@@ -115,6 +115,43 @@ class TestNonStreamingFallbackRunsTools:
                                      tools=[get_weather], execute_tool_fn=execute))
         assert state["turns"] == 2, "the tool result was never sent back"
 
+    def test_ollama_chain_mapping_is_scoped_to_one_turn(self):
+        llm = LLM(model="ollama/llama3.2")
+        seen = []
+        state = {"turns": 0}
+
+        def first() -> int:
+            return 3
+
+        def second(value):
+            seen.append(value)
+            return 9
+
+        def completion(**kwargs):
+            state["turns"] += 1
+            if state["turns"] == 1:
+                message = types.SimpleNamespace(
+                    content=None, tool_calls=[_tool_call("first", "{}")])
+            elif state["turns"] == 2:
+                message = types.SimpleNamespace(
+                    content=None,
+                    tool_calls=[_tool_call("second", '{"value":"first"}')],
+                )
+            else:
+                message = types.SimpleNamespace(content="Done.", tool_calls=None)
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(message=message, finish_reason="stop")])
+
+        llm._completion_with_retry = completion
+        out = list(llm.get_response_stream(
+            prompt="chain", system_prompt="x", tools=[first, second],
+            execute_tool_fn=lambda name, args: first() if name == "first" else second(**args),
+        ))
+
+        assert state["turns"] == 3
+        assert seen == ["first"]
+        assert "Done." in "".join(out)
+
     def test_a_turn_with_no_tool_calls_still_yields_its_prose(self):
         llm = LLM(model="anthropic/claude-sonnet-4-20250514")
         message = types.SimpleNamespace(content="plain answer", tool_calls=None)
