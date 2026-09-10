@@ -13,7 +13,14 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="🦞 PraisonAI Dashboard (full UI)")
+# No emoji in the Typer help: this string is what `praisonai --help`
+# prints, and U+1F99E raises UnicodeEncodeError on a cp1252 console
+# (Windows). #2699 removed emoji from praisonai-code's help strings for
+# exactly this reason; the lazily-loaded bot command overrides the clean
+# text registered in praisonai_code/cli/app.py, so it reintroduced one
+# whenever praisonai-bot is installed. Runtime output below is
+# unaffected -- only the help surface has to survive cp1252.
+app = typer.Typer(help="PraisonAI Dashboard (full UI)")
 
 CLAW_DIR = Path.home() / ".praisonai" / "claw"
 DEFAULT_APP = CLAW_DIR / "app.py"
