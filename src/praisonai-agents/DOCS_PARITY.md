@@ -52,7 +52,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5917 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 63 | 14755 |
-| ✅ Memory | 6 | 19 | 7614 |
+| ✅ Memory | 6 | 20 | 7949 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2842 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3690 |
 | ✅ Security | 1 | 3 | 3594 |
-| ✅ Sessions | 4 | 20 | 7972 |
+| ✅ Sessions | 4 | 20 | 7982 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7580 lines)
+- ℹ️ Database (43 docs, 7581 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 
