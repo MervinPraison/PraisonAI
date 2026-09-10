@@ -388,6 +388,44 @@ class TestPluginManager:
         finally:
             manager.unregister(plugin_name)
 
+    def test_shared_plugin_tool_remains_active_until_last_owner_disabled(self):
+        """A shared tool is revoked only after every provider is disabled."""
+        from praisonaiagents import Agent
+
+        suffix = uuid.uuid4().hex
+        first_name = f"shared_owner_first_{suffix}"
+        second_name = f"shared_owner_second_{suffix}"
+        shared_tool = lambda: "shared"
+
+        def make_plugin(name):
+            class SharedToolPlugin(Plugin):
+                @property
+                def info(self):
+                    return PluginInfo(name=name)
+
+                def get_tools(self):
+                    return [shared_tool]
+
+            return SharedToolPlugin()
+
+        manager = get_plugin_manager()
+        assert manager.register(make_plugin(first_name))
+        assert manager.register(make_plugin(second_name))
+        try:
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            assert sum(tool is shared_tool for tool in agent.tools) == 1
+            owners = agent._plugin_tool_owners[id(shared_tool)]
+            assert {entry[0] for entry in owners} == {first_name, second_name}
+            assert agent._is_plugin_tool_active(shared_tool) is True
+
+            manager.disable(first_name)
+            assert agent._is_plugin_tool_active(shared_tool) is True
+            manager.disable(second_name)
+            assert agent._is_plugin_tool_active(shared_tool) is False
+        finally:
+            manager.unregister(first_name)
+            manager.unregister(second_name)
+
     def test_shutdown(self):
         """Test shutting down all plugins."""
         manager = PluginManager()

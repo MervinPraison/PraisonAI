@@ -426,14 +426,23 @@ class ToolExecutionMixin:
             # governs background hook/metric plugins — tool plugins are live on
             # registration, matching how they were attached in ``_merge_plugin_tools``.
             manager = get_plugin_manager()
-            if isinstance(owner, tuple):
-                owner_name, owner_plugin = owner
-                get_plugin = getattr(manager, "get_plugin", None)
-                current_plugin = get_plugin(owner_name) if callable(get_plugin) else None
-                if current_plugin is not owner_plugin:
-                    return False
-                owner = owner_name
-            return manager.is_enabled(owner)
+            owner_entries = owner if isinstance(owner, list) else [owner]
+            get_plugin = getattr(manager, "get_plugin", None)
+            for owner_entry in owner_entries:
+                owner_name = owner_entry
+                owner_plugin = None
+                if isinstance(owner_entry, tuple):
+                    owner_name, owner_plugin = owner_entry
+                    current_plugin = (
+                        get_plugin(owner_name) if callable(get_plugin) else None
+                    )
+                    # Revocation tracks plugin identity as well as enabled state,
+                    # so unregister/re-register cannot revive a stale tool.
+                    if current_plugin is not owner_plugin:
+                        continue
+                if manager.is_enabled(owner_name):
+                    return True
+            return False
         except Exception as exc:  # pragma: no cover - defensive plugin boundary
             logging.warning("Failed to check plugin tool state: %s", exc)
             return False
@@ -478,6 +487,31 @@ class ToolExecutionMixin:
         } | {name for name, _tool in self._iter_active_named_tools()}
         for owner, tool in plugin_entries:
             if id(tool) in existing_ids:
+                # Multiple enabled plugins may intentionally expose the same
+                # callable or hosted-tool object. Keep every owner so disabling
+                # one provider does not revoke a capability still supplied by
+                # another provider.
+                plugin_owners = getattr(self, "_plugin_tool_owners", None)
+                if plugin_owners is not None and id(tool) in plugin_owners and owner:
+                    get_plugin = getattr(manager, "get_plugin", None)
+                    owner_entry = (
+                        owner,
+                        get_plugin(owner) if callable(get_plugin) else None,
+                    )
+                    existing_owner = plugin_owners[id(tool)]
+                    owner_entries = (
+                        existing_owner
+                        if isinstance(existing_owner, list)
+                        else [existing_owner]
+                    )
+                    if not any(
+                        isinstance(entry, tuple)
+                        and entry[0] == owner_entry[0]
+                        and entry[1] is owner_entry[1]
+                        for entry in owner_entries
+                    ):
+                        owner_entries.append(owner_entry)
+                        plugin_owners[id(tool)] = owner_entries
                 continue
             name = self._tool_name_for_plugin_merge(tool)
             function = tool.get("function") if isinstance(tool, dict) else None
