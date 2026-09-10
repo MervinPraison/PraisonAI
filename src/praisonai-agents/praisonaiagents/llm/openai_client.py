@@ -591,9 +591,13 @@ class OpenAIClient:
         if not tools:
             return None
         
-        # Check cache first
-        cache_key = self._get_tools_cache_key(tools)
-        if cache_key in self._formatted_tools_cache:
+        # String tool names resolve against the mutable tool registry and the
+        # process globals/__main__, so a cached result could advertise an
+        # obsolete schema after the tool is re-registered. Only cache when every
+        # tool is a stable, self-describing form (dict/callable/list).
+        cacheable = not any(isinstance(tool, str) for tool in tools)
+        cache_key = self._get_tools_cache_key(tools) if cacheable else None
+        if cacheable and cache_key in self._formatted_tools_cache:
             return self._formatted_tools_cache[cache_key]
             
         from ..tools.hosted import is_hosted_tool
@@ -661,9 +665,9 @@ class OpenAIClient:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return None
         
-        # Cache the result
+        # Cache the result (skipped for string tools, see above)
         result = formatted_tools if formatted_tools else None
-        if result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
+        if cacheable and result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
             self._formatted_tools_cache[cache_key] = result
                 
         return result
@@ -986,12 +990,73 @@ class OpenAIClient:
             logging.error(f"Error generating tool definition: {e}")
             return None
     
+    @staticmethod
+    def _lookup_by_name(name: str) -> Any:
+        """This module's globals first, then __main__, which is where a script's
+        own tools live."""
+        found = globals().get(name)
+        if found is None:
+            import __main__
+            found = getattr(__main__, name, None)
+        return found
+
     def _generate_tool_definition_from_name(self, function_name: str) -> Optional[Dict]:
-        """Generate a tool definition from a function name."""
-        # This is a placeholder - in agent.py this would look up the function
-        # For now, return None as the actual implementation would need access to the function
-        logging.debug(f"Tool definition generation from name '{function_name}' requires function reference")
-        return None
+        """Resolve a tool named by a string and build its definition.
+
+        format_tools() documents string function names as a supported format,
+        and this returned None unconditionally, so every such tool was dropped
+        from the request with no error and nothing above debug level. The same
+        name works on the LiteLLM path, which is what made it hard to see.
+
+        Resolution order matches LLM._generate_tool_definition: the shared tool
+        registry first, then a `<name>_definition` dict, then the function
+        itself.
+        """
+        tool = None
+        try:
+            from ..tools.registry import get_registry
+            tool = get_registry().get(function_name)
+        except ImportError:
+            logging.debug("Tool registry not available, falling back to globals/__main__")
+        except Exception as e:
+            logging.debug(f"Tool registry lookup failed for '{function_name}': {e}")
+
+        if tool is not None:
+            if hasattr(tool, 'get_schema'):
+                # A BaseTool declares its own schema, which honours an @tool
+                # name= override and excludes injected parameters. Normalise the
+                # parameters exactly as LLM._generate_tool_definition does so the
+                # registry path and the callable path emit identical, provider-safe
+                # schemas (array 'items' fix) without mutating the tool's schema.
+                tool_def = tool.get_schema()
+                if (
+                    isinstance(tool_def, dict)
+                    and isinstance(tool_def.get("function"), dict)
+                    and isinstance(tool_def["function"].get("parameters"), dict)
+                ):
+                    tool_def = tool_def.copy()
+                    tool_def["function"] = tool_def["function"].copy()
+                    tool_def["function"]["parameters"] = self._fix_array_schemas(
+                        tool_def["function"]["parameters"]
+                    )
+                return tool_def
+            if not callable(tool):
+                logging.debug(f"Tool '{function_name}' in registry is not callable")
+                return None
+            return self._generate_tool_definition(tool)
+
+        logging.debug(f"Tool '{function_name}' not in registry, falling back to globals/__main__")
+
+        tool_def = self._lookup_by_name(f"{function_name}_definition")
+        if tool_def:
+            return tool_def
+
+        func = self._lookup_by_name(function_name)
+        if not callable(func):
+            logging.debug(f"Function '{function_name}' not found or not callable")
+            return None
+
+        return self._generate_tool_definition(func)
     
     def process_stream_response(
         self,
