@@ -120,3 +120,30 @@ def test_success_is_true_when_nothing_failed():
 
         assert result.errors == []
         assert result.success is True
+
+
+def test_success_is_false_on_a_partial_chunk_failure():
+    """A single file that stored only *some* of its chunks is incomplete.
+
+    ``_process_single_input`` raises only when *every* chunk fails, so a file
+    that lost, say, 3 of 10 chunks previously returned a success-shaped result
+    and left ``IndexResult.success`` True -- a silently half-indexed document.
+    ``add()`` now reports ``failed_chunks``; ``index()`` must surface it.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "a.txt"), "w") as fh:
+            fh.write("content")
+
+        partial = {
+            "results": ["1", "2"],
+            "relations": [],
+            "failed_chunks": 3,
+            "attempted_chunks": 5,
+        }
+        with patch.object(Knowledge, "add", return_value=partial):
+            result = Knowledge().index(tmpdir)
+
+        assert result.files_indexed == 1
+        assert len(result.errors) == 1
+        assert "chunk(s) failed to index" in result.errors[0]
+        assert result.success is False
