@@ -27,6 +27,13 @@ from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+from .model_providers import (
+    EDENAI_API_KEY_VAR,
+    EDENAI_BASE_URL_VAR,
+    EDENAI_DEFAULT_BASE_URL,
+    EDENAI_ROUTE_PREFIX,
+    is_edenai_model,
+)
 
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
@@ -660,6 +667,14 @@ Respond with ONLY a valid JSON tool call in this format:
         if provider_prefix in {"lm_studio", "lmstudio", "vllm", "hosted_vllm",
                                "llamacpp", "llama_cpp"}:
             return "local"
+        # A gateway route names the gateway, not the vendor in the rest of the
+        # id: "edenai/anthropic/claude-*" is Eden AI serving Claude over
+        # Chat Completions. It must not reach the substring fallback below,
+        # which would hand it the direct Anthropic adapter (streaming disabled)
+        # or the Gemini one (streaming-with-tools disabled). Returning the
+        # gateway id selects DefaultAdapter, i.e. plain OpenAI behaviour.
+        if is_edenai_model(self.model):
+            return "edenai"
         if provider_prefix in {"anthropic", "claude"}:
             return "anthropic"
         if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
@@ -731,6 +746,17 @@ Respond with ONLY a valid JSON tool call in this format:
         # here made this predicate disagree with the adapter that gets selected.
         if self.model.startswith(("ollama/", "ollama_chat/")):
             return True
+
+        # An explicit gateway route is hosted by definition, so a local
+        # base_url in the environment must not capture it. The
+        # is_hosted_only_model() guard below cannot cover this case: it keys off
+        # closed-weights model *families*, and a gateway route commonly names an
+        # open-weights one ("edenai/mistral/mistral-large-latest") that Ollama
+        # genuinely can serve. Without this, such a route took the Ollama
+        # adapter -- tool results downgraded to natural-language user turns and
+        # tool_calls dropped from the assistant message.
+        if is_edenai_model(self.model):
+            return False
 
         # A base_url says WHERE the server is, not WHAT it serves. Only let it
         # imply Ollama for a model that could plausibly be running locally.
@@ -6123,6 +6149,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         model = self.model
         if not isinstance(model, str):
             return model
+        # Eden AI is an OpenAI-compatible gateway litellm has no provider route
+        # for, so "edenai/<vendor>/<model>" goes through litellm's OpenAI client
+        # (_apply_edenai_route supplies the endpoint and credential). litellm
+        # splits only the FIRST path segment, so the "<vendor>/<model>" tail
+        # reaches Eden AI exactly as the user wrote it -- which is Eden AI's own
+        # documented model format. Remove this once litellm routes "edenai"
+        # itself (i.e. once "edenai" appears in litellm.provider_list).
+        if is_edenai_model(model):
+            return f"openai/{model[len(EDENAI_ROUTE_PREFIX):]}"
         # llama.cpp's llama-server speaks OpenAI, but litellm knows no
         # "llama_cpp/" provider -- it raised "LLM Provider NOT provided" and
         # then retried four times before returning None. We accept the prefix
@@ -6143,6 +6178,44 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._detect_provider() != "openai":
             return model
         return f"openai/{model}"
+
+    def _apply_edenai_route(self, params: Dict[str, Any]) -> None:
+        """Point an ``edenai/`` route at Eden AI, and fail closed without its key.
+
+        ``_resolve_openai_compatible_model`` has already rewritten the model to
+        ``openai/...``, which means litellm would otherwise fill in OpenAI's own
+        defaults for it: ``OPENAI_API_KEY`` for the credential and
+        ``OPENAI_BASE_URL``/``OPENAI_API_BASE`` (else api.openai.com) for the
+        endpoint. Measured, with only those two set: the request went to
+        ``http://localhost:11434/v1/chat/completions`` carrying the user's real
+        OpenAI key. So both are resolved explicitly here, and a missing Eden AI
+        key raises instead of falling back -- an Eden AI route must never spend
+        an OpenAI credential.
+
+        Endpoint precedence: an already-resolved ``base_url`` (caller-supplied,
+        or injected by a subscription auth provider) > ``EDENAI_BASE_URL`` >
+        Eden AI's public endpoint. Credential precedence is the same, so
+        ``api_key=`` and ``auth=`` keep working unchanged.
+        """
+        if not is_edenai_model(self.model):
+            return
+        if not params.get("base_url"):
+            params["base_url"] = (
+                (os.getenv(EDENAI_BASE_URL_VAR) or "").strip()
+                or EDENAI_DEFAULT_BASE_URL
+            )
+        if not params.get("api_key"):
+            api_key = (os.getenv(EDENAI_API_KEY_VAR) or "").strip()
+            if not api_key:
+                raise ValueError(
+                    f"{EDENAI_API_KEY_VAR} is required for the Eden AI model "
+                    f"{self.model!r}. Set it to your Eden AI key, or pass "
+                    "api_key=... explicitly. OPENAI_API_KEY is deliberately not "
+                    "used as a fallback: Eden AI is a separate gateway, so doing "
+                    "that would send your OpenAI credential to "
+                    f"{params['base_url']}."
+                )
+            params["api_key"] = api_key
 
     def _guard_format_with_tools(self, params: Dict[str, Any]) -> None:
         """Refuse a combination that makes the model fabricate.
@@ -6226,6 +6299,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Override with any provided parameters
         params.update(override_params)
+
+        # Resolve Eden AI's endpoint and credential once every other source
+        # (instance, subscription auth, per-call overrides) has been merged, so
+        # any explicit value wins and the fail-closed key check sees the final
+        # state of the request.
+        self._apply_edenai_route(params)
 
         # Resolve temperature from the instance when the caller did not specify
         # one. Public entry points now default temperature to None so a value
