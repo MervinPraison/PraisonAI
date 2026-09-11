@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ..errors import ToolExecutionError
 from ..model_harness.guard import check_model_request
+from ..tools.call_executor import _durable_iteration_kwargs
 
 # Graceful "wrap-up" instruction injected when the step budget is nearly
 # exhausted, so the model produces a coherent final answer instead of being
@@ -31,12 +32,6 @@ _MAX_STEPS_WRAPUP_PROMPT = (
     "Stop calling tools now and provide your best final answer, summarising the "
     "work completed so far and clearly noting anything left incomplete."
 )
-
-
-def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
-    if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
-        return {"_durable_iteration_index": index}
-    return {}
 
 
 def _handle_native_deferred_result(
