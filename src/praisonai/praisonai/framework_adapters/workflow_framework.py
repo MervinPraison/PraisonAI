@@ -70,6 +70,13 @@ def validate_workflow_framework(
     raise ValueError(message)
 
 
-def framework_from_config(config: Dict[str, Any]) -> str:
-    """Return normalised framework name from a parsed YAML config dict."""
-    return str(config.get("framework") or "praisonai").lower()
+def framework_from_config(config: Dict[str, Any], *, registry: Any = None) -> str:
+    """Return normalised framework name from a parsed YAML config dict.
+
+    Falls back to the registry-selected default (single source of truth) rather
+    than a hardcoded framework name when the config omits ``framework``.
+    """
+    from .registry import get_default_registry
+
+    registry = registry or get_default_registry()
+    return registry.resolve_or_default(config.get("framework")).lower()
