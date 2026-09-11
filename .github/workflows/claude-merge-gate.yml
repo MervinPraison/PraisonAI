@@ -547,10 +547,12 @@ jobs:
 
             try {
               const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
-              const comments = ctx.comments;
-              const verdictMin = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-              const verdict = mergeGate.findMergeGateVerdict(
-                comments, verdictMin, ctx.headPushedAt, { excludeAutomatedFallback: true }
+              const { verdict } = await mergeGate.waitForMergeGateVerdict(
+                github, owner, repo, prNumber, {
+                  headPushedAt: ctx.headPushedAt,
+                  excludeAutomatedFallback: true,
+                  core,
+                }
               );
               if (verdict !== 'APPROVE') {
                 core.info(`Skip merge: verdict=${verdict || 'NONE'}`);
