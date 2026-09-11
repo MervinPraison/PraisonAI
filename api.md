@@ -195,6 +195,7 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definition</a>(name: str) -> Optional[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definitions</a>(permission_resolver: Optional[Callable[[str], bool]] = None) -> List[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_trust_level</a>(name: str) -> Optional[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None, ttl_seconds: Optional[float] = None) -> List[Union[BaseTool, Callable]]</code>
@@ -751,7 +752,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_spawned_agents</a>() -> List[SpawnedSubAgent]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
-* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id, tasks = None)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_status</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_todo_markdown</a>() -> str</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_token_usage_summary</a>() -> Dict[str, Any]</code>
