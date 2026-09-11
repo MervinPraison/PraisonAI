@@ -33,11 +33,13 @@ Usage:
 
 from dataclasses import dataclass, field
 import math
-from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet
+from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet, TYPE_CHECKING
 from enum import Enum
 
-# Import AutonomyConfig from canonical location (no circular dep)
-from ..agent.autonomy import AutonomyConfig
+if TYPE_CHECKING:
+    # Type-only: the eager import pulled agent.autonomy and escalation.types onto
+    # every `from praisonaiagents import Agent` path (see resolve_autonomy).
+    from ..agent.autonomy import AutonomyConfig
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth shared by OutputConfig.tool_output_limit and
@@ -1785,13 +1787,16 @@ def resolve_caching(value: CachingParam) -> Optional[CachingConfig]:
     return _resolve(value, CachingConfig)
 
 
-def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
+def resolve_autonomy(value: AutonomyParam) -> Optional["AutonomyConfig"]:
     """
     Resolve autonomy= parameter following precedence ladder.
     
     Delegates to the canonical resolver in param_resolver.py.
     Kept for backward compatibility with tests.
     """
+    # Lazy: agent.autonomy (and, through it, escalation.types) is only needed
+    # when a caller actually resolves an autonomy= value.
+    from ..agent.autonomy import AutonomyConfig
     from .param_resolver import resolve_autonomy as _resolve
     return _resolve(value, AutonomyConfig)
 
@@ -2052,10 +2057,18 @@ def __getattr__(name):
 
     ``ToolSearchConfig`` is resolved (and the tools subsystem imported) only on
     first access, so ``from praisonaiagents import Agent`` does not eagerly load
-    the entire tools package (issue #3191).
+    the entire tools package (issue #3191). ``AutonomyConfig`` follows the same
+    pattern (issue #5056).
     """
     if name == "ToolSearchConfig":
         cfg = _resolve_tool_search_config()
         globals()["ToolSearchConfig"] = cfg  # cache for subsequent access
         return cfg
+    if name == "AutonomyConfig":
+        # Same idea for AutonomyConfig: keep the historical import path
+        # (``from ...feature_configs import AutonomyConfig``) working without
+        # loading agent.autonomy / escalation.types at module import (#5056).
+        from ..agent.autonomy import AutonomyConfig
+        globals()["AutonomyConfig"] = AutonomyConfig
+        return AutonomyConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
