@@ -2296,10 +2296,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # was sent to OpenAI under a model name that was really a repr -- the
         # opposite of what passing your own model means. Duck-typed on
         # ``get_response`` so any conforming backend works, not just ``LLM``.
+        # Detection must match what the tool loop actually invokes: the custom
+        # path calls ``llm_instance.get_response(**llm_kwargs)`` (and the async
+        # ``get_response_async``) with PraisonAI-internal kwargs -- tools,
+        # tool_choice, seed, cancel_token, steering_drain, and more. The
+        # ``chat``/``achat`` (LLMProviderProtocol) and
+        # ``chat_completion``/``achat_completion`` (UnifiedLLMProtocol) surfaces
+        # take a different signature and are NOT wired into that loop, so a
+        # backend exposing only those would be adopted here and then raise
+        # ``AttributeError`` on the first turn. Adopt only the surface the
+        # executor can drive; a translation adapter for the other protocols
+        # would be a heavy, unused implementation rather than a fix.
+        _MODEL_BACKEND_METHODS = ("get_response", "get_response_async")
         _is_model_instance = (
             llm is not None
             and not isinstance(llm, (str, dict))
-            and callable(getattr(llm, "get_response", None))
+            and any(callable(getattr(llm, m, None)) for m in _MODEL_BACKEND_METHODS)
         )
         if _is_model_instance:
             self._llm_instance = llm
