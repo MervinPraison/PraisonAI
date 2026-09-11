@@ -180,3 +180,18 @@ waivers:
     reason: NOT an equivalence -- the output half of the same missing capability. See
       tool().input_guardrails above. Same expiry, for the same reason.
     expires: '2026-12-07'
+  Task.__init__.human_input:
+    owner: praisonai-ts
+    reason: NOT an equivalence -- this records a real gap. Task-output human review was
+      added to Python (agents/agents.py::_apply_human_review) and has no TypeScript
+      counterpart; nothing in praisonai-ts resolves the same behaviour by another route.
+      TypeScript does have an approval manager (ai/tool-approval), so the port is
+      tractable -- it was not done here only because it is a separate change in a
+      separate package. `expires` is set deliberately so this fails the gate rather than
+      becoming permanent if the port is forgotten.
+    expires: '2026-12-08'
+  Task.__init__.human_review_prompt:
+    owner: praisonai-ts
+    reason: NOT an equivalence -- the prompt half of the same missing capability. See
+      Task.__init__.human_input above. Same expiry, for the same reason.
+    expires: '2026-12-08'
