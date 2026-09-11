@@ -316,6 +316,143 @@ def validate_decision_string(decision_str: str) -> RunStatus:
         return "failure"
 
 
+# --------------------------------------------------------------------------
+# Canonical terminal-outcome contract
+#
+# A gateway run can end for several reasons that observe the run concurrently
+# (idle timeout, run-budget timeout, external /stop, provider error, supersede
+# by a newer turn, normal completion). ``RunTerminal`` is the single closed
+# discriminated union for "how a run ended". ``merge_run_terminal`` folds
+# racing terminal observations into one authoritative outcome with a fixed,
+# deterministic precedence so a deliberate cancellation or a hard timeout is
+# never silently overwritten by a late, generic provider error. ``collapse``
+# projects back onto the existing ``RunStatus`` vocabulary so nothing
+# downstream breaks.
+# --------------------------------------------------------------------------
+
+# How a run ended, in order of increasing attribution strength. ``merge`` may
+# only refine toward a stronger kind; it never downgrades.
+TerminalKind = Literal["ok", "failed", "timeout", "aborted"]
+
+# What observed the run ending.
+TerminalSource = Literal[
+    "completion",   # normal completion
+    "idle",         # idle timeout
+    "run_budget",   # run-budget / hard timeout
+    "external",     # external /stop (deliberate user cancellation)
+    "provider",     # provider error
+    "superseded",   # superseded by a newer turn
+]
+
+# Precedence rank per kind: higher wins a merge. A weaker later observation
+# never downgrades a stronger recorded one.
+_TERMINAL_KIND_RANK: Dict[str, int] = {
+    "ok": 0,
+    "failed": 1,
+    "timeout": 2,
+    "aborted": 3,
+}
+
+# Sticky sources: once recorded, they can never be overwritten by a later
+# observation of a different (or weaker) kind. A deliberate cancellation, a
+# hard run-budget timeout, and a supersede are all intentional terminals.
+_STICKY_SOURCES = frozenset({"external", "run_budget", "superseded"})
+
+# Project each terminal kind onto the existing RunStatus vocabulary.
+_TERMINAL_KIND_TO_RUN_STATUS: Dict[str, RunStatus] = {
+    "ok": "success",
+    "failed": "failure",
+    "timeout": "timeout",
+    "aborted": "cancelled",
+}
+
+
+@dataclass(frozen=True)
+class RunTerminal:
+    """One authoritative way a run ended — a closed discriminated union.
+
+    ``kind`` is the collapsed terminal category; ``source`` records which
+    observer produced it (used to decide stickiness). ``RunTerminal`` is frozen
+    so a recorded outcome is immutable — refinement happens by producing a new
+    instance via :func:`merge_run_terminal`, never by mutation.
+    """
+
+    kind: TerminalKind
+    source: TerminalSource
+    detail: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict (JSON/SQLite friendly, round-trippable)."""
+        return {"kind": self.kind, "source": self.source, "detail": self.detail}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RunTerminal":
+        """Rehydrate from a plain dict produced by :meth:`to_dict`."""
+        return cls(
+            kind=data["kind"],
+            source=data["source"],
+            detail=data.get("detail"),
+        )
+
+
+def is_sticky(outcome: RunTerminal) -> bool:
+    """Whether ``outcome`` can never be overwritten by a later observation.
+
+    Deliberate cancellations (``external``), hard run-budget timeouts
+    (``run_budget``), and supersedes (``superseded``) are intentional
+    terminals: once recorded they are authoritative.
+    """
+    return outcome.source in _STICKY_SOURCES
+
+
+def merge_run_terminal(
+    current: Optional[RunTerminal], observed: RunTerminal
+) -> RunTerminal:
+    """Fold a newly-observed terminal into the current one (refine-only).
+
+    Pure, deterministic, and **order-independent**: folding the same set of
+    observations always yields the same authoritative outcome regardless of the
+    sequence in which they arrive. Rules, in order:
+
+    1. No current outcome — the observation becomes authoritative.
+    2. Current is sticky — it can never be downgraded; keep it.
+    3. Observation has strictly stronger attribution
+       (``aborted`` > ``timeout`` > ``failed`` > ``ok``) — refine to it.
+    4. Equal attribution strength but the observation is sticky while the
+       current writer is not — promote to the sticky observation so a later
+       ``run_budget`` / ``external`` / ``superseded`` of the same kind can no
+       longer be silently downgraded by a subsequent weaker signal. Without
+       this, ``timeout/idle`` then ``timeout/run_budget`` would keep the
+       non-sticky idle result and stay downgradeable, so identical signals in
+       the opposite order produced a different final outcome.
+    5. Otherwise keep ``current`` so the first writer of a given strength wins.
+
+    A later, weaker observation therefore never overwrites a stronger one, and
+    a sticky terminal always wins over an equally-ranked non-sticky one no
+    matter which was observed first.
+    """
+    if current is None:
+        return observed
+    if is_sticky(current):
+        return current
+    current_rank = _TERMINAL_KIND_RANK.get(current.kind, 0)
+    observed_rank = _TERMINAL_KIND_RANK.get(observed.kind, 0)
+    if observed_rank > current_rank:
+        return observed
+    if observed_rank == current_rank and is_sticky(observed):
+        return observed
+    return current
+
+
+def collapse(outcome: RunTerminal) -> RunStatus:
+    """Project a ``RunTerminal`` onto the existing ``RunStatus`` vocabulary.
+
+    Collapses to exactly one of ``success``/``timeout``/``cancelled``/
+    ``failure`` for all downstream consumers.
+    """
+    return _TERMINAL_KIND_TO_RUN_STATUS.get(outcome.kind, "failure")
+
+
 # Backward compatibility export
 __all__ = [
     "AgentRunOutcome",
@@ -323,4 +460,10 @@ __all__ = [
     "TerminationReason",
     "termination_to_run_status",
     "validate_decision_string",
+    "RunTerminal",
+    "TerminalKind",
+    "TerminalSource",
+    "merge_run_terminal",
+    "is_sticky",
+    "collapse",
 ]
