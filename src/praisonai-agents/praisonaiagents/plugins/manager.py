@@ -432,8 +432,14 @@ class PluginManager:
             lambda: self.execute_hook(hook, *args, **kwargs)
         )
     
-    def get_all_tools(self) -> List[Dict[str, Any]]:
-        """Get all tools from all enabled plugins."""
+    def get_all_tools_with_sources(self) -> List[Tuple[str, Any]]:
+        """Get enabled plugin tools together with their owning plugin names.
+
+        The ownership information lets an Agent re-check plugin state after
+        construction.  This matters because an Agent keeps its own tool list;
+        disabling or unregistering a plugin must not leave copied tools
+        executable through that stale list.
+        """
         tools = []
 
         # Snapshot the enabled (name, plugin) pairs under the lock so a
@@ -449,11 +455,15 @@ class PluginManager:
         for name, plugin in enabled_plugins:
             try:
                 plugin_tools = plugin.get_tools()
-                tools.extend(plugin_tools)
+                tools.extend((name, tool) for tool in (plugin_tools or []))
             except Exception as e:
                 logger.error(f"Error getting tools from plugin {name}: {e}")
 
         return tools
+
+    def get_all_tools(self) -> List[Any]:
+        """Get all tools from all enabled plugins."""
+        return [tool for _plugin_name, tool in self.get_all_tools_with_sources()]
     
     def shutdown(self):
         """Shutdown all plugins."""

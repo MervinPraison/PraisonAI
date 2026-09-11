@@ -1766,7 +1766,10 @@ Write the complete compiled report:"""
             func = None
             tools_to_search = tools_override if tools_override is not None else self.tools
             from ..tools.base import BaseTool
+            plugin_owners = getattr(self, "_plugin_tool_owners", None)
             for tool in tools_to_search:
+                if plugin_owners and not self._is_plugin_tool_active(tool):
+                    continue
                 if isinstance(tool, BaseTool) and getattr(tool, 'name', None) == function_name:
                     func = tool
                     break

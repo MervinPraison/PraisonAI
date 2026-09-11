@@ -3413,8 +3413,27 @@ Your Goal: {self.goal}
                         from ..config.feature_configs import MemoryConfig
                         clone_kwargs['memory'] = MemoryConfig(auto_save=value)
         
-        # Create new Agent instance
-        return self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        # Create new Agent instance. Plugin tools are shallow-copied above so
+        # callable identity and their ownership metadata can be carried over;
+        # otherwise the constructor's name-collision guard would treat a copied
+        # plugin tool as a caller-declared tool and disabling the plugin could
+        # leave the clone with an executable stale capability.
+        clone = self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        plugin_owners = getattr(self, "_plugin_tool_owners", None)
+        if plugin_owners:
+            inherited_owners = {
+                id(tool): plugin_owners[id(tool)]
+                for tool in (clone.tools if isinstance(clone.tools, (list, tuple)) else [])
+                if id(tool) in plugin_owners
+            }
+            if inherited_owners:
+                # Keep ownership recorded while the constructor merged any
+                # plugins that became enabled after the source was created.
+                # Those entries are needed to revoke newly attached tools.
+                current_owners = dict(getattr(clone, "_plugin_tool_owners", {}) or {})
+                current_owners.update(inherited_owners)
+                clone._plugin_tool_owners = current_owners
+        return clone
 
     @property
     def _telemetry(self):
@@ -5848,6 +5867,8 @@ Summary:"""
             List of available tools
         """
         if not self.plan_mode:
+            if getattr(self, "_plugin_tool_owners", None):
+                return [tool for tool in self.tools if self._is_plugin_tool_active(tool)]
             return self.tools
             
         # Filter to read-only tools only
@@ -5855,6 +5876,8 @@ Summary:"""
         
         filtered_tools = []
         for tool in self.tools:
+            if not self._is_plugin_tool_active(tool):
+                continue
             tool_name = getattr(tool, '__name__', str(tool)).lower()
             
             # Check if tool is in restricted list
@@ -7329,10 +7352,25 @@ Answer:"""
             return "empty"
         # Create a simple hash based on tool names
         tool_names = []
+        try:
+            from ..tools.hosted import is_hosted_tool
+        except ImportError:
+            is_hosted_tool = lambda _tool: False
+
         for tool in tools:
             if callable(tool) and hasattr(tool, '__name__'):
                 tool_names.append(tool.__name__)
-            elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+            elif isinstance(tool, dict) and is_hosted_tool(tool):
+                try:
+                    hosted_key = json.dumps(tool, sort_keys=True)
+                except (TypeError, ValueError):
+                    hosted_key = str(id(tool))
+                tool_names.append(f"hosted:{hosted_key}")
+            elif (
+                isinstance(tool, dict)
+                and isinstance(tool.get('function'), dict)
+                and tool['function'].get('name')
+            ):
                 tool_names.append(tool['function']['name'])
             elif isinstance(tool, str):
                 tool_names.append(tool)

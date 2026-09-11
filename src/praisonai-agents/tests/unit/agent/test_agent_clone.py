@@ -10,6 +10,7 @@ Validates:
 import asyncio
 import copy
 import threading
+import uuid
 
 import pytest
 
@@ -89,6 +90,54 @@ class TestAgentDeepCopy:
         clone2 = agent.clone_for_channel()
         assert clone1 is not clone2
         assert clone1._Agent__cache_lock is not clone2._Agent__cache_lock
+
+    def test_clone_preserves_ownership_for_plugin_enabled_after_source(self):
+        """A clone keeps ownership for tools merged after the source was built."""
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+
+        suffix = uuid.uuid4().hex
+        source_name = f"clone_owner_source_{suffix}"
+        late_name = f"clone_owner_late_{suffix}"
+
+        def source_tool() -> str:
+            return "source"
+
+        def late_tool() -> str:
+            return "late"
+
+        class SourcePlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name=source_name)
+
+            def get_tools(self):
+                return [source_tool]
+
+        class LatePlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name=late_name)
+
+            def get_tools(self):
+                return [late_tool]
+
+        manager = get_plugin_manager()
+        assert manager.register(SourcePlugin())
+        try:
+            source = self._make_agent()
+            assert source_tool in source.tools
+            assert manager.register(LatePlugin())
+            clone = source.clone_for_channel()
+
+            assert late_tool in clone.tools
+            assert clone._plugin_tool_owners[id(late_tool)][0] == late_name
+
+            manager.disable(late_name)
+            assert clone._is_plugin_tool_active(late_tool) is False
+        finally:
+            manager.unregister(late_name)
+            manager.unregister(source_name)
 
     def test_deepcopy_multiple_times(self):
         """Successive deepcopies must all succeed (no cumulative state corruption)."""
