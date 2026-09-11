@@ -797,22 +797,67 @@ function manualReviewReasonForAgentPy(agentChange) {
   return null;
 }
 
-async function listAllComments(github, owner, repo, issueNumber) {
-  if (typeof github.paginate === 'function') {
-    return github.paginate(github.rest.issues.listComments, {
-      owner,
-      repo,
-      issue_number: issueNumber,
-      per_page: 100,
-    });
-  }
-  const { data } = await github.rest.issues.listComments({
+async function listAllComments(github, owner, repo, issueNumber, options = {}) {
+  const { since } = options;
+  const params = {
     owner,
     repo,
     issue_number: issueNumber,
     per_page: 100,
-  });
-  return data;
+  };
+  if (since) params.since = since;
+
+  // Always page explicitly — github-script's paginate helper can return only the
+  // first page on busy PRs, so fresh MERGE_GATE_VERDICT comments on page 2+ are missed.
+  const all = [];
+  for (let page = 1; page <= 50; page++) {
+    const { data } = await github.rest.issues.listComments({ ...params, page });
+    all.push(...data);
+    if (data.length < 100) break;
+  }
+  return all;
+}
+
+/** Poll until Opus posts MERGE_GATE_VERDICT on HEAD (merge-only runs right after assess). */
+async function waitForMergeGateVerdict(github, owner, repo, prNumber, options = {}) {
+  const {
+    headPushedAt = null,
+    excludeAutomatedFallback = true,
+    maxAttempts = 18,
+    intervalMs = 10000,
+    since = null,
+    core: log = null,
+  } = options;
+
+  let resolvedHeadPushedAt = headPushedAt;
+  const commentSince =
+    since ||
+    (resolvedHeadPushedAt
+      ? new Date(new Date(resolvedHeadPushedAt).getTime() - 5 * 60 * 1000).toISOString()
+      : null);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (!resolvedHeadPushedAt) {
+      const ctx = await loadPrContext(github, owner, repo, prNumber);
+      resolvedHeadPushedAt = ctx.headPushedAt;
+    }
+    const comments = await listAllComments(github, owner, repo, prNumber, {
+      since: commentSince || undefined,
+    });
+    const verdict = findMergeGateVerdict(comments, null, resolvedHeadPushedAt, {
+      excludeAutomatedFallback,
+    });
+    if (verdict) {
+      return { verdict, headPushedAt: resolvedHeadPushedAt };
+    }
+    if (attempt < maxAttempts) {
+      log?.info?.(
+        `Verdict not visible yet (attempt ${attempt}/${maxAttempts}), waiting ${intervalMs / 1000}s...`
+      );
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+  return { verdict: null, headPushedAt: resolvedHeadPushedAt };
 }
 
 async function getHeadCommitDate(github, owner, repo, prNumber) {
@@ -1119,6 +1164,7 @@ module.exports = {
   secretScanReasons,
   sdkTestChecksReason,
   listAllComments,
+  waitForMergeGateVerdict,
   getHeadCommitDate,
   isStaleFinalAfterPush,
   needsStaleFinalRecovery,
