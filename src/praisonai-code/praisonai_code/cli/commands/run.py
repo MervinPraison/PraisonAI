@@ -21,6 +21,65 @@ _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
 
+# Model-independent fallback used only when the resolved model's real output
+# ceiling is unknown (litellm absent or model not in its registry). Keeping this
+# equal to the historical CLI default makes the derivation backward-compatible.
+_PREFERRED_DEFAULT_MAX_TOKENS = 16000
+
+
+def _resolve_max_tokens(
+    model_name: Optional[str],
+    max_tokens: int,
+    was_explicit: bool,
+    output,
+) -> int:
+    """Derive/clamp ``--max-tokens`` against the resolved model's output ceiling.
+
+    - Unset by the user/config: default to ``min(preferred, ceiling)`` so a
+      large-output model is not silently capped at the constant and a small one
+      is not sent an over-limit request.
+    - Explicitly set above the ceiling: clamp down with a one-line diagnostic so
+      the provider does not 400.
+    - Ceiling unknown (no litellm / unknown model): return the value unchanged,
+      preserving today's behaviour.
+    """
+    if not model_name:
+        return max_tokens
+    try:
+        from praisonaiagents.llm.model_capabilities import max_output_tokens
+        ceiling = max_output_tokens(model_name)
+    except Exception:
+        ceiling = None
+    if not ceiling:
+        return max_tokens
+    if was_explicit:
+        if max_tokens > ceiling:
+            output.print_warning(
+                f"--max-tokens {max_tokens} exceeds {model_name} limit; "
+                f"clamping to {ceiling}"
+            )
+            return ceiling
+        return max_tokens
+    return min(_PREFERRED_DEFAULT_MAX_TOKENS, ceiling)
+
+
+def _apply_max_tokens(agent_config: Dict[str, Any], max_tokens: Optional[int]) -> None:
+    """Fold a resolved output budget into an ``Agent(**agent_config)`` dict.
+
+    Mirrors the direct-prompt handler, which passes ``max_tokens`` inside the
+    ``llm`` config dict (``{"model": ..., "max_tokens": ...}``). Normalising a
+    plain ``llm`` string into that dict here means the ceiling-derived/clamped
+    budget reaches the agent on the ``--agent`` and ``actions`` paths too, so
+    they no longer send an over-limit request the default prompt path avoids.
+    """
+    if not max_tokens:
+        return
+    llm = agent_config.get("llm")
+    if isinstance(llm, dict):
+        llm.setdefault("max_tokens", max_tokens)
+    elif isinstance(llm, str):
+        agent_config["llm"] = {"model": llm, "max_tokens": max_tokens}
+
 
 def _run_succeeded(result: Any) -> bool:
     """Whether an agent run result represents a genuine success.
@@ -1378,6 +1437,18 @@ def run_main(
         _headless = (not sys.stdin.isatty()) or output.is_json_mode
         model = ensure_configured_or_onboard(model=model, interactive=not _headless)
 
+    # Derive/clamp the output budget from the now-resolved model's real ceiling
+    # (Issue #5017). A bare `run` no longer 400s on lower-ceiling models nor
+    # truncates silently on higher-ceiling ones; an explicit over-limit value is
+    # clamped with a diagnostic. Unknown-metadata models keep today's constant.
+    try:
+        import click as _click
+        _mt_src = _click.get_current_context().get_parameter_source("max_tokens")
+        _max_tokens_explicit = _mt_src is not None and _mt_src.name != "DEFAULT"
+    except Exception:
+        _max_tokens_explicit = False
+    max_tokens = _resolve_max_tokens(model, max_tokens, _max_tokens_explicit, output)
+
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject
     # the combination up front rather than silently ignoring isolation.
@@ -1525,6 +1596,7 @@ def run_main(
             instructions=merged_instructions,
             append_system_prompt=resolved_append_prompt,
             image=image,
+            max_tokens_explicit=_max_tokens_explicit,
         )
         return
     
@@ -1711,6 +1783,7 @@ def run_main(
                 instructions=merged_instructions,
                 append_system_prompt=resolved_append_prompt,
                 image=image,
+                max_tokens_explicit=_max_tokens_explicit,
             )
 
 
@@ -1752,6 +1825,14 @@ def _run_from_file(
         # Set model if provided
         if model:
             praison.config_list[0]['model'] = model
+        # Carry the ceiling-derived/clamped output budget on the model config so
+        # generators that honour ``max_tokens`` from ``config_list`` pick it up.
+        # Note: a multi-model YAML file can pin a different ``llm:`` per agent;
+        # the CLI ceiling was resolved once against the effective ``--model`` (or
+        # the process default), so per-agent YAML models are budgeted by the core
+        # context layer rather than re-clamped here.
+        if max_tokens:
+            praison.config_list[0]['max_tokens'] = max_tokens
         
         # Handle session continuity for YAML files
         session_id = None
@@ -1886,6 +1967,7 @@ def _run_prompt(
     instructions: Optional[List[str]] = None,
     append_system_prompt: Optional[str] = None,
     image: Optional[List[str]] = None,
+    max_tokens_explicit: bool = False,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1975,6 +2057,11 @@ def _run_prompt(
         # PRAISONAI_APPEND_SYSTEM_PROMPT export, and it reuses a cached agent
         # whose system prompt is already assembled — so attaching would silently
         # drop the requested suffix. The in-process path applies it correctly.
+        # An explicit/derived per-call --max-tokens must also stay in-process:
+        # the warm runtime is a separate process reusing a cached agent whose
+        # output budget was fixed at startup, so attaching would silently drop
+        # the requested (possibly ceiling-clamped) budget — the same failure
+        # mode as thinking_budget/append_system_prompt above.
         stateful_attach = bool(session_id) and not fork
         runtime_eligible = (
             (no_save or stateful_attach)
@@ -1982,6 +2069,7 @@ def _run_prompt(
             and not isolated
             and not append_system_prompt
             and not image
+            and not max_tokens_explicit
             and not any([
                 mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
                 memory, permissions_config, fork, instructions,
@@ -2021,6 +2109,9 @@ def _run_prompt(
             }
             if model:
                 agent_config["llm"] = model
+            # Apply the ceiling-derived/clamped output budget so the actions
+            # fast path honours the same limit as the default prompt path.
+            _apply_max_tokens(agent_config, max_tokens)
             
             # Resolve approval backend if specified
             if approval:
@@ -2539,6 +2630,11 @@ def _run_custom_agent(
         # Override model if specified
         if model:
             agent_config["llm"] = model
+
+        # Fold the ceiling-derived/clamped output budget into the agent's llm
+        # config so a `--agent` run honours the same limit as the default
+        # prompt path (only when the definition did not already pin one).
+        _apply_max_tokens(agent_config, max_tokens)
 
         # Compose the agent's toolset: frontmatter ``tools:`` (name strings)
         # + explicit --tools/--toolset + auto-discovered project-local
