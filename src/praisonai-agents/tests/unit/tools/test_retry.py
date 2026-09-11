@@ -99,6 +99,21 @@ class TestRetryPolicy:
         for delay in delays:
             assert 750 <= delay <= 1250
     
+    def test_jitter_never_exceeds_max_delay(self):
+        """Jitter is a one-sided/upward source that must not breach the cap."""
+        policy = RetryPolicy(
+            initial_delay_ms=1000,
+            backoff_factor=2.0,
+            max_delay_ms=5000,
+            jitter=True,
+            jitter_factor=0.5,
+        )
+        # attempt 10 would explode past the cap; base is clamped to 5000, then
+        # jitter is added and the result must be re-clamped to <= 5000.
+        for _ in range(200):
+            delay = policy.get_delay_ms(10)
+            assert 0 <= delay <= 5000
+
     def test_validation_max_attempts(self):
         """Test validation rejects invalid max_attempts."""
         try:
