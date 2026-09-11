@@ -88,6 +88,33 @@ roles:
     assert "echo:hello" in result
 
 
+def test_agents_generator_uses_registry_default_when_framework_omitted(monkeypatch):
+    registry = FrameworkAdapterRegistry(discover_entry_points=False)
+    registry.unregister("praisonai")
+    registry.register("echo_test_adapter", _EchoAdapter)
+
+    from praisonai.agents_generator import AgentsGenerator
+
+    gen = AgentsGenerator(
+        agent_file="test.yaml",
+        framework=None,
+        config_list=[{"model": "openai/gpt-4o-mini"}],
+        agent_yaml="roles: {}\ntopic: hello\n",
+        adapter_registry=registry,
+    )
+    monkeypatch.setattr(gen, "_validate_agents_config", lambda _config: None)
+    monkeypatch.setattr(gen, "_build_tools_dict", lambda _config: {})
+    monkeypatch.setattr(
+        gen,
+        "_validate_cli_backend_compatibility",
+        lambda *_args, **_kwargs: None,
+    )
+
+    prep = gen._prepare_for_run({"roles": {}, "topic": "hello"})
+
+    assert prep["adapter"].name == "echo_test_adapter"
+
+
 def test_entry_point_loaders_use_add_loader_path():
     """Entry-point loaders use the same _add_loader path as _discover_entry_points."""
     registry = FrameworkAdapterRegistry(discover_entry_points=False)
