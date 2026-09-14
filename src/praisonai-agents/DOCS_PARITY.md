@@ -49,7 +49,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Hooks | 2 | 9 | 4990 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 19 | 5964 |
-| ✅ LLM | 3 | 15 | 5917 |
+| ✅ LLM | 3 | 15 | 5944 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 63 | 14860 |
 | ✅ Memory | 6 | 21 | 8186 |
@@ -70,12 +70,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3690 |
 | ✅ Security | 1 | 3 | 3598 |
-| ✅ Sessions | 4 | 20 | 8034 |
+| ✅ Sessions | 4 | 20 | 8049 |
 | ✅ Skills | 6 | 16 | 5984 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44505 |
+| ✅ Tools | 12 | 145 | 44509 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7581 lines)
+- ℹ️ Database (43 docs, 7657 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 
