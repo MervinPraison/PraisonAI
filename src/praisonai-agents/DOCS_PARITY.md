@@ -38,7 +38,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Display | 6 | 3 | 844 |
 | ✅ Embeddings | 6 | 23 | 2051 |
 | ✅ Evaluation | 1 | 9 | 3537 |
-| ✅ Events | 1 | 2 | 767 |
+| ✅ Events | 1 | 2 | 781 |
 | ✅ Execution | 3 | 4 | 1693 |
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
