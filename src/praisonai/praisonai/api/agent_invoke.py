@@ -443,6 +443,35 @@ def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> N
             )
 
 
+async def _safe_close_agent(agent: Any, template: Any) -> None:
+    """Best-effort teardown of a per-request agent clone.
+
+    ``resolve_session_agent`` returns a fresh clone for every invoke of a
+    real ``Agent`` (so concurrent callers never share ``chat_history``). Those
+    clones lazily spin up LLM client pools, tool-executor threads and MCP
+    subprocesses that ``Agent.close()``/``aclose()`` release — without this
+    teardown each request leaks them into the long-lived server process.
+
+    Only the *clone* is closed: when the agent fell back to the shared registry
+    template (plain mocks / non-isolatable agents) ``agent is template`` and we
+    must NOT close it, or the next request would run against a torn-down agent.
+    Errors are swallowed (logged) so cleanup never masks a successful response.
+    """
+    if agent is None or agent is template:
+        return
+    try:
+        aclose = getattr(agent, "aclose", None)
+        if inspect.iscoroutinefunction(aclose):
+            await aclose()
+        else:
+            close = getattr(agent, "close", None)
+            if callable(close):
+                import asyncio
+                await asyncio.to_thread(close)
+    except Exception:
+        logger.exception("Agent cleanup failed")
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -497,6 +526,9 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         # Resolve a per-session isolated agent view so concurrent callers never
         # share mutable chat_history. A provided session_id gives continuity via
         # the shared session store; its absence yields an ephemeral conversation.
+        # Keep the template so cleanup can tell a fresh clone (to be closed)
+        # from the shared registry instance (must not be closed).
+        template = get_agent(agent_id, registry=registry)
         try:
             agent = resolve_session_agent(agent_id, request.session_id, registry=registry)
         except Exception as e:
@@ -511,52 +543,60 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 status_code=404,
                 detail=f"Agent '{agent_id}' not found"
             )
-        
-        # Apply per-request agent_config overrides to the isolated clone, or
-        # reject unsupported keys with a 400 so the caller isn't silently
-        # running a different config than they asked for.
-        try:
-            _apply_agent_config(agent, request.agent_config)
-        except AgentConfigError as e:
-            raise HTTPException(status_code=400, detail=str(e))
 
         try:
-            # Session ID echoed back to the caller
-            session_id = request.session_id or "default"
-            
-            # Invoke agent (handle both sync and async agents)
-            if _supports_async_start(agent):
-                # Async agent
-                result = await agent.astart(request.message)
-            elif _supports_sync_start(agent):
-                # Sync agent - run in a worker thread to avoid blocking the event
-                # loop. ``asyncio.to_thread`` is the correct primitive inside a
-                # running request coroutine (``get_event_loop()`` is deprecated
-                # there since Python 3.10).
-                import asyncio
-                result = await asyncio.to_thread(agent.start, request.message)
-            else:
-                raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
-            
-            logger.info(f"Agent {agent_id} invoked successfully")
-            
-            return AgentInvokeResponse(
-                result=str(result),
-                session_id=session_id,
-                status="success",
-                metadata={
-                    "agent_id": agent_id,
-                    "message_length": len(request.message),
-                    "response_length": len(str(result))
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"Agent {agent_id} invocation failed: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Agent execution failed: {str(e)}"
-            )
+            # Apply per-request agent_config overrides to the isolated clone, or
+            # reject unsupported keys with a 400 so the caller isn't silently
+            # running a different config than they asked for.
+            try:
+                _apply_agent_config(agent, request.agent_config)
+            except AgentConfigError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+            try:
+                # Session ID echoed back to the caller
+                session_id = request.session_id or "default"
+
+                # Invoke agent (handle both sync and async agents)
+                if _supports_async_start(agent):
+                    # Async agent
+                    result = await agent.astart(request.message)
+                elif _supports_sync_start(agent):
+                    # Sync agent - run in a worker thread to avoid blocking the event
+                    # loop. ``asyncio.to_thread`` is the correct primitive inside a
+                    # running request coroutine (``get_event_loop()`` is deprecated
+                    # there since Python 3.10).
+                    import asyncio
+                    result = await asyncio.to_thread(agent.start, request.message)
+                else:
+                    raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
+
+                logger.info(f"Agent {agent_id} invoked successfully")
+
+                return AgentInvokeResponse(
+                    result=str(result),
+                    session_id=session_id,
+                    status="success",
+                    metadata={
+                        "agent_id": agent_id,
+                        "message_length": len(request.message),
+                        "response_length": len(str(result))
+                    }
+                )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Agent {agent_id} invocation failed: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Agent execution failed: {str(e)}"
+                )
+        finally:
+            # Release the per-request clone's resources (LLM pools, tool-executor
+            # threads, MCP subprocesses). No-op when the agent fell back to the
+            # shared template. Never masks the response.
+            await _safe_close_agent(agent, template)
 
     @router.get("/agents")
     async def list_agents(
@@ -662,13 +702,15 @@ async def invoke_agent_standalone(
     This can be used in environments where FastAPI is not available
     or when integrating with other web frameworks.
     """
-    if get_agent(agent_id) is None:
+    template = get_agent(agent_id)
+    if template is None:
         return {
             "error": f"Agent '{agent_id}' not found",
             "status": "error",
             "available_agents": list_registered_agents()
         }
 
+    agent = None
     try:
         # Per-session isolated agent view (see resolve_session_agent). Done
         # inside the try so a clone/isolation failure returns a clean error
@@ -715,6 +757,10 @@ async def invoke_agent_standalone(
             "status": "error",
             "agent_id": agent_id
         }
+    finally:
+        # Release the per-request clone's resources; no-op for the shared
+        # template fallback. Never masks the response.
+        await _safe_close_agent(agent, template)
 
 
 # Example usage and helper functions

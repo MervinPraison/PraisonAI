@@ -468,6 +468,142 @@ class TestSessionIsolation:
             unregister_agent("clonefail-agent")
 
 
+class TestAgentInvokeCleanup:
+    """Every invoke path must release its per-request agent clone (issue #5076)."""
+
+    @pytest.mark.asyncio
+    async def test_standalone_closes_cloned_agent(self):
+        """A session-isolatable clone gets aclose()/close() after invoke."""
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            invoke_agent_standalone,
+        )
+        import praisonai.api.agent_invoke as agent_invoke
+
+        template = Mock()
+        clone = Mock()
+        clone.astart = AsyncMock(return_value="ok")
+        clone.aclose = AsyncMock()
+
+        register_agent("clean-agent", template)
+        try:
+            with patch.object(agent_invoke, "resolve_session_agent", return_value=clone):
+                result = await invoke_agent_standalone("clean-agent", "hi")
+            assert result["status"] == "success"
+            clone.aclose.assert_awaited_once()
+        finally:
+            unregister_agent("clean-agent")
+
+    @pytest.mark.asyncio
+    async def test_standalone_closes_clone_on_failure(self):
+        """Cleanup still runs when the agent invocation raises."""
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            invoke_agent_standalone,
+        )
+        import praisonai.api.agent_invoke as agent_invoke
+
+        template = Mock()
+        clone = Mock()
+        clone.astart = AsyncMock(side_effect=RuntimeError("boom"))
+        clone.aclose = AsyncMock()
+
+        register_agent("fail-agent", template)
+        try:
+            with patch.object(agent_invoke, "resolve_session_agent", return_value=clone):
+                result = await invoke_agent_standalone("fail-agent", "hi")
+            assert result["status"] == "error"
+            clone.aclose.assert_awaited_once()
+        finally:
+            unregister_agent("fail-agent")
+
+    @pytest.mark.asyncio
+    async def test_shared_template_not_closed(self):
+        """The shared registry instance (mock fallback) must NOT be closed."""
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            invoke_agent_standalone,
+        )
+        import praisonai.api.agent_invoke as agent_invoke
+
+        # resolve_session_agent returns the SAME object for a non-isolatable agent.
+        template = Mock()
+        template.start.return_value = "ok"
+        template.aclose = AsyncMock()
+        template.close = Mock()
+
+        register_agent("shared-agent", template)
+        try:
+            with patch.object(agent_invoke, "resolve_session_agent", return_value=template):
+                result = await invoke_agent_standalone("shared-agent", "hi")
+            assert result["status"] == "success"
+            template.aclose.assert_not_called()
+            template.close.assert_not_called()
+        finally:
+            unregister_agent("shared-agent")
+
+    @pytest.mark.asyncio
+    async def test_cleanup_error_does_not_mask_response(self):
+        """A close() failure is swallowed; the successful result is returned."""
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            invoke_agent_standalone,
+        )
+        import praisonai.api.agent_invoke as agent_invoke
+
+        template = Mock()
+        clone = Mock()
+        clone.astart = AsyncMock(return_value="ok")
+        clone.aclose = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+
+        register_agent("noisy-agent", template)
+        try:
+            with patch.object(agent_invoke, "resolve_session_agent", return_value=clone):
+                result = await invoke_agent_standalone("noisy-agent", "hi")
+            assert result["status"] == "success"
+            clone.aclose.assert_awaited_once()
+        finally:
+            unregister_agent("noisy-agent")
+
+    @pytest.mark.asyncio
+    async def test_safe_close_agent_prefers_aclose(self):
+        """_safe_close_agent uses aclose when it is a coroutine function."""
+        from praisonai.api.agent_invoke import _safe_close_agent
+
+        clone = Mock()
+        clone.aclose = AsyncMock()
+        clone.close = Mock()
+        await _safe_close_agent(clone, template=object())
+        clone.aclose.assert_awaited_once()
+        clone.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_safe_close_agent_falls_back_to_sync_close(self):
+        """_safe_close_agent uses close() when no async aclose is available."""
+        from praisonai.api.agent_invoke import _safe_close_agent
+
+        clone = Mock(spec=["close"])
+        clone.close = Mock()
+        await _safe_close_agent(clone, template=object())
+        clone.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_safe_close_agent_skips_template(self):
+        """_safe_close_agent never closes the shared template instance."""
+        from praisonai.api.agent_invoke import _safe_close_agent
+
+        shared = Mock()
+        shared.aclose = AsyncMock()
+        shared.close = Mock()
+        await _safe_close_agent(shared, template=shared)
+        shared.aclose.assert_not_called()
+        shared.close.assert_not_called()
+
+
 def test_agent_invoke_smoke_test():
     """Smoke test to verify agent invoke module can be imported and used."""
     try:
