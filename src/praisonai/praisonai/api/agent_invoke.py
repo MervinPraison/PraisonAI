@@ -443,21 +443,28 @@ def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> N
             )
 
 
-async def _safe_close_agent(agent: Any, template: Any) -> None:
+async def _safe_close_agent(agent: Any) -> None:
     """Best-effort teardown of a per-request agent clone.
 
     ``resolve_session_agent`` returns a fresh clone for every invoke of a
-    real ``Agent`` (so concurrent callers never share ``chat_history``). Those
-    clones lazily spin up LLM client pools, tool-executor threads and MCP
-    subprocesses that ``Agent.close()``/``aclose()`` release — without this
-    teardown each request leaks them into the long-lived server process.
+    session-isolatable ``Agent`` (so concurrent callers never share
+    ``chat_history``). Those clones lazily spin up LLM client pools,
+    tool-executor threads and MCP subprocesses that
+    ``Agent.close()``/``aclose()`` release — without this teardown each request
+    leaks them into the long-lived server process.
 
-    Only the *clone* is closed: when the agent fell back to the shared registry
-    template (plain mocks / non-isolatable agents) ``agent is template`` and we
-    must NOT close it, or the next request would run against a torn-down agent.
+    Only a *clone* is closed. Ownership is derived from the agent itself via
+    :func:`_supports_session_isolation`: an isolatable agent was cloned for this
+    request and is safe to close, whereas a non-isolatable one (plain mock /
+    lightweight callable) is the shared registry instance and must NOT be closed
+    or the next request would run against a torn-down agent. Deriving ownership
+    from the resolved object — rather than comparing it against a second,
+    independently-timed registry lookup — is race-free even when the registry
+    entry is concurrently replaced.
+
     Errors are swallowed (logged) so cleanup never masks a successful response.
     """
-    if agent is None or agent is template:
+    if agent is None or not _supports_session_isolation(agent):
         return
     try:
         aclose = getattr(agent, "aclose", None)
@@ -526,9 +533,6 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         # Resolve a per-session isolated agent view so concurrent callers never
         # share mutable chat_history. A provided session_id gives continuity via
         # the shared session store; its absence yields an ephemeral conversation.
-        # Keep the template so cleanup can tell a fresh clone (to be closed)
-        # from the shared registry instance (must not be closed).
-        template = get_agent(agent_id, registry=registry)
         try:
             agent = resolve_session_agent(agent_id, request.session_id, registry=registry)
         except Exception as e:
@@ -596,7 +600,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             # Release the per-request clone's resources (LLM pools, tool-executor
             # threads, MCP subprocesses). No-op when the agent fell back to the
             # shared template. Never masks the response.
-            await _safe_close_agent(agent, template)
+            await _safe_close_agent(agent)
 
     @router.get("/agents")
     async def list_agents(
@@ -702,8 +706,7 @@ async def invoke_agent_standalone(
     This can be used in environments where FastAPI is not available
     or when integrating with other web frameworks.
     """
-    template = get_agent(agent_id)
-    if template is None:
+    if get_agent(agent_id) is None:
         return {
             "error": f"Agent '{agent_id}' not found",
             "status": "error",
@@ -760,7 +763,7 @@ async def invoke_agent_standalone(
     finally:
         # Release the per-request clone's resources; no-op for the shared
         # template fallback. Never masks the response.
-        await _safe_close_agent(agent, template)
+        await _safe_close_agent(agent)
 
 
 # Example usage and helper functions

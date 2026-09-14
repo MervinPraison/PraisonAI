@@ -468,6 +468,23 @@ class TestSessionIsolation:
             unregister_agent("clonefail-agent")
 
 
+def _make_isolatable_clone():
+    """Build a mock that ``_supports_session_isolation`` accepts as a clone.
+
+    Cleanup ownership is derived from the resolved agent itself
+    (``_supports_session_isolation``), not a second registry lookup, so a clone
+    the helper should close must look session-isolatable: a real ``Agent``
+    instance exposing ``_session_id``, ``chat_history`` and ``clone_for_channel``.
+    """
+    from praisonaiagents import Agent
+
+    clone = Mock(spec=Agent)
+    clone._session_id = None
+    clone.chat_history = []
+    clone.clone_for_channel = Mock()
+    return clone
+
+
 class TestAgentInvokeCleanup:
     """Every invoke path must release its per-request agent clone (issue #5076)."""
 
@@ -482,7 +499,7 @@ class TestAgentInvokeCleanup:
         import praisonai.api.agent_invoke as agent_invoke
 
         template = Mock()
-        clone = Mock()
+        clone = _make_isolatable_clone()
         clone.astart = AsyncMock(return_value="ok")
         clone.aclose = AsyncMock()
 
@@ -506,7 +523,7 @@ class TestAgentInvokeCleanup:
         import praisonai.api.agent_invoke as agent_invoke
 
         template = Mock()
-        clone = Mock()
+        clone = _make_isolatable_clone()
         clone.astart = AsyncMock(side_effect=RuntimeError("boom"))
         clone.aclose = AsyncMock()
 
@@ -556,7 +573,7 @@ class TestAgentInvokeCleanup:
         import praisonai.api.agent_invoke as agent_invoke
 
         template = Mock()
-        clone = Mock()
+        clone = _make_isolatable_clone()
         clone.astart = AsyncMock(return_value="ok")
         clone.aclose = AsyncMock(side_effect=RuntimeError("cleanup failed"))
 
@@ -574,10 +591,10 @@ class TestAgentInvokeCleanup:
         """_safe_close_agent uses aclose when it is a coroutine function."""
         from praisonai.api.agent_invoke import _safe_close_agent
 
-        clone = Mock()
+        clone = _make_isolatable_clone()
         clone.aclose = AsyncMock()
         clone.close = Mock()
-        await _safe_close_agent(clone, template=object())
+        await _safe_close_agent(clone)
         clone.aclose.assert_awaited_once()
         clone.close.assert_not_called()
 
@@ -586,22 +603,147 @@ class TestAgentInvokeCleanup:
         """_safe_close_agent uses close() when no async aclose is available."""
         from praisonai.api.agent_invoke import _safe_close_agent
 
-        clone = Mock(spec=["close"])
+        clone = _make_isolatable_clone()
+        # No coroutine ``aclose`` on this clone -> sync close() path.
+        clone.aclose = None
         clone.close = Mock()
-        await _safe_close_agent(clone, template=object())
+        await _safe_close_agent(clone)
         clone.close.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_safe_close_agent_skips_template(self):
-        """_safe_close_agent never closes the shared template instance."""
+    async def test_safe_close_agent_skips_non_isolatable(self):
+        """_safe_close_agent never closes a shared, non-isolatable instance."""
         from praisonai.api.agent_invoke import _safe_close_agent
 
+        # A plain mock is not session-isolatable -> it is the shared registry
+        # instance and must be left untouched, regardless of registry timing.
         shared = Mock()
         shared.aclose = AsyncMock()
         shared.close = Mock()
-        await _safe_close_agent(shared, template=shared)
+        await _safe_close_agent(shared)
         shared.aclose.assert_not_called()
         shared.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_agent_aclose_releases_llm_client(self):
+        """Agent.aclose() must tear down a live LLM client before marking closed.
+
+        Regression for issue #5076: the invoke cleanup prefers aclose(); if
+        aclose() skips LLM-client teardown, each per-request clone leaks its
+        client pool. A live ``_llm_instance`` must be closed (async preferred).
+        """
+        from praisonaiagents import Agent
+
+        agent = Agent(name="leaky", instructions="test")
+        llm_client = Mock()
+        llm_client.aclose = AsyncMock()
+        # Seed an already-materialised client (bypass lazy creation).
+        agent._llm_instance = llm_client
+
+        await agent.aclose()
+
+        llm_client.aclose.assert_awaited_once()
+        assert agent._closed is True
+
+    @pytest.mark.asyncio
+    async def test_agent_aclose_does_not_lazily_create_client(self):
+        """aclose() must not instantiate an LLM client just to close it."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="lazy", instructions="test")
+        # No client was ever materialised.
+        agent._llm_instance = None
+
+        # Should complete cleanly without building an LLM instance.
+        await agent.aclose()
+        assert agent._llm_instance is None
+        assert agent._closed is True
+
+
+@pytest.mark.skipif(not pytest.importorskip("fastapi", minversion="0.68.0"), reason="FastAPI not available")
+class TestAgentInvokeRouteCleanup:
+    """The FastAPI invoke route must also release its per-request clone (#5076)."""
+
+    @pytest.fixture
+    def client(self, monkeypatch):
+        # Disable auth for localhost so the route runs without a token; this
+        # isolates the cleanup behaviour under test from the auth layer.
+        monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+        monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "127.0.0.1")
+
+        from fastapi.testclient import TestClient
+        from praisonai.api.agent_invoke import router
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app)
+
+    def _register_with_clone(self, monkeypatch, agent_id, clone):
+        import praisonai.api.agent_invoke as agent_invoke
+
+        template = Mock()
+        agent_invoke.register_agent(agent_id, template)
+        monkeypatch.setattr(agent_invoke, "resolve_session_agent",
+                            lambda *a, **k: clone)
+        return template
+
+    def test_route_closes_cloned_agent_on_success(self, client, monkeypatch):
+        """Route closes the resolved clone after a successful invocation."""
+        from praisonai.api.agent_invoke import unregister_agent
+
+        clone = _make_isolatable_clone()
+        del clone.astart  # force the sync start() path
+        clone.start = Mock(return_value="hello")
+        clone.aclose = AsyncMock()
+
+        self._register_with_clone(monkeypatch, "route-clean", clone)
+        try:
+            resp = client.post("/api/v1/agents/route-clean/invoke",
+                               json={"message": "hi"})
+            assert resp.status_code == 200
+            assert resp.json()["result"] == "hello"
+            clone.aclose.assert_awaited_once()
+        finally:
+            unregister_agent("route-clean")
+
+    def test_route_closes_cloned_agent_on_failure(self, client, monkeypatch):
+        """Route still closes the clone when invocation raises (500)."""
+        from praisonai.api.agent_invoke import unregister_agent
+
+        clone = _make_isolatable_clone()
+        clone.astart = AsyncMock(side_effect=RuntimeError("boom"))
+        clone.aclose = AsyncMock()
+
+        self._register_with_clone(monkeypatch, "route-fail", clone)
+        try:
+            resp = client.post("/api/v1/agents/route-fail/invoke",
+                               json={"message": "hi"})
+            assert resp.status_code == 500
+            clone.aclose.assert_awaited_once()
+        finally:
+            unregister_agent("route-fail")
+
+    def test_route_does_not_close_shared_template(self, client, monkeypatch):
+        """Route leaves a shared, non-isolatable instance untouched."""
+        from praisonai.api.agent_invoke import register_agent, unregister_agent
+        import praisonai.api.agent_invoke as agent_invoke
+
+        shared = Mock()
+        shared.start.return_value = "ok"
+        shared.aclose = AsyncMock()
+        shared.close = Mock()
+        register_agent("route-shared", shared)
+        monkeypatch.setattr(agent_invoke, "resolve_session_agent",
+                            lambda *a, **k: shared)
+        try:
+            resp = client.post("/api/v1/agents/route-shared/invoke",
+                               json={"message": "hi"})
+            assert resp.status_code == 200
+            shared.aclose.assert_not_called()
+            shared.close.assert_not_called()
+        finally:
+            unregister_agent("route-shared")
 
 
 def test_agent_invoke_smoke_test():
