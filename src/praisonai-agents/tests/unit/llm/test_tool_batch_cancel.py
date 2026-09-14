@@ -114,3 +114,74 @@ def test_llm_loop_forwards_cancel_token_to_execute_batch():
         f"expected >=2 execute_batch calls forwarding cancel_token, "
         f"found {forwarded}"
     )
+
+
+def _method_source(cls_or_module, method_name):
+    """Return the dedented source of a method/function by name via AST."""
+    import ast
+    import inspect
+    import textwrap
+
+    source = textwrap.dedent(inspect.getsource(cls_or_module))
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == method_name:
+            return node
+    raise AssertionError(f"{method_name} not found")
+
+
+def test_streaming_loop_stops_model_call_when_cancelled():
+    """get_response_stream must not issue a follow-up model request once the
+    cancel token is signalled (Issue #5073).
+
+    Source-level guard: the streaming method both defines a cancellation
+    predicate and returns/breaks based on it, so a cancelled turn cannot spend
+    another completion after the tool batch short-circuits.
+    """
+    import ast
+    from praisonaiagents.llm import llm as llm_module
+
+    node = _method_source(llm_module, "get_response_stream")
+
+    defines_predicate = any(
+        isinstance(n, ast.FunctionDef) and n.name == "_stream_is_cancelled"
+        for n in ast.walk(node)
+    )
+    assert defines_predicate, "expected _stream_is_cancelled predicate in get_response_stream"
+
+    guarded = 0
+    for n in ast.walk(node):
+        if not isinstance(n, ast.If):
+            continue
+        test = n.test
+        if isinstance(test, ast.Call) and isinstance(test.func, ast.Name) \
+                and test.func.id == "_stream_is_cancelled":
+            guarded += 1
+    assert guarded >= 1, (
+        "expected at least one cancellation guard in get_response_stream "
+        f"to stop the loop, found {guarded}"
+    )
+
+
+def test_agent_stream_forwards_cancel_token_to_get_response_stream():
+    """The public agent streaming path must forward cancel_token to
+    get_response_stream (Issue #5073).
+
+    Without this, the token extracted in get_response_stream is always None for
+    start(stream=True) / iter_stream(), so streamed tools keep running after Stop.
+    """
+    import ast
+    from praisonaiagents.agent import chat_mixin
+
+    node = _method_source(chat_mixin, "_start_stream_impl")
+
+    forwarded = False
+    for n in ast.walk(node):
+        if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) \
+                and n.value.id == "stream_sampling_kwargs":
+            key = n.slice
+            if isinstance(key, ast.Constant) and key.value == "cancel_token":
+                forwarded = True
+    assert forwarded, (
+        "expected _start_stream_impl to set stream_sampling_kwargs['cancel_token']"
+    )

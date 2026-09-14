@@ -4370,6 +4370,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Extract the optional cancel token before building completion params
         # so it is forwarded to the tool batch executor (not leaked to litellm).
         cancel_token = kwargs.pop("cancel_token", None)
+
+        def _stream_is_cancelled() -> bool:
+            return cancel_token is not None and getattr(
+                cancel_token, "is_set", lambda: False)()
+
+        def _stream_cancel_reason() -> str:
+            return getattr(cancel_token, "reason", None) or "user"
+
         try:
             import litellm
             
@@ -4602,7 +4610,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # model can re-emit them (never dispatched with {}).
                         for _err_msg in parse_error_messages:
                             messages.append(_err_msg)
-                        
+
+                        # If a Stop/interrupt fired during the tool batch, the
+                        # executor already short-circuited pending calls; do not
+                        # spend another model request on the cancelled turn
+                        # (Issue #5073), matching the non-streaming loop.
+                        if _stream_is_cancelled():
+                            logging.debug(
+                                "Streaming tool loop cancelled after tool batch: "
+                                f"{_stream_cancel_reason()}")
+                            return
+
                         # Continue conversation after tool execution - get follow-up response
                         try:
                             follow_up_response = self._completion_with_retry(
@@ -4669,6 +4687,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_result_mapping = {}  # Store function results by name for Ollama chaining
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
+                        # Honour a Stop/interrupt between fallback iterations so
+                        # a cancelled turn does not issue another model request
+                        # (Issue #5073).
+                        if _stream_is_cancelled():
+                            logging.debug(
+                                "Streaming fallback loop cancelled: "
+                                f"{_stream_cancel_reason()}")
+                            break
                         fallback_iterations += 1
                         response = self._completion_with_retry(
                             **self._build_completion_params(
@@ -4747,6 +4773,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 f"within limit of {max_tool_calls_per_turn}.")
 
                         for tool_call in tool_calls:
+                            # Skip pending calls once a Stop/interrupt fires so
+                            # the fallback path honours cancellation like the
+                            # executor-backed paths do (Issue #5073).
+                            if _stream_is_cancelled():
+                                logging.debug(
+                                    "Streaming fallback tool dispatch cancelled: "
+                                    f"{_stream_cancel_reason()}")
+                                break
                             tool_call_count += 1
                             function_name, arguments, tool_call_id = (
                                 self._extract_tool_call_info(tool_call, is_ollama))
