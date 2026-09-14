@@ -1506,20 +1506,22 @@ class AgentsGenerator:
         # generator instance still holds the default 'praisonai'. Resolve
         # through the injected registry (not the process default) so the
         # build-time framework agrees with the observability label and a
-        # tenant-scoped adapter is honoured.
+        # tenant-scoped adapter is honoured. Fall back to the process default
+        # when the instance was built without an injected registry.
+        registry = getattr(self, "_adapter_registry", None) or _get_default_adapter_registry()
         workflow_framework = framework_from_config(
-            config, registry=self._adapter_registry
+            config, registry=registry
         )
         validate_workflow_framework(
             workflow_framework,
             source="agents.yaml workflow section",
-            registry=self._adapter_registry,
+            registry=registry,
         )
         if self.framework:
             validate_workflow_framework(
                 self.framework,
                 source="AgentsGenerator framework",
-                registry=self._adapter_registry,
+                registry=registry,
             )
 
         # Parity with the sequential/hierarchical path: reject an incompatible
@@ -1528,7 +1530,7 @@ class AgentsGenerator:
         # 'praisonai'.
         self._validate_cli_backend_compatibility(
             config,
-            self._adapter_registry.resolve_or_default(workflow_framework),
+            registry.resolve_or_default(workflow_framework),
         )
 
         # The framework-level check above passes for 'praisonai' because the
