@@ -240,3 +240,93 @@ def test_closed_loop_does_not_trip():
     time.sleep(0.2)
     wd.disarm()
     assert wd.wedged is False
+
+
+# ── Shutdown-phase deadline mode (Issue #5079) ──
+
+
+def test_policy_shutdown_grace_default_and_validation():
+    assert LoopWatchdogPolicy().shutdown_grace_s == 5.0
+    LoopWatchdogPolicy(shutdown_grace_s=0)  # zero is allowed
+    with pytest.raises(ValueError):
+        LoopWatchdogPolicy(shutdown_grace_s=-1)
+    with pytest.raises(ValueError):
+        LoopWatchdogPolicy(shutdown_grace_s=float("nan"))
+
+
+def test_cancel_when_not_armed_is_safe():
+    wd = LoopWatchdog()
+    assert wd.deadline_armed is False
+    wd.cancel()  # must not raise
+    assert wd.deadline_armed is False
+    assert wd.deadline_expired is False
+
+
+def test_clean_shutdown_cancels_deadline_no_exit():
+    """A deadline cancelled before expiry must never dump or self-exit."""
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(
+            shutdown_grace_s=0.0, on_wedge="dump_and_exit"
+        )
+    )
+    wd.arm_deadline(0.5)
+    assert wd.deadline_armed is True
+    wd.cancel()  # clean stop finished well before 0.5s
+    assert wd.deadline_armed is False
+    assert wd.deadline_expired is False
+
+
+def test_wedged_shutdown_expires_deadline(monkeypatch):
+    """A shutdown that overruns the deadline dumps stacks (dump_only, no exit)."""
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(on_wedge="dump_only")
+    )
+    wd.arm_deadline(0.05)
+    time.sleep(0.2)  # never cancelled: the "teardown" wedged past the deadline
+    assert wd.deadline_expired is True
+
+
+def test_deadline_arm_is_idempotent():
+    wd = LoopWatchdog(LoopWatchdogPolicy(on_wedge="dump_only"))
+    wd.arm_deadline(1.0)
+    first = wd._deadline_thread
+    wd.arm_deadline(1.0)  # no-op while armed
+    assert wd._deadline_thread is first
+    wd.cancel()
+
+
+def test_deadline_writes_dump_file(tmp_path):
+    dump = tmp_path / "shutdown.txt"
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(on_wedge="dump_only", dump_file=str(dump))
+    )
+    wd.arm_deadline(0.05)
+    time.sleep(0.2)
+    assert wd.deadline_expired is True
+    assert dump.exists()
+    assert "shutdown did not complete" in dump.read_text()
+
+
+def test_deadline_cancel_suppresses_in_flight_exit():
+    """A cancel racing an in-flight expiry must not call os._exit."""
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(on_wedge="dump_and_exit")
+    )
+    wd._deadline_stop.set()  # simulate cancel() having raced in
+    exited = []
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        wd._on_deadline(1.0)  # must observe the stop flag and not exit
+    finally:
+        os._exit = original_exit
+    assert exited == []
+    assert wd.deadline_expired is True
+
+
+def test_non_positive_deadline_is_noop():
+    wd = LoopWatchdog()
+    wd.arm_deadline(0)
+    assert wd.deadline_armed is False
+    wd.arm_deadline(-5)
+    assert wd.deadline_armed is False

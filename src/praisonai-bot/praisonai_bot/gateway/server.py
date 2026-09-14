@@ -2440,11 +2440,21 @@ class WebSocketGateway:
         try:
             interval = float(watchdog_cfg.get("liveness_interval", 5.0))
             strikes = int(watchdog_cfg.get("liveness_strikes", 3))
-            policy = LoopWatchdogPolicy(
+            policy_kwargs: Dict[str, Any] = dict(
                 probe_interval_s=interval,
                 missed_probes_before_wedged=strikes,
                 dump_file=watchdog_cfg.get("dump_file") or None,
             )
+            # Issue #5079: optional shutdown-phase deadline grace budget. Only
+            # forwarded when the core policy supports it, so an older core
+            # (liveness only) still loads.
+            if "shutdown_grace" in watchdog_cfg and hasattr(
+                LoopWatchdogPolicy, "shutdown_grace_s"
+            ):
+                policy_kwargs["shutdown_grace_s"] = float(
+                    watchdog_cfg.get("shutdown_grace")
+                )
+            policy = LoopWatchdogPolicy(**policy_kwargs)
         except (TypeError, ValueError) as exc:
             logger.warning("Invalid gateway.watchdog config (%s); disabling", exc)
             return
@@ -2477,6 +2487,51 @@ class WebSocketGateway:
             watchdog.disarm()
         except Exception:  # pragma: no cover - fail open
             pass
+
+    def _arm_shutdown_deadline(self, deadline_s: float) -> None:
+        """Arm a bounded self-exit around the stop path (Issue #5079).
+
+        The liveness watchdog only fires on a *wedged loop* and is disarmed on
+        a deliberate stop (#3410) — so a teardown step that blocks while the
+        loop is still alive would otherwise hang until an external ``SIGKILL``.
+        Arming the core watchdog's deadline mode gives that path an all-thread
+        stack dump + bounded ``os._exit`` before the supervisor kills us. Opt-in
+        and no-op when the watchdog is unconfigured; fail-open on any error.
+        """
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.arm_deadline(deadline_s)
+        except Exception:  # pragma: no cover - fail open, never block stop
+            logger.debug("Could not arm shutdown deadline", exc_info=True)
+
+    def _cancel_shutdown_deadline(self) -> None:
+        """Cancel the shutdown deadline so a clean stop never self-exits."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.cancel()
+        except Exception:  # pragma: no cover - fail open
+            pass
+
+    def _resolve_shutdown_grace(self, grace: Optional[float]) -> float:
+        """Resolve the shutdown grace budget (CLI/Python override or policy)."""
+        if grace is not None:
+            try:
+                grace = float(grace)
+            except (TypeError, ValueError):
+                grace = None
+        if grace is None:
+            watchdog = self._watchdog
+            if watchdog is not None:
+                grace = getattr(watchdog.policy, "shutdown_grace_s", 5.0)
+            else:
+                grace = 5.0
+        if grace < 0:
+            grace = 0.0
+        return grace
 
     # ── Gateway lifecycle: idle/scale-to-zero + drain marker (Issue #3021) ──
 
@@ -2973,15 +3028,34 @@ class WebSocketGateway:
                 except Exception as e:
                     logger.error(f"Failed to persist timed-out session {session.session_id}: {e}")
 
-    async def stop(self, drain_timeout: float = 10.0) -> None:
+    async def stop(self, drain_timeout: float = 10.0, grace: Optional[float] = None) -> None:
         """Stop the gateway server with graceful drain.
         
         Args:
             drain_timeout: Maximum time to wait for active sessions to complete (default: 10.0)
+            grace: Extra budget (seconds) beyond ``drain_timeout`` before the
+                shutdown-phase deadline watchdog fires a bounded, diagnosable
+                self-exit (Issue #5079). ``None`` uses ``gateway.watchdog.
+                shutdown_grace`` (default 5s). Only active when a watchdog is
+                configured; otherwise this is a plain no-op.
         """
         if not self._is_running:
             return
-        
+
+        # Issue #5079: arm a wall-clock shutdown deadline so a teardown step
+        # that blocks while the loop is still alive gets an all-thread stack
+        # dump + bounded os._exit instead of an external SIGKILL. Armed at the
+        # start of the drain; cancelled in the finally on a clean stop so a
+        # healthy shutdown never self-exits. No-op unless a watchdog is set.
+        shutdown_grace = self._resolve_shutdown_grace(grace)
+        self._arm_shutdown_deadline(drain_timeout + shutdown_grace)
+        try:
+            await self._stop_inner(drain_timeout)
+        finally:
+            self._cancel_shutdown_deadline()
+
+    async def _stop_inner(self, drain_timeout: float) -> None:
+        """The ordered teardown, bounded by the shutdown deadline (#5079)."""
         # Flip readiness to draining BEFORE draining so load balancers stop
         # routing new traffic while in-flight sessions finish. Keep _is_running
         # True so liveness (/live) still reports the process as alive during drain.
