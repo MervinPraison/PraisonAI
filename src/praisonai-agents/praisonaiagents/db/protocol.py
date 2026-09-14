@@ -46,6 +46,7 @@ class DbMessage:
     timestamp: float = field(default_factory=time.time)
     id: Optional[str] = None
     tool_calls: Optional[List["DbToolCall"]] = None  # For assistant messages with tool calls
+    tool_call_id: Optional[str] = None  # Links a role="tool" result to its call (Issue #3089)
     run_id: Optional[str] = None  # Group messages by run
 
 
@@ -178,6 +179,17 @@ class DbAdapter(Protocol):
             metadata: Optional call metadata
         """
         ...
+    
+    # --- Faithful tool-turn persistence (Optional, Issue #3089 parity) ---
+    # The structured tool-turn callbacks (``on_assistant_message`` /
+    # ``on_tool_message``) are intentionally NOT part of this base protocol:
+    # a ``@runtime_checkable`` Protocol makes every declared method mandatory,
+    # so adding them here would break ``isinstance(adapter, DbAdapter)`` for
+    # legacy adapters that predate them. They live in the optional
+    # ``ToolTurnDbAdapterProtocol`` below and are feature-detected at runtime
+    # via ``hasattr``. Adapters that omit them keep the prior text-only
+    # behaviour: assistant turns route to ``on_agent_message`` and raw tool
+    # turns are dropped.
     
     def on_agent_end(
         self,
@@ -418,6 +430,53 @@ class DbAdapter(Protocol):
             Tuple of (is_compatible, message)
             - is_compatible: True if schema is compatible
             - message: Description of compatibility status or required action
+        """
+        ...
+
+
+@runtime_checkable
+class ToolTurnDbAdapterProtocol(Protocol):
+    """Optional capability for faithful tool-turn persistence (Issue #3089).
+
+    Kept separate from :class:`DbAdapter` so that adding these callbacks never
+    breaks structural conformance for legacy adapters. Adapters that opt in
+    persist the structured tool transcript — assistant ``tool_calls`` and
+    ``role="tool"`` results — so a resumed session hands the model the same
+    messages it saw before. The agent feature-detects this capability via
+    ``hasattr``; adapters that omit it keep the text-only behaviour.
+    """
+
+    def on_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_calls: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist an assistant turn that requested tools.
+
+        Args:
+            session_id: Session identifier
+            content: Assistant message content (may be empty when only tools were called)
+            tool_calls: Structured tool calls (OpenAI format) to persist faithfully
+            metadata: Optional message metadata
+        """
+        ...
+
+    def on_tool_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a tool result turn (role="tool").
+
+        Args:
+            session_id: Session identifier
+            content: Tool result content
+            tool_call_id: Id linking this result to the assistant tool call it answers
+            metadata: Optional message metadata
         """
         ...
 
