@@ -252,20 +252,29 @@ class MCPToolRunner(threading.Thread):
         """
         self.queue.put(None)
 
-    def stop(self):
-        """Best-effort teardown for a runner that failed to initialize.
+    def stop(self, timeout=None):
+        """Best-effort teardown for the runner thread.
 
-        Queues the shutdown sentinel and joins the thread briefly so that if
-        the handshake eventually completes the request loop exits immediately
-        instead of leaving a background thread (and its stdio subprocess) alive.
-        The thread is a daemon, so this never blocks interpreter exit.
+        Queues the shutdown sentinel and joins the thread so the request loop
+        exits and its stdio subprocess is terminated instead of leaking a
+        background thread (and its child) across the process lifetime. The
+        request loop polls the queue between async operations, so once any
+        in-flight call unwinds the sentinel is consumed promptly.
+
+        Args:
+            timeout: Seconds to wait for the thread to exit. Defaults to the
+                runner's own operation ``timeout`` so an in-flight call has a
+                chance to finish before we give up. The thread is a daemon, so
+                this never blocks interpreter exit even if the join times out.
         """
         try:
             self.queue.put(None)
         except Exception:
             pass
+        if timeout is None:
+            timeout = getattr(self, "timeout", 60)
         if self.is_alive():
-            self.join(timeout=1)
+            self.join(timeout=timeout)
 
 class MCP:
     """
@@ -506,13 +515,16 @@ class MCP:
         # so a blocked handshake does not leave a background thread and stdio
         # child process alive across construction retries.
         if not self.runner.initialized.wait(timeout=self.timeout):
-            self.runner.stop()
+            # Fast-fail teardown: the handshake is stuck, so join briefly and
+            # let the daemon thread be reclaimed at exit rather than blocking
+            # the raise for the full operation timeout.
+            self.runner.stop(timeout=1)
             raise TimeoutError(
                 f"MCP initialization timed out after {self.timeout} seconds "
                 f"(command={cmd!r} args={arguments!r})."
             )
         if getattr(self.runner, "_init_error", None):
-            self.runner.stop()
+            self.runner.stop(timeout=1)
             raise RuntimeError(
                 f"MCP initialization failed: {self.runner._init_error} "
                 f"(command={cmd!r} args={arguments!r})."
@@ -1176,6 +1188,20 @@ class MCP:
                 self.runner.shutdown()
             except Exception:
                 pass  # Best effort cleanup
+            # Join the daemon thread (and terminate its stdio subprocess) so
+            # long-lived processes don't leak one child per MCP server. Plain
+            # shutdown() only enqueues a sentinel; stop() also joins the thread.
+            try:
+                if hasattr(self.runner, "stop"):
+                    self.runner.stop()
+            except Exception:
+                pass  # Best effort cleanup
+            # Only drop the reference once the thread has actually exited so a
+            # later shutdown() can retry the join if an in-flight call kept the
+            # runner alive past the join timeout. The thread is a daemon, so a
+            # surviving runner never blocks interpreter exit.
+            if not getattr(self.runner, "is_alive", lambda: False)():
+                self.runner = None
         
         # Shutdown SSE client if present
         if hasattr(self, 'sse_client') and self.sse_client is not None:
