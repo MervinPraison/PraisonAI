@@ -81,6 +81,11 @@ class PlatformCapabilities:
         max_message_length: Maximum message length in the platform's unit
         length_unit: Unit for message length ("codepoints" or "utf16")
         supports_edit: Whether the platform supports in-place message edits (for streaming)
+        supports_delete: Whether the platform supports deleting a sent message.
+            When True the adapter MUST override ``delete_message``; the
+            capability contract is verified at adapter build time so a
+            declared-but-unbacked flag fails early rather than silently
+            no-opping mid-turn.
         supports_typing: Whether the platform supports typing indicators
         markdown_dialect: Markdown flavor the platform uses (e.g., "markdown", "telegram_markdown_v2")
         needs_rate_limit: Whether the platform needs rate limiting
@@ -120,6 +125,7 @@ class PlatformCapabilities:
     max_message_length: int = 4096
     length_unit: str = "codepoints"  # "codepoints" or "utf16"
     supports_edit: bool = False
+    supports_delete: bool = False
     supports_typing: bool = True
     markdown_dialect: str = "markdown"
     needs_rate_limit: bool = True
@@ -140,6 +146,7 @@ class PlatformCapabilities:
             "max_message_length": self.max_message_length,
             "length_unit": self.length_unit,
             "supports_edit": self.supports_edit,
+            "supports_delete": self.supports_delete,
             "supports_typing": self.supports_typing,
             "markdown_dialect": self.markdown_dialect,
             "needs_rate_limit": self.needs_rate_limit,
@@ -162,6 +169,7 @@ class PlatformCapabilities:
             max_message_length=data.get("max_message_length", 4096),
             length_unit=data.get("length_unit", "codepoints"),
             supports_edit=data.get("supports_edit", False),
+            supports_delete=data.get("supports_delete", False),
             supports_typing=data.get("supports_typing", True),
             markdown_dialect=data.get("markdown_dialect", "markdown"),
             needs_rate_limit=data.get("needs_rate_limit", True),

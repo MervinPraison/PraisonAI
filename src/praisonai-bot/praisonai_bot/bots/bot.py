@@ -259,9 +259,27 @@ class Bot:
 
         adapter = adapter_cls(**init_kwargs)
 
+        self._verify_capability_contract(adapter)
+
         self._attach_gateway_runtime(adapter)
 
         return adapter
+
+    @staticmethod
+    def _verify_capability_contract(adapter: Any) -> None:
+        """Fail loudly at build time if a declared capability is unbacked.
+
+        Verifies each ``supports_*`` flag the adapter declares against the
+        method that must back it, so a declared-but-unbacked capability raises a
+        clear ``CapabilityContractError`` here — before any live turn — rather
+        than surfacing later as a ``NotImplementedError`` buried in the delivery
+        loop. A core release predating this contract simply skips the check.
+        """
+        try:
+            from praisonaiagents.bots import enforce_capability_contract
+        except ImportError:
+            return
+        enforce_capability_contract(adapter)
 
     def _attach_gateway_runtime(self, adapter: Any) -> None:
         """Wire the gateway reliability seams into a freshly-built adapter.
