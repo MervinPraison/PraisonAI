@@ -515,23 +515,9 @@ class ExecutionMixin:
                 finally:
                     new_loop.close()
             
-            # Bound the blocking wait by the per-agent tool timeout (seconds) so a
-            # hung async backend cannot block this worker thread indefinitely. When
-            # no timeout is configured the behaviour is unchanged (waits forever).
-            tool_timeout = getattr(self, '_tool_timeout', None)
-            backend_timeout = tool_timeout if tool_timeout and tool_timeout > 0 else None
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async)
-                try:
-                    return future.result(timeout=backend_timeout)
-                except concurrent.futures.TimeoutError:
-                    future.cancel()
-                    logger.warning(
-                        "Backend sync execution timed out after %ss", tool_timeout
-                    )
-                    raise TimeoutError(
-                        f"Backend execution timed out after {tool_timeout}s"
-                    )
+                return future.result()
 
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
@@ -1618,9 +1604,13 @@ Write the complete compiled report:"""
                 # path returns (retryable=False: an uncancellable side effect must
                 # not be re-run).
                 future.cancel()
-                logging.warning(
-                    "Middleware async tool '%s' timed out after %ss",
-                    req.tool_name, tool_timeout,
+                logger.warning(
+                    "Middleware async tool '%s' timed out after %ss (agent=%s, run_id=%s, tool_call_id=%s)",
+                    req.tool_name,
+                    tool_timeout,
+                    self.name,
+                    getattr(self, '_current_run_id', 'unknown'),
+                    tool_call_id,
                 )
                 result = {
                     "error": f"Tool timed out after {tool_timeout}s",

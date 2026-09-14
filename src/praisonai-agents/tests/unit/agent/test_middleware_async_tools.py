@@ -48,7 +48,7 @@ async def test_middleware_async_tool_respects_timeout():
         await asyncio.sleep(30)
         return "never"
 
-    harness = _MiddlewareHarness(tool_timeout=0.2, inner_coro=_hang)
+    harness = _MiddlewareHarness(tool_timeout=0.05, inner_coro=_hang)
 
     result = await harness._execute_tool_async_via_middleware(
         harness._get_tool_middleware_manager(),
