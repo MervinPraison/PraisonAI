@@ -5008,6 +5008,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'reasoning_effort', getattr(self, 'reasoning_effort', None))
                     if _stream_effort is not None:
                         stream_sampling_kwargs['reasoning_effort'] = _stream_effort
+                    # Forward the cancellation token so a Stop/interrupt during
+                    # the streamed tool phase short-circuits pending tool calls
+                    # (Issue #5073). Resolve the explicit token first, then fall
+                    # back to the agent's interrupt controller, mirroring chat().
+                    _stream_cancel_source = kwargs.get('cancel_token')
+                    if _stream_cancel_source is None:
+                        _stream_cancel_source = getattr(self, "interrupt_controller", None)
+                    _stream_cancel_token = self._turn_cancel_token(
+                        _stream_cancel_source,
+                        explicit=kwargs.get('cancel_token') is not None,
+                    )
+                    if _stream_cancel_token is not None:
+                        stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
