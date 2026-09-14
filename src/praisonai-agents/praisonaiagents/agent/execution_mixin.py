@@ -515,10 +515,24 @@ class ExecutionMixin:
                 finally:
                     new_loop.close()
             
+            # Bound the blocking wait by the per-agent tool timeout (seconds) so a
+            # hung async backend cannot block this worker thread indefinitely. When
+            # no timeout is configured the behaviour is unchanged (waits forever).
+            tool_timeout = getattr(self, '_tool_timeout', None)
+            backend_timeout = tool_timeout if tool_timeout and tool_timeout > 0 else None
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async)
-                return future.result()
-                
+                try:
+                    return future.result(timeout=backend_timeout)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    logger.warning(
+                        "Backend sync execution timed out after %ss", tool_timeout
+                    )
+                    raise TimeoutError(
+                        f"Backend execution timed out after {tool_timeout}s"
+                    )
+
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
             return asyncio.run(self.backend.execute(prompt, **kwargs))
@@ -1577,14 +1591,42 @@ Write the complete compiled report:"""
             ),
         )
 
+        # Bound the worker thread's wait on the async tool by the same per-agent
+        # tool timeout the direct path applies (ToolConfig.timeout, seconds). The
+        # inner coroutine already wraps itself in asyncio.wait_for, but the worker
+        # blocking on future.result() has no bound of its own: if the inner path
+        # hangs (or no timeout is configured) the middleware worker would block a
+        # thread-pool worker indefinitely. Give it a slightly larger grace bound so
+        # the inner wait_for surfaces its structured timeout first when configured.
+        tool_timeout = getattr(self, '_tool_timeout', None)
+        worker_timeout = (tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
+
         def _final_handler(req):
+            import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(
                 self._execute_tool_async_with_retry(
                     req.tool_name, req.arguments, tool_call_id, tools_override
                 ),
                 loop,
             )
-            result = future.result()
+            try:
+                result = future.result(timeout=worker_timeout)
+            except concurrent.futures.TimeoutError:
+                # The scheduled coroutine did not finish within the bound. Request
+                # cancellation on the running loop so it stops rather than leaking,
+                # and surface the same structured timeout error the direct async
+                # path returns (retryable=False: an uncancellable side effect must
+                # not be re-run).
+                future.cancel()
+                logging.warning(
+                    "Middleware async tool '%s' timed out after %ss",
+                    req.tool_name, tool_timeout,
+                )
+                result = {
+                    "error": f"Tool timed out after {tool_timeout}s",
+                    "timeout": True,
+                    "_praison_retryable": False,
+                }
             return ToolResponse(tool_name=req.tool_name, result=result)
 
         def _run_chain():
