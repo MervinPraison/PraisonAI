@@ -317,7 +317,23 @@ def __getattr__(name: str):
     
     # Everything else: lazy-load from the submodule map (protocols.py parsed
     # only if a protocol/policy symbol is actually requested).
-    return _lazy_getattr(name)
+    value = _lazy_getattr(name)
+    # Bind the resolved symbol into the module globals so it behaves exactly
+    # like an eager import: it becomes a real attribute (discoverable via
+    # ``dir``, deletable, and patchable via ``monkeypatch.delattr``/``setattr``),
+    # and future accesses skip ``__getattr__`` entirely.
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    """Expose the public API to ``dir()`` / IDE autocomplete without importing.
+
+    Returns the union of names already resolved into the module globals and the
+    declared public ``__all__``, so lazy exports remain discoverable before they
+    are first accessed (matching the eager-import behaviour).
+    """
+    return sorted(set(globals()) | set(__all__))
 
 
 __all__ = [
