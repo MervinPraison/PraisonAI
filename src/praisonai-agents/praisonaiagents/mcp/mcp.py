@@ -1176,6 +1176,15 @@ class MCP:
                 self.runner.shutdown()
             except Exception:
                 pass  # Best effort cleanup
+            # Join the daemon thread (and terminate its stdio subprocess) so
+            # long-lived processes don't leak one child per MCP server. Plain
+            # shutdown() only enqueues a sentinel; stop() also joins the thread.
+            try:
+                if hasattr(self.runner, "stop"):
+                    self.runner.stop()
+            except Exception:
+                pass  # Best effort cleanup
+            self.runner = None
         
         # Shutdown SSE client if present
         if hasattr(self, 'sse_client') and self.sse_client is not None:
