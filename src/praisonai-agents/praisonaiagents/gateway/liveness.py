@@ -149,6 +149,10 @@ class LoopWatchdog:
         self._deadline_thread: Optional[threading.Thread] = None
         self._deadline_stop = threading.Event()
         self._deadline_expired = False
+        # Guards the deadline generation swap (thread + its stop event) so an
+        # arm racing a cancel can never mix one generation's thread with
+        # another's stop event (Issue #5079 review).
+        self._deadline_lock = threading.Lock()
 
     @property
     def armed(self) -> bool:
@@ -236,46 +240,66 @@ class LoopWatchdog:
         Idempotent and fail-open: a re-arm while already armed is a no-op, and
         any failure to start the thread is swallowed.
         """
-        if self.deadline_armed:
-            return
         if not math.isfinite(deadline_s) or deadline_s <= 0:
             return
-        try:
-            self._deadline_stop.clear()
+        with self._deadline_lock:
+            if self.deadline_armed:
+                return
+            # Each armed generation gets its *own* stop event, handed directly
+            # to the thread. Cancellation state is therefore per-generation: a
+            # later arm never clears an older thread's event, so a slow old
+            # generation (e.g. still flushing a stack dump) can never observe a
+            # fresh generation's cleared flag and self-exit during a healthy run
+            # (Issue #5079 review).
+            stop = threading.Event()
             self._deadline_expired = False
-            self._deadline_thread = threading.Thread(
-                target=self._run_deadline,
-                args=(deadline_s,),
-                name="praisonai-shutdown-watchdog",
-                daemon=True,
-            )
-            self._deadline_thread.start()
-        except Exception:  # pragma: no cover - fail open
-            self._deadline_thread = None
+            try:
+                thread = threading.Thread(
+                    target=self._run_deadline,
+                    args=(deadline_s, stop),
+                    name="praisonai-shutdown-watchdog",
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:  # pragma: no cover - fail open
+                self._deadline_thread = None
+                self._deadline_stop = stop
+                return
+            self._deadline_thread = thread
+            self._deadline_stop = stop
 
     def cancel(self) -> None:
         """Cancel an armed shutdown deadline. Safe when not armed.
 
         A clean stop() calls this so the bounded self-exit never fires on a
-        healthy shutdown.
+        healthy shutdown. Sets the *current* generation's stop event (so that
+        exact thread suppresses its self-exit even if it is mid-dump) and drops
+        the reference; a later arm starts a fresh generation with its own event.
         """
-        self._deadline_stop.set()
-        thread = self._deadline_thread
+        with self._deadline_lock:
+            self._deadline_stop.set()
+            thread = self._deadline_thread
+            self._deadline_thread = None
         if thread is not None and thread is not threading.current_thread():
             try:
                 thread.join(timeout=1.0)
             except Exception:  # pragma: no cover - fail open
                 pass
-        self._deadline_thread = None
 
-    def _run_deadline(self, deadline_s: float) -> None:
-        # Wait out the deadline; a clean cancel() sets the event and returns
-        # immediately so a healthy shutdown never trips the self-exit.
-        if self._deadline_stop.wait(deadline_s):
+    def _run_deadline(self, deadline_s: float, stop: "threading.Event") -> None:
+        # Wait out the deadline against *this generation's* event; a clean
+        # cancel() sets it and returns immediately so a healthy shutdown never
+        # trips the self-exit.
+        if stop.wait(deadline_s):
             return
-        self._on_deadline(deadline_s)
+        self._on_deadline(deadline_s, stop)
 
-    def _on_deadline(self, deadline_s: float) -> None:
+    def _on_deadline(self, deadline_s: float, stop: "threading.Event") -> None:
+        # Only the still-active generation records expiry / self-exits: if this
+        # thread was cancelled its own ``stop`` is set, so a stale generation
+        # that survived a bounded join stays inert.
+        if stop.is_set():
+            return
         self._deadline_expired = True
         try:
             self._dump_stacks(
@@ -288,7 +312,7 @@ class LoopWatchdog:
             pass
         if self.policy.on_wedge == "dump_and_exit":
             # If cancel() raced in while we were dumping, honour the clean stop.
-            if self._deadline_stop.is_set():
+            if stop.is_set():
                 return
             try:
                 sys.stderr.flush()

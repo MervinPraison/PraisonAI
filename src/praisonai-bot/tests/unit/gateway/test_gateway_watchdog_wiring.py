@@ -160,6 +160,18 @@ def test_resolve_shutdown_grace_without_watchdog_defaults():
     assert gw._resolve_shutdown_grace(7) == 7.0
 
 
+def test_resolve_shutdown_grace_rejects_non_finite_override():
+    """NaN/inf overrides would make arm_deadline silently no-op; fall back to
+    the policy default so the backstop is never quietly disabled (#5079)."""
+    gw = _make_gateway()
+    gw._configure_watchdog({"enabled": True, "shutdown_grace": 8})
+    assert gw._resolve_shutdown_grace(float("nan")) == 8.0
+    assert gw._resolve_shutdown_grace(float("inf")) == 8.0
+    assert gw._resolve_shutdown_grace(float("-inf")) == 8.0
+    # Non-numeric override also falls back rather than raising.
+    assert gw._resolve_shutdown_grace("not-a-number") == 8.0
+
+
 def test_arm_and_cancel_shutdown_deadline_lifecycle():
     gw = _make_gateway()
     gw._configure_watchdog({"enabled": True})

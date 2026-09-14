@@ -276,13 +276,32 @@ def test_clean_shutdown_cancels_deadline_no_exit():
     assert wd.deadline_expired is False
 
 
-def test_wedged_shutdown_expires_deadline(monkeypatch):
-    """A shutdown that overruns the deadline dumps stacks (dump_only, no exit)."""
+def test_wedged_shutdown_expires_deadline():
+    """A shutdown that overruns the deadline records expiry (dump_only, no exit).
+
+    Deterministic: drive the expiry handler directly with a fresh (unset)
+    generation event rather than racing a real wall-clock sleep against a
+    daemon thread.
+    """
     wd = LoopWatchdog(
         LoopWatchdogPolicy(on_wedge="dump_only")
     )
+    wd._on_deadline(0.05, threading.Event())
+    assert wd.deadline_expired is True
+
+
+def test_deadline_thread_actually_fires_and_expires():
+    """End-to-end lifecycle: a short real deadline expires the daemon thread.
+
+    Synchronised on the thread terminating (``join``) rather than a fixed
+    sleep, so it stays deterministic under load.
+    """
+    wd = LoopWatchdog(LoopWatchdogPolicy(on_wedge="dump_only"))
     wd.arm_deadline(0.05)
-    time.sleep(0.2)  # never cancelled: the "teardown" wedged past the deadline
+    thread = wd._deadline_thread
+    assert thread is not None
+    thread.join(timeout=5.0)
+    assert thread.is_alive() is False
     assert wd.deadline_expired is True
 
 
@@ -296,32 +315,64 @@ def test_deadline_arm_is_idempotent():
 
 
 def test_deadline_writes_dump_file(tmp_path):
+    """The expiry handler writes the dump file. Driven directly for determinism."""
     dump = tmp_path / "shutdown.txt"
     wd = LoopWatchdog(
         LoopWatchdogPolicy(on_wedge="dump_only", dump_file=str(dump))
     )
-    wd.arm_deadline(0.05)
-    time.sleep(0.2)
+    wd._on_deadline(0.05, threading.Event())
     assert wd.deadline_expired is True
     assert dump.exists()
     assert "shutdown did not complete" in dump.read_text()
 
 
 def test_deadline_cancel_suppresses_in_flight_exit():
-    """A cancel racing an in-flight expiry must not call os._exit."""
+    """A cancelled generation must neither self-exit nor record expiry."""
     wd = LoopWatchdog(
         LoopWatchdogPolicy(on_wedge="dump_and_exit")
     )
-    wd._deadline_stop.set()  # simulate cancel() having raced in
+    stop = threading.Event()
+    stop.set()  # simulate cancel() having raced in for this generation
     exited = []
     original_exit = os._exit
     os._exit = lambda code: exited.append(code)
     try:
-        wd._on_deadline(1.0)  # must observe the stop flag and not exit
+        wd._on_deadline(1.0, stop)  # must observe its own stop flag and stay inert
     finally:
         os._exit = original_exit
     assert exited == []
-    assert wd.deadline_expired is True
+    # A cancelled generation stays fully inert — it does not record expiry.
+    assert wd.deadline_expired is False
+
+
+def test_stale_generation_never_exits_after_rearm():
+    """A stale, cancelled generation must not self-exit during a later run.
+
+    Regression for the cancel/re-arm race: an old generation that survived the
+    bounded join checks its *own* stop event, not the shared one a fresh arm
+    would clear, so it can never ``os._exit`` a healthy later shutdown.
+    """
+    wd = LoopWatchdog(LoopWatchdogPolicy(on_wedge="dump_and_exit"))
+    wd.arm_deadline(10.0)
+    old_stop = wd._deadline_stop
+    wd.cancel()  # old generation is cancelled: its event is set
+    assert old_stop.is_set() is True
+
+    # A fresh arm starts a brand-new generation with its own (unset) event.
+    wd.arm_deadline(10.0)
+    assert wd._deadline_stop is not old_stop
+    assert wd._deadline_stop.is_set() is False
+
+    exited = []
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        # The stale generation fires its handler against its own (set) event.
+        wd._on_deadline(10.0, old_stop)
+    finally:
+        os._exit = original_exit
+    assert exited == []  # stale generation stayed inert
+    wd.cancel()
 
 
 def test_non_positive_deadline_is_noop():

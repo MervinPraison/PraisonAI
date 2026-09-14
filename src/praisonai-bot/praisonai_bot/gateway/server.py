@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import re
 import secrets
@@ -2522,6 +2523,12 @@ class WebSocketGateway:
             try:
                 grace = float(grace)
             except (TypeError, ValueError):
+                grace = None
+            # Issue #5079: a NaN/inf override would flow into ``deadline_s`` and
+            # make ``arm_deadline`` silently no-op (it rejects non-finite),
+            # quietly disabling the backstop it was asked to size. Treat a
+            # non-finite override as "unset" and fall back to the policy default.
+            if grace is not None and not math.isfinite(grace):
                 grace = None
         if grace is None:
             watchdog = self._watchdog
@@ -9998,31 +10005,47 @@ class WebSocketGateway:
         try:
             await _run_all()
         finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            if self._cleanup_task:
-                self._cleanup_task.cancel()
-            # Issue #3021: stop lifecycle loops on shutdown.
-            if self._lifecycle_task:
-                self._lifecycle_task.cancel()
-            if self._drain_marker_task:
-                self._drain_marker_task.cancel()
-            # Issue #2375: drain in-flight agent turns (channel bots) and
-            # websocket sessions before final teardown when a drain timeout
-            # is configured. The configured timeout bounds the *total*
-            # shutdown drain: track elapsed across both phases so channel
-            # bots + websocket sessions don't sum to 2 * drain_timeout.
-            # No-op when unset (today's behaviour).
-            drain_overall_start = time.monotonic()
-            await self.stop_channels(drain_timeout=drain_timeout_cfg)
+            # Issue #5079: this ``finally`` is the *real* supervisor-driven
+            # teardown (SIGINT/SIGTERM flips ``should_exit``; ``serve()``
+            # returns; ``start()`` disarms the liveness watchdog). It never
+            # calls ``stop()``, so without arming the deadline here a wedged
+            # ``stop_channels`` / session drain (adapter ``disconnect()``, WS
+            # drain, ledger/DB close) would hang until the supervisor's
+            # ``SIGKILL`` — the exact gap this feature closes. Arm the same
+            # bounded self-exit around the drain and cancel it on clean
+            # completion. No-op unless a watchdog is configured; fail-open.
+            drain_deadline = self._resolve_shutdown_grace(None)
             if drain_timeout_cfg and drain_timeout_cfg > 0:
-                remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
-                if remaining > 0:
-                    try:
-                        await self._drain_active_sessions(
-                            reason="shutdown", timeout=float(remaining)
-                        )
-                    except Exception as e:
-                        logger.warning("Error draining websocket sessions: %s", e)
+                drain_deadline += float(drain_timeout_cfg)
+            self._arm_shutdown_deadline(drain_deadline)
+            try:
+                if self._config_watch_task:
+                    self._config_watch_task.cancel()
+                if self._scheduler_task:
+                    self._scheduler_task.cancel()
+                if self._cleanup_task:
+                    self._cleanup_task.cancel()
+                # Issue #3021: stop lifecycle loops on shutdown.
+                if self._lifecycle_task:
+                    self._lifecycle_task.cancel()
+                if self._drain_marker_task:
+                    self._drain_marker_task.cancel()
+                # Issue #2375: drain in-flight agent turns (channel bots) and
+                # websocket sessions before final teardown when a drain timeout
+                # is configured. The configured timeout bounds the *total*
+                # shutdown drain: track elapsed across both phases so channel
+                # bots + websocket sessions don't sum to 2 * drain_timeout.
+                # No-op when unset (today's behaviour).
+                drain_overall_start = time.monotonic()
+                await self.stop_channels(drain_timeout=drain_timeout_cfg)
+                if drain_timeout_cfg and drain_timeout_cfg > 0:
+                    remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
+                    if remaining > 0:
+                        try:
+                            await self._drain_active_sessions(
+                                reason="shutdown", timeout=float(remaining)
+                            )
+                        except Exception as e:
+                            logger.warning("Error draining websocket sessions: %s", e)
+            finally:
+                self._cancel_shutdown_deadline()
