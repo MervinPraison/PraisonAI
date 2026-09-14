@@ -3041,10 +3041,13 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Create appropriate executor based on parallel_tool_calls setting
                             executor = create_tool_call_executor(parallel=parallel_tool_calls)
                             
-                            # Execute batch (forward optional per-tool timeout)
+                            # Execute batch (forward optional per-tool timeout
+                            # and the cancel token so a Stop/interrupt during
+                            # the tool phase short-circuits pending calls).
                             tool_results_batch = executor.execute_batch(
                                 tool_calls_batch, execute_tool_fn,
                                 timeout_ms=self.tool_timeout_ms,
+                                cancel_token=cancel_token,
                             )
                             
                             tool_results = []
@@ -4364,6 +4367,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Raises:
             Exception: If streaming fails or LLM call encounters an error
         """
+        # Extract the optional cancel token before building completion params
+        # so it is forwarded to the tool batch executor (not leaked to litellm).
+        cancel_token = kwargs.pop("cancel_token", None)
         try:
             import litellm
             
@@ -4541,6 +4547,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_results = executor.execute_batch(
                             tool_calls_batch, execute_tool_fn,
                             timeout_ms=self.tool_timeout_ms,
+                            cancel_token=cancel_token,
                         )
                         _batch_elapsed = _perf_counter() - _batch_started
                         
