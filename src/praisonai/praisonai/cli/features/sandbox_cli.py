@@ -201,29 +201,3 @@ class SandboxHandler:
                 print(f"  {name}: {flag}")
         except ImportError as exc:
             print(f"  Error: {exc}")
-
-
-def handle_sandbox_command(args) -> None:
-    """Handle sandbox CLI command."""
-    handler = SandboxHandler()
-    
-    subcommand = getattr(args, "sandbox_command", None) or "status"
-    
-    if subcommand == "run":
-        handler.run(
-            code=getattr(args, "code", None),
-            file=getattr(args, "file", None),
-            sandbox_type=getattr(args, "type", "subprocess"),
-            image=getattr(args, "image", "python:3.11-slim"),
-            timeout=getattr(args, "timeout", 60),
-        )
-    elif subcommand == "shell":
-        handler.shell(
-            sandbox_type=getattr(args, "type", "subprocess"),
-            image=getattr(args, "image", "python:3.11-slim"),
-        )
-    elif subcommand == "status":
-        handler.status()
-    else:
-        print(f"Unknown sandbox command: {subcommand}")
-        print("Available commands: run, shell, status")
