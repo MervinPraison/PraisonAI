@@ -125,7 +125,6 @@ class PlatformCapabilities:
     max_message_length: int = 4096
     length_unit: str = "codepoints"  # "codepoints" or "utf16"
     supports_edit: bool = False
-    supports_delete: bool = False
     supports_typing: bool = True
     markdown_dialect: str = "markdown"
     needs_rate_limit: bool = True
@@ -139,6 +138,9 @@ class PlatformCapabilities:
     supports_idempotency_token: bool = False
     supports_media: bool = False
     supports_threads: bool = False
+    # Appended after all pre-existing fields to preserve the positional
+    # constructor contract for external callers (do not reorder above).
+    supports_delete: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

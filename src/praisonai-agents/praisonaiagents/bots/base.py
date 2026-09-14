@@ -137,10 +137,10 @@ def verify_capability_contract(adapter: Any) -> List[str]:
             continue
         bound = getattr(type(adapter), method_name, None)
         base_impl = getattr(BasePlatformAdapter, method_name, None)
-        if bound is None or bound is base_impl:
+        if bound is None or bound is base_impl or not callable(bound):
             violations.append(
                 f"{name} declares {flag}=True but does not override "
-                f"{method_name}"
+                f"{method_name} with a callable implementation"
             )
     return violations
 

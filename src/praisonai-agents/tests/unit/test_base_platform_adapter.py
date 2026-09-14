@@ -243,6 +243,34 @@ class TestCapabilityContract:
         violations = verify_capability_contract(DictCaps())
         assert any("supports_edit" in v for v in violations)
 
+    def test_non_callable_backing_is_reported(self):
+        from praisonaiagents.bots import verify_capability_contract
+
+        class NoneBacked(RecordingBot):
+            capabilities = PlatformCapabilities(
+                supports_edit=True, supports_delete=True
+            )
+            edit_message = None
+            delete_message = None
+
+        violations = verify_capability_contract(NoneBacked())
+        assert any("supports_edit" in v for v in violations)
+        assert any("supports_delete" in v for v in violations)
+
+    def test_supports_delete_is_appended_positionally(self):
+        # ``supports_delete`` must be the LAST field so external callers using
+        # the previous positional constructor order keep binding each value to
+        # its original meaning (regression for the field-reorder concern).
+        prior_order = PlatformCapabilities(
+            4096,          # max_message_length
+            "codepoints",  # length_unit
+            True,          # supports_edit
+            False,         # supports_typing
+        )
+        assert prior_order.supports_edit is True
+        assert prior_order.supports_typing is False
+        assert prior_order.supports_delete is False
+
 
 class TestFormatting:
     def test_format_message_identity(self):
