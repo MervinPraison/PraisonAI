@@ -46,6 +46,7 @@ class DbMessage:
     timestamp: float = field(default_factory=time.time)
     id: Optional[str] = None
     tool_calls: Optional[List["DbToolCall"]] = None  # For assistant messages with tool calls
+    tool_call_id: Optional[str] = None  # Links a role="tool" result to its call (Issue #3089)
     run_id: Optional[str] = None  # Group messages by run
 
 
@@ -176,6 +177,49 @@ class DbAdapter(Protocol):
             args: Tool arguments
             result: Tool result
             metadata: Optional call metadata
+        """
+        ...
+    
+    # --- Faithful tool-turn persistence (Optional, Issue #3089 parity) ---
+    # These methods are optional. Adapters that implement them persist the
+    # structured tool transcript (assistant tool_calls + tool result turns) so
+    # a resumed session hands the model the same messages it saw before.
+    # Adapters that omit them keep the prior text-only behaviour: assistant
+    # turns route to on_agent_message and raw tool turns are dropped.
+    
+    def on_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_calls: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Called when the agent produces an assistant turn that requested tools.
+        
+        Args:
+            session_id: Session identifier
+            content: Assistant message content (may be empty when only tools were called)
+            tool_calls: Structured tool calls (OpenAI format) to persist faithfully
+            metadata: Optional message metadata
+        """
+        ...
+    
+    def on_tool_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Called when a tool result turn (role="tool") should be persisted.
+        
+        Args:
+            session_id: Session identifier
+            content: Tool result content
+            tool_call_id: Id linking this result to the assistant tool call it answers
+            metadata: Optional message metadata
         """
         ...
     

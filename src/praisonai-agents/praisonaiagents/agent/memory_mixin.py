@@ -408,13 +408,19 @@ class MemoryMixin:
                 metadata={"role": self.role, "goal": self.goal}
             )
             
-            # Restore chat history from previous session
+            # Restore chat history from previous session. Rebuild the full LLM
+            # message shape so a resumed tool-using session hands the model the
+            # same transcript it saw before — assistant turns keep their
+            # ``tool_calls`` and tool-result turns keep their ``tool_call_id``
+            # (Issue #3089 parity for the DB path). Plain turns stay minimal.
             if history:
                 for msg in history:
-                    self.chat_history.append({
-                        "role": msg.role,
-                        "content": msg.content
-                    })
+                    entry = {"role": msg.role, "content": msg.content}
+                    if getattr(msg, "tool_calls", None):
+                        entry["tool_calls"] = msg.tool_calls
+                    if getattr(msg, "tool_call_id", None):
+                        entry["tool_call_id"] = msg.tool_call_id
+                    self.chat_history.append(entry)
                 logging.info(f"Resumed session {self._session_id} with {len(history)} messages")
         except Exception as e:
             logging.warning(f"Failed to initialize DB session: {e}")
@@ -536,7 +542,26 @@ class MemoryMixin:
                 if role == "user":
                     self._db.on_user_message(self._session_id, content)
                 elif role == "assistant":
-                    self._db.on_agent_message(self._session_id, content)
+                    # Faithful transcript: carry any tool calls the assistant
+                    # requested so a resumed DB session replays them, matching
+                    # the JSON store fix (Issue #3089). Adapters that predate
+                    # ``on_assistant_message`` fall back to the text-only
+                    # ``on_agent_message`` so behaviour is unchanged for them.
+                    if tool_calls and hasattr(self._db, "on_assistant_message"):
+                        self._db.on_assistant_message(
+                            self._session_id, content, tool_calls=tool_calls
+                        )
+                    else:
+                        self._db.on_agent_message(self._session_id, content)
+                elif role == "tool":
+                    # Persist the tool-result turn linked to its call id so the
+                    # resumed message list interleaves results in order (#3089).
+                    # Adapters without ``on_tool_message`` keep the prior
+                    # behaviour of dropping the raw tool turn (text-only).
+                    if hasattr(self._db, "on_tool_message"):
+                        self._db.on_tool_message(
+                            self._session_id, content, tool_call_id=tool_call_id
+                        )
             except Exception as e:
                 logging.warning(f"Failed to persist message to DB: {e}")
             return
