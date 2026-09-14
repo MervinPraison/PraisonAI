@@ -8026,7 +8026,15 @@ class WebSocketGateway:
             init_kwargs[key] = value
 
         try:
-            return adapter_cls(**init_kwargs)
+            adapter = adapter_cls(**init_kwargs)
+            # Enforce the capability contract on the gateway construction path
+            # too (parity with ``Bot._build_adapter``): a declared-but-unbacked
+            # ``supports_*`` flag must fail here — recorded as a degraded
+            # channel — rather than surfacing later inside a live turn.
+            from praisonai_bot.bots.bot import Bot
+
+            Bot._verify_capability_contract(adapter)
+            return adapter
         except Exception as exc:
             logger.warning(
                 "Failed to construct channel %r adapter: %s", channel_type, exc

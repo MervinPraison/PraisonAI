@@ -44,6 +44,10 @@ from .base import (
     SendStatus,
     SendErrorKind,
     classify_send_error,
+    CapabilityContractError,
+    CAPABILITY_BACKING,
+    verify_capability_contract,
+    enforce_capability_contract,
 )
 from .presentation import (
     MessagePresentation,
@@ -178,6 +182,10 @@ __all__ = [
     "SendStatus",
     "SendErrorKind",
     "classify_send_error",
+    "CapabilityContractError",
+    "CAPABILITY_BACKING",
+    "verify_capability_contract",
+    "enforce_capability_contract",
     "InteractiveContext",
     "InteractiveRegistry",
     "InteractiveHandler",
