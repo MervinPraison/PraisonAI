@@ -46,12 +46,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Gateway | 7 | 87 | 32899 |
 | ✅ Guardrails | 5 | 4 | 2470 |
 | ✅ Handoffs | 11 | 6 | 2748 |
-| ✅ Hooks | 2 | 9 | 4985 |
+| ✅ Hooks | 2 | 9 | 4990 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 19 | 5964 |
 | ✅ LLM | 3 | 15 | 5917 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 63 | 14755 |
+| ✅ MCP | 1 | 63 | 14860 |
 | ✅ Memory | 6 | 21 | 8186 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2842 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44497 |
+| ✅ Tools | 12 | 145 | 44505 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
