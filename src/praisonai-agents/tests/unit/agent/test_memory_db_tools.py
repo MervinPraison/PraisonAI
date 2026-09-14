@@ -10,7 +10,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from praisonaiagents import Agent
-from praisonaiagents.db.protocol import DbMessage
+from praisonaiagents.db.protocol import (
+    DbMessage,
+    DbToolCall,
+    ToolTurnDbAdapterProtocol,
+)
 
 
 TOOL_CALLS = [
@@ -72,7 +76,7 @@ class TestPersistForwardsToolTurnsToDb:
         db.on_user_message.assert_called_once_with("sess-1", "hi")
 
 
-class _LegacyDb:
+class _LegacyDbAdapter:
     """A DbAdapter predating the tool-turn callbacks: it exposes only the
     original user/agent message methods. Tool turns must not raise and the
     assistant tool-call turn falls back to text-only on_agent_message."""
@@ -90,7 +94,7 @@ class _LegacyDb:
 
 class TestLegacyDbBackwardCompatible:
     def test_legacy_db_falls_back_to_text_only(self):
-        db = _LegacyDb()
+        db = _LegacyDbAdapter()
         agent = _db_agent(db)
 
         # Should not raise even though on_assistant_message / on_tool_message
@@ -101,6 +105,60 @@ class TestLegacyDbBackwardCompatible:
         # Assistant tool-call turn preserved as text; tool turn dropped as
         # before (unchanged legacy behaviour).
         assert db.agent_calls == ["call"]
+
+    def test_legacy_db_not_detected_as_tool_turn_capable(self):
+        # The optional callbacks live on a separate capability protocol so a
+        # legacy adapter is NOT structurally required to implement them.
+        db = _LegacyDbAdapter()
+        assert not isinstance(db, ToolTurnDbAdapterProtocol)
+        assert not hasattr(db, "on_assistant_message")
+        assert not hasattr(db, "on_tool_message")
+
+
+class TestToolTurnCapabilityProtocol:
+    def test_capability_protocol_detects_new_adapters(self):
+        class _ToolAwareDbAdapter:
+            def on_assistant_message(self, session_id, content,
+                                     tool_calls=None, metadata=None):
+                ...
+
+            def on_tool_message(self, session_id, content,
+                                tool_call_id, metadata=None):
+                ...
+
+        assert isinstance(_ToolAwareDbAdapter(), ToolTurnDbAdapterProtocol)
+
+
+class TestDbToolCallRestoreNormalization:
+    def test_dataclass_tool_calls_are_normalized_to_provider_shape(self):
+        history = [
+            DbMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    DbToolCall(
+                        tool_name="read_file",
+                        args={"path": "a.txt"},
+                        call_id="call_1",
+                    )
+                ],
+            ),
+        ]
+        db = MagicMock()
+        db.on_agent_start.return_value = history
+
+        agent = Agent(name="t", instructions="t")
+        agent._db = db
+        agent._session_id = "sess-dc"
+        agent._db_initialized = False
+        agent._init_db_session()
+
+        restored = agent.chat_history[0]["tool_calls"][0]
+        assert restored["id"] == "call_1"
+        assert restored["type"] == "function"
+        assert restored["function"]["name"] == "read_file"
+        # Arguments are serialised to a JSON string (provider format).
+        assert restored["function"]["arguments"] == '{"path": "a.txt"}'
 
 
 class TestDbResumeRestoresToolShape:

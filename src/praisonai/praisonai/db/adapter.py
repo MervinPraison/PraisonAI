@@ -376,7 +376,9 @@ class PraisonAIDB:
         if messages is None:
             return []
         
-        # Convert to DbMessage format
+        # Convert to DbMessage format. Carry the structured tool fields so a
+        # resumed tool-using session rebuilds the same transcript the model saw
+        # before (Issue #5075 — parity with the JSON store fix in #3089).
         from praisonaiagents.db.protocol import DbMessage
         return [
             DbMessage(
@@ -384,7 +386,9 @@ class PraisonAIDB:
                 content=msg.content,
                 metadata=msg.metadata or {},
                 timestamp=msg.created_at or time.time(),
-                id=msg.id
+                id=msg.id,
+                tool_calls=getattr(msg, "tool_calls", None),
+                tool_call_id=getattr(msg, "tool_call_id", None),
             )
             for msg in messages
         ]
@@ -449,6 +453,81 @@ class PraisonAIDB:
             msg,
         )
     
+    def on_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_calls: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist an assistant turn that requested tools (Issue #5075).
+
+        Stores the structured ``tool_calls`` verbatim on the
+        ``ConversationMessage`` so a resumed session replays the same
+        assistant turn the model produced. Falls back to a plain assistant
+        message when no tool calls are present.
+        """
+        self._init_stores()
+        if not self._conversation_store:
+            return
+
+        from ..persistence.conversation.base import ConversationMessage
+        import uuid
+
+        msg = ConversationMessage(
+            id=f"msg-{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls,
+            metadata=metadata or {},
+            created_at=time.time(),
+        )
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
+
+    def on_tool_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a tool result turn linked to its call id (Issue #5075).
+
+        Keeps the ``role="tool"`` result and its ``tool_call_id`` so the
+        resumed message list interleaves results in order, matching the JSON
+        store behaviour from #3089.
+        """
+        self._init_stores()
+        if not self._conversation_store:
+            return
+
+        from ..persistence.conversation.base import ConversationMessage
+        import uuid
+
+        msg = ConversationMessage(
+            id=f"tool-{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            role="tool",
+            content=content,
+            tool_call_id=tool_call_id,
+            metadata=metadata or {},
+            created_at=time.time(),
+        )
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
+
     @staticmethod
     def _serialize_tool_call(tool_name: str, args: Any, result: Any) -> str:
         """Serialise a tool call for persistence without dropping data.

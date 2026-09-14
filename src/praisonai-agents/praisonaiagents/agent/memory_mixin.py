@@ -416,8 +416,15 @@ class MemoryMixin:
             if history:
                 for msg in history:
                     entry = {"role": msg.role, "content": msg.content}
-                    if getattr(msg, "tool_calls", None):
-                        entry["tool_calls"] = msg.tool_calls
+                    tool_calls = getattr(msg, "tool_calls", None)
+                    if tool_calls:
+                        # ``DbMessage.tool_calls`` may arrive as provider-shaped
+                        # dicts (OpenAI format, the way _persist_message stores
+                        # them) or as ``DbToolCall`` dataclasses from an adapter
+                        # that follows the declared field type. Normalise to the
+                        # provider shape so the next model request always gets a
+                        # valid, serialisable tool-call list (Issue #5075).
+                        entry["tool_calls"] = self._normalize_restored_tool_calls(tool_calls)
                     if getattr(msg, "tool_call_id", None):
                         entry["tool_call_id"] = msg.tool_call_id
                     self.chat_history.append(entry)
@@ -427,6 +434,37 @@ class MemoryMixin:
         
         self._db_initialized = True
         self._current_run_id = None  # Track current run
+
+    @staticmethod
+    def _normalize_restored_tool_calls(tool_calls):
+        """Coerce restored tool calls to provider-shaped (OpenAI) dicts.
+
+        Persisted tool calls can come back either already provider-shaped
+        (dicts with ``id``/``type``/``function``) or as ``DbToolCall``
+        dataclasses (``tool_name``/``args``/``call_id``) when an adapter follows
+        the declared ``DbMessage.tool_calls`` field type. Dicts pass through
+        unchanged; dataclasses are converted so the resumed transcript is always
+        a valid, serialisable tool-call list (Issue #5075).
+        """
+        normalized = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                normalized.append(tc)
+                continue
+            tool_name = getattr(tc, "tool_name", None)
+            if tool_name is not None:
+                import json as _json
+                args = getattr(tc, "args", None)
+                arguments = args if isinstance(args, str) else _json.dumps(args or {})
+                normalized.append({
+                    "id": getattr(tc, "call_id", None),
+                    "type": "function",
+                    "function": {"name": tool_name, "arguments": arguments},
+                })
+            else:
+                # Unknown shape — pass through so we never lose data.
+                normalized.append(tc)
+        return normalized
 
     def _init_session_store(self):
         """
