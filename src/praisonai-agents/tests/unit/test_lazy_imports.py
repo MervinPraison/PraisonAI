@@ -51,6 +51,20 @@ class TestLazyImports:
         """Clean up after each test."""
         restore_modules()
     
+    def test_autonomy_not_loaded_on_agent_import(self):
+        """agent.autonomy / escalation.types must not load on the default Agent path (#5056)."""
+        from praisonaiagents import Agent  # noqa: F401
+        assert 'praisonaiagents.agent.autonomy' not in sys.modules, \
+            "agent.autonomy should be loaded lazily, not on `from praisonaiagents import Agent`"
+        assert 'praisonaiagents.escalation.types' not in sys.modules, \
+            "escalation.types should not ride along on the default Agent import"
+
+    def test_autonomy_config_still_importable_from_feature_configs(self):
+        """The lazy re-export keeps the historical import path working."""
+        from praisonaiagents.config.feature_configs import AutonomyConfig
+        from praisonaiagents.agent.autonomy import AutonomyConfig as Canonical
+        assert AutonomyConfig is Canonical
+
     def test_litellm_not_loaded_on_import(self):
         """litellm should NOT be loaded when importing praisonaiagents."""
         import praisonaiagents  # noqa: F401
