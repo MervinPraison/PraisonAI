@@ -34,7 +34,7 @@ class _FakeRunner:
     def shutdown(self):
         pass
 
-    def stop(self):
+    def stop(self, timeout=None):
         pass
 
 
@@ -114,6 +114,76 @@ def test_mcp_filter_removes_all_tools_does_not_raise():
         mcp = MCP("/usr/bin/python fake_server.py", timeout=5,
                   disabled_tools=["get_current_time"])
         assert list(mcp) == []
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_npx_cold_start_extends_default_timeout():
+    """An npx command with no explicit timeout uses the larger cold-start default (#5099)."""
+    class _FakeTool:
+        name = "read_file"
+        description = "Read a file"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("npx -y @modelcontextprotocol/server-filesystem /tmp")
+        assert mcp.timeout == MCP.COLD_START_TIMEOUT
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_explicit_timeout_wins_over_cold_start():
+    """An explicit timeout is never overridden by the cold-start bump (#5099)."""
+    class _FakeTool:
+        name = "read_file"
+        description = "Read a file"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("npx -y @modelcontextprotocol/server-filesystem /tmp", timeout=30)
+        assert mcp.timeout == 30
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_non_launcher_uses_plain_default_timeout():
+    """A non-launcher stdio command keeps the plain 60s default (#5099)."""
+    class _FakeTool:
+        name = "get_current_time"
+        description = "Return the current time"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("/usr/bin/python fake_server.py")
+        assert mcp.timeout == MCP.DEFAULT_TIMEOUT
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_launcher_timeout_message_includes_prewarm_hint():
+    """A cold-start launcher timeout renders a quoted pre-warm command (#5099)."""
+    factory = _make_runner_factory(init_ok=False)
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        with pytest.raises(TimeoutError) as excinfo:
+            MCP("npx", args=["-y", "@modelcontextprotocol/server-filesystem",
+                             "/tmp/my dir"], timeout=1)
+    msg = str(excinfo.value)
+    assert "pre-warm" in msg
+    assert "timeout=300" in msg
+    # shlex.join must quote the spaced path so the hint is copy-pasteable.
+    assert "'/tmp/my dir'" in msg
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_non_launcher_timeout_message_includes_generic_hint():
+    """A non-launcher timeout still offers actionable remediation (#5099)."""
+    factory = _make_runner_factory(init_ok=False)
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        with pytest.raises(TimeoutError) as excinfo:
+            MCP("/usr/bin/python fake_server.py", timeout=1)
+    msg = str(excinfo.value)
+    assert "pre-warm" not in msg
+    assert "Verify the command runs manually" in msg
+    assert "timeout=180" in msg
 
 
 if __name__ == "__main__":
