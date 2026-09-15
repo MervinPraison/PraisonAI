@@ -76,9 +76,14 @@ def test_run_yaml_file_reaches_agent_runner_not_jobs(monkeypatch, tmp_path):
 
 def test_run_missing_yaml_reaches_agent_runner_not_jobs(monkeypatch, tmp_path):
     """Issue #5095: ``run <file>.yaml`` must reach the agent runner even when
-    the file does not exist (typo/wrong dir), so the user gets a clear runner
-    error instead of the async-jobs ``invalid choice`` / missing-``job_id``
-    failure that made the documented onboarding path look broken."""
+    the file does not exist (typo/wrong dir), so it is the runner — not the
+    async-jobs ``invalid choice`` / missing-``job_id`` parser — that ultimately
+    handles the path and can report a clear error, instead of the confusing
+    jobs failure that made the documented onboarding path look broken.
+
+    This asserts dispatch only: the runner ``app`` is stubbed by the recorder,
+    so the target is not read here. The point is that a YAML-suffixed target is
+    routed to the agent runner regardless of whether the file exists on disk."""
     pa = _load_module()
     _require_wrapper_argparse()
     monkeypatch.chdir(tmp_path)
@@ -88,8 +93,8 @@ def test_run_missing_yaml_reaches_agent_runner_not_jobs(monkeypatch, tmp_path):
         monkeypatch, pa, ["praisonai", "run", missing]
     )
 
-    # A YAML-suffixed target routes to the agent runner (which then reports a
-    # proper file-not-found), not the jobs argparse parser.
+    # A YAML-suffixed target routes to the agent runner, not the jobs argparse
+    # parser, even when the file is absent.
     assert calls["jobs"] is None
     assert calls["run_app"] == [missing]
     assert code == 0
