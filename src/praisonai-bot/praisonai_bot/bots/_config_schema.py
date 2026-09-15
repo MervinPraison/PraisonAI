@@ -377,6 +377,39 @@ class ScheduleConfigSchema(BaseModel):
         return self
 
 
+def _normalize_unknown_user_policy(v: Optional[str]) -> Optional[str]:
+    """Validate + normalize an inbound admission policy (Issue #5093).
+
+    Shared by the channel-level and top-level single-bot fields so a typo
+    (``alow``/``deney``) fails closed at load time in either position rather
+    than being silently accepted and ignored. ``None`` passes through so the
+    secure ``deny`` default (applied by ``BotConfig``) still wins when omitted.
+    """
+    if v is None:
+        return v
+    allowed = {"deny", "pair", "allow"}
+    normalized = str(v).strip().lower()
+    if normalized not in allowed:
+        raise ValueError(
+            f"Invalid unknown_user_policy '{v}'. Must be one of: "
+            f"{', '.join(sorted(allowed))}"
+        )
+    return normalized
+
+
+def _coerce_owner_user_id(v):
+    """Coerce a numeric or string owner id to a trimmed string (Issue #5093).
+
+    Telegram/Discord owner ids are naturally numeric, so an unquoted YAML
+    ``owner_user_id: 987654321`` arrives as an ``int``. Mirror the gateway
+    path's ``str(...)`` coercion so the typed single-bot schema accepts it.
+    """
+    if v is None:
+        return None
+    text = str(v).strip()
+    return text or None
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -575,16 +608,19 @@ class ChannelConfigSchema(BaseModel):
         rejected at load time rather than silently falling back to the secure
         ``deny`` default and leaving the operator debugging a "broken" bot.
         """
-        if v is None:
-            return v
-        allowed = {"deny", "pair", "allow"}
-        normalized = v.strip().lower()
-        if normalized not in allowed:
-            raise ValueError(
-                f"Invalid unknown_user_policy '{v}'. Must be one of: "
-                f"{', '.join(sorted(allowed))}"
-            )
-        return normalized
+        return _normalize_unknown_user_policy(v)
+
+    @field_validator("owner_user_id", mode="before")
+    @classmethod
+    def coerce_owner_user_id(cls, v):
+        """Accept a numeric or string owner id (Issue #5093).
+
+        Telegram/Discord owner ids are naturally numeric, so an unquoted
+        ``owner_user_id: 987654321`` in YAML arrives as an ``int``. The gateway
+        path already coerces via ``str(...)``; mirror that here so the typed
+        ``praisonai bot start`` schema does not reject valid input.
+        """
+        return _coerce_owner_user_id(v)
 
     @field_validator("approval_mode")
     @classmethod
@@ -911,7 +947,27 @@ class GatewayConfigSchema(BaseModel):
     # friendly, field-named error instead of being silently dropped (#3050).
     gateway: Optional[Dict[str, Any]] = None
     hooks: Optional[List[Dict[str, Any]]] = None
-    
+
+    @field_validator("unknown_user_policy")
+    @classmethod
+    def validate_top_level_unknown_user_policy(
+        cls, v: Optional[str]
+    ) -> Optional[str]:
+        """Fail-closed on a typo'd top-level admission policy (Issue #5093).
+
+        A top-level ``unknown_user_policy`` is only migrated onto a synthesised
+        channel when ``platform`` is set and no ``channels:`` block exists, so
+        without this it could be silently accepted (and ignored) in mixed
+        configs. Validate it here too, sharing the channel-level rule.
+        """
+        return _normalize_unknown_user_policy(v)
+
+    @field_validator("owner_user_id", mode="before")
+    @classmethod
+    def coerce_top_level_owner_user_id(cls, v):
+        """Coerce an unquoted numeric top-level owner id (Issue #5093)."""
+        return _coerce_owner_user_id(v)
+
     @model_validator(mode="after")
     def normalize_and_validate(self):
         """Normalize different config formats to canonical form and validate."""
