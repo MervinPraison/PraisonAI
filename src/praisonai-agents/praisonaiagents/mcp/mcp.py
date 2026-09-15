@@ -323,13 +323,39 @@ class MCP:
     _active_server_names: set = set()
     _active_server_names_lock = threading.Lock()
 
+    # Default init/tool-call timeout (seconds). Used when the caller does not
+    # pass an explicit ``timeout``.
+    DEFAULT_TIMEOUT = 60
+    # Larger default applied only for cold-start package launchers (npx/uvx/bunx),
+    # whose first run downloads the server package before the MCP handshake can
+    # begin. On a fresh cache this routinely exceeds 60s (issue #5099), so the
+    # 60s trap fires before the server ever prints "listening on stdio". An
+    # explicit ``timeout`` from the caller always wins over this.
+    COLD_START_TIMEOUT = 180
+    # Executables that fetch-and-run a package on first use; their cold start
+    # is dominated by an npm/PyPI download, not by the MCP server itself.
+    _COLD_START_LAUNCHERS = ('npx', 'uvx', 'bunx', 'pnpm', 'yarn')
+
     @classmethod
     def list_active_server_names(cls) -> set:
         """Return the set of sanitized names of MCP servers namespaced this run."""
         with cls._active_server_names_lock:
             return set(cls._active_server_names)
 
-    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
+    @classmethod
+    def _is_cold_start_launcher(cls, cmd) -> bool:
+        """True when ``cmd`` is a package launcher (npx/uvx/...) whose first run
+        downloads the server before the MCP handshake starts."""
+        if not isinstance(cmd, str):
+            return False
+        # Split on both separators so a Windows-style path is handled even when
+        # this runs on a POSIX host (and vice versa).
+        base = re.split(r'[\\/]', cmd)[-1]
+        # Strip Windows executable extensions (npx.cmd, npx.exe, ...).
+        base = re.sub(r'\.(cmd|exe|bat|ps1)$', '', base, flags=re.IGNORECASE).lower()
+        return base in cls._COLD_START_LAUNCHERS
+
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False, 
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
@@ -342,7 +368,11 @@ class MCP:
                              - An SSE URL (e.g., "http://localhost:8080/sse")
             args: Arguments to pass to the command (when command_or_string is the command)
             command: Alternative parameter name for backward compatibility
-            timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
+            timeout: Timeout in seconds for MCP server initialization and tool calls.
+                     Defaults to 60s, or 180s for cold-start launchers such as
+                     ``npx``/``uvx`` whose first run must download the server
+                     package before the handshake starts (issue #5099). Pass an
+                     explicit value to override either default.
             debug: Enable debug logging for MCP operations (default: False)
             allowed_tools: Include whitelist - only these tools will be available (default: None = all tools)
             disabled_tools: Exclude blacklist - these tools will be filtered out (default: None = no exclusions)
@@ -386,8 +416,14 @@ class MCP:
             get_logger("httpx").setLevel(logging.WARNING)
             get_logger("llm").setLevel(logging.WARNING)
         
-        # Store additional parameters
-        self.timeout = timeout
+        # Store additional parameters. ``timeout=None`` is a sentinel meaning
+        # "use the default", which lets us tell an explicit caller value apart
+        # from the default and only auto-extend for cold-start launchers below.
+        self._timeout_explicit = timeout is not None
+        # URL transports (ws/http/sse) resolve to the plain default here; the
+        # stdio path re-resolves once the launcher command is known.
+        self.timeout = timeout if self._timeout_explicit else self.DEFAULT_TIMEOUT
+        timeout = self.timeout
         self.debug = debug
         self.allowed_tools = allowed_tools
         self.disabled_tools = disabled_tools
@@ -494,7 +530,16 @@ class MCP:
         # Set up stdio client
         self.is_sse = False
         self.is_http_stream = False
-        
+
+        # Cold-start launchers (npx/uvx/bunx/...) download the server package on
+        # first run, which on a fresh cache regularly exceeds the 60s default and
+        # trips the init timeout before the handshake even begins (issue #5099).
+        # When the caller did not set an explicit timeout, raise the effective
+        # init timeout for these commands. An explicit timeout always wins.
+        if not self._timeout_explicit and self._is_cold_start_launcher(cmd):
+            self.timeout = self.COLD_START_TIMEOUT
+            timeout = self.timeout
+
         # Build safe environment for stdio MCP servers
         # Use safe baseline + explicit env from config (B5 security policy)
         custom_env = kwargs.get('env', {})
@@ -519,9 +564,18 @@ class MCP:
             # let the daemon thread be reclaimed at exit rather than blocking
             # the raise for the full operation timeout.
             self.runner.stop(timeout=1)
+            hint = ""
+            if self._is_cold_start_launcher(cmd):
+                warm_cmd = " ".join([str(cmd), *[str(a) for a in arguments]])
+                hint = (
+                    f" This looks like a first-run package download; pre-warm it "
+                    f"once with `{warm_cmd}` (wait for the server to start), or "
+                    f"pass a larger timeout, e.g. MCP(..., timeout=300)."
+                )
             raise TimeoutError(
                 f"MCP initialization timed out after {self.timeout} seconds "
                 f"(command={cmd!r} args={arguments!r})."
+                f"{hint}"
             )
         if getattr(self.runner, "_init_error", None):
             self.runner.stop(timeout=1)

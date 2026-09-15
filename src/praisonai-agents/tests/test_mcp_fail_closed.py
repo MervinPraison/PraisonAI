@@ -34,7 +34,7 @@ class _FakeRunner:
     def shutdown(self):
         pass
 
-    def stop(self):
+    def stop(self, timeout=None):
         pass
 
 
@@ -114,6 +114,48 @@ def test_mcp_filter_removes_all_tools_does_not_raise():
         mcp = MCP("/usr/bin/python fake_server.py", timeout=5,
                   disabled_tools=["get_current_time"])
         assert list(mcp) == []
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_npx_cold_start_extends_default_timeout():
+    """An npx command with no explicit timeout uses the larger cold-start default (#5099)."""
+    class _FakeTool:
+        name = "read_file"
+        description = "Read a file"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("npx -y @modelcontextprotocol/server-filesystem /tmp")
+        assert mcp.timeout == MCP.COLD_START_TIMEOUT
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_explicit_timeout_wins_over_cold_start():
+    """An explicit timeout is never overridden by the cold-start bump (#5099)."""
+    class _FakeTool:
+        name = "read_file"
+        description = "Read a file"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("npx -y @modelcontextprotocol/server-filesystem /tmp", timeout=30)
+        assert mcp.timeout == 30
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_non_launcher_uses_plain_default_timeout():
+    """A non-launcher stdio command keeps the plain 60s default (#5099)."""
+    class _FakeTool:
+        name = "get_current_time"
+        description = "Return the current time"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("/usr/bin/python fake_server.py")
+        assert mcp.timeout == MCP.DEFAULT_TIMEOUT
 
 
 if __name__ == "__main__":
