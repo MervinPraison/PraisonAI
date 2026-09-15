@@ -216,5 +216,31 @@ async def test_invalid_policy_rejected_at_config():
         BotConfig(allowed_users=["allowed_user"], unknown_user_policy="invalid_policy")
 
 
+@pytest.mark.asyncio
+async def test_deny_policy_logs_warning_on_drop(caplog):
+    """Deny policy drop is no longer silent — it logs a WARNING (Issue #5092)."""
+    import logging
+
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="deny")
+    mock_store = Mock(spec=PairingStore)
+    mock_store.is_paired.return_value = False
+    bot_ctx = BotContext(config=config, pairing_store=mock_store)
+
+    with caplog.at_level(logging.WARNING, logger="praisonai_bot.bots._unknown_user"):
+        result = await UnknownUserHandler.handle(
+            make_message(user_id="stranger", channel_id="chat-42"), bot_ctx
+        )
+
+    assert result is False
+    assert any(
+        record.levelno == logging.WARNING
+        and "stranger" in record.getMessage()
+        and "unknown_user_policy=deny" in record.getMessage()
+        and "platform=telegram" in record.getMessage()
+        and "conversation=chat-42" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

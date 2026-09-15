@@ -414,6 +414,7 @@ class ChannelConfigSchema(BaseModel):
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)  # Changed to List for consistency
+    unknown_user_policy: str = "deny"  # deny | allow | pair — how to treat users not in allowed_users
     admin_users: Optional[str] = None  # Comma-separated list of admin user IDs
     user_allowed_commands: Optional[str] = None  # Comma-separated list of allowed commands
     routes: Dict[str, str] = Field(default_factory=dict)  # Context -> agent_id mapping
@@ -550,6 +551,26 @@ class ChannelConfigSchema(BaseModel):
             return ""
         return result.value
     
+    @field_validator("unknown_user_policy")
+    @classmethod
+    def validate_unknown_user_policy(cls, v: str) -> str:
+        """Fail-closed on an unknown access policy selector (Issue #5092).
+
+        The runtime ``BotConfig`` rejects anything outside deny/allow/pair, so
+        a typo (``alow``/``dney``) must be caught at load time here rather than
+        passing schema validation, being reported as ``deny`` by the startup
+        banner, and then silently disabling the channel when ``BotConfig`` is
+        constructed later.
+        """
+        allowed = {"deny", "allow", "pair"}
+        normalized = (v or "deny").strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"Invalid unknown_user_policy '{v}'. Must be one of: "
+                f"{', '.join(sorted(allowed))}"
+            )
+        return normalized
+
     @field_validator("group_policy")
     @classmethod
     def validate_group_policy(cls, v: str) -> str:
@@ -587,12 +608,31 @@ class ChannelConfigSchema(BaseModel):
         if self.routing and not self.routes:
             self.routes = self.routing
             
-        # Warn about empty allowed_users (open to everyone)
+        # Report the effective access policy for empty allowlists. With no
+        # allowlist configured the behaviour depends on unknown_user_policy, so
+        # the message must match the resolved policy rather than always claiming
+        # the bot responds to everyone (Issue #5092).
         if not self.allowed_users and not self.allowlist and not self.blocklist:
-            logger.warning(
-                "Channel has no user restrictions (allowed_users/allowlist/blocklist). "
-                "Bot will respond to EVERYONE. Consider adding allowed_users for security."
-            )
+            policy = (self.unknown_user_policy or "deny").lower()
+            if policy == "allow":
+                logger.warning(
+                    "Channel has no user restrictions (allowed_users/allowlist/blocklist) "
+                    "and unknown_user_policy=allow. Bot will respond to EVERYONE. "
+                    "Consider adding allowed_users for security."
+                )
+            elif policy == "pair":
+                logger.info(
+                    "Channel has no allowed_users and unknown_user_policy=pair. "
+                    "Unknown users must complete pairing before the bot replies."
+                )
+            else:  # deny (the validated default)
+                logger.warning(
+                    "Channel has no allowed_users and unknown_user_policy=deny. "
+                    "DMs from users not in allowed_users (and not already paired) "
+                    "are dropped and the bot responds to NOBODY new. Set "
+                    "unknown_user_policy=allow or add allowed_users to let users "
+                    "through."
+                )
             
         # Warn about respond_all in production
         if self.group_policy == "respond_all":

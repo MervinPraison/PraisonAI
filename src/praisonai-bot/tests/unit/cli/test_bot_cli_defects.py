@@ -456,3 +456,71 @@ class TestGenericForwardsAdapterConfig:
         fwd = _StubGenericBot.instances[0].kwargs
         assert fwd.get("account") == "+15551234567"
         assert fwd.get("bridge_url") == "http://localhost:9090"
+
+
+class TestSecurityBannerMatchesPolicy:
+    """The startup security banner must match the resolved unknown_user_policy.
+
+    Before the fix an empty allowlist always warned "Bot will respond to
+    EVERYONE" even though the effective default policy is ``deny`` (the bot
+    responds to nobody) — misleading operators into thinking a broken bot was
+    open (Issue #5092).
+    """
+
+    @staticmethod
+    def _capture_banner(**kwargs) -> str:
+        """Construct a schema and return the security-banner log text.
+
+        Attaches a handler directly to the module logger so the assertion does
+        not depend on pytest's root-propagation capture (which other bot
+        imports can reconfigure).
+        """
+        import logging
+
+        from praisonai_bot.bots import _config_schema
+
+        records: list[logging.LogRecord] = []
+
+        class _Collector(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Collector(level=logging.INFO)
+        _config_schema.logger.addHandler(handler)
+        prev_level = _config_schema.logger.level
+        _config_schema.logger.setLevel(logging.INFO)
+        try:
+            ChannelConfigSchema(**kwargs)
+        finally:
+            _config_schema.logger.removeHandler(handler)
+            _config_schema.logger.setLevel(prev_level)
+
+        return " ".join(r.getMessage() for r in records)
+
+    def test_deny_policy_banner_says_nobody(self):
+        text = self._capture_banner(platform="telegram", token="x")
+        assert "NOBODY" in text
+        assert "unknown_user_policy=deny" in text
+        assert "respond to EVERYONE" not in text
+
+    def test_allow_policy_banner_says_everyone(self):
+        text = self._capture_banner(
+            platform="telegram", token="x", unknown_user_policy="allow"
+        )
+        assert "EVERYONE" in text
+
+    def test_pair_policy_banner_mentions_pairing(self):
+        text = self._capture_banner(
+            platform="telegram", token="x", unknown_user_policy="pair"
+        )
+        assert "pairing" in text
+        assert "EVERYONE" not in text
+        assert "NOBODY" not in text
+
+    def test_invalid_policy_rejected_at_load(self):
+        import pytest
+
+        with pytest.raises(Exception):
+            ChannelConfigSchema(
+                platform="telegram", token="x", unknown_user_policy="alow"
+            )
