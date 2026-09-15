@@ -278,3 +278,87 @@ class TestBrowserToolWiring:
                 patch.dict("sys.modules", {"praisonai_browser": MagicMock()}), \
                 patch.object(builtins, "__import__", side_effect=_fake_import):
             assert _browser_bridge.browser_available() is False
+
+
+class TestUnknownUserPolicyWiring:
+    """Issue #5093: bot.yaml unknown_user_policy must reach BotConfig via CLI."""
+
+    def test_policy_kwargs_forwards_policy_and_owner(self):
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+
+        caps = BotCapabilities(
+            unknown_user_policy="ALLOW", owner_user_id="  987654321  "
+        )
+        kwargs = BotHandler._policy_kwargs(caps)
+        assert kwargs["unknown_user_policy"] == "allow"
+        assert kwargs["owner_user_id"] == "987654321"
+
+    def test_policy_kwargs_omits_unset(self):
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+
+        assert BotHandler._policy_kwargs(BotCapabilities()) == {}
+        assert BotHandler._policy_kwargs(None) == {}
+
+    def test_capabilities_to_botconfig_defaults_deny_when_omitted(self):
+        """Omitting the field keeps BotConfig's secure ``deny`` default."""
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+        from praisonaiagents.bots import BotConfig
+
+        cfg = BotConfig(token="x", **BotHandler._policy_kwargs(BotCapabilities()))
+        assert cfg.unknown_user_policy == "deny"
+
+    def test_capabilities_to_botconfig_applies_allow(self):
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+        from praisonaiagents.bots import BotConfig
+
+        caps = BotCapabilities(unknown_user_policy="allow")
+        cfg = BotConfig(token="x", **BotHandler._policy_kwargs(caps))
+        assert cfg.unknown_user_policy == "allow"
+
+
+class TestUnknownUserPolicyYamlSchema:
+    """Issue #5093: unknown_user_policy must survive YAML validation."""
+
+    def test_top_level_single_bot_policy_reaches_channel(self):
+        """A top-level ``unknown_user_policy`` migrates onto the channel."""
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        cfg = validate_gateway_config(
+            {
+                "platform": "telegram",
+                "token": "fake",
+                "unknown_user_policy": "allow",
+                "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+            },
+            apply_env_substitution=False,
+        )
+        channel = cfg.channels["telegram"]
+        assert channel.unknown_user_policy == "allow"
+
+    def test_channel_level_policy_preserved(self):
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        cfg = validate_gateway_config(
+            {
+                "channels": {
+                    "telegram": {"token": "fake", "unknown_user_policy": "pair"}
+                },
+                "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+            },
+            apply_env_substitution=False,
+        )
+        assert cfg.channels["telegram"].unknown_user_policy == "pair"
+
+    def test_invalid_policy_rejected(self):
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        with pytest.raises(ValueError):
+            validate_gateway_config(
+                {
+                    "channels": {
+                        "telegram": {"token": "fake", "unknown_user_policy": "alow"}
+                    },
+                    "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+                },
+                apply_env_substitution=False,
+            )
