@@ -1646,6 +1646,23 @@ class TestCompactedHistoryRecall:
             s_ids = {h.session_id for h in sqlite_store.search("XZ99-SECRETVALUE")}
             assert d_ids == s_ids == {"s"}
 
+    def test_bookends_tag_archived_turns(self):
+        """Bookends read the same archived-plus-active projection as search
+        context and ``window``, so an opening bookend that is a compacted turn
+        must carry the ``archived`` marker too — otherwise the boundary is
+        invisible in exactly one of the three projections (Issue #5031)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            self._seed_compacted_session(store)
+
+            bookends = store.search("XZ99-SECRETVALUE")[0].bookends
+            opening, closing = bookends["opening"], bookends["closing"]
+            # Precondition: the earliest turn was compacted out of the window.
+            assert "XZ99-SECRETVALUE" in opening[0]["content"]
+            assert opening[0]["archived"] is True
+            # Active-window bookends carry the key too, set to False.
+            assert closing[-1]["archived"] is False
+
     def test_window_resolves_archived_anchor(self):
         """A discovery hit whose anchor lands on an archived turn must resolve
         to that same archived message when scrolled via ``window`` — search and
