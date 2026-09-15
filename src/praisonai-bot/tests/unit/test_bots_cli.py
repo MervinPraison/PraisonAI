@@ -362,3 +362,90 @@ class TestUnknownUserPolicyYamlSchema:
                 },
                 apply_env_substitution=False,
             )
+
+    def test_invalid_top_level_policy_rejected_with_channels(self):
+        """A top-level typo must fail closed even when ``channels:`` exists.
+
+        Without the top-level validator this bypasses the channel rule (the
+        migration only runs when ``platform`` is set and no channels exist).
+        """
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        with pytest.raises(ValueError):
+            validate_gateway_config(
+                {
+                    "unknown_user_policy": "alow",
+                    "channels": {"telegram": {"token": "fake"}},
+                    "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+                },
+                apply_env_substitution=False,
+            )
+
+    def test_numeric_owner_id_channel_coerced_to_string(self):
+        """An unquoted numeric channel owner id must not fail validation."""
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        cfg = validate_gateway_config(
+            {
+                "channels": {
+                    "telegram": {"token": "fake", "owner_user_id": 987654321}
+                },
+                "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+            },
+            apply_env_substitution=False,
+        )
+        assert cfg.channels["telegram"].owner_user_id == "987654321"
+
+    def test_numeric_owner_id_top_level_migrates_as_string(self):
+        """A top-level numeric owner id migrates onto the channel as a string."""
+        from praisonai_bot.bots._config_schema import validate_gateway_config
+
+        cfg = validate_gateway_config(
+            {
+                "platform": "telegram",
+                "token": "fake",
+                "owner_user_id": 987654321,
+                "unknown_user_policy": "pair",
+                "agent": {"name": "Test", "llm": "gpt-4o-mini"},
+            },
+            apply_env_substitution=False,
+        )
+        channel = cfg.channels["telegram"]
+        assert channel.owner_user_id == "987654321"
+        assert channel.unknown_user_policy == "pair"
+
+
+class TestUnknownUserPolicyStartupInfo:
+    """Issue #5093: startup banner must not falsely confirm the policy."""
+
+    def _capture(self, platform, capabilities, policy_applied):
+        from praisonai_bot.cli.features.bots_cli import BotHandler
+
+        lines = []
+        with patch("builtins.print", side_effect=lambda *a, **k: lines.append(" ".join(str(x) for x in a))):
+            BotHandler()._print_startup_info(
+                platform, capabilities, policy_applied=policy_applied
+            )
+        return "\n".join(lines)
+
+    def test_policy_printed_when_applied(self):
+        from praisonai_bot.cli.features.bots_cli import BotCapabilities
+
+        out = self._capture(
+            "Telegram", BotCapabilities(unknown_user_policy="allow"), True
+        )
+        assert "unknown_user_policy: allow" in out
+
+    def test_effective_deny_printed_when_omitted_but_applied(self):
+        from praisonai_bot.cli.features.bots_cli import BotCapabilities
+
+        out = self._capture("Telegram", BotCapabilities(), True)
+        assert "unknown_user_policy: deny" in out
+
+    def test_policy_not_printed_on_unsupported_platform(self):
+        from praisonai_bot.cli.features.bots_cli import BotCapabilities
+
+        out = self._capture(
+            "WhatsApp", BotCapabilities(unknown_user_policy="allow"), False
+        )
+        assert "unknown_user_policy" not in out

@@ -525,7 +525,7 @@ class BotHandler:
         
         bot = TelegramBot(token=token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Telegram", capabilities)
+        self._print_startup_info("Telegram", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -578,7 +578,7 @@ class BotHandler:
         
         bot = DiscordBot(token=token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Discord", capabilities)
+        self._print_startup_info("Discord", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -656,7 +656,7 @@ class BotHandler:
         
         bot = SlackBot(token=token, app_token=app_token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Slack", capabilities)
+        self._print_startup_info("Slack", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -998,8 +998,20 @@ class BotHandler:
         
         return kwargs
 
-    def _print_startup_info(self, platform: str, capabilities: Optional[BotCapabilities]) -> None:
-        """Print startup information with enabled capabilities."""
+    def _print_startup_info(
+        self,
+        platform: str,
+        capabilities: Optional[BotCapabilities],
+        policy_applied: bool = False,
+    ) -> None:
+        """Print startup information with enabled capabilities.
+
+        ``policy_applied`` gates the ``unknown_user_policy`` line so it is only
+        printed on the platforms that actually forward it into ``BotConfig``
+        (telegram/discord/slack). Printing it unconditionally would give
+        operators a false confirmation on adapters that never receive the
+        policy (Issue #5093).
+        """
         print(f"Starting {platform} bot...")
         
         if capabilities:
@@ -1025,11 +1037,18 @@ class BotHandler:
                 print(f"Capabilities: {', '.join(enabled)}")
 
             # Issue #5093: surface the resolved admission policy so an operator
-            # can confirm at a glance that a bot.yaml ``unknown_user_policy`` was
-            # applied (instead of silently defaulting to ``deny``).
-            policy = capabilities.unknown_user_policy
-            if isinstance(policy, str) and policy.strip():
-                print(f"unknown_user_policy: {policy.strip().lower()}")
+            # can confirm at a glance which policy is in effect. Only print on
+            # platforms that actually wire it into BotConfig (``policy_applied``)
+            # and show the effective ``deny`` default when the YAML omits it, so
+            # the common secure-default path is visible rather than silent.
+            if policy_applied:
+                policy = capabilities.unknown_user_policy
+                effective = (
+                    policy.strip().lower()
+                    if isinstance(policy, str) and policy.strip()
+                    else "deny"
+                )
+                print(f"unknown_user_policy: {effective}")
         
         print("Press Ctrl+C to stop")
     
