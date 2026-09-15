@@ -199,6 +199,24 @@ class TestSlackStarts:
             BotHandler().start_slack()
         assert excinfo.value.code == 1
 
+    def test_single_bot_top_level_app_token_reaches_channel(self, clean_env):
+        """A top-level ``app_token:`` in a single-bot slack config must not be dropped.
+
+        The single-bot migration built the Slack channel from ``token`` alone,
+        so a plaintext top-level ``app_token`` never reached the adapter and
+        Socket Mode fell back to (or failed on) the env var only.
+        """
+        config = GatewayConfigSchema(
+            platform="slack",
+            token="xoxb-plain",
+            app_token="xapp-plain",
+            agent={"name": "assistant", "instructions": "Be helpful."},
+            auto_enable_from_env=False,
+        )
+
+        assert list(config.channels) == ["slack"]
+        assert config.channels["slack"].app_token == "xapp-plain"
+
 
 # ── Defect 3: a started bot must stay up ────────────────────────────────
 
