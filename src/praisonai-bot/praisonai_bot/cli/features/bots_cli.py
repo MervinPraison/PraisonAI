@@ -149,6 +149,12 @@ class BotCapabilities:
     group_policy: str = "mention_only"  # respond_all, mention_only, command_only
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
     silence_token: Optional[str] = None  # Custom silence token
+
+    # Inbound admission policy (Issue #5093): deny (default) | pair | allow.
+    # Wired from bot.yaml so `praisonai bot start` honours the same field the
+    # gateway path already reads.
+    unknown_user_policy: Optional[str] = None
+    owner_user_id: Optional[str] = None  # Owner user ID for pairing approvals
     
     # Session
     session_id: Optional[str] = None
@@ -185,6 +191,8 @@ class BotCapabilities:
             "group_policy": self.group_policy,
             "allow_silence": self.allow_silence,
             "silence_token": self.silence_token,
+            "unknown_user_policy": self.unknown_user_policy,
+            "owner_user_id": "***" if self.owner_user_id else None,
             "session_id": self.session_id,
             "user_id": self.user_id,
         }
@@ -294,6 +302,8 @@ class BotHandler:
             group_policy=channel.group_policy,
             allow_silence=channel.allow_silence,
             silence_token=channel.silence_token,
+            unknown_user_policy=getattr(channel, "unknown_user_policy", None),
+            owner_user_id=getattr(channel, "owner_user_id", None),
         )
         
         # Start bot based on platform
@@ -510,11 +520,12 @@ class BotHandler:
             group_policy=capabilities.group_policy if capabilities else "mention_only",
             allow_silence=capabilities.allow_silence if capabilities else False,
             silence_token=capabilities.silence_token if capabilities else None,
+            **self._policy_kwargs(capabilities),
         )
         
         bot = TelegramBot(token=token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Telegram", capabilities)
+        self._print_startup_info("Telegram", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -562,11 +573,12 @@ class BotHandler:
             group_policy=capabilities.group_policy if capabilities else "mention_only",
             allow_silence=capabilities.allow_silence if capabilities else False,
             silence_token=capabilities.silence_token if capabilities else None,
+            **self._policy_kwargs(capabilities),
         )
         
         bot = DiscordBot(token=token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Discord", capabilities)
+        self._print_startup_info("Discord", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -639,11 +651,12 @@ class BotHandler:
             group_policy=capabilities.group_policy if capabilities else "mention_only",
             allow_silence=capabilities.allow_silence if capabilities else False,
             silence_token=capabilities.silence_token if capabilities else None,
+            **self._policy_kwargs(capabilities),
         )
         
         bot = SlackBot(token=token, app_token=app_token, agent=agent, config=bot_config)
         
-        self._print_startup_info("Slack", capabilities)
+        self._print_startup_info("Slack", capabilities, policy_applied=True)
         
         _run_bot(bot)
     
@@ -924,6 +937,28 @@ class BotHandler:
         
         _run_bot(bot)
 
+    @staticmethod
+    def _policy_kwargs(capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
+        """BotConfig kwargs for the inbound admission policy (Issue #5093).
+
+        The ``praisonai bot start`` path previously built ``BotConfig`` without
+        ``unknown_user_policy``/``owner_user_id``, so a bot.yaml declaring
+        ``unknown_user_policy: allow`` was silently ignored and the secure
+        ``deny`` default won — dropping every DM. This forwards the YAML fields
+        the same way the gateway path already does. Omitted keys keep
+        BotConfig's own defaults.
+        """
+        kwargs: Dict[str, Any] = {}
+        if not capabilities:
+            return kwargs
+        policy = capabilities.unknown_user_policy
+        if isinstance(policy, str) and policy.strip():
+            kwargs["unknown_user_policy"] = policy.strip().lower()
+        owner = capabilities.owner_user_id
+        if owner is not None and str(owner).strip():
+            kwargs["owner_user_id"] = str(owner).strip()
+        return kwargs
+
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
         """Extract Agent constructor kwargs from BotCapabilities (DRY).
         
@@ -963,8 +998,20 @@ class BotHandler:
         
         return kwargs
 
-    def _print_startup_info(self, platform: str, capabilities: Optional[BotCapabilities]) -> None:
-        """Print startup information with enabled capabilities."""
+    def _print_startup_info(
+        self,
+        platform: str,
+        capabilities: Optional[BotCapabilities],
+        policy_applied: bool = False,
+    ) -> None:
+        """Print startup information with enabled capabilities.
+
+        ``policy_applied`` gates the ``unknown_user_policy`` line so it is only
+        printed on the platforms that actually forward it into ``BotConfig``
+        (telegram/discord/slack). Printing it unconditionally would give
+        operators a false confirmation on adapters that never receive the
+        policy (Issue #5093).
+        """
         print(f"Starting {platform} bot...")
         
         if capabilities:
@@ -988,6 +1035,20 @@ class BotHandler:
             
             if enabled:
                 print(f"Capabilities: {', '.join(enabled)}")
+
+            # Issue #5093: surface the resolved admission policy so an operator
+            # can confirm at a glance which policy is in effect. Only print on
+            # platforms that actually wire it into BotConfig (``policy_applied``)
+            # and show the effective ``deny`` default when the YAML omits it, so
+            # the common secure-default path is visible rather than silent.
+            if policy_applied:
+                policy = capabilities.unknown_user_policy
+                effective = (
+                    policy.strip().lower()
+                    if isinstance(policy, str) and policy.strip()
+                    else "deny"
+                )
+                print(f"unknown_user_policy: {effective}")
         
         print("Press Ctrl+C to stop")
     
