@@ -649,12 +649,30 @@ class ChannelConfigSchema(BaseModel):
         if self.routing and not self.routes:
             self.routes = self.routing
             
-        # Warn about empty allowed_users (open to everyone)
+        # Report the effective access policy for empty allowlists. With no
+        # allowlist configured the behaviour depends on unknown_user_policy, so
+        # the message must match the resolved policy rather than always claiming
+        # the bot responds to everyone (Issue #5092).
         if not self.allowed_users and not self.allowlist and not self.blocklist:
-            logger.warning(
-                "Channel has no user restrictions (allowed_users/allowlist/blocklist). "
-                "Bot will respond to EVERYONE. Consider adding allowed_users for security."
-            )
+            policy = (self.unknown_user_policy or "deny").lower()
+            if policy == "allow":
+                logger.warning(
+                    "Channel has no user restrictions (allowed_users/allowlist/blocklist) "
+                    "and unknown_user_policy=allow. Bot will respond to EVERYONE. "
+                    "Consider adding allowed_users for security."
+                )
+            elif policy == "pair":
+                logger.info(
+                    "Channel has no allowed_users and unknown_user_policy=pair. "
+                    "Unknown users must complete pairing before the bot replies."
+                )
+            else:
+                logger.warning(
+                    "Channel has no allowed_users and unknown_user_policy=deny. "
+                    "DMs from users not in allowed_users are dropped and the bot "
+                    "will respond to NOBODY. Set unknown_user_policy=allow or add "
+                    "allowed_users to let users through."
+                )
             
         # Warn about respond_all in production
         if self.group_policy == "respond_all":
