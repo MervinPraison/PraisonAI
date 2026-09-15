@@ -74,6 +74,27 @@ def test_run_yaml_file_reaches_agent_runner_not_jobs(monkeypatch, tmp_path):
     assert code == 0
 
 
+def test_run_missing_yaml_reaches_agent_runner_not_jobs(monkeypatch, tmp_path):
+    """Issue #5095: ``run <file>.yaml`` must reach the agent runner even when
+    the file does not exist (typo/wrong dir), so the user gets a clear runner
+    error instead of the async-jobs ``invalid choice`` / missing-``job_id``
+    failure that made the documented onboarding path look broken."""
+    pa = _load_module()
+    _require_wrapper_argparse()
+    monkeypatch.chdir(tmp_path)
+
+    missing = str(tmp_path / "agents.yaml")  # never created on disk
+    calls, code = _run_with_argv(
+        monkeypatch, pa, ["praisonai", "run", missing]
+    )
+
+    # A YAML-suffixed target routes to the agent runner (which then reports a
+    # proper file-not-found), not the jobs argparse parser.
+    assert calls["jobs"] is None
+    assert calls["run_app"] == [missing]
+    assert code == 0
+
+
 def test_run_submit_still_reaches_jobs(monkeypatch, tmp_path):
     pa = _load_module()
     _require_wrapper_argparse()
