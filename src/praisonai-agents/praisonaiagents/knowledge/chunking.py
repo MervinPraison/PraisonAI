@@ -1,6 +1,7 @@
 from typing import List, Union, Optional, Dict, Any
 from functools import cached_property
 import importlib
+import importlib.util
 
 #: Names accepted for a chunking strategy that are not chunker ids themselves.
 #: ``ChunkingStrategy.FIXED`` and ``.PARAGRAPH`` had no chunker at all, so they
@@ -127,13 +128,21 @@ class Chunking:
         
     @staticmethod
     def _import_auto_embeddings():
-        """Import chonkie's AutoEmbeddings with an actionable error message."""
+        """Import chonkie's AutoEmbeddings with an actionable error message.
+
+        Only a genuinely missing ``chonkie`` package is translated into the
+        install hint. If ``chonkie`` is installed but its import fails for a
+        different reason (e.g. a missing transitive dependency), the original
+        error is re-raised unchanged so the real cause is not masked.
+        """
         try:
             from chonkie.embeddings import AutoEmbeddings
         except ImportError as e:
-            raise ImportError(
-                "chonkie package not found. Please install it using: pip install 'praisonaiagents[knowledge]'"
-            ) from e
+            if importlib.util.find_spec("chonkie") is None:
+                raise ImportError(
+                    "chonkie package not found. Please install it using: pip install 'praisonaiagents[knowledge]'"
+                ) from e
+            raise
         return AutoEmbeddings
 
     @cached_property
