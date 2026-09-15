@@ -3345,6 +3345,36 @@ Your Goal: {self.goal}"""
                     # Append formatted knowledge to the prompt
                     prompt = f"{prompt}\n\n{formatted_context}"
 
+                    # Sync llm_prompt with the retrieved context so the RAG block
+                    # actually reaches the model. llm_prompt (not prompt) is what
+                    # gets sent to the LLM in both the custom-LLM and OpenAI paths
+                    # below; without this the retrieved knowledge is appended to
+                    # `prompt` but never delivered, so the model answers from
+                    # parametric memory only. Append (rather than reassign) to
+                    # preserve any response-template instruction already baked into
+                    # llm_prompt.
+                    if isinstance(llm_prompt, str):
+                        llm_prompt = f"{llm_prompt}\n\n{formatted_context}"
+                    elif isinstance(llm_prompt, list):
+                        # Multimodal prompt: append the retrieved context to the
+                        # last text part so attachment-bearing turns still receive
+                        # the RAG block. Copy dicts before mutating to avoid
+                        # aliasing the caller's attachment structures; if no text
+                        # part exists, add one.
+                        appended = False
+                        for i in range(len(llm_prompt) - 1, -1, -1):
+                            item = llm_prompt[i]
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                updated = dict(item)
+                                updated["text"] = f"{updated.get('text', '')}\n\n{formatted_context}"
+                                llm_prompt[i] = updated
+                                appended = True
+                                break
+                        if not appended:
+                            llm_prompt = list(llm_prompt) + [
+                                {"type": "text", "text": formatted_context}
+                            ]
+
         if self._using_custom_llm:
             # Track messages THIS turn appends so a failure rolls back only our
             # own messages, never a concurrent turn's (see memory_mixin).
