@@ -1442,25 +1442,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
             )
         else:
-            # Pre-flight single-instance check (Issue #5094): Telegram allows
-            # only one getUpdates poller per token. A second process (CLI bot,
-            # gateway telegram channel, UI Channels worker) silently breaks
-            # replies with a 409 loop. Detect an already-active poller *before*
-            # binding this one and fail fast with a clear, actionable message
-            # instead of entering the conflict cascade.
-            from ._resilience import detect_telegram_poll_conflict
-            conflict = await detect_telegram_poll_conflict(self._token)
-            if conflict:
-                self._is_running = False
-                raise RuntimeError(
-                    "Another process is already polling this Telegram token "
-                    "(only one instance per token is allowed). Stop the other "
-                    "bot/gateway/UI-channel instance first. "
-                    f"Telegram reported: {conflict}"
-                )
-
-            # Resilient polling loop with exponential backoff
+            # Resilient polling loop with exponential backoff.
+            # Single-instance enforcement (Issue #5094): Telegram allows only
+            # one getUpdates poller per token. A duplicate poller (second CLI
+            # bot, gateway telegram channel, UI Channels worker, or orphaned
+            # restart) surfaces as an HTTP 409 Conflict on start_polling. We
+            # fail fast on that real conflict instead of silently looping — a
+            # standalone getUpdates pre-flight probe cannot be used because the
+            # probe is itself a competing consumer and would terminate the
+            # incumbent poller (the incumbent gets the 409, the probe gets 200).
             self._stop_event = asyncio.Event()
+            poll_conflict: Optional[str] = None
             while not self._stop_event.is_set():
                 try:
                     await self._application.initialize()
@@ -1477,11 +1469,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     break
                 except Exception as e:
                     if is_conflict_error(e):
+                        poll_conflict = str(e)
                         logger.error(
-                            "[telegram] Another bot instance is running with this token. "
-                            "Stop the other instance first."
+                            "[telegram] Another process is already polling this "
+                            "token (only one instance per token is allowed). "
+                            "Stop the other bot/gateway/UI-channel instance first."
                         )
-                        break  # Don't retry conflicts
+                        break  # Don't retry conflicts — fail fast below
                     
                     if is_recoverable_error(e, "telegram") and self._monitor.should_retry():
                         delay = self._monitor.record_error(e)
@@ -1510,6 +1504,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     except Exception:
                         pass
                     self._is_running = False
+
+            # Fail fast on a confirmed single-instance conflict so supervisors
+            # (CLI, gateway, BotOS) mark startup as failed instead of treating a
+            # silently-stopped poller as healthy (Issue #5094).
+            if poll_conflict is not None:
+                raise RuntimeError(
+                    "Another process is already polling this Telegram token "
+                    "(only one instance per token is allowed). Stop the other "
+                    "bot/gateway/UI-channel instance first. "
+                    f"Telegram reported: {poll_conflict}"
+                )
     
     async def stop(self) -> None:
         """Stop the Telegram bot."""

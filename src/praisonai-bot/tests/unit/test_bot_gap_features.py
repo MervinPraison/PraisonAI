@@ -197,61 +197,77 @@ class TestIsConflictError:
         assert is_conflict_error(ValueError("something")) is False
 
 
-class TestDetectTelegramPollConflict:
-    """Pre-flight single-instance detection (Issue #5094)."""
+class TestTelegramConflictClassification:
+    """Single-instance 409 detection on the real polling path (Issue #5094).
 
-    def _patch_aiohttp(self, monkeypatch, status, description=None):
-        import types
-        from unittest.mock import AsyncMock, MagicMock
+    A standalone getUpdates pre-flight probe is NOT used: the probe would be a
+    competing consumer that terminates the incumbent poller (incumbent gets the
+    409, probe gets 200). Instead the real start_polling() 409 is classified by
+    ``is_conflict_error`` and start() fails fast.
+    """
 
-        resp = MagicMock()
-        resp.status = status
-        resp.json = AsyncMock(
-            return_value={"ok": False, "error_code": status,
-                          "description": description} if description else {}
+    def test_ptb_conflict_status_code(self):
+        from praisonai_bot.bots._resilience import is_conflict_error
+
+        class _Conflict(Exception):
+            error_code = 409
+
+        assert is_conflict_error(_Conflict("Conflict")) is True
+
+    def test_ptb_conflict_message(self):
+        from praisonai_bot.bots._resilience import is_conflict_error
+        err = Exception(
+            "Conflict: terminated by other getUpdates request; make sure that "
+            "only one bot instance is running"
         )
+        assert is_conflict_error(err) is True
 
-        get_cm = MagicMock()
-        get_cm.__aenter__ = AsyncMock(return_value=resp)
-        get_cm.__aexit__ = AsyncMock(return_value=False)
+    def test_409_conflict_text(self):
+        from praisonai_bot.bots._resilience import is_conflict_error
+        assert is_conflict_error(Exception("409 Conflict")) is True
 
-        session = MagicMock()
-        session.get = MagicMock(return_value=get_cm)
+    def test_non_conflict_not_flagged(self):
+        from praisonai_bot.bots._resilience import is_conflict_error
+        assert is_conflict_error(ValueError("network timeout")) is False
 
-        session_cm = MagicMock()
-        session_cm.__aenter__ = AsyncMock(return_value=session)
-        session_cm.__aexit__ = AsyncMock(return_value=False)
 
-        fake_aiohttp = types.ModuleType("aiohttp")
-        fake_aiohttp.ClientSession = MagicMock(return_value=session_cm)
-        fake_aiohttp.ClientTimeout = MagicMock(return_value=object())
-        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
+class TestTelegramStartFailsFastOnConflict:
+    """start()'s polling loop must fail fast (raise) on a confirmed 409.
 
-    def test_conflict_returns_description(self, monkeypatch):
-        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
-        self._patch_aiohttp(
-            monkeypatch, 409,
-            description="Conflict: terminated by other getUpdates request",
-        )
-        result = asyncio.run(detect_telegram_poll_conflict("token"))
-        assert result is not None
-        assert "terminated by other getUpdates" in result
+    ``python-telegram-bot`` is an optional dependency and is not installed in
+    the base unit-test environment, so the polling loop (embedded in ``start()``)
+    is verified structurally via source inspection — the same pattern used by
+    ``test_bot_wiring.py``. This guarantees no regression silently swallows the
+    single-instance conflict.
+    """
 
-    def test_conflict_without_description_uses_default(self, monkeypatch):
-        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
-        self._patch_aiohttp(monkeypatch, 409)
-        result = asyncio.run(detect_telegram_poll_conflict("token"))
-        assert result is not None
-        assert "only one bot instance" in result
+    def _start_source(self):
+        import inspect
+        from praisonai_bot.bots.telegram import TelegramBot
+        return inspect.getsource(TelegramBot.start)
 
-    def test_no_conflict_returns_none(self, monkeypatch):
-        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
-        self._patch_aiohttp(monkeypatch, 200)
-        assert asyncio.run(detect_telegram_poll_conflict("token")) is None
+    def test_no_standalone_preflight_probe(self):
+        """The harmful getUpdates pre-flight probe must be gone: the probe is a
+        competing consumer that terminates the incumbent poller."""
+        src = self._start_source()
+        assert "detect_telegram_poll_conflict" not in src
 
-    def test_empty_token_returns_none(self):
-        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
-        assert asyncio.run(detect_telegram_poll_conflict("")) is None
+    def test_conflict_captured_from_real_polling(self):
+        src = self._start_source()
+        assert "is_conflict_error(e)" in src
+        assert "poll_conflict = str(e)" in src
+
+    def test_conflict_reraises_runtimeerror(self):
+        """A confirmed conflict must raise (fail fast) so supervisors mark
+        startup as failed — never silently break/return."""
+        src = self._start_source()
+        assert "if poll_conflict is not None:" in src
+        assert "raise RuntimeError(" in src
+        assert "only one instance per token" in src
+
+    def test_helper_removed_from_resilience(self):
+        import praisonai_bot.bots._resilience as resil
+        assert not hasattr(resil, "detect_telegram_poll_conflict")
 
 
 class TestConnectionMonitor:
