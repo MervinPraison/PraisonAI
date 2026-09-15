@@ -968,7 +968,10 @@ class MCP:
             
         Example:
             ```python
-            mcp = MCP("npx -y @modelcontextprotocol/server-time")
+            # Point the filesystem server at any directory the agent may access.
+            # Use a platform-appropriate path (e.g. "." for the current dir);
+            # on Windows npx may need to be invoked as "npx.cmd".
+            mcp = MCP("npx -y @modelcontextprotocol/server-filesystem .")
             tools = mcp.get_tools()
             for tool in tools:
                 print(f"Tool: {tool.__name__}")

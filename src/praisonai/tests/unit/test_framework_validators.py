@@ -167,19 +167,27 @@ class TestRegistryImportErrorIsContained:
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        # is_available() memoises probe results per process; drop any cached
+        # value so the patched (raising) create() is actually exercised.
+        registry.invalidate_availability("crewai")
         with patch.object(registry, "create", side_effect=ImportError("missing dep")):
             assert registry.is_available("crewai") is False
+        registry.invalidate_availability("crewai")
 
     def test_assert_framework_available_gives_friendly_hint_on_import_error(self):
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        # Clear any memoised availability so the patched create() runs and its
+        # ImportError is contained into the friendly install hint.
+        registry.invalidate_availability("crewai")
         with patch(
             "praisonai.framework_adapters.validators.get_default_registry",
             return_value=registry,
         ), patch.object(registry, "create", side_effect=ImportError("missing dep")):
             with pytest.raises(ImportError, match="was requested but is not installed"):
                 assert_framework_available("crewai")
+        registry.invalidate_availability("crewai")
 
 
 class TestAssertFrameworkAvailableSucceeds:
