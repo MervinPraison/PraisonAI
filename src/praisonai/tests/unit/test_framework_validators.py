@@ -167,6 +167,10 @@ class TestRegistryImportErrorIsContained:
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        # is_available() memoises probe results per process; drop any cached
+        # entry so the patched create() (raising ImportError) is actually
+        # exercised instead of a stale cache hit from an earlier test. Restore
+        # in a finally so a failed assertion can't leak stale state.
         registry.invalidate_availability("crewai")
         try:
             with patch.object(registry, "create", side_effect=ImportError("missing dep")):
@@ -178,6 +182,9 @@ class TestRegistryImportErrorIsContained:
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        # Clear the availability cache so the patched create() drives the probe;
+        # otherwise a cached True from an earlier test masks the ImportError path.
+        # Restore in a finally so a failed assertion can't leak stale state.
         registry.invalidate_availability("crewai")
         try:
             with patch(
