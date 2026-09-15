@@ -93,12 +93,13 @@ class UnknownUserHandler:
             # a trace so an operator can tell a misconfigured allowlist from a
             # broken bot (Issue #5092).
             logger.warning(
-                "Dropped message from unknown user_id=%s channel=%s: "
-                "unknown_user_policy=deny and user is not in allowed_users. "
-                "Set unknown_user_policy=allow (or add the user to allowed_users) "
-                "to let this user through.",
+                "Dropped message from unknown user_id=%s platform=%s "
+                "conversation=%s: unknown_user_policy=deny and user is not in "
+                "allowed_users. Set unknown_user_policy=allow (or add the user "
+                "to allowed_users) to let this user through.",
                 user_id,
                 channel_type,
+                channel,
             )
             return False
             

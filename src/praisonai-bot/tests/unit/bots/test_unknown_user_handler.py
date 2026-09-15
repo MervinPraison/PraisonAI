@@ -228,7 +228,7 @@ async def test_deny_policy_logs_warning_on_drop(caplog):
 
     with caplog.at_level(logging.WARNING, logger="praisonai_bot.bots._unknown_user"):
         result = await UnknownUserHandler.handle(
-            make_message(user_id="stranger"), bot_ctx
+            make_message(user_id="stranger", channel_id="chat-42"), bot_ctx
         )
 
     assert result is False
@@ -236,6 +236,8 @@ async def test_deny_policy_logs_warning_on_drop(caplog):
         record.levelno == logging.WARNING
         and "stranger" in record.getMessage()
         and "unknown_user_policy=deny" in record.getMessage()
+        and "platform=telegram" in record.getMessage()
+        and "conversation=chat-42" in record.getMessage()
         for record in caplog.records
     )
 
