@@ -564,13 +564,20 @@ class MCP:
             # let the daemon thread be reclaimed at exit rather than blocking
             # the raise for the full operation timeout.
             self.runner.stop(timeout=1)
-            hint = ""
+            # shlex.join preserves argv boundaries so a copy-pasteable command is
+            # produced even when the executable path or an argument contains
+            # spaces or shell metacharacters.
+            full_cmd = shlex.join([str(cmd), *[str(a) for a in arguments]])
             if self._is_cold_start_launcher(cmd):
-                warm_cmd = " ".join([str(cmd), *[str(a) for a in arguments]])
                 hint = (
                     f" This looks like a first-run package download; pre-warm it "
-                    f"once with `{warm_cmd}` (wait for the server to start), or "
+                    f"once with `{full_cmd}` (wait for the server to start), or "
                     f"pass a larger timeout, e.g. MCP(..., timeout=300)."
+                )
+            else:
+                hint = (
+                    f" Verify the command runs manually (`{full_cmd}`), or pass a "
+                    f"larger timeout, e.g. MCP(..., timeout=180)."
                 )
             raise TimeoutError(
                 f"MCP initialization timed out after {self.timeout} seconds "

@@ -158,5 +158,33 @@ def test_non_launcher_uses_plain_default_timeout():
         assert mcp.timeout == MCP.DEFAULT_TIMEOUT
 
 
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_launcher_timeout_message_includes_prewarm_hint():
+    """A cold-start launcher timeout renders a quoted pre-warm command (#5099)."""
+    factory = _make_runner_factory(init_ok=False)
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        with pytest.raises(TimeoutError) as excinfo:
+            MCP("npx", args=["-y", "@modelcontextprotocol/server-filesystem",
+                             "/tmp/my dir"], timeout=1)
+    msg = str(excinfo.value)
+    assert "pre-warm" in msg
+    assert "timeout=300" in msg
+    # shlex.join must quote the spaced path so the hint is copy-pasteable.
+    assert "'/tmp/my dir'" in msg
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_non_launcher_timeout_message_includes_generic_hint():
+    """A non-launcher timeout still offers actionable remediation (#5099)."""
+    factory = _make_runner_factory(init_ok=False)
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        with pytest.raises(TimeoutError) as excinfo:
+            MCP("/usr/bin/python fake_server.py", timeout=1)
+    msg = str(excinfo.value)
+    assert "pre-warm" not in msg
+    assert "Verify the command runs manually" in msg
+    assert "timeout=180" in msg
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
