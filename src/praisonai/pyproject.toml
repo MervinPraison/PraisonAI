@@ -190,6 +190,11 @@ flow = [
     # a2a-sdk<1.0 lacks the `a2a.server.active_task` module Langflow imports,
     # and older fastapi-pagination breaks on newer FastAPI/starlette
     # (`cannot import name 'EventSourceResponse'`). See issue #5101.
+    # NOTE: Langflow needs a2a-sdk>=1.0.0, while the A2UI extra
+    # (praisonaiagents[a2ui], pulled in by [claw] via praisonaiagents[all])
+    # pins a2a-sdk<1.0.0 for the Google A2UI SDK. These two heavy, opt-in
+    # extras are therefore mutually exclusive — install [flow] and [claw]
+    # in separate environments.
     "a2a-sdk[http-server]>=1.0.0",
     "fastapi-pagination>=0.12.34",
 ]
