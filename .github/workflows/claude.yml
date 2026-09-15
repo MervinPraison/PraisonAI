@@ -270,12 +270,20 @@ jobs:
             git remote set-url origin "file://$(pwd)"
           fi
 
+      - name: Pick Claude OAuth token
+        id: oauth
+        uses: ./.github/actions/pick-oauth-token
+        with:
+          token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
+
       - uses: anthropics/claude-code-action@beta
         env:
           GH_TOKEN: ${{ steps.check_fork.outputs.can_push_fork == 'true' && secrets.GH_TOKEN || steps.app-token.outputs.token }}
         with:
           allowed_bots: 'praisonai-triage-agent[bot]'
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ steps.oauth.outputs.token }}
           github_token: ${{ steps.app-token.outputs.token }}
           model: claude-opus-4-8
           trigger_phrase: "@claude"

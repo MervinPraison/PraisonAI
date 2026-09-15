@@ -274,6 +274,14 @@ jobs:
           git fetch origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
           git checkout "pr-${PR_NUMBER}"
 
+      - name: Pick Claude OAuth token
+        id: oauth
+        uses: ./.github/actions/pick-oauth-token
+        with:
+          token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
+
       - name: Claude merge gate assessment (read-only)
         id: assess
         continue-on-error: true
@@ -283,7 +291,7 @@ jobs:
           CLAUDE_CODE_SUBAGENT_MODEL: inherit
           ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ steps.oauth.outputs.token }}
           github_token: ${{ steps.app-token.outputs.token }}
           model: claude-opus-4-8
           trigger_phrase: '@claude-merge-gate-internal'
