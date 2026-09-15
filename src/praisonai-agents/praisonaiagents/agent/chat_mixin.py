@@ -3345,6 +3345,18 @@ Your Goal: {self.goal}"""
                     # Append formatted knowledge to the prompt
                     prompt = f"{prompt}\n\n{formatted_context}"
 
+                    # Sync llm_prompt with the retrieved context so the RAG block
+                    # actually reaches the model. llm_prompt (not prompt) is what
+                    # gets sent to the LLM in both the custom-LLM and OpenAI paths
+                    # below; without this the retrieved knowledge is appended to
+                    # `prompt` but never delivered, so the model answers from
+                    # parametric memory only. Append (rather than reassign) to
+                    # preserve any response-template instruction already baked into
+                    # llm_prompt, and skip multimodal (list) prompts whose text is
+                    # handled separately.
+                    if isinstance(llm_prompt, str):
+                        llm_prompt = f"{llm_prompt}\n\n{formatted_context}"
+
         if self._using_custom_llm:
             # Track messages THIS turn appends so a failure rolls back only our
             # own messages, never a concurrent turn's (see memory_mixin).

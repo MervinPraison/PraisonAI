@@ -294,6 +294,64 @@ class TestAgentChatRetrieval:
         assert hasattr(agent.chat, '__call__')
 
 
+class TestChatInjectsRetrievedContext:
+    """Regression tests: retrieved context must reach the prompt sent to the LLM.
+
+    Guards against the bug where knowledge was appended to `prompt` but the
+    LLM call used a separate `llm_prompt` that omitted the retrieved text
+    (issue #5098).
+    """
+
+    MARKER = "ZEBRA-QUOTA-9917"
+
+    def _build_agent(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(
+            name="TestAgent",
+            instructions="Answer using the knowledge base only.",
+            knowledge=["policy.txt"],
+        )
+        agent._knowledge_processed = True
+        agent.knowledge = Mock()
+        # Return the marker chunk from retrieval, bypassing real vector store.
+        agent._get_knowledge_context = Mock(
+            return_value=(
+                f"Company policy {self.MARKER} limits daily API calls to 42.",
+                [],
+            )
+        )
+        return agent
+
+    def test_chat_forwards_retrieved_context_to_llm(self):
+        """Sync chat() must pass the retrieved marker into the prompt used to build messages.
+
+        `_build_messages` is the seam where the LLM-bound prompt is assembled; the
+        original bug appended knowledge to `prompt` but sent a separate `llm_prompt`
+        that omitted it. We intercept `_build_messages` to capture that prompt and
+        short-circuit the turn before any real network/LLM call.
+        """
+        agent = self._build_agent()
+
+        captured = {}
+
+        class _StopTurn(Exception):
+            pass
+
+        def fake_build_messages(prompt, *args, **kwargs):
+            captured["prompt"] = prompt
+            raise _StopTurn()
+
+        with patch.object(agent, "_build_messages", side_effect=fake_build_messages):
+            with pytest.raises(_StopTurn):
+                agent.chat("What is the daily API limit?", force_retrieval=True)
+
+        assert "prompt" in captured, "_build_messages was not invoked"
+        assert self.MARKER in str(captured["prompt"]), (
+            "Retrieved context missing from prompt sent to LLM"
+        )
+
+
 class TestLazyLoading:
     """Test lazy loading of retrieval dependencies."""
     
