@@ -1970,13 +1970,20 @@ class DefaultSessionStore:
 
     @staticmethod
     def _bookends(messages: List[Any], size: int) -> Dict[str, List[Dict[str, Any]]]:
-        """Return the first and last ``size`` user/assistant messages."""
+        """Return the first and last ``size`` user/assistant messages.
+
+        ``messages`` is the shared archived-plus-active projection, so an
+        opening bookend can be a compacted turn. Entries carry the same
+        ``archived`` marker as :meth:`search`'s context and :meth:`window` so
+        the boundary stays visible in every projection (Issue #5031).
+        """
         convo = [
             {
                 "index": i,
                 "role": m.get("role", ""),
                 "content": m.get("content", ""),
                 "timestamp": m.get("timestamp"),
+                "archived": bool(m.get("archived")),
             }
             for i, m in enumerate(messages)
             if isinstance(m, dict) and m.get("role") in ("user", "assistant")
