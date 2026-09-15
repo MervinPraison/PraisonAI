@@ -551,6 +551,26 @@ class ChannelConfigSchema(BaseModel):
             return ""
         return result.value
     
+    @field_validator("unknown_user_policy")
+    @classmethod
+    def validate_unknown_user_policy(cls, v: str) -> str:
+        """Fail-closed on an unknown access policy selector (Issue #5092).
+
+        The runtime ``BotConfig`` rejects anything outside deny/allow/pair, so
+        a typo (``alow``/``dney``) must be caught at load time here rather than
+        passing schema validation, being reported as ``deny`` by the startup
+        banner, and then silently disabling the channel when ``BotConfig`` is
+        constructed later.
+        """
+        allowed = {"deny", "allow", "pair"}
+        normalized = (v or "deny").strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"Invalid unknown_user_policy '{v}'. Must be one of: "
+                f"{', '.join(sorted(allowed))}"
+            )
+        return normalized
+
     @field_validator("group_policy")
     @classmethod
     def validate_group_policy(cls, v: str) -> str:
@@ -605,12 +625,13 @@ class ChannelConfigSchema(BaseModel):
                     "Channel has no allowed_users and unknown_user_policy=pair. "
                     "Unknown users must complete pairing before the bot replies."
                 )
-            else:
+            else:  # deny (the validated default)
                 logger.warning(
                     "Channel has no allowed_users and unknown_user_policy=deny. "
-                    "DMs from users not in allowed_users are dropped and the bot "
-                    "will respond to NOBODY. Set unknown_user_policy=allow or add "
-                    "allowed_users to let users through."
+                    "DMs from users not in allowed_users (and not already paired) "
+                    "are dropped and the bot responds to NOBODY new. Set "
+                    "unknown_user_policy=allow or add allowed_users to let users "
+                    "through."
                 )
             
         # Warn about respond_all in production

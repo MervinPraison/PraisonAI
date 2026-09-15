@@ -508,3 +508,19 @@ class TestSecurityBannerMatchesPolicy:
             platform="telegram", token="x", unknown_user_policy="allow"
         )
         assert "EVERYONE" in text
+
+    def test_pair_policy_banner_mentions_pairing(self):
+        text = self._capture_banner(
+            platform="telegram", token="x", unknown_user_policy="pair"
+        )
+        assert "pairing" in text
+        assert "EVERYONE" not in text
+        assert "NOBODY" not in text
+
+    def test_invalid_policy_rejected_at_load(self):
+        import pytest
+
+        with pytest.raises(Exception):
+            ChannelConfigSchema(
+                platform="telegram", token="x", unknown_user_policy="alow"
+            )
