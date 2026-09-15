@@ -169,11 +169,15 @@ class TestRegistryImportErrorIsContained:
         registry = get_default_registry()
         # is_available() memoises probe results per process; drop any cached
         # entry so the patched create() (raising ImportError) is actually
-        # exercised instead of a stale cache hit from an earlier test.
+        # exercised instead of a stale cache hit from an earlier test. Use
+        # try/finally so a failing assertion still evicts the stale probe and
+        # cannot leak an order-dependent ``crewai: False`` into later tests.
         registry.invalidate_availability("crewai")
-        with patch.object(registry, "create", side_effect=ImportError("missing dep")):
-            assert registry.is_available("crewai") is False
-        registry.invalidate_availability("crewai")
+        try:
+            with patch.object(registry, "create", side_effect=ImportError("missing dep")):
+                assert registry.is_available("crewai") is False
+        finally:
+            registry.invalidate_availability("crewai")
 
     def test_assert_framework_available_gives_friendly_hint_on_import_error(self):
         from praisonai.framework_adapters.registry import get_default_registry
@@ -181,14 +185,18 @@ class TestRegistryImportErrorIsContained:
         registry = get_default_registry()
         # Clear the availability cache so the patched create() drives the probe;
         # otherwise a cached True from an earlier test masks the ImportError path.
+        # try/finally keeps cleanup exception-safe so a failing assertion cannot
+        # leave a stale ``crewai: False`` in the process-wide cache.
         registry.invalidate_availability("crewai")
-        with patch(
-            "praisonai.framework_adapters.validators.get_default_registry",
-            return_value=registry,
-        ), patch.object(registry, "create", side_effect=ImportError("missing dep")):
-            with pytest.raises(ImportError, match="was requested but is not installed"):
-                assert_framework_available("crewai")
-        registry.invalidate_availability("crewai")
+        try:
+            with patch(
+                "praisonai.framework_adapters.validators.get_default_registry",
+                return_value=registry,
+            ), patch.object(registry, "create", side_effect=ImportError("missing dep")):
+                with pytest.raises(ImportError, match="was requested but is not installed"):
+                    assert_framework_available("crewai")
+        finally:
+            registry.invalidate_availability("crewai")
 
 
 class TestAssertFrameworkAvailableSucceeds:
