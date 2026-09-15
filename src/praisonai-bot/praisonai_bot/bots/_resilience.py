@@ -447,6 +447,59 @@ def is_conflict_error(err: BaseException) -> bool:
     return False
 
 
+async def detect_telegram_poll_conflict(
+    token: str,
+    timeout: float = 5.0,
+) -> Optional[str]:
+    """Detect an already-active getUpdates poller for a Telegram token.
+
+    Telegram allows only ONE ``getUpdates`` consumer per bot token. When a
+    second process starts against the same token every poller receives HTTP
+    ``409 Conflict`` and replies stop (Issue #5094). This makes that constraint
+    detectable *before* binding a new poller: a single short ``getUpdates`` call
+    that returns 409 proves another instance already holds the poll lease.
+
+    Best-effort and non-fatal on network errors so a transient blip never blocks
+    startup — only a confirmed 409 is reported.
+
+    Args:
+        token: The Telegram bot token to probe.
+        timeout: Overall request timeout in seconds.
+
+    Returns:
+        The Telegram conflict description string when a competing poller is
+        detected, else ``None`` (no conflict, or the probe could not run).
+    """
+    if not token:
+        return None
+    try:
+        import aiohttp
+    except Exception:  # pragma: no cover — probe is optional
+        return None
+
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                params={"timeout": "0", "limit": "1"},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status == 409:
+                    try:
+                        data = await resp.json()
+                    except Exception:
+                        data = {}
+                    return (
+                        data.get("description")
+                        or "Conflict: terminated by other getUpdates request; "
+                        "make sure that only one bot instance is running"
+                    )
+    except Exception:  # pragma: no cover — network/parse errors are non-fatal
+        return None
+    return None
+
+
 async def sleep_with_abort(seconds: float, abort_signal: Optional[asyncio.Event] = None) -> bool:
     """Sleep for a duration, but wake early if abort is signaled.
     

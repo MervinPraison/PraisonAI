@@ -197,6 +197,63 @@ class TestIsConflictError:
         assert is_conflict_error(ValueError("something")) is False
 
 
+class TestDetectTelegramPollConflict:
+    """Pre-flight single-instance detection (Issue #5094)."""
+
+    def _patch_aiohttp(self, monkeypatch, status, description=None):
+        import types
+        from unittest.mock import AsyncMock, MagicMock
+
+        resp = MagicMock()
+        resp.status = status
+        resp.json = AsyncMock(
+            return_value={"ok": False, "error_code": status,
+                          "description": description} if description else {}
+        )
+
+        get_cm = MagicMock()
+        get_cm.__aenter__ = AsyncMock(return_value=resp)
+        get_cm.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=get_cm)
+
+        session_cm = MagicMock()
+        session_cm.__aenter__ = AsyncMock(return_value=session)
+        session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        fake_aiohttp = types.ModuleType("aiohttp")
+        fake_aiohttp.ClientSession = MagicMock(return_value=session_cm)
+        fake_aiohttp.ClientTimeout = MagicMock(return_value=object())
+        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
+
+    def test_conflict_returns_description(self, monkeypatch):
+        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
+        self._patch_aiohttp(
+            monkeypatch, 409,
+            description="Conflict: terminated by other getUpdates request",
+        )
+        result = asyncio.run(detect_telegram_poll_conflict("token"))
+        assert result is not None
+        assert "terminated by other getUpdates" in result
+
+    def test_conflict_without_description_uses_default(self, monkeypatch):
+        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
+        self._patch_aiohttp(monkeypatch, 409)
+        result = asyncio.run(detect_telegram_poll_conflict("token"))
+        assert result is not None
+        assert "only one bot instance" in result
+
+    def test_no_conflict_returns_none(self, monkeypatch):
+        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
+        self._patch_aiohttp(monkeypatch, 200)
+        assert asyncio.run(detect_telegram_poll_conflict("token")) is None
+
+    def test_empty_token_returns_none(self):
+        from praisonai_bot.bots._resilience import detect_telegram_poll_conflict
+        assert asyncio.run(detect_telegram_poll_conflict("")) is None
+
+
 class TestConnectionMonitor:
     def test_record_success_resets(self):
         from praisonai_bot.bots._resilience import ConnectionMonitor
