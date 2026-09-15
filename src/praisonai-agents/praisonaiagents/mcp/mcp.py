@@ -968,7 +968,7 @@ class MCP:
             
         Example:
             ```python
-            mcp = MCP("npx -y @modelcontextprotocol/server-time")
+            mcp = MCP("npx -y @modelcontextprotocol/server-filesystem /tmp")
             tools = mcp.get_tools()
             for tool in tools:
                 print(f"Tool: {tool.__name__}")
