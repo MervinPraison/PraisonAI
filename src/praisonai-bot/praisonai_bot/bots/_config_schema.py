@@ -944,8 +944,11 @@ class GatewayConfigSchema(BaseModel):
             # Carry a top-level ``app_token`` (Slack Socket Mode's app-level
             # token) into the channel so it reaches the adapter. Without this a
             # plaintext top-level ``app_token`` was silently dropped and Socket
-            # Mode fell back to (or failed on) the env var alone.
-            if self.app_token is not None:
+            # Mode fell back to (or failed on) the env var alone. Scoped to
+            # Slack: ``app_token`` is Slack-specific, so forwarding it to a
+            # non-Slack custom adapter with a strict constructor could keep the
+            # channel from starting.
+            if declared_platform == "slack" and self.app_token is not None:
                 channel_kwargs["app_token"] = self.app_token
             self.channels = {
                 declared_platform: ChannelConfigSchema(**channel_kwargs)
