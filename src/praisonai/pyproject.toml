@@ -186,6 +186,12 @@ flow = [
     # Agent + AgentTeam components pre-loaded. Heavy, opt-in only.
     "langflow>=1.0.0",
     "requests>=2.31.0",
+    # Pin Langflow transitive deps that ship broken combos on Python 3.13:
+    # a2a-sdk<1.0 lacks the `a2a.server.active_task` module Langflow imports,
+    # and older fastapi-pagination breaks on newer FastAPI/starlette
+    # (`cannot import name 'EventSourceResponse'`). See issue #5101.
+    "a2a-sdk[http-server]>=1.0.0",
+    "fastapi-pagination>=0.12.34",
 ]
 lite = [
     # Minimal installation without TUI, litellm - just core agent functionality
