@@ -3352,10 +3352,28 @@ Your Goal: {self.goal}"""
                     # `prompt` but never delivered, so the model answers from
                     # parametric memory only. Append (rather than reassign) to
                     # preserve any response-template instruction already baked into
-                    # llm_prompt, and skip multimodal (list) prompts whose text is
-                    # handled separately.
+                    # llm_prompt.
                     if isinstance(llm_prompt, str):
                         llm_prompt = f"{llm_prompt}\n\n{formatted_context}"
+                    elif isinstance(llm_prompt, list):
+                        # Multimodal prompt: append the retrieved context to the
+                        # last text part so attachment-bearing turns still receive
+                        # the RAG block. Copy dicts before mutating to avoid
+                        # aliasing the caller's attachment structures; if no text
+                        # part exists, add one.
+                        appended = False
+                        for i in range(len(llm_prompt) - 1, -1, -1):
+                            item = llm_prompt[i]
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                updated = dict(item)
+                                updated["text"] = f"{updated.get('text', '')}\n\n{formatted_context}"
+                                llm_prompt[i] = updated
+                                appended = True
+                                break
+                        if not appended:
+                            llm_prompt = list(llm_prompt) + [
+                                {"type": "text", "text": formatted_context}
+                            ]
 
         if self._using_custom_llm:
             # Track messages THIS turn appends so a failure rolls back only our

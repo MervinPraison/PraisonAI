@@ -351,6 +351,59 @@ class TestChatInjectsRetrievedContext:
             "Retrieved context missing from prompt sent to LLM"
         )
 
+    def test_chat_forwards_retrieved_context_into_multimodal_prompt(self):
+        """Sync chat() with attachments must inject retrieved context into the list prompt.
+
+        When attachments are present, `llm_prompt` becomes a multimodal list.
+        The retrieved context must still reach a text part of that list so the
+        model receives the RAG block alongside the attachment(s).
+        """
+        agent = self._build_agent()
+
+        captured = {}
+
+        class _StopTurn(Exception):
+            pass
+
+        def fake_build_messages(prompt, *args, **kwargs):
+            captured["prompt"] = prompt
+            raise _StopTurn()
+
+        multimodal_prompt = [
+            {"type": "text", "text": "What is the daily API limit?"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/x.png"}},
+        ]
+
+        with patch.object(
+            agent, "_build_multimodal_prompt", return_value=multimodal_prompt
+        ):
+            with patch.object(
+                agent, "_build_messages", side_effect=fake_build_messages
+            ):
+                with pytest.raises(_StopTurn):
+                    agent.chat(
+                        "What is the daily API limit?",
+                        force_retrieval=True,
+                        attachments=["x.png"],
+                    )
+
+        assert "prompt" in captured, "_build_messages was not invoked"
+        captured_prompt = captured["prompt"]
+        assert isinstance(captured_prompt, list), "Expected a multimodal list prompt"
+        text_parts = [
+            item.get("text", "")
+            for item in captured_prompt
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
+        assert any(self.MARKER in text for text in text_parts), (
+            "Retrieved context missing from multimodal prompt sent to LLM"
+        )
+        # Attachment content must be preserved alongside the injected context.
+        assert any(
+            isinstance(item, dict) and item.get("type") == "image_url"
+            for item in captured_prompt
+        ), "Attachment content was dropped from multimodal prompt"
+
 
 class TestLazyLoading:
     """Test lazy loading of retrieval dependencies."""
