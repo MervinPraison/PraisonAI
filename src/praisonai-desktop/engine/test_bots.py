@@ -56,6 +56,11 @@ class BotSupervisorTests(unittest.TestCase):
         data = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(len(data), 1)
 
+    def test_delete_channel_does_not_deadlock(self):
+        ch = self.sup.add_channel({"platform": "telegram", "name": "A"})
+        self.assertTrue(self.sup.delete_channel(ch["id"]))
+        self.assertEqual(self.sup.list_channels(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

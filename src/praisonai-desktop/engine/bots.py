@@ -166,7 +166,9 @@ class BotSupervisor:
         self.channels_path = self.root / "channels.json"
         self.gateway_config = self.root / "gateway.yaml"
         self.gateway_log = self.root / "gateway.log"
-        self._lock = threading.Lock()
+        # RLock: delete_channel -> stop_channel and start_gateway -> gateway_status
+        # re-enter the same supervisor while holding the lock.
+        self._lock = threading.RLock()
         self._channels: list[dict] = []
         self._gateway = _ProcessHandle("gateway", self.gateway_log)
         self._bots: dict[str, _ProcessHandle] = {}
