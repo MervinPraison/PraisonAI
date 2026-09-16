@@ -1,5 +1,6 @@
 """Regression coverage for token accounting with quiet output defaults."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from collections import defaultdict
@@ -286,3 +287,45 @@ def test_openai_client_clears_stale_metrics_when_usage_absent(monkeypatch):
         verbose=False,
     )
     assert client.last_token_metrics is None
+
+
+async def test_concurrent_agents_sharing_one_llm_do_not_misattribute_tokens(monkeypatch):
+    """current_agent_name lives on the shared LLM instance, so a second agent's
+    set_current_agent() can overwrite it while the first agent is still
+    awaiting its own completion.
+    """
+    import litellm
+
+    collector = get_token_collector()
+    collector.reset()
+    llm = LLM(model="custom/test-model", api_key="test")
+
+    def _usage_response(prompt_tokens):
+        return {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 1},
+        }
+
+    async def fake_acompletion(**kwargs):
+        prompt = kwargs["messages"][-1]["content"]
+        if prompt == "slow-agent-prompt":
+            await asyncio.sleep(0.05)
+            return _usage_response(100)
+        return _usage_response(5)
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run_agent(name, prompt):
+        llm.set_current_agent(name)
+        await llm._acompletion_with_retry(
+            messages=[{"role": "user", "content": prompt}], model=llm.model
+        )
+
+    await asyncio.gather(
+        run_agent("SlowAgent", "slow-agent-prompt"),
+        run_agent("FastAgent", "fast-agent-prompt"),
+    )
+
+    by_agent = collector.get_session_summary()["by_agent"]
+    assert by_agent["SlowAgent"]["input_tokens"] == 100
+    assert by_agent["FastAgent"]["input_tokens"] == 5
