@@ -350,9 +350,22 @@ button.stop{background:var(--bad)}
    Same tokens as chat, same centred column. A training view that invented its
    own palette would read as a bolted-on second app, which is exactly what it
    must not be: it is the same product doing a different job. */
-#train{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
-#train.on{display:block}
+#train,#channels,#gateway{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
+#train.on,#channels.on,#gateway.on{display:block}
 body.training #thread,body.training #f{display:none}
+body.view-channels #thread,body.view-channels #f,body.view-channels #train,body.view-channels #gateway{display:none}
+body.view-channels #channels{display:block}
+body.view-gateway #thread,body.view-gateway #f,body.view-gateway #train,body.view-gateway #channels{display:none}
+body.view-gateway #gateway{display:block}
+.chlist{display:flex;flex-direction:column;gap:.5rem;margin:.6rem 0}
+.chrow{display:flex;align-items:center;gap:.6rem;padding:.55rem .65rem;border:1px solid var(--rule);
+  border-radius:.45rem;background:var(--panel)}
+.chrow .nm{font-weight:650;flex:1;min-width:0}
+.chrow .meta{font-size:.72rem;color:var(--soft)}
+.chrow .st{font-size:.68rem;padding:.15rem .45rem;border-radius:999px;border:1px solid var(--rule)}
+.chrow .st.run{color:var(--accent);border-color:var(--accent)}
+.chlog{max-height:28vh;overflow:auto;font-size:.72rem;font-family:ui-monospace,Menlo,monospace;
+  background:var(--code);border-radius:.4rem;padding:.5rem;margin-top:.6rem;white-space:pre-wrap}
 .trainhd{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .2rem}
 .trainhd h2{font-size:1.05rem;margin:0;font-weight:650}
 .trainhd p{margin:0;color:var(--soft);font-size:.78rem}
@@ -437,6 +450,10 @@ body.training #thread,body.training #f{display:none}
               aria-controls="thread"><span class="ic" aria-hidden="true">▫</span>Chat</button>
       <button class="navbtn" id="viewTrain" type="button" role="tab" aria-selected="false"
               aria-controls="train"><span class="ic" aria-hidden="true">◩</span>Train</button>
+      <button class="navbtn" id="viewChannels" type="button" role="tab" aria-selected="false"
+              aria-controls="channels"><span class="ic" aria-hidden="true">◎</span>Channels</button>
+      <button class="navbtn" id="viewGateway" type="button" role="tab" aria-selected="false"
+              aria-controls="gateway"><span class="ic" aria-hidden="true">⬡</span>Gateway</button>
     </div>
     <div class="sidetop">
       <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k" data-chord="N"></span></button>
@@ -606,6 +623,64 @@ body.training #thread,body.training #f{display:none}
         <div class="tcard" id="tHistoryCard" hidden>
           <div class="sectlbl runshd">Previous runs</div>
           <div id="tHistory"></div>
+        </div>
+      </div>
+    </section>
+    <section id="channels" role="tabpanel" aria-labelledby="viewChannels" aria-label="Channels">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Channels</h2>
+          <p>Connect Telegram and Slack bots. Tokens use env: refs from ~/.praisonai/.env</p>
+        </div>
+        <form id="chAddForm" class="tcard">
+          <div class="tgrid">
+            <div class="tf">
+              <label for="chPlatform">Platform</label>
+              <select id="chPlatform" name="platform">
+                <option value="telegram">Telegram</option>
+                <option value="slack">Slack</option>
+              </select>
+            </div>
+            <div class="tf">
+              <label for="chName">Name</label>
+              <input id="chName" name="name" placeholder="My bot"/>
+            </div>
+            <div class="tf">
+              <label for="chToken">Token ref</label>
+              <input id="chToken" name="token_ref" placeholder="env:TELEGRAM_BOT_TOKEN"/>
+            </div>
+            <div class="tf" id="chAppTokenWrap">
+              <label for="chAppToken">Slack app token ref</label>
+              <input id="chAppToken" name="app_token_ref" placeholder="env:SLACK_APP_TOKEN"/>
+            </div>
+          </div>
+          <div class="trow">
+            <button class="tbtn" type="submit">Add channel</button>
+          </div>
+          <p class="tnote" id="chError" role="alert"></p>
+        </form>
+        <div class="tcard">
+          <div class="sectlbl">Your channels</div>
+          <div id="chList" class="chlist"></div>
+        </div>
+      </div>
+    </section>
+    <section id="gateway" role="tabpanel" aria-labelledby="viewGateway" aria-label="Gateway">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Multi-bot gateway</h2>
+          <p>Run Telegram + Slack together on port 8765. Stop individual bots first.</p>
+        </div>
+        <div class="tcard">
+          <div class="trow">
+            <span class="pill" id="gwState">stopped</span>
+            <span class="meta" id="gwMeta"></span>
+            <span class="grow"></span>
+            <button class="tbtn" id="gwStart" type="button">Start gateway</button>
+            <button class="tbtn danger" id="gwStop" type="button" hidden>Stop gateway</button>
+          </div>
+          <p class="tnote" id="gwError" role="alert"></p>
+          <div class="chlog" id="gwLog" hidden></div>
         </div>
       </div>
     </section>
@@ -2365,8 +2440,12 @@ box.addEventListener('keydown',e=>{
  * showing an empty pane next to a job that is still going.
  */
 const trainView=document.getElementById('train'),
+      channelsView=document.getElementById('channels'),
+      gatewayView=document.getElementById('gateway'),
       viewChat=document.getElementById('viewChat'),
       viewTrain=document.getElementById('viewTrain'),
+      viewChannels=document.getElementById('viewChannels'),
+      viewGateway=document.getElementById('viewGateway'),
       trainForm=document.getElementById('trainForm'),
       tStart=document.getElementById('tStart'), tStop=document.getElementById('tStop'),
       tState=document.getElementById('tState'), tError=document.getElementById('tError'),
@@ -2399,21 +2478,33 @@ const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file h
 // ready, a requested Train view is forced to Chat so that UI stays visible;
 // the deliberate choice is still persisted, and the post-boot restore below
 // returns Train once the engine is up.
+const VIEW_TABS={chat:viewChat,train:viewTrain,channels:viewChannels,gateway:viewGateway};
+
 function showView(name,{persist=true}={}){
   const requested=name;
-  if(name==='train' && engineBlocked) name='chat';
+  if(name!=='chat' && engineBlocked) name='chat';
   const training=name==='train';
   document.body.classList.toggle('training',training);
+  document.body.classList.remove('view-channels','view-gateway');
+  if(name==='channels') document.body.classList.add('view-channels');
+  if(name==='gateway') document.body.classList.add('view-gateway');
   trainView.classList.toggle('on',training);
-  viewTrain.setAttribute('aria-selected',String(training));
-  viewChat.setAttribute('aria-selected',String(!training));
-  viewTrain.classList.toggle('active',training);
-  viewChat.classList.toggle('active',!training);
+  channelsView.classList.toggle('on',name==='channels');
+  gatewayView.classList.toggle('on',name==='gateway');
+  for(const [v,btn] of Object.entries(VIEW_TABS)){
+    const on=v===name;
+    btn.setAttribute('aria-selected',String(on));
+    btn.classList.toggle('active',on);
+  }
   if(persist) try{ localStorage.setItem('view',requested); }catch(e){}
   if(training) refreshTraining();
+  if(name==='channels') refreshChannels();
+  if(name==='gateway') refreshGateway();
 }
 viewChat.addEventListener('click',()=>showView('chat'));
 viewTrain.addEventListener('click',()=>showView('train'));
+viewChannels.addEventListener('click',()=>showView('channels'));
+viewGateway.addEventListener('click',()=>showView('gateway'));
 
 function setTrainState(state){
   const live=state && !['done','failed','cancelled'].includes(state);
@@ -2674,9 +2765,145 @@ document.getElementById('tRunOn').addEventListener('change',e=>{
 // brings a deliberate Train view back without inventing a new selection. While
 // the engine is not ready showView forces Chat, so restoreView() is safe to run
 // at startup too: it selects the tab and setup stays visible.
+/* --- channels & gateway ------------------------------------------------ */
+const chList=document.getElementById('chList'),
+      chAddForm=document.getElementById('chAddForm'),
+      chError=document.getElementById('chError'),
+      chPlatform=document.getElementById('chPlatform'),
+      chAppTokenWrap=document.getElementById('chAppTokenWrap'),
+      gwState=document.getElementById('gwState'),
+      gwMeta=document.getElementById('gwMeta'),
+      gwStart=document.getElementById('gwStart'),
+      gwStop=document.getElementById('gwStop'),
+      gwError=document.getElementById('gwError'),
+      gwLog=document.getElementById('gwLog');
+
+function syncChPlatform(){
+  const slack=chPlatform.value==='slack';
+  chAppTokenWrap.classList.toggle('is-hidden',!slack);
+  const tok=chAddForm.querySelector('[name=token_ref]');
+  if(!tok.value || tok.dataset.auto==='1'){
+    tok.value=slack?'env:SLACK_BOT_TOKEN':'env:TELEGRAM_BOT_TOKEN';
+    tok.dataset.auto='1';
+  }
+}
+chPlatform.addEventListener('change',syncChPlatform);
+syncChPlatform();
+
+async function refreshChannels(){
+  if(!PORT) return;
+  chError.textContent='';
+  try{
+    const {channels}=await (await fetch(`http://127.0.0.1:${PORT}/bots/channels`)).json();
+    chList.textContent='';
+    if(!channels.length){
+      chList.innerHTML='<p class="meta">No channels yet. Add Telegram or Slack above.</p>';
+      return;
+    }
+    channels.forEach(ch=>{
+      const row=document.createElement('div');
+      row.className='chrow';
+      const st=document.createElement('span');
+      st.className='st'+(ch.state==='running'?' run':'');
+      st.textContent=ch.state;
+      const nm=document.createElement('span');
+      nm.className='nm';
+      nm.textContent=`${ch.name} (${ch.platform})`;
+      const meta=document.createElement('span');
+      meta.className='meta';
+      meta.textContent=[ch.token_set?'token ok':'token missing',
+        ch.platform==='slack'?(ch.app_token_set?'app ok':'app missing'):null]
+        .filter(Boolean).join(' · ');
+      const startBtn=document.createElement('button');
+      startBtn.className='tbtn';
+      startBtn.type='button';
+      startBtn.textContent=ch.state==='running'?'Running':'Start';
+      startBtn.disabled=ch.state==='running';
+      startBtn.onclick=async()=>{
+        chError.textContent='';
+        const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/start`,{method:'POST'});
+        const j=await r.json();
+        if(!r.ok){ chError.textContent=j.error||'start failed'; return; }
+        refreshChannels();
+      };
+      const stopBtn=document.createElement('button');
+      stopBtn.className='tbtn danger';
+      stopBtn.type='button';
+      stopBtn.textContent='Stop';
+      stopBtn.hidden=ch.state!=='running';
+      stopBtn.onclick=async()=>{
+        await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/stop`,{method:'POST'});
+        refreshChannels();
+      };
+      const delBtn=document.createElement('button');
+      delBtn.className='ghost';
+      delBtn.type='button';
+      delBtn.textContent='Delete';
+      delBtn.onclick=async()=>{
+        if(ch.state==='running'){ chError.textContent='Stop the bot first'; return; }
+        await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}`,{method:'DELETE'});
+        refreshChannels();
+      };
+      row.append(st,nm,meta,startBtn,stopBtn,delBtn);
+      chList.appendChild(row);
+    });
+  }catch(e){ chError.textContent='Could not load channels'; }
+}
+
+chAddForm.addEventListener('submit',async e=>{
+  e.preventDefault();
+  chError.textContent='';
+  const data=new FormData(chAddForm);
+  const body={platform:data.get('platform'),name:data.get('name'),token_ref:data.get('token_ref')};
+  if(data.get('platform')==='slack') body.app_token_ref=data.get('app_token_ref');
+  body.unknown_user_policy='allow';
+  const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels`,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok){ chError.textContent=j.error||'add failed'; return; }
+  chAddForm.reset();
+  syncChPlatform();
+  refreshChannels();
+});
+
+async function refreshGateway(){
+  if(!PORT) return;
+  gwError.textContent='';
+  try{
+    const g=await (await fetch(`http://127.0.0.1:${PORT}/bots/gateway`)).json();
+    const live=g.state==='running';
+    gwState.textContent=g.state;
+    gwState.className='pill '+(live?'run':'');
+    gwMeta.textContent=live?`pid ${g.pid} · port ${g.port} · ${g.channels_configured} channel(s)`:
+      `${g.channels_configured} channel(s) configured`;
+    gwStart.hidden=live;
+    gwStop.hidden=!live;
+    if(g.log_tail&&g.log_tail.length){
+      gwLog.hidden=false;
+      gwLog.textContent=g.log_tail.join('\n');
+    }
+  }catch(e){ gwError.textContent='Could not load gateway status'; }
+}
+
+gwStart.addEventListener('click',async()=>{
+  gwError.textContent='';
+  const r=await fetch(`http://127.0.0.1:${PORT}/bots/gateway/start`,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  const j=await r.json();
+  if(!r.ok){ gwError.textContent=j.error||'start failed'; return; }
+  refreshGateway();
+});
+gwStop.addEventListener('click',async()=>{
+  await fetch(`http://127.0.0.1:${PORT}/bots/gateway/stop`,{method:'POST'});
+  refreshGateway();
+});
+
 function restoreView(){
   let saved='chat';
-  try{ if(localStorage.getItem('view')==='train') saved='train'; }catch(e){}
+  try{
+    const v=localStorage.getItem('view');
+    if(v&&['train','channels','gateway'].includes(v)) saved=v;
+  }catch(e){}
   showView(saved);
 }
 initialBoot.then(restoreView);

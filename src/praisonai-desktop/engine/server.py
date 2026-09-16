@@ -118,6 +118,7 @@ LOCK_PATH = DATA_DIR / "engine.lock"
 # Built on first use: importing the training module costs nothing until someone
 # opens the tab, and the engine must stay fast to start for chat.
 _TRAINER = None
+_BOTS = None
 LOCK_FORMAT_VERSION = 2
 
 
@@ -1841,6 +1842,19 @@ class Handler(BaseHTTPRequestHandler):
             _TRAINER = Trainer(DATA_DIR, sys.executable)
         return _TRAINER
 
+    def _bots(self):
+        """Channel bots and gateway supervisor."""
+        global _BOTS
+        if _BOTS is None:
+            from bots import BotSupervisor
+            cfg = load_settings()
+            _BOTS = BotSupervisor(
+                DATA_DIR,
+                sys.executable,
+                model=str(cfg.get("model") or "gpt-4o-mini"),
+            )
+        return _BOTS
+
     def _train_progress(self, run, cursor):
         """Replay from `cursor`, then follow. Not a subscription: a client that
         reconnects after a closed lid gets what it missed, which is the whole
@@ -1917,6 +1931,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._train_progress(run, cursor)
             except (BrokenPipeError, ConnectionResetError):
                 pass          # the window closed; the run keeps going
+            return
+
+        if self.path == "/bots/channels":
+            self._json({"channels": self._bots().list_channels()})
+            return
+        if self.path == "/bots/gateway":
+            self._json(self._bots().gateway_status())
+            return
+        if self.path.startswith("/bots/logs?"):
+            from urllib.parse import parse_qs, urlparse
+            target = (parse_qs(urlparse(self.path).query).get("target") or [""])[0]
+            try:
+                self._json(self._bots().logs(target))
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
             return
 
         if self.path == "/train/runs":
@@ -2017,8 +2046,36 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_PUT(self):
+        if not self._origin_ok():
+            return
+        route = urlparse(self.path).path
+        if route.startswith("/bots/channels/"):
+            channel_id = route.rsplit("/", 1)[-1]
+            payload = self._body()
+            try:
+                ch = self._bots().update_channel(channel_id, payload)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+        self.send_error(404)
+
     def do_DELETE(self):
         if not self._origin_ok():
+            return
+        route = urlparse(self.path).path
+        if route.startswith("/bots/channels/"):
+            channel_id = route.rsplit("/", 1)[-1]
+            ok = self._bots().delete_channel(channel_id)
+            if not ok:
+                self._json({"ok": False, "error": "no such channel"}, 404)
+                return
+            self._json({"ok": True})
             return
         if not self.path.startswith("/chats/"):
             self.send_error(404)
@@ -2038,6 +2095,60 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._origin_ok():
             return
+        route = urlparse(self.path).path
+
+        if route == "/bots/channels":
+            payload = self._body()
+            try:
+                ch = self._bots().add_channel(payload)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, "channel": ch}, 201)
+            return
+
+        if route.startswith("/bots/channels/") and route.endswith("/start"):
+            channel_id = route.split("/")[3]
+            try:
+                ch = self._bots().start_channel(channel_id)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+
+        if route.startswith("/bots/channels/") and route.endswith("/stop"):
+            channel_id = route.split("/")[3]
+            try:
+                ch = self._bots().stop_channel(channel_id)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+
+        if route == "/bots/gateway/start":
+            payload = self._body() or {}
+            port = int(payload.get("port") or 8765)
+            try:
+                status = self._bots().start_gateway(port)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "gateway": status})
+            return
+
+        if route == "/bots/gateway/stop":
+            status = self._bots().stop_gateway()
+            self._json({"ok": True, "gateway": status})
+            return
+
         if self.path == "/train/start":
             payload = self._body()
             config = payload.get("config") or {}
