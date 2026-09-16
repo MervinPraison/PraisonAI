@@ -826,6 +826,11 @@ class GatewayConfigSchema(BaseModel):
     # Top-level fields for single-bot compatibility
     platform: Optional[str] = None
     token: Optional[str] = None
+    # Slack Socket Mode needs an app-level token in addition to the bot token.
+    # Accepted at the top level of a single-bot ``bot.yaml`` and carried into
+    # the migrated Slack channel below so ``app_token`` is not silently dropped
+    # (a plaintext top-level ``app_token`` used to never reach the adapter).
+    app_token: Optional[Union[str, Dict[str, Any]]] = None
 
     # Set by the single-bot migration when a top-level ``platform:`` was
     # declared. Credential-presence autofill uses it to refuse to bring up any
@@ -932,11 +937,21 @@ class GatewayConfigSchema(BaseModel):
                 # existing "channel skipped" path rather than silently
                 # switching platforms.
                 token = self._credential_env_ref(declared_platform)
+            channel_kwargs: Dict[str, Any] = {
+                "platform": declared_platform,
+                "token": token,
+            }
+            # Carry a top-level ``app_token`` (Slack Socket Mode's app-level
+            # token) into the channel so it reaches the adapter. Without this a
+            # plaintext top-level ``app_token`` was silently dropped and Socket
+            # Mode fell back to (or failed on) the env var alone. Scoped to
+            # Slack: ``app_token`` is Slack-specific, so forwarding it to a
+            # non-Slack custom adapter with a strict constructor could keep the
+            # channel from starting.
+            if declared_platform == "slack" and self.app_token is not None:
+                channel_kwargs["app_token"] = self.app_token
             self.channels = {
-                declared_platform: ChannelConfigSchema(
-                    platform=declared_platform,
-                    token=token,
-                )
+                declared_platform: ChannelConfigSchema(**channel_kwargs)
             }
             self._explicit_single_platform = declared_platform
 

@@ -199,6 +199,56 @@ class TestSlackStarts:
             BotHandler().start_slack()
         assert excinfo.value.code == 1
 
+    def test_single_bot_top_level_app_token_reaches_channel(self, clean_env):
+        """A top-level ``app_token:`` in a single-bot slack config must not be dropped.
+
+        The single-bot migration built the Slack channel from ``token`` alone,
+        so a plaintext top-level ``app_token`` never reached the adapter and
+        Socket Mode fell back to (or failed on) the env var only.
+        """
+        config = GatewayConfigSchema(
+            platform="slack",
+            token="xoxb-plain",
+            app_token="xapp-plain",
+            agent={"name": "assistant", "instructions": "Be helpful."},
+            auto_enable_from_env=False,
+        )
+
+        assert list(config.channels) == ["slack"]
+        assert config.channels["slack"].app_token == "xapp-plain"
+
+    def test_single_bot_top_level_app_token_env_ref_resolves(self, clean_env):
+        """A ``${ENV}`` top-level ``app_token`` resolves onto the channel."""
+        clean_env.setenv("SLACK_APP_TOKEN", "xapp-from-env")
+
+        config = GatewayConfigSchema(
+            platform="slack",
+            token="xoxb-plain",
+            app_token="${SLACK_APP_TOKEN}",
+            agent={"name": "assistant", "instructions": "Be helpful."},
+            auto_enable_from_env=False,
+        )
+
+        assert config.channels["slack"].app_token == "xapp-from-env"
+
+    def test_top_level_app_token_scoped_to_slack(self, clean_env):
+        """A Slack-only ``app_token`` must not leak onto a non-Slack channel.
+
+        ``app_token`` is Slack-specific, so the single-bot migration must not
+        forward it to a non-Slack adapter (a strict constructor would reject
+        the unexpected keyword and keep the channel from starting).
+        """
+        config = GatewayConfigSchema(
+            platform="telegram",
+            token="tg-plain",
+            app_token="xapp-should-not-leak",
+            agent={"name": "assistant", "instructions": "Be helpful."},
+            auto_enable_from_env=False,
+        )
+
+        assert list(config.channels) == ["telegram"]
+        assert config.channels["telegram"].app_token is None
+
 
 # ── Defect 3: a started bot must stay up ────────────────────────────────
 
