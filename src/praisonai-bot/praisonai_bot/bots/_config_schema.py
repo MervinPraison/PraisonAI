@@ -377,6 +377,39 @@ class ScheduleConfigSchema(BaseModel):
         return self
 
 
+def _normalize_unknown_user_policy(v: Optional[str]) -> Optional[str]:
+    """Validate + normalize an inbound admission policy (Issue #5093).
+
+    Shared by the channel-level and top-level single-bot fields so a typo
+    (``alow``/``deney``) fails closed at load time in either position rather
+    than being silently accepted and ignored. ``None`` passes through so the
+    secure ``deny`` default (applied by ``BotConfig``) still wins when omitted.
+    """
+    if v is None:
+        return v
+    allowed = {"deny", "pair", "allow"}
+    normalized = str(v).strip().lower()
+    if normalized not in allowed:
+        raise ValueError(
+            f"Invalid unknown_user_policy '{v}'. Must be one of: "
+            f"{', '.join(sorted(allowed))}"
+        )
+    return normalized
+
+
+def _coerce_owner_user_id(v):
+    """Coerce a numeric or string owner id to a trimmed string (Issue #5093).
+
+    Telegram/Discord owner ids are naturally numeric, so an unquoted YAML
+    ``owner_user_id: 987654321`` arrives as an ``int``. Mirror the gateway
+    path's ``str(...)`` coercion so the typed single-bot schema accepts it.
+    """
+    if v is None:
+        return None
+    text = str(v).strip()
+    return text or None
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -414,6 +447,12 @@ class ChannelConfigSchema(BaseModel):
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)  # Changed to List for consistency
+    # Inbound admission policy for users not on the allowlist (Issue #2855 /
+    # #5093): "deny" (default, silently drop), "pair" (route through pairing),
+    # or "allow" (open DMs). Declared here so both the gateway and the
+    # ``praisonai bot start`` CLI wire it into BotConfig from the same field.
+    unknown_user_policy: Optional[str] = None
+    owner_user_id: Optional[str] = None  # Owner user ID for pairing approvals
     admin_users: Optional[str] = None  # Comma-separated list of admin user IDs
     user_allowed_commands: Optional[str] = None  # Comma-separated list of allowed commands
     routes: Dict[str, str] = Field(default_factory=dict)  # Context -> agent_id mapping
@@ -559,6 +598,29 @@ class ChannelConfigSchema(BaseModel):
                 f"Invalid group_policy '{v}'. Must be one of: {', '.join(sorted(allowed))}"
             )
         return v
+
+    @field_validator("unknown_user_policy")
+    @classmethod
+    def validate_unknown_user_policy(cls, v: Optional[str]) -> Optional[str]:
+        """Fail-closed on a typo'd admission policy (Issue #5093).
+
+        A misspelled ``unknown_user_policy`` (``alow``/``deney``) must be
+        rejected at load time rather than silently falling back to the secure
+        ``deny`` default and leaving the operator debugging a "broken" bot.
+        """
+        return _normalize_unknown_user_policy(v)
+
+    @field_validator("owner_user_id", mode="before")
+    @classmethod
+    def coerce_owner_user_id(cls, v):
+        """Accept a numeric or string owner id (Issue #5093).
+
+        Telegram/Discord owner ids are naturally numeric, so an unquoted
+        ``owner_user_id: 987654321`` in YAML arrives as an ``int``. The gateway
+        path already coerces via ``str(...)``; mirror that here so the typed
+        ``praisonai bot start`` schema does not reject valid input.
+        """
+        return _coerce_owner_user_id(v)
 
     @field_validator("approval_mode")
     @classmethod
@@ -831,6 +893,12 @@ class GatewayConfigSchema(BaseModel):
     # the migrated Slack channel below so ``app_token`` is not silently dropped
     # (a plaintext top-level ``app_token`` used to never reach the adapter).
     app_token: Optional[Union[str, Dict[str, Any]]] = None
+    # Single-bot admission policy (Issue #5093): a ``bot.yaml`` may declare
+    # ``unknown_user_policy``/``owner_user_id`` at the top level alongside
+    # ``platform:``/``token:``. These are migrated onto the synthesised channel
+    # below so the ``praisonai bot start`` path wires them into BotConfig.
+    unknown_user_policy: Optional[str] = None
+    owner_user_id: Optional[str] = None
 
     # Set by the single-bot migration when a top-level ``platform:`` was
     # declared. Credential-presence autofill uses it to refuse to bring up any
@@ -884,7 +952,27 @@ class GatewayConfigSchema(BaseModel):
     # friendly, field-named error instead of being silently dropped (#3050).
     gateway: Optional[Dict[str, Any]] = None
     hooks: Optional[List[Dict[str, Any]]] = None
-    
+
+    @field_validator("unknown_user_policy")
+    @classmethod
+    def validate_top_level_unknown_user_policy(
+        cls, v: Optional[str]
+    ) -> Optional[str]:
+        """Fail-closed on a typo'd top-level admission policy (Issue #5093).
+
+        A top-level ``unknown_user_policy`` is only migrated onto a synthesised
+        channel when ``platform`` is set and no ``channels:`` block exists, so
+        without this it could be silently accepted (and ignored) in mixed
+        configs. Validate it here too, sharing the channel-level rule.
+        """
+        return _normalize_unknown_user_policy(v)
+
+    @field_validator("owner_user_id", mode="before")
+    @classmethod
+    def coerce_top_level_owner_user_id(cls, v):
+        """Coerce an unquoted numeric top-level owner id (Issue #5093)."""
+        return _coerce_owner_user_id(v)
+
     @model_validator(mode="after")
     def normalize_and_validate(self):
         """Normalize different config formats to canonical form and validate."""
@@ -950,6 +1038,14 @@ class GatewayConfigSchema(BaseModel):
             # channel from starting.
             if declared_platform == "slack" and self.app_token is not None:
                 channel_kwargs["app_token"] = self.app_token
+            # Carry the top-level single-bot admission policy (Issue #5093) onto
+            # the synthesised channel so ``praisonai bot start`` wires it into
+            # BotConfig. Only forward when set so channel defaults/validation are
+            # unaffected when the operator omits them.
+            if self.unknown_user_policy is not None:
+                channel_kwargs["unknown_user_policy"] = self.unknown_user_policy
+            if self.owner_user_id is not None:
+                channel_kwargs["owner_user_id"] = self.owner_user_id
             self.channels = {
                 declared_platform: ChannelConfigSchema(**channel_kwargs)
             }
