@@ -167,6 +167,7 @@ class TestRegistryImportErrorIsContained:
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        registry.invalidate_availability("crewai")
         with patch.object(registry, "create", side_effect=ImportError("missing dep")):
             assert registry.is_available("crewai") is False
 
@@ -174,6 +175,7 @@ class TestRegistryImportErrorIsContained:
         from praisonai.framework_adapters.registry import get_default_registry
 
         registry = get_default_registry()
+        registry.invalidate_availability("crewai")
         with patch(
             "praisonai.framework_adapters.validators.get_default_registry",
             return_value=registry,
