@@ -70,7 +70,7 @@ def _reset_framework_availability_cache():
     """
     try:
         from praisonai_code import _framework_availability
-    except Exception:
+    except ImportError:
         yield
         return
     _framework_availability.invalidate()
