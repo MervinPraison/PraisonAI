@@ -10,6 +10,15 @@ from unittest.mock import Mock, patch
 
 def pytest_configure(config):
     """Register custom markers to avoid warnings."""
+    # litellm fetches its model-cost map from a remote GitHub URL at import
+    # time (litellm/__init__.py). Under the network guard that outbound call is
+    # blocked, so any unit test that freshly imports litellm (e.g. constructing
+    # an LLM) fails with NetworkBlockedError. Force litellm to use its bundled
+    # local cost map so imports stay fully offline. Set before any test module
+    # imports litellm; skip if the environment already opts in to live network.
+    if os.environ.get('PRAISONAI_ALLOW_NETWORK') != '1' and os.environ.get('PRAISONAI_LIVE_TESTS') != '1':
+        os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+
     config.pluginmanager.import_plugin("tests._pytest_plugins.test_gating")
     config.pluginmanager.import_plugin("tests._pytest_plugins.network_guard")
     config.addinivalue_line("markers", "real: Test requires real API keys")
