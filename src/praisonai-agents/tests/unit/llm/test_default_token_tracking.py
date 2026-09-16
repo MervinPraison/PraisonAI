@@ -293,12 +293,20 @@ async def test_concurrent_agents_sharing_one_llm_do_not_misattribute_tokens(monk
     """current_agent_name lives on the shared LLM instance, so a second agent's
     set_current_agent() can overwrite it while the first agent is still
     awaiting its own completion.
+
+    The interleaving is forced with asyncio.Event coordination rather than a
+    wall-clock sleep: the slow completion signals it has started and then
+    waits for the fast completion to finish before it is allowed to return,
+    so the ordering is deterministic instead of timing-dependent.
     """
     import litellm
 
     collector = get_token_collector()
     collector.reset()
     llm = LLM(model="custom/test-model", api_key="test")
+
+    slow_started = asyncio.Event()
+    fast_done = asyncio.Event()
 
     def _usage_response(prompt_tokens):
         return {
@@ -309,9 +317,13 @@ async def test_concurrent_agents_sharing_one_llm_do_not_misattribute_tokens(monk
     async def fake_acompletion(**kwargs):
         prompt = kwargs["messages"][-1]["content"]
         if prompt == "slow-agent-prompt":
-            await asyncio.sleep(0.05)
+            slow_started.set()
+            await fast_done.wait()
             return _usage_response(100)
-        return _usage_response(5)
+        await slow_started.wait()
+        response = _usage_response(5)
+        fast_done.set()
+        return response
 
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
 

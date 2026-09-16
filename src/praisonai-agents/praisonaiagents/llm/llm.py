@@ -6160,6 +6160,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Set the current agent name for token tracking."""
         self.current_agent_name = agent_name
 
+    def __deepcopy__(self, memo: dict) -> "LLM":
+        """Custom deepcopy that gives the clone its own ContextVar.
+
+        ``contextvars.ContextVar`` cannot be deep-copied (it has no
+        ``__deepcopy__``/``__reduce__`` support), so the default
+        ``copy.deepcopy`` walk raises ``TypeError`` as soon as it reaches
+        ``_current_agent_name_var``. That attribute only holds task-local,
+        runtime attribution state anyway - it is meaningless to carry across
+        a clone - so this hook allocates a fresh ContextVar (default
+        ``None``, same as ``__init__``) for the copy instead of copying the
+        original one.
+        """
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "_current_agent_name_var":
+                object.__setattr__(
+                    result,
+                    k,
+                    contextvars.ContextVar(
+                        f"praisonai_current_agent_name_{id(result)}", default=None
+                    ),
+                )
+            else:
+                object.__setattr__(result, k, copy.deepcopy(v, memo))
+        return result
+
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
 
