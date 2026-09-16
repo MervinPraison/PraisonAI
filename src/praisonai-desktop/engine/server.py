@@ -1765,6 +1765,11 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin_allowed(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
+        # WebView2/Chromium preflight requires Allow-Methods or POST/DELETE fail
+        # with a network error while GET (no preflight) still works.
+        self.send_header(
+            "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+        )
         self.send_header("Access-Control-Allow-Headers", "content-type")
 
     def _origin_ok(self) -> bool:

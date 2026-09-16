@@ -143,6 +143,21 @@ class OriginGateOverHttp(unittest.TestCase):
             self.assertIn(status, (200, 204), f"{method} {path}")
             self.assertEqual(acao, APP, f"{method} {path} lost its CORS header")
 
+    def test_preflight_allows_post_and_delete(self):
+        req = urllib.request.Request(
+            self.base + "/bots/channels",
+            method="OPTIONS",
+            headers={
+                "Origin": APP,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            methods = resp.headers.get("Access-Control-Allow-Methods") or ""
+            self.assertIn("POST", methods)
+            self.assertIn("DELETE", methods)
+
     def test_the_reply_never_carries_a_wildcard(self):
         _, acao = self.call("GET", "/chats", origin=APP)
         self.assertNotEqual(acao, "*", "wildcard CORS is what let any page in")
