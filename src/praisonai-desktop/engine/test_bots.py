@@ -61,6 +61,15 @@ class BotSupervisorTests(unittest.TestCase):
         self.assertTrue(self.sup.delete_channel(ch["id"]))
         self.assertEqual(self.sup.list_channels(), [])
 
+    def test_load_dotenv_replaces_empty_inherited_var(self):
+        env_path = __import__("pathlib").Path(self.home) / ".praisonai.env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text("TELEGRAM_BOT_TOKEN=1234567890:ABCDEF\n", encoding="utf-8")
+        os.environ["TELEGRAM_BOT_TOKEN"] = ""
+        bots.load_dotenv_file(env_path)
+        self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "1234567890:ABCDEF")
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
 
 if __name__ == "__main__":
     unittest.main()

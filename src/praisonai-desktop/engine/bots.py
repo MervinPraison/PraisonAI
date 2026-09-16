@@ -29,7 +29,11 @@ def _quiet_spawn_kwargs() -> dict:
 
 
 def load_dotenv_file(path: pathlib.Path) -> None:
-    """Load KEY=VALUE lines into os.environ without overwriting existing keys."""
+    """Load KEY=VALUE lines into os.environ.
+
+    Fills missing keys and replaces empty inherited placeholders (common when
+    the desktop shell exports ``TELEGRAM_BOT_TOKEN=`` without a value).
+    """
     if not path.is_file():
         return
     try:
@@ -41,8 +45,10 @@ def load_dotenv_file(path: pathlib.Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip()
-        if key and key not in os.environ:
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if not key:
+            continue
+        if key not in os.environ or not str(os.environ.get(key) or "").strip():
             os.environ[key] = value
 
 
@@ -274,8 +280,10 @@ class BotSupervisor:
             return len(self._channels) < before
 
     def _build_env(self) -> dict[str, str]:
-        env = dict(os.environ)
-        return env
+        # Re-read ~/.praisonai/.env on every spawn so gateway/bot subprocesses
+        # see tokens even when the engine inherited empty env placeholders.
+        load_dotenv_file(pathlib.Path.home() / ".praisonai" / ".env")
+        return dict(os.environ)
 
     def _write_bot_yaml(self, ch: dict) -> pathlib.Path:
         platform = ch["platform"]

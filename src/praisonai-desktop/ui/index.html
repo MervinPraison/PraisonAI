@@ -2821,10 +2821,14 @@ async function refreshChannels(){
       startBtn.disabled=ch.state==='running';
       startBtn.onclick=async()=>{
         chError.textContent='';
-        const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/start`,{method:'POST'});
-        const j=await r.json();
-        if(!r.ok){ chError.textContent=j.error||'start failed'; return; }
-        refreshChannels();
+        startBtn.disabled=true;
+        try{
+          const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/start`,{method:'POST'});
+          const j=await r.json().catch(()=>({}));
+          if(!r.ok){ chError.textContent=j.error||`start failed (${r.status})`; return; }
+          refreshChannels();
+        }catch(e){ chError.textContent='Engine unreachable — is it still running?'; }
+        finally{ startBtn.disabled=ch.state==='running'; }
       };
       const stopBtn=document.createElement('button');
       stopBtn.className='tbtn danger';
@@ -2832,8 +2836,15 @@ async function refreshChannels(){
       stopBtn.textContent='Stop';
       stopBtn.hidden=ch.state!=='running';
       stopBtn.onclick=async()=>{
-        await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/stop`,{method:'POST'});
-        refreshChannels();
+        chError.textContent='';
+        try{
+          const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/stop`,{method:'POST'});
+          if(!r.ok){
+            const j=await r.json().catch(()=>({}));
+            chError.textContent=j.error||`stop failed (${r.status})`;
+          }
+          refreshChannels();
+        }catch(e){ chError.textContent='Engine unreachable — is it still running?'; }
       };
       const delBtn=document.createElement('button');
       delBtn.className='ghost';
@@ -2841,8 +2852,15 @@ async function refreshChannels(){
       delBtn.textContent='Delete';
       delBtn.onclick=async()=>{
         if(ch.state==='running'){ chError.textContent='Stop the bot first'; return; }
-        await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}`,{method:'DELETE'});
-        refreshChannels();
+        chError.textContent='';
+        try{
+          const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}`,{method:'DELETE'});
+          if(!r.ok){
+            const j=await r.json().catch(()=>({}));
+            chError.textContent=j.error||`delete failed (${r.status})`;
+          }
+          refreshChannels();
+        }catch(e){ chError.textContent='Engine unreachable — is it still running?'; }
       };
       row.append(st,nm,meta,startBtn,stopBtn,delBtn);
       chList.appendChild(row);
@@ -2852,18 +2870,24 @@ async function refreshChannels(){
 
 chAddForm.addEventListener('submit',async e=>{
   e.preventDefault();
+  if(!PORT){ chError.textContent='Engine not ready yet'; return; }
   chError.textContent='';
-  const data=new FormData(chAddForm);
-  const body={platform:data.get('platform'),name:data.get('name'),token_ref:data.get('token_ref')};
-  if(data.get('platform')==='slack') body.app_token_ref=data.get('app_token_ref');
-  body.unknown_user_policy='allow';
-  const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels`,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const j=await r.json();
-  if(!r.ok){ chError.textContent=j.error||'add failed'; return; }
-  chAddForm.reset();
-  syncChPlatform();
-  refreshChannels();
+  const btn=chAddForm.querySelector('[type=submit]');
+  if(btn) btn.disabled=true;
+  try{
+    const data=new FormData(chAddForm);
+    const body={platform:data.get('platform'),name:data.get('name'),token_ref:data.get('token_ref')};
+    if(data.get('platform')==='slack') body.app_token_ref=data.get('app_token_ref');
+    body.unknown_user_policy='allow';
+    const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ chError.textContent=j.error||`add failed (${r.status})`; return; }
+    chAddForm.reset();
+    syncChPlatform();
+    refreshChannels();
+  }catch(err){ chError.textContent='Engine unreachable — is it still running?'; }
+  finally{ if(btn) btn.disabled=false; }
 });
 
 async function refreshGateway(){
@@ -2886,16 +2910,28 @@ async function refreshGateway(){
 }
 
 gwStart.addEventListener('click',async()=>{
+  if(!PORT){ gwError.textContent='Engine not ready yet'; return; }
   gwError.textContent='';
-  const r=await fetch(`http://127.0.0.1:${PORT}/bots/gateway/start`,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  const j=await r.json();
-  if(!r.ok){ gwError.textContent=j.error||'start failed'; return; }
-  refreshGateway();
+  gwStart.disabled=true;
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/bots/gateway/start`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) gwError.textContent=j.error||`start failed (${r.status})`;
+  }catch(e){ gwError.textContent='Engine unreachable — is it still running?'; }
+  finally{ gwStart.disabled=false; refreshGateway(); }
 });
 gwStop.addEventListener('click',async()=>{
-  await fetch(`http://127.0.0.1:${PORT}/bots/gateway/stop`,{method:'POST'});
-  refreshGateway();
+  gwError.textContent='';
+  gwStop.disabled=true;
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/bots/gateway/stop`,{method:'POST'});
+    if(!r.ok){
+      const j=await r.json().catch(()=>({}));
+      gwError.textContent=j.error||`stop failed (${r.status})`;
+    }
+  }catch(e){ gwError.textContent='Engine unreachable — is it still running?'; }
+  finally{ gwStop.disabled=false; refreshGateway(); }
 });
 
 function restoreView(){
