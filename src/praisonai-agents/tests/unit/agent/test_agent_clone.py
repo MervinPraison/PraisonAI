@@ -83,6 +83,37 @@ class TestAgentDeepCopy:
         agent = self._make_agent(llm="gpt-4o-mini")
         assert agent.clone_for_channel().llm == "gpt-4o-mini"
 
+    def test_deepcopy_agent_with_built_llm_instance_does_not_raise(self):
+        """An already-built LLM stores its agent-attribution state in a
+        ContextVar (issue #5052), which has no __deepcopy__/__reduce__ of its
+        own. Agent.__deepcopy__ recursively deep-copies _llm_instance, so
+        without LLM.__deepcopy__ giving the clone a fresh ContextVar, this
+        raises TypeError: cannot pickle '_contextvars.ContextVar' object.
+        """
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="custom/test-model", api_key="test")
+        agent = self._make_agent(llm=llm)
+
+        cloned = copy.deepcopy(agent)
+
+        assert cloned is not agent
+        assert cloned._llm_instance is not agent._llm_instance
+        # The clone gets its own task-local attribution state, not the
+        # original ContextVar (which is not copyable, and whose value is
+        # runtime/task-local anyway).
+        assert (
+            cloned._llm_instance._current_agent_name_var
+            is not agent._llm_instance._current_agent_name_var
+        )
+        assert cloned._llm_instance.current_agent_name is None
+
+        # The two instances' attribution state stays independent afterwards.
+        agent._llm_instance.set_current_agent("Original")
+        cloned._llm_instance.set_current_agent("Clone")
+        assert agent._llm_instance.current_agent_name == "Original"
+        assert cloned._llm_instance.current_agent_name == "Clone"
+
     def test_multiple_clones_are_isolated(self):
         """Regression: creating two clones (simulating 2nd+ gateway channel) must work."""
         agent = self._make_agent()
