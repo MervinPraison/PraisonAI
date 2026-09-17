@@ -193,7 +193,13 @@ async function createAnyapiClient(): Promise<AnyapiClient> {
  * directly. Normalize both into one shape for the caller.
  */
 function readOutput(output: unknown): { found: boolean; data: unknown } {
-  if (output && typeof output === 'object' && 'found' in output) {
+  if (
+    output &&
+    typeof output === 'object' &&
+    'found' in output &&
+    typeof (output as { found: unknown }).found === 'boolean' &&
+    'data' in output
+  ) {
     const envelope = output as { found: boolean; data: unknown };
     return { found: envelope.found, data: envelope.data };
   }
