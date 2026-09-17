@@ -85,9 +85,13 @@ class TestAutoAgentsConsolidation:
         assert "function_calling_llm=self.function_calling_llm" not in source, \
             "AutoAgents._create_agents_and_tasks still passes function_calling_llm= to Agent()"
     
+    @pytest.mark.live
     @pytest.mark.skipif(
-        not os.environ.get("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY not set"
+        (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+         and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+        or not os.environ.get("OPENAI_API_KEY"),
+        # Owning a key is not consent to spend it.
+        reason="Live provider call: set PRAISONAI_LIVE_TESTS=1 and OPENAI_API_KEY"
     )
     def test_autoagents_accepts_llm_param(self):
         """AutoAgents should accept llm= parameter."""

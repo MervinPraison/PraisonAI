@@ -23,9 +23,12 @@ from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState, DualLock
-# NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
-# (Issue #2644). It is kept in the MRO for backward compatibility during the
-# deprecation cycle and will be removed afterwards.
+# NOTE: UnifiedExecutionMixin's *public* methods are deprecated and unused by
+# any production path (Issue #2644); it is kept in the MRO for backward
+# compatibility during the deprecation cycle and will be removed afterwards.
+# The one live helper it used to own (_run_async_in_sync_context) has been
+# relocated to async_safety.run_async_in_sync_context, so dropping this mixin
+# from the MRO is a true no-op.
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
@@ -879,6 +882,19 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "stream": (
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
+                ),
+                # Same migration, different container: these two were flat
+                # kwargs before they were grouped into tool_config. Without a
+                # hint the user gets a bare "unexpected keyword argument" and
+                # has to search a 41-parameter signature for a name that is not
+                # in it.
+                "tool_retry_policy": (
+                    "tool retry moved into tool_config=; use "
+                    "tool_config=ToolConfig(retry_policy=RetryPolicy(...))."
+                ),
+                "tool_timeout": (
+                    "tool timeout moved into tool_config=; use "
+                    "tool_config=ToolConfig(timeout=...)."
                 ),
             }
             _hint = "".join(
@@ -2288,10 +2304,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # was sent to OpenAI under a model name that was really a repr -- the
         # opposite of what passing your own model means. Duck-typed on
         # ``get_response`` so any conforming backend works, not just ``LLM``.
+        # Detection must match what the tool loop actually invokes: the custom
+        # path calls ``llm_instance.get_response(**llm_kwargs)`` (and the async
+        # ``get_response_async``) with PraisonAI-internal kwargs -- tools,
+        # tool_choice, seed, cancel_token, steering_drain, and more. The
+        # ``chat``/``achat`` (LLMProviderProtocol) and
+        # ``chat_completion``/``achat_completion`` (UnifiedLLMProtocol) surfaces
+        # take a different signature and are NOT wired into that loop, so a
+        # backend exposing only those would be adopted here and then raise
+        # ``AttributeError`` on the first turn. Adopt only the surface the
+        # executor can drive; a translation adapter for the other protocols
+        # would be a heavy, unused implementation rather than a fix.
+        _MODEL_BACKEND_METHODS = ("get_response", "get_response_async")
         _is_model_instance = (
             llm is not None
             and not isinstance(llm, (str, dict))
-            and callable(getattr(llm, "get_response", None))
+            and any(callable(getattr(llm, m, None)) for m in _MODEL_BACKEND_METHODS)
         )
         if _is_model_instance:
             self._llm_instance = llm
@@ -2544,7 +2572,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                         self.tools.extend(get_ast_grep_tools())
                     except ImportError:
                         pass  # No default tools available
-        
+
+        # Merge tools contributed by enabled PluginType.TOOL plugins so a plugin's
+        # get_tools() output is actually callable by this agent. Existing tools win
+        # on a name collision (reported, not silently shadowed).
+        self._merge_plugin_tools()
+
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
@@ -3400,8 +3433,27 @@ Your Goal: {self.goal}
                         from ..config.feature_configs import MemoryConfig
                         clone_kwargs['memory'] = MemoryConfig(auto_save=value)
         
-        # Create new Agent instance
-        return self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        # Create new Agent instance. Plugin tools are shallow-copied above so
+        # callable identity and their ownership metadata can be carried over;
+        # otherwise the constructor's name-collision guard would treat a copied
+        # plugin tool as a caller-declared tool and disabling the plugin could
+        # leave the clone with an executable stale capability.
+        clone = self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+        plugin_owners = getattr(self, "_plugin_tool_owners", None)
+        if plugin_owners:
+            inherited_owners = {
+                id(tool): plugin_owners[id(tool)]
+                for tool in (clone.tools if isinstance(clone.tools, (list, tuple)) else [])
+                if id(tool) in plugin_owners
+            }
+            if inherited_owners:
+                # Keep ownership recorded while the constructor merged any
+                # plugins that became enabled after the source was created.
+                # Those entries are needed to revoke newly attached tools.
+                current_owners = dict(getattr(clone, "_plugin_tool_owners", {}) or {})
+                current_owners.update(inherited_owners)
+                clone._plugin_tool_owners = current_owners
+        return clone
 
     @property
     def _telemetry(self):
@@ -4061,34 +4113,41 @@ Summary:"""
         * ``"safe"``  -> subprocess isolation, no tool access from the code.
         * ``"unsafe"`` -> same process, restricted builtins, and the
           ``code_tools_allow`` allow-list injected as callable tool proxies.
+        * ``"isolated"`` -> subprocess isolation AND the ``code_tools_allow``
+          allow-list, with each tool call bridged back to the parent under the
+          approval gate (the safe-and-tool-capable path).
 
-        Both expose one tool named ``execute_code``, which the approval registry
+        All expose one tool named ``execute_code``, which the approval registry
         classes as "critical", so it stays gated under every preset but "full".
         """
         from ..tools.python_tools import build_code_execution_tools
 
+        _tool_capable = ("unsafe", "isolated")
         code_tools = bool(getattr(exec_config, "code_tools", False))
         allowed = list(getattr(exec_config, "code_tools_allow", None) or [])
-        if code_tools and code_execution_mode != "unsafe":
+        if code_tools and code_execution_mode not in _tool_capable:
             import warnings
             warnings.warn(
-                "ExecutionConfig(code_tools=True) needs code_mode='unsafe': in "
-                "'safe' mode the code runs in a separate process and cannot "
-                "reach the agent's tools, so code_tools_allow is ignored.",
+                "ExecutionConfig(code_tools=True) needs code_mode='unsafe' or "
+                "'isolated': in 'safe' mode the code runs in a separate process "
+                "and cannot reach the agent's tools, so code_tools_allow is "
+                "ignored.",
                 UserWarning,
                 stacklevel=3,
             )
             code_tools = False
 
-        # In unsafe mode the allow-list must resolve against ONLY the tools this
-        # agent was granted, never the process-global registry (which can hold
-        # plugin/entry-point tools the agent was never given). Build a private
-        # registry from self.tools and pass it down so code-mode inherits the
-        # agent's exact tool boundary.
+        # In tool-capable modes the allow-list must resolve against ONLY the
+        # tools this agent was granted, never the process-global registry (which
+        # can hold plugin/entry-point tools the agent was never given). Build a
+        # private registry from self.tools and pass it down so code-mode
+        # inherits the agent's exact tool boundary.
         scoped_registry = None
-        if code_tools and code_execution_mode == "unsafe":
+        if code_tools and code_execution_mode in _tool_capable:
             from ..tools.registry import ToolRegistry
-            scoped_registry = ToolRegistry()
+            # discovery_enabled=False: an allow-listed name absent from THIS
+            # agent's tools must NOT resolve to an installed global plugin.
+            scoped_registry = ToolRegistry(discovery_enabled=False)
             for t in (self.tools or []):
                 if callable(t) or hasattr(t, "name"):
                     try:
@@ -5835,6 +5894,8 @@ Summary:"""
             List of available tools
         """
         if not self.plan_mode:
+            if getattr(self, "_plugin_tool_owners", None):
+                return [tool for tool in self.tools if self._is_plugin_tool_active(tool)]
             return self.tools
             
         # Filter to read-only tools only
@@ -5842,6 +5903,8 @@ Summary:"""
         
         filtered_tools = []
         for tool in self.tools:
+            if not self._is_plugin_tool_active(tool):
+                continue
             tool_name = getattr(tool, '__name__', str(tool)).lower()
             
             # Check if tool is in restricted list
@@ -7316,10 +7379,25 @@ Answer:"""
             return "empty"
         # Create a simple hash based on tool names
         tool_names = []
+        try:
+            from ..tools.hosted import is_hosted_tool
+        except ImportError:
+            is_hosted_tool = lambda _tool: False
+
         for tool in tools:
             if callable(tool) and hasattr(tool, '__name__'):
                 tool_names.append(tool.__name__)
-            elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+            elif isinstance(tool, dict) and is_hosted_tool(tool):
+                try:
+                    hosted_key = json.dumps(tool, sort_keys=True)
+                except (TypeError, ValueError):
+                    hosted_key = str(id(tool))
+                tool_names.append(f"hosted:{hosted_key}")
+            elif (
+                isinstance(tool, dict)
+                and isinstance(tool.get('function'), dict)
+                and tool['function'].get('name')
+            ):
                 tool_names.append(tool['function']['name'])
             elif isinstance(tool, str):
                 tool_names.append(tool)
@@ -7958,6 +8036,41 @@ Answer:"""
                 elif hasattr(self.memory, 'close_connections'):
                     self.memory.close_connections()
             
+            # LLM client cleanup - release live client pools asynchronously.
+            # Mirror close()'s targets but never touch the ``llm_instance``
+            # property (it would lazily *create* a client just to close it);
+            # only tear down an already-materialised ``_llm_instance``.
+            try:
+                llm_instance = getattr(self, '_llm_instance', None)
+                if llm_instance is not None:
+                    aclose = getattr(llm_instance, 'aclose', None)
+                    if aclose is not None:
+                        try:
+                            if asyncio.iscoroutinefunction(aclose):
+                                await aclose()
+                            else:
+                                aclose()
+                        except Exception:
+                            close = getattr(llm_instance, 'close', None)
+                            if callable(close):
+                                close()
+                    else:
+                        close = getattr(llm_instance, 'close', None)
+                        if callable(close):
+                            close()
+
+                openai_client = getattr(self, '_Agent__openai_client', None)
+                if openai_client is not None and hasattr(openai_client, 'close'):
+                    openai_client.close()
+
+                llm = getattr(self, 'llm', None)
+                if llm and not isinstance(llm, str):
+                    llm_client = getattr(llm, '_client', None)
+                    if llm_client and hasattr(llm_client, 'close'):
+                        llm_client.close()
+            except Exception as e:
+                logger.warning(f"LLM client cleanup failed: {e}")
+
             # Close MCP clients passed via tools=[MCP(...)]
             # (mirrors remove_mcp_server()'s best-effort shutdown)
             if isinstance(self.tools, list):

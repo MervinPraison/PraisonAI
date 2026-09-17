@@ -1442,8 +1442,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
             )
         else:
-            # Resilient polling loop with exponential backoff
+            # Resilient polling loop with exponential backoff.
+            # Single-instance enforcement (Issue #5094): Telegram allows only
+            # one getUpdates poller per token. A duplicate poller (second CLI
+            # bot, gateway telegram channel, UI Channels worker, or orphaned
+            # restart) surfaces as an HTTP 409 Conflict on start_polling. We
+            # fail fast on that real conflict instead of silently looping — a
+            # standalone getUpdates pre-flight probe cannot be used because the
+            # probe is itself a competing consumer and would terminate the
+            # incumbent poller (the incumbent gets the 409, the probe gets 200).
             self._stop_event = asyncio.Event()
+            poll_conflict: Optional[str] = None
             while not self._stop_event.is_set():
                 try:
                     await self._application.initialize()
@@ -1460,11 +1469,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     break
                 except Exception as e:
                     if is_conflict_error(e):
+                        poll_conflict = str(e)
                         logger.error(
-                            "[telegram] Another bot instance is running with this token. "
-                            "Stop the other instance first."
+                            "[telegram] Another process is already polling this "
+                            "token (only one instance per token is allowed). "
+                            "Stop the other bot/gateway/UI-channel instance first."
                         )
-                        break  # Don't retry conflicts
+                        break  # Don't retry conflicts — fail fast below
                     
                     if is_recoverable_error(e, "telegram") and self._monitor.should_retry():
                         delay = self._monitor.record_error(e)
@@ -1493,6 +1504,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     except Exception:
                         pass
                     self._is_running = False
+
+            # Fail fast on a confirmed single-instance conflict so supervisors
+            # (CLI, gateway, BotOS) mark startup as failed instead of treating a
+            # silently-stopped poller as healthy (Issue #5094).
+            if poll_conflict is not None:
+                raise RuntimeError(
+                    "Another process is already polling this Telegram token "
+                    "(only one instance per token is allowed). Stop the other "
+                    "bot/gateway/UI-channel instance first. "
+                    f"Telegram reported: {poll_conflict}"
+                )
     
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -2428,6 +2450,28 @@ def _record_passive_group_message(bot: "TelegramBot", message) -> None:
         logger.debug(f"Failed to record passive group message: {e}")
 
 
+def _is_reply_to_bot(update, bot: "TelegramBot") -> bool:
+    """Whether an inbound update replies to one of the bot's own messages.
+
+    Issue #5029: in a ``mention_only`` group the most natural way to continue a
+    conversation is to tap "Reply" on the bot's answer without re-typing
+    ``@bot``. Telegram carries this as ``message.reply_to_message.from_user`` —
+    when that sender is the bot itself the reply is an implicit mention.
+    Best-effort: any missing field or error means "not a reply to the bot".
+    """
+    try:
+        replied = getattr(update.message, "reply_to_message", None)
+        if replied is None:
+            return False
+        from_user = getattr(replied, "from_user", None)
+        if from_user is None:
+            return False
+        bot_id = bot._bot_user.user_id if bot._bot_user else None
+        return bool(bot_id) and str(from_user.id) == str(bot_id)
+    except Exception:  # pragma: no cover — defensive
+        return False
+
+
 async def process_inbound_telegram_message(
     update,  # Telegram Update
     bot: TelegramBot,
@@ -2525,10 +2569,19 @@ async def process_inbound_telegram_message(
             # Check if bot was mentioned in the message
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
-            bot_mentioned = (
+            explicit_mention = bool(
                 mention_handle and mention_handle in message.content.lower()
-            ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
-            
+            )
+            # Issue #5029: a reply to the bot's own message counts as an
+            # implicit mention, so continuing a conversation by tapping "Reply"
+            # is answered without re-typing @bot.
+            reply_to_bot = _is_reply_to_bot(update, bot)
+            bot_mentioned = (
+                explicit_mention
+                or reply_to_bot
+                or message.message_type == MessageType.COMMAND  # Commands are always allowed
+            )
+
             if not bot_mentioned:
                 # Issue #3380: under ``observe`` an unmentioned group message is
                 # recorded into the session transcript as passive context (no
@@ -2548,9 +2601,11 @@ async def process_inbound_telegram_message(
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
             bot_mentioned = (
-                mention_handle and mention_handle in message.content.lower()
-            ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
-            
+                bool(mention_handle and mention_handle in message.content.lower())
+                or _is_reply_to_bot(update, bot)  # Issue #5029: reply-to-bot is implicit
+                or message.message_type == MessageType.COMMAND  # Commands are always allowed
+            )
+
             if not bot_mentioned:
                 logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
                 return None

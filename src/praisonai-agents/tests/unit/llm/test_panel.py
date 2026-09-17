@@ -400,7 +400,19 @@ async def test_async_partial_failure_tolerance(monkeypatch):
 
 def test_agent_panel_descriptor_forwards_connection_settings(monkeypatch):
     import praisonaiagents.llm.panel as panel_mod
+    import praisonaiagents.auth.subscription.registry as auth_registry
+    from praisonaiagents.auth.subscription.protocols import SubscriptionCredentials
     from praisonaiagents.agent.agent import Agent
+
+    # `auth="claude-code"` resolves the subscription seat eagerly at construction
+    # (by design). This test only asserts that connection settings are forwarded
+    # to the panel, so stub the resolver to keep it offline and independent of
+    # whether a real Claude Code seat is present on the runner.
+    monkeypatch.setattr(
+        auth_registry,
+        "resolve_subscription_credentials",
+        lambda provider_id: SubscriptionCredentials(api_key="stub"),
+    )
 
     captured = {}
 
@@ -410,6 +422,14 @@ def test_agent_panel_descriptor_forwards_connection_settings(monkeypatch):
         return object()
 
     monkeypatch.setattr(panel_mod, "create_panel_llm", fake_create_panel_llm)
+
+    # Agent.__init__ resolves subscription credentials eagerly for auth=, by
+    # design ("missing credentials must fail at construction, not at request
+    # time"). This test is about whether auth reaches the panel, not about
+    # credential discovery, so give the resolver the token it documents in its
+    # own error message -- otherwise it raises AuthError on any machine without
+    # Claude Code logged in, which is every CI runner.
+    monkeypatch.setenv("ANTHROPIC_TOKEN", "test-token")
 
     agent = Agent(
         instructions="x",

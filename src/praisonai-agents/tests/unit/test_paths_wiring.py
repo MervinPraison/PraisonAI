@@ -20,9 +20,16 @@ class TestPolicyConfigWiring:
     """Verify policy/config.py routes through paths.py."""
 
     def test_default_rules_dir_matches_paths(self):
-        from praisonaiagents.policy.config import DEFAULT_RULES_DIR
+        # Reload: DEFAULT_RULES_DIR is computed at IMPORT time from the home in
+        # effect then, so comparing it to a get_rules_dir() call made later only
+        # holds if no earlier test moved the home. Recomputing under the current
+        # home is what "resolves via paths.py" actually asserts.
+        import importlib
+        import praisonaiagents.policy.config as policy_config
         from praisonaiagents.paths import get_rules_dir
-        assert DEFAULT_RULES_DIR == str(get_rules_dir())
+
+        importlib.reload(policy_config)
+        assert policy_config.DEFAULT_RULES_DIR == str(get_rules_dir())
 
     def test_no_hardcoded_expanduser(self):
         from praisonaiagents.policy import config
@@ -59,9 +66,13 @@ class TestSchedulerStoreWiring:
     """Verify scheduler/store.py routes through paths.py."""
 
     def test_default_dir_matches_paths(self):
-        from praisonaiagents.scheduler.store import _DEFAULT_DIR
+        # Same import-time constant problem as the policy config above.
+        import importlib
+        import praisonaiagents.scheduler.store as scheduler_store
         from praisonaiagents.paths import get_schedules_dir
-        assert _DEFAULT_DIR == str(get_schedules_dir())
+
+        importlib.reload(scheduler_store)
+        assert scheduler_store._DEFAULT_DIR == str(get_schedules_dir())
 
     def test_no_hardcoded_expanduser(self):
         from praisonaiagents.scheduler import store

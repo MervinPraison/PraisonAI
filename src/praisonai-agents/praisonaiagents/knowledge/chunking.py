@@ -1,6 +1,7 @@
 from typing import List, Union, Optional, Dict, Any
 from functools import cached_property
 import importlib
+import importlib.util
 
 #: Names accepted for a chunking strategy that are not chunker ids themselves.
 #: ``ChunkingStrategy.FIXED`` and ``.PARAGRAPH`` had no chunker at all, so they
@@ -125,15 +126,32 @@ class Chunking:
         self._chunker = None
         self._embeddings = None
         
+    @staticmethod
+    def _import_auto_embeddings():
+        """Import chonkie's AutoEmbeddings with an actionable error message.
+
+        Only a genuinely missing ``chonkie`` package is translated into the
+        install hint. If ``chonkie`` is installed but its import fails for a
+        different reason (e.g. a missing transitive dependency), the original
+        error is re-raised unchanged so the real cause is not masked.
+        """
+        try:
+            from chonkie.embeddings import AutoEmbeddings
+        except ImportError as e:
+            if importlib.util.find_spec("chonkie") is None:
+                raise ImportError(
+                    "chonkie package not found. Please install it using: pip install 'praisonaiagents[knowledge]'"
+                ) from e
+            raise
+        return AutoEmbeddings
+
     @cached_property
     def embedding_model(self):
         """Lazy load the embedding model."""
         if self._embedding_model is None and self.chunker_type in ['semantic', 'sdpm', 'late']:
-            from chonkie.embeddings import AutoEmbeddings
-            return AutoEmbeddings.get_embeddings("all-MiniLM-L6-v2")
+            return self._import_auto_embeddings().get_embeddings("all-MiniLM-L6-v2")
         elif isinstance(self._embedding_model, str):
-            from chonkie.embeddings import AutoEmbeddings
-            return AutoEmbeddings.get_embeddings(self._embedding_model)
+            return self._import_auto_embeddings().get_embeddings(self._embedding_model)
         return self._embedding_model
 
     def _get_chunker_params(self) -> Dict[str, Any]:

@@ -183,6 +183,7 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
                     other = pinned_path.read_text(encoding="utf-8").strip()
                     if other in available:
                         return other
+                    # Racing writer pinned a now-stale commit; refresh as above.
                     _atomic_write(pinned_path, chosen)
                 except OSError:
                     pass

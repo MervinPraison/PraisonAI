@@ -112,7 +112,27 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
     new_prefix = new_name + "."
 
     # Alias whatever is already imported first (e.g. the package __init__).
-    for mod_name, mod in list(sys.modules.items()):
+    #
+    # Snapshot ``sys.modules`` defensively: a concurrent import in another
+    # thread (e.g. an async client loading a module during a parallel test) can
+    # mutate ``sys.modules`` while ``items()`` is being materialised, and
+    # CPython raises ``RuntimeError: dictionary changed size during iteration``
+    # even for ``list(sys.modules.items())``. Retry the snapshot a few times,
+    # then fall back to reading each value by key — indexing individual keys
+    # never trips the size-change guard.
+    snapshot = None
+    for _attempt in range(3):
+        try:
+            snapshot = list(sys.modules.items())
+            break
+        except RuntimeError:
+            continue
+    if snapshot is None:
+        snapshot = [
+            (name, sys.modules.get(name)) for name in list(sys.modules.keys())
+        ]
+
+    for mod_name, mod in snapshot:
         # ``sys.modules`` can legitimately hold ``None`` placeholders (failed
         # optional imports). Aliasing one would poison the old dotted name so
         # that ``import old_name.sub`` raises "None in sys.modules" even though

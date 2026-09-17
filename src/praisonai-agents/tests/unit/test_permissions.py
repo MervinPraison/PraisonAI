@@ -53,11 +53,34 @@ class TestPermissionPresets:
 class TestAgentPermissionInit:
     """Test that Agent correctly resolves permission presets from approval= param."""
 
-    def test_no_approval_no_denials(self):
+    def test_no_approval_uses_the_default_deny_set(self, monkeypatch):
+        """No approval config is the SAFE default now, not the permissive one.
+
+        This asserted _perm_deny == frozenset(). An agent with no approval
+        mechanism configured now denies destructive tools outright rather than
+        letting them run unguarded -- _resolve_default_deny_set() applies the
+        "default" preset (execute_command, delete_file, kill_process,
+        execute_code, ...). PRAISONAI_TOOL_SAFETY=off is the documented escape
+        hatch and is pinned below so the opt-out cannot rot.
+        """
         from praisonaiagents import Agent
+        monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+        agent = Agent(name="test", instructions="test")
+        assert "execute_command" in agent._perm_deny
+        assert "delete_file" in agent._perm_deny
+        assert agent._perm_allow is None
+
+    def test_tool_safety_off_restores_an_empty_deny_set(self, monkeypatch):
+        from praisonaiagents import Agent
+        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
         agent = Agent(name="test", instructions="test")
         assert agent._perm_deny == frozenset()
-        assert agent._perm_allow is None
+
+        with patch.dict(os.environ, {"PRAISONAI_TOOL_SAFETY": "off"}):
+            wide_open = Agent(name="test", instructions="test")
+        assert wide_open._perm_deny == frozenset(), (
+            "PRAISONAI_TOOL_SAFETY=off is the documented full bypass"
+        )
 
     def test_approval_safe_sets_deny(self):
         from praisonaiagents import Agent
@@ -83,12 +106,21 @@ class TestAgentPermissionInit:
         assert agent._approval_backend is not None
         assert agent._perm_deny == frozenset()
 
-    def test_approval_false_still_works(self):
-        """Backward compat: approval=False should still disable."""
+    def test_approval_false_still_works(self, monkeypatch):
+        """approval=False disables the BACKEND, not the default denials.
+
+        Turning off the approval mechanism is not a request to run destructive
+        tools unguarded -- with nobody left to ask, the safe posture is to deny
+        them. The backend is still None, which is what this test was protecting.
+        """
         from praisonaiagents import Agent
+        monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
         agent = Agent(name="test", instructions="test", approval=False)
+        # approval=False opts out of *prompting*, not out of safety: the
+        # backend is gone, but the default deny preset still stands so
+        # dangerous tools never run unattended without an explicit policy.
         assert agent._approval_backend is None
-        assert agent._perm_deny == frozenset()
+        assert "execute_command" in agent._perm_deny
 
     def test_approval_none_still_works(self):
         from praisonaiagents import Agent
@@ -157,9 +189,15 @@ class TestPermissionZeroOverhead:
     """Verify zero overhead when no permission preset is set."""
 
     def test_empty_frozenset_falsy(self):
-        """Empty frozenset is falsy, so 'if self._perm_deny' skips the check."""
+        """Empty frozenset is falsy, so 'if self._perm_deny' skips the check.
+
+        A default Agent no longer has an empty deny set, so the bypass env var
+        is used to produce one -- the property under test is the falsiness of
+        the empty set, not the default policy.
+        """
         from praisonaiagents import Agent
-        agent = Agent(name="test", instructions="test")
+        with patch.dict(os.environ, {"PRAISONAI_TOOL_SAFETY": "off"}):
+            agent = Agent(name="test", instructions="test")
         assert not agent._perm_deny  # frozenset() is falsy
 
     def test_none_perm_allow_skips(self):

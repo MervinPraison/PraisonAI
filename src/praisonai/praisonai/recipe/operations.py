@@ -52,22 +52,50 @@ class BackgroundTaskHandle:
 
 @dataclass
 class JobHandle:
-    """Handle for an async job."""
+    """Handle for an async job.
+
+    ``JobHandle`` is a long-lived handle: a single ``wait()`` may poll the jobs
+    API dozens of times. A shared, lazily-constructed ``httpx.Client`` is kept
+    on the handle so those polls reuse one keep-alive connection instead of
+    opening (and TLS-handshaking) a fresh socket per call. Use the handle as a
+    context manager, or call ``close()``, to release the connection pool.
+    """
     job_id: str
     recipe_name: str
     status: str = "queued"
     poll_url: Optional[str] = None
     stream_url: Optional[str] = None
     api_url: str = "http://127.0.0.1:8005"
+    _client: Any = field(default=None, init=False, repr=False)
+    
+    @property
+    def client(self) -> Any:
+        """Lazily construct and cache a shared HTTP client."""
+        if self._client is None:
+            import httpx
+            self._client = httpx.Client(base_url=self.api_url, timeout=30.0)
+        return self._client
+    
+    def close(self) -> None:
+        """Close the shared HTTP client, if one was created."""
+        if self._client is not None:
+            try:
+                self._client.close()
+            finally:
+                self._client = None
+    
+    def __enter__(self) -> "JobHandle":
+        return self
+    
+    def __exit__(self, *exc) -> None:
+        self.close()
     
     def get_status(self) -> Dict[str, Any]:
         """Get job status from API."""
         try:
-            import httpx
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(f"{self.api_url}/api/v1/runs/{self.job_id}")
-                response.raise_for_status()
-                return response.json()
+            response = self.client.get(f"/api/v1/runs/{self.job_id}")
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.error(f"Failed to get job status: {e}")
             return {"job_id": self.job_id, "status": "unknown", "error": str(e)}
@@ -75,11 +103,9 @@ class JobHandle:
     def get_result(self) -> Any:
         """Get job result from API."""
         try:
-            import httpx
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(f"{self.api_url}/api/v1/runs/{self.job_id}/result")
-                response.raise_for_status()
-                return response.json()
+            response = self.client.get(f"/api/v1/runs/{self.job_id}/result")
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.error(f"Failed to get job result: {e}")
             return {"job_id": self.job_id, "error": str(e)}
@@ -87,10 +113,8 @@ class JobHandle:
     def cancel(self) -> bool:
         """Cancel the job."""
         try:
-            import httpx
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(f"{self.api_url}/api/v1/runs/{self.job_id}/cancel")
-                return response.status_code < 400
+            response = self.client.post(f"/api/v1/runs/{self.job_id}/cancel")
+            return response.status_code < 400
         except Exception as e:
             logger.error(f"Failed to cancel job: {e}")
             return False

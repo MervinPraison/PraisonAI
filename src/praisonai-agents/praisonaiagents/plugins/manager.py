@@ -73,6 +73,41 @@ class PluginManager:
         # (e.g. Python ``plugins=False`` parity) forces suppression regardless.
         self._disabled = disabled
         self._suppression_notified = False
+        # Optional instance-local allow-list governing whether *late* plugin
+        # registrations default to enabled. ``None`` (default) means no
+        # restriction — every registration starts enabled, preserving the
+        # behaviour of standalone managers. The facade sets this only on the
+        # singleton used by ``plugins.enable([...])`` so selective enablement
+        # never leaks into independently constructed managers.
+        self._registration_allow_list: Optional[frozenset] = None
+
+    def set_registration_allow_list(
+        self, names: Optional[List[str]]
+    ) -> None:
+        """Set (or clear) the instance-local late-registration allow-list.
+
+        When ``names`` is a list, plugins registered after this call default to
+        disabled unless their name is included. Passing ``None`` clears the
+        restriction so future registrations start enabled again. An immutable
+        snapshot is stored so later mutations of the caller's list cannot
+        silently change registration behaviour.
+        """
+        with self._lock:
+            self._registration_allow_list = (
+                None if names is None else frozenset(names)
+            )
+
+    def _default_enabled_for_registration(self, plugin_name: str) -> bool:
+        """Whether a newly registered plugin should start enabled.
+
+        When a selective allow-list is active on *this* manager, late
+        registrations default to disabled unless explicitly allowed. Managers
+        without an allow-list keep registrations enabled by default.
+        """
+        allow_list = self._registration_allow_list
+        if allow_list is not None:
+            return plugin_name in allow_list
+        return True
 
     def is_discovery_disabled(self) -> bool:
         """Return True when external plugin discovery is suppressed this run.
@@ -174,7 +209,7 @@ class PluginManager:
                     return False
                 
                 self._plugins[info.name] = plugin
-                self._enabled[info.name] = True
+                self._enabled[info.name] = self._default_enabled_for_registration(info.name)
                 
                 # Initialize plugin
                 plugin.on_init({})
@@ -432,21 +467,38 @@ class PluginManager:
             lambda: self.execute_hook(hook, *args, **kwargs)
         )
     
-    def get_all_tools(self) -> List[Dict[str, Any]]:
-        """Get all tools from all enabled plugins."""
+    def get_all_tools_with_sources(self) -> List[Tuple[str, Any]]:
+        """Get enabled plugin tools together with their owning plugin names.
+
+        The ownership information lets an Agent re-check plugin state after
+        construction.  This matters because an Agent keeps its own tool list;
+        disabling or unregistering a plugin must not leave copied tools
+        executable through that stale list.
+        """
         tools = []
-        
-        for name, plugin in self._plugins.items():
-            if not self._enabled.get(name, False):
-                continue
-            
+
+        # Snapshot the enabled (name, plugin) pairs under the lock so a
+        # concurrent register/unregister cannot mutate the dict mid-iteration
+        # (which would raise RuntimeError and drop every plugin tool).
+        with self._lock:
+            enabled_plugins = [
+                (name, plugin)
+                for name, plugin in self._plugins.items()
+                if self._enabled.get(name, False)
+            ]
+
+        for name, plugin in enabled_plugins:
             try:
                 plugin_tools = plugin.get_tools()
-                tools.extend(plugin_tools)
+                tools.extend((name, tool) for tool in (plugin_tools or []))
             except Exception as e:
                 logger.error(f"Error getting tools from plugin {name}: {e}")
-        
+
         return tools
+
+    def get_all_tools(self) -> List[Any]:
+        """Get all tools from all enabled plugins."""
+        return [tool for _plugin_name, tool in self.get_all_tools_with_sources()]
     
     def shutdown(self):
         """Shutdown all plugins."""

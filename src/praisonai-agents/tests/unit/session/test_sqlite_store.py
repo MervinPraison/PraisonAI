@@ -190,6 +190,149 @@ class TestDefaultStoreSearchEnhancements:
         assert "messages" in d
 
 
+class TestArchivedRecall:
+    """Issue #5031: compaction must not silently drop turns from recall.
+
+    A conversation compacted under ``retention="compact"`` moves its raw turns
+    into ``archived_messages``; recall must still span the whole conversation,
+    and both built-in stores must agree so their recall can't drift.
+    """
+
+    def _seed_with_archive(self, store, session_id, archived, active):
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        session = SessionData(session_id=session_id)
+        for role, content in archived:
+            session.archived_messages.append(
+                SessionMessage(role=role, content=content)
+            )
+        for role, content in active:
+            session.messages.append(SessionMessage(role=role, content=content))
+        store._save_session(session)
+
+    def test_default_store_recalls_archived_turn(self, tmp_dir):
+        store = DefaultSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert len(hits) == 1
+        assert hits[0].session_id == "s1"
+        # The anchoring context marks the compaction boundary.
+        assert any(m.get("archived") for m in hits[0].messages)
+
+    def test_sqlite_store_recalls_archived_turn(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert len(hits) == 1
+        assert hits[0].session_id == "s1"
+        assert any(m.get("archived") for m in hits[0].messages)
+
+    def test_both_stores_agree_on_archived_only_query(self, tmp_dir):
+        default = DefaultSessionStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            default,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        indexed = SqliteSessionStore(session_dir=tmp_dir)
+
+        default_ids = [h.session_id for h in default.search("zx-9271-alpha")]
+        indexed_ids = [h.session_id for h in indexed.search("zx-9271-alpha")]
+        assert default_ids == indexed_ids == ["s1"]
+
+    def test_real_compaction_stays_searchable(self, tmp_dir):
+        # Drive an actual compaction: the early turn is rolled into the archive
+        # and must remain recallable afterwards.
+        store = DefaultSessionStore(session_dir=tmp_dir, active_window=3)
+        store.add_message("s", "user", "the special value was zx-9271-alpha")
+        for i in range(8):
+            store.add_message("s", "user", f"later message {i}")
+
+        session = store.get_session("s")
+        archived = [m.content for m in session.archived_messages]
+        assert "the special value was zx-9271-alpha" in archived
+
+        hits = store.search("zx-9271-alpha")
+        assert [h.session_id for h in hits] == ["s"]
+
+    def test_window_scrolls_from_archived_anchor(self, tmp_dir):
+        # The anchor returned by search indexes the archived+active projection;
+        # window must scroll the SAME projection so an archived hit resolves to
+        # the matching turn, not an unrelated recent one (Qodo High).
+        for store in (
+            DefaultSessionStore(session_dir=tmp_dir + "/d"),
+            SqliteSessionStore(session_dir=tmp_dir + "/s"),
+        ):
+            self._seed_with_archive(
+                store,
+                "s1",
+                archived=[
+                    ("user", "the special value was zx-9271-alpha"),
+                    ("assistant", "noted the special value"),
+                ],
+                active=[
+                    ("system", "Summary: helped set up X"),
+                    ("user", "unrelated recent turn one"),
+                    ("user", "unrelated recent turn two"),
+                ],
+            )
+            hits = store.search("zx-9271-alpha")
+            assert hits and hits[0].session_id == "s1"
+            anchor = hits[0].anchor_index
+            rows = store.window("s1", str(anchor), window=1)
+            contents = " ".join(r["content"] for r in rows)
+            assert "zx-9271-alpha" in contents
+            assert any(r.get("archived") for r in rows)
+
+    def test_existing_index_migrated_for_archived_recall(self, tmp_dir):
+        # Upgrade path: a store populated by a prior release indexed active
+        # messages only. Opening it with the archived-aware implementation must
+        # force a one-time content reindex so an archived-only query succeeds
+        # WITHOUT another session write (Qodo/Greptile High).
+        import os
+
+        db_path = os.path.join(tmp_dir, "sessions_index.db")
+        store = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        self._seed_with_archive(
+            store,
+            "old",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        # Simulate a v1 (active-only) index: rewrite the FTS content without the
+        # archived turn and reset the version marker to the pre-archived state.
+        conn = store._connect()
+        store._ensure_backfilled()
+        with store._db_lock:
+            conn.execute("DELETE FROM session_fts WHERE session_id = ?", ("old",))
+            conn.execute(
+                "INSERT INTO session_fts (session_id, content) VALUES (?, ?)",
+                ("old", "Summary: helped set up X"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO session_index_meta (key, value) "
+                "VALUES ('content_version', '1')",
+            )
+        # A pre-migration query for the archived-only token must miss.
+        assert not store._candidate_ids("zx-9271-alpha", 5)
+
+        # Re-open fresh against the same DB/dir: migration force-reindexes.
+        reopened = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        hits = reopened.search("zx-9271-alpha")
+        assert [h.session_id for h in hits] == ["old"]
+
+
 class TestIndexedSessionRoute:
     """Indexed gateway/agent routing lookups (Issue #2956)."""
 

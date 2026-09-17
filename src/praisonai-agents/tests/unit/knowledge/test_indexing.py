@@ -6,7 +6,11 @@ Tests IndexResult, CorpusStats, incremental indexing, and .praisonignore support
 
 import os
 import tempfile
+
+import pytest
 import time
+
+import pytest
 
 
 class TestCorpusStats:
@@ -281,7 +285,15 @@ class TestFileTracker:
 
 
 class TestKnowledgeIndex:
-    """Tests for Knowledge.index() method."""
+    """Tests for Knowledge.index() method.
+
+    The methods that actually index embed every chunk through the configured
+    provider — a real network call. Unmarked, `pytest tests/unit` issued live
+    embedding requests and failed on any key lacking access to the default
+    model, so those carry the repo's ``live`` marker (tests/conftest.py) and
+    skip unless PRAISONAI_LIVE_TESTS=1. The deterministic API-contract check
+    below only inspects the class and stays in the default suite.
+    """
     
     def test_knowledge_has_index_method(self):
         """Knowledge should have an index() method."""
@@ -289,6 +301,7 @@ class TestKnowledgeIndex:
         
         assert hasattr(Knowledge, "index")
     
+    @pytest.mark.live
     def test_index_returns_result(self):
         """Knowledge.index() should return IndexResult."""
         from praisonaiagents.knowledge import Knowledge
@@ -305,6 +318,7 @@ class TestKnowledgeIndex:
             assert isinstance(result, IndexResult)
             assert result.files_indexed >= 1
     
+    @pytest.mark.live
     def test_incremental_index(self):
         """Knowledge.index() should support incremental indexing."""
         from praisonaiagents.knowledge import Knowledge
@@ -334,6 +348,7 @@ class TestKnowledgeIndex:
             assert result3.files_indexed == 1
             assert result3.files_skipped == 1
     
+    @pytest.mark.live
     def test_index_respects_ignore_patterns(self):
         """Knowledge.index() should respect exclude_glob patterns."""
         from praisonaiagents.knowledge import Knowledge
@@ -359,6 +374,7 @@ class TestKnowledgeIndex:
             # Should only index main.txt (*.log files excluded)
             assert result.files_indexed == 1
     
+    @pytest.mark.live
     def test_index_with_include_exclude_globs(self):
         """Knowledge.index() should support include/exclude globs."""
         from praisonaiagents.knowledge import Knowledge
@@ -394,6 +410,7 @@ class TestKnowledgeIndex:
             )
             assert result.files_indexed == 1
     
+    @pytest.mark.live
     def test_get_corpus_stats(self):
         """Knowledge should provide corpus stats."""
         from praisonaiagents.knowledge import Knowledge

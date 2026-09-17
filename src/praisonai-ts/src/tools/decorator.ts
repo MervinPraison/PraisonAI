@@ -5,6 +5,14 @@
  */
 
 import { getApprovalManager, ToolApprovalDeniedError } from '../ai/tool-approval';
+import {
+  INPUT,
+  OUTPUT,
+  buildToolGuardrails,
+  toolGuardrailDenial,
+  type ToolGuardrailChain,
+  type ToolGuardrailSpec,
+} from '../guardrails/tool-guardrails';
 import { ToolValidationError } from './base';
 
 export interface ToolParameters {
@@ -75,6 +83,19 @@ export interface ToolConfig<TParams = any, TResult = any> {
    * `execute()` when the context carries `resumed: true`.
    */
   restartSafe?: boolean;
+  /**
+   * Python parity: input_guardrails (Optional[Any], default None). Guardrails
+   * that gate THIS tool's arguments before it runs. A single guardrail or an
+   * array; each entry is a function taking the arguments, or an object
+   * exposing `validateToolCall()`. A blocked call returns the reason to the
+   * model instead of throwing.
+   */
+  inputGuardrails?: ToolGuardrailSpec | ToolGuardrailSpec[];
+  /**
+   * Python parity: output_guardrails (Optional[Any], default None). Guardrails
+   * that gate THIS tool's raw result before it re-enters the LLM context.
+   */
+  outputGuardrails?: ToolGuardrailSpec | ToolGuardrailSpec[];
 }
 
 export interface ToolContext {
@@ -210,6 +231,9 @@ export class FunctionTool<TParams = any, TResult = any> {
   private readonly availabilityFn?: () => [boolean, string];
   private readonly schemaOverride?: (schema: ToolParameters) => ToolParameters;
   private readonly toModelOutputFn?: (result: TResult) => unknown;
+  /** Python parity: coerced at definition time, like `@tool(...)` does. */
+  readonly inputGuardrails?: ToolGuardrailChain;
+  readonly outputGuardrails?: ToolGuardrailChain;
 
   constructor(config: ToolConfig<TParams, TResult>) {
     this.name = config.name;
@@ -228,6 +252,10 @@ export class FunctionTool<TParams = any, TResult = any> {
     this.approval = resolveApproval(config.approval, config.requiresApproval, config.name);
     this.toModelOutputFn = config.toModelOutput;
     this.restartSafe = config.restartSafe;
+    // Coerce at definition time so a malformed declaration surfaces where it
+    // was written, and so the per-call path is a single property read.
+    this.inputGuardrails = buildToolGuardrails(config.inputGuardrails, INPUT);
+    this.outputGuardrails = buildToolGuardrails(config.outputGuardrails, OUTPUT);
   }
 
   /**
@@ -407,7 +435,38 @@ export class FunctionTool<TParams = any, TResult = any> {
       throw new ToolNotRestartSafeError(this.name);
     }
     await this.gateApproval(params, context);
-    return this.runWithRetry(params, context);
+
+    // Per-tool input guardrail: closest layer to the tool, so it sees the
+    // arguments exactly as dispatched and can rewrite them.
+    let args = params;
+    if (this.inputGuardrails) {
+      const [ok, processed] = this.inputGuardrails.validateToolCall(this.name, params);
+      if (!ok) {
+        console.warn(`[praisonai] Tool '${this.name}' blocked by its input guardrail: ${processed}`);
+        // Returned, not thrown: a blocked call is a normal policy outcome, and
+        // the reason goes back to the model so it can react. Python does the
+        // same (an error dict tagged guardrail_denied).
+        return toolGuardrailDenial(this.name, INPUT, String(processed)) as unknown as TResult;
+      }
+      if (processed && typeof processed === 'object') args = processed as TParams;
+    }
+
+    const result = await this.runWithRetry(args, context);
+
+    // Per-tool output guardrail runs FIRST on the way out, before any
+    // agent-wide result handling, so it sees the RAW result.
+    if (this.outputGuardrails) {
+      const [ok, processed] = this.outputGuardrails.validateToolResult(this.name, result);
+      if (!ok) {
+        console.warn(
+          `[praisonai] Tool '${this.name}' result blocked by its output guardrail: ${processed}`,
+        );
+        return toolGuardrailDenial(this.name, OUTPUT, String(processed)) as unknown as TResult;
+      }
+      return processed as TResult;
+    }
+
+    return result;
   }
 
   /**

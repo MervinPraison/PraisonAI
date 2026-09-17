@@ -7,7 +7,91 @@ Provides generic API passthrough functionality for provider-specific endpoints.
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
+import asyncio
 import ipaddress
+import threading
+
+
+# Shared HTTP clients for the httpx fallback path (used when litellm's
+# passthrough route is unavailable). Reused across calls so the hot passthrough
+# fallback shares a keep-alive connection pool instead of opening + tearing down
+# a socket per agent call. Timeout is applied per-request, so a single client
+# safely serves callers with different ``timeout`` values.
+_sync_client: Any = None
+_async_client: Any = None
+_async_client_loop: Any = None
+_client_lock = threading.Lock()
+
+
+def _get_sync_client() -> Any:
+    """Return the shared sync httpx client, constructing it lazily."""
+    global _sync_client
+    if _sync_client is None:
+        with _client_lock:
+            if _sync_client is None:
+                import httpx
+                _sync_client = httpx.Client()
+    return _sync_client
+
+
+def _get_async_client() -> Any:
+    """Return the shared async httpx client for the running event loop.
+
+    ``httpx.AsyncClient`` binds its connection pool to the event loop that first
+    used it, so a client cached across separate ``asyncio.run()`` lifecycles (or
+    reused from a different loop) fails with a loop-closed error. We therefore
+    key the cached client to its owning loop and rebuild it whenever the current
+    loop differs from the one that created it.
+    """
+    global _async_client, _async_client_loop
+    import httpx
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    with _client_lock:
+        if _async_client is None or _async_client_loop is not current_loop:
+            _async_client = httpx.AsyncClient()
+            _async_client_loop = current_loop
+        return _async_client
+
+
+def close_clients() -> None:
+    """Close the cached sync client and clear the sync/async globals.
+
+    Provided as an explicit shutdown hook for long-lived hosts that want to
+    release the pooled sockets deterministically. The async client cannot be
+    awaited from this sync helper, so it is dropped (and rebuilt per-loop on next
+    use); the sync client is closed here.
+    """
+    global _sync_client, _async_client, _async_client_loop
+    with _client_lock:
+        if _sync_client is not None:
+            try:
+                _sync_client.close()
+            finally:
+                _sync_client = None
+        _async_client = None
+        _async_client_loop = None
+
+
+async def aclose_clients() -> None:
+    """Await-close the cached async client (in its own loop) and the sync one."""
+    global _sync_client, _async_client, _async_client_loop
+    client = None
+    with _client_lock:
+        client = _async_client
+        _async_client = None
+        _async_client_loop = None
+        if _sync_client is not None:
+            try:
+                _sync_client.close()
+            finally:
+                _sync_client = None
+    if client is not None:
+        await client.aclose()
 
 
 @dataclass
@@ -121,22 +205,20 @@ def passthrough(
             metadata=metadata or {},
         )
     except AttributeError:
-        # Fallback to httpx if passthrough not available
-        import httpx
-        
+        # Fallback to a shared httpx client if the passthrough route is missing.
         url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method=method,
-                url=url,
-                headers=request_headers,
-                json=json_data,
-                data=data,
-            )
+        response = _get_sync_client().request(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json=json_data,
+            data=data,
+            timeout=timeout,
+        )
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
@@ -203,21 +285,19 @@ async def apassthrough(
             metadata=metadata or {},
         )
     except AttributeError:
-        import httpx
-        
         url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=request_headers,
-                json=json_data,
-                data=data,
-            )
+        response = await _get_async_client().request(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json=json_data,
+            data=data,
+            timeout=timeout,
+        )
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,

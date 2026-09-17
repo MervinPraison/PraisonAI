@@ -3088,6 +3088,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_results_batch = executor.execute_batch(
                                 tool_calls_batch, execute_tool_fn,
                                 timeout_ms=self.tool_timeout_ms,
+                                cancel_token=cancel_token,
                             )
                             
                             tool_results = []
@@ -4413,6 +4414,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Raises:
             Exception: If streaming fails or LLM call encounters an error
         """
+        # Extract the optional cancel token before building completion params
+        # so it is forwarded to the tool batch executor (not leaked to litellm).
+        cancel_token = kwargs.pop("cancel_token", None)
+
+        def _stream_is_cancelled() -> bool:
+            return cancel_token is not None and getattr(
+                cancel_token, "is_set", lambda: False)()
+
+        def _stream_cancel_reason() -> str:
+            return getattr(cancel_token, "reason", None) or "user"
+
         try:
             import litellm
             
@@ -4612,6 +4624,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 _result = executor.execute_batch(
                                     [_tool_call], execute_tool_fn,
                                     timeout_ms=self.tool_timeout_ms,
+                                    cancel_token=cancel_token,
                                 )
                                 tool_results.extend(_result)
                                 if _result and _result[0].error is None:
@@ -4624,6 +4637,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_results = executor.execute_batch(
                                 tool_calls_batch, execute_tool_fn,
                                 timeout_ms=self.tool_timeout_ms,
+                                cancel_token=cancel_token,
                             )
                             if is_ollama:
                                 for _tool_call, _result in zip(

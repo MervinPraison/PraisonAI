@@ -13,7 +13,6 @@ import {
   registerComputeToolPlaces,
 } from '../../../src/compute';
 import { toolPlaceNames } from '../../../src/agent/features/placement';
-import { Logger } from '../../../src/utils/logger';
 
 describe('registration', () => {
   it('compute providers become toolsRunOn places', () => {
@@ -44,14 +43,21 @@ describe('running a tool elsewhere', () => {
   });
 
   it('the host fallback is NOT silent: it warns that isolation was not applied', async () => {
-    // "runs locally and says so" must actually say so -- a caller who asked for
-    // a sandbox must not believe they had one when they did not.
-    const warn = jest.spyOn(Logger, 'warn').mockResolvedValue(undefined as never);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const place = new ComputeToolPlace(new LocalCompute());
+      const dockerLike: any = {
+        name: 'docker',
+        isAvailable: async () => true,
+        provision: async () => ({ id: 'x', status: 'running' }),
+        execute: async () => ({ exitCode: 0, stdout: '', stderr: '', timedOut: false }),
+        shutdown: async () => {},
+        listInstances: async () => [],
+        getStatus: async () => null,
+      };
+      const place = new ComputeToolPlace(dockerLike);
       await place.runTool('anything', {}, async () => 'LOCAL');
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(String(warn.mock.calls[0][0])).toMatch(/not isolated|runs on the host/i);
+      expect(String(warn.mock.calls[0][0])).toMatch(/HOST|sandbox/i);
     } finally {
       warn.mockRestore();
     }

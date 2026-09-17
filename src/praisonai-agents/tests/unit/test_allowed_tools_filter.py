@@ -4,6 +4,7 @@ import logging
 from unittest.mock import patch, MagicMock
 import pytest
 
+from praisonaiagents import allowed_tools_filter as allowed_tools_filter_module
 from praisonaiagents.allowed_tools_filter import AllowedToolsFilter, filter_tools_with_allowed_tools
 
 
@@ -77,7 +78,12 @@ class TestAllowedToolsFilter:
         filter_instance = AllowedToolsFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch.object(logging.getLogger(), 'warning') as mock_warn:
+        # The module logs through its own logger, not the root one, so
+        # patching logging.getLogger() intercepted nothing and the
+        # assertion below reported a missing warning that was in fact
+        # emitted (it shows up in the captured log).
+        module_logger = logging.getLogger('praisonaiagents.allowed_tools_filter')
+        with patch.object(module_logger, 'warning') as mock_warn:
             filtered = filter_instance.filter_tools(available_tools)
             
         # Should return intersection of available and whitelisted tools
@@ -107,7 +113,13 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"})
+    # CI: "false" pinned deliberately. AllowedToolsFilter is STRICT when the
+    # CI env var is truthy -- an unknown tool raises instead of being warned
+    # about and stripped. These tests exercise the dev-mode warn path, so on a
+    # CI runner (where CI=true is already exported) they inherited the strict
+    # path and failed with "All specified tools must be available in CI mode".
+    # The convention is already used by test_filter_tools_with_unknown_tools_dev_mode.
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"})
     def test_filter_tools_partial_match(self):
         """Test filtering when only some whitelisted tools are available."""
         filter_instance = AllowedToolsFilter()
@@ -134,7 +146,8 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist"})
+    # See test_filter_tools_partial_match: dev-mode warn path, so CI must be off.
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist", "CI": "false"})
     def test_diagnostics_data(self):
         """Test diagnostics data collection."""
         filter_instance = AllowedToolsFilter()
@@ -145,7 +158,13 @@ class TestAllowedToolsFilter:
         
         assert diagnostics["env_var_name"] == "ALLOWED_TOOLS"
         assert diagnostics["env_value"] == "search,send_message,unknown_in_whitelist"
-        assert diagnostics["whitelist"] == ["search", "send_message", "unknown_in_whitelist"]
+        # whitelist is derived from a set, so its order is not stable across
+        # runs (it varies with PYTHONHASHSEED). Comparing lists made this pass
+        # or fail depending on the interpreter's hash seed, which is what made
+        # it look order-dependent in full-suite runs.
+        assert set(diagnostics["whitelist"]) == {
+            "search", "send_message", "unknown_in_whitelist"
+        }
         assert set(diagnostics["registered_before_filter"]) == {"search", "send_message", "extract_pdf"}
         assert set(diagnostics["registered_after_filter"]) == {"search", "send_message"}
         assert set(diagnostics["dropped_tools"]) == {"extract_pdf"}
@@ -273,7 +292,9 @@ class TestBackwardCompatibility:
     
     def test_empty_tools_edge_case(self):
         """Test filtering with empty available tools."""
-        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"}):
+        # CI off: with no available tools every whitelisted name is "unknown",
+        # which raises under the strict CI path. See test_filter_tools_partial_match.
+        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"}):
             filter_instance = AllowedToolsFilter()
             
             filtered = filter_instance.filter_tools(set())

@@ -417,24 +417,50 @@ class TestHierarchicalSessionStore:
         assert final_session.messages[2].content == "Message 2"
         assert final_session.messages[3].content == "Response 2"
     
-    def test_cache_performance_with_unchanged_files(self):
-        """
-        Test that performance optimization works - reads from cache when file hasn't changed.
+    def test_reads_are_fresh_and_leave_the_cache_valid(self):
+        """``get_extended_session`` reads from disk every time, by design.
+
+        This asserted ``session2 is session1`` -- that a second read returns the
+        same cached object -- until #1781 and #1785 made the getter always
+        reload. Those were not tidying: the stale extended cache could **wipe
+        session messages**, and went stale on cross-instance writes. Returning
+        the cached object again would reintroduce exactly that.
+
+        So identity is not the contract. What must hold is that a second read
+        sees the same data, and that the fresh read leaves the cache and its
+        mtime in sync rather than invalidating them.
         """
         session_id = self.store.create_session(title="Cache Test")
         self.store.add_message(session_id, "user", "Test message")
-        
-        # First read - loads from disk and caches
+
         session1 = self.store.get_extended_session(session_id)
         assert len(session1.messages) == 1
-        
-        # Second read should use cache (file hasn't changed)
-        # We can't easily test this directly, but we can verify the cache is valid
         assert self.store._is_cache_valid(session_id) is True
-        
+
         session2 = self.store.get_extended_session(session_id)
         assert len(session2.messages) == 1
-        assert session2 is session1  # Should be same cached object
+        assert session2.session_id == session1.session_id
+        assert [m.content for m in session2.messages] == [
+            m.content for m in session1.messages
+        ]
+        # Re-reading keeps the cache coherent instead of leaving it stale.
+        assert self.store._is_cache_valid(session_id) is True
+
+    def test_a_write_from_another_store_instance_is_seen(self):
+        """The reason the cache is bypassed (#1785): cross-instance writes.
+
+        A second store object writing to the same directory must be visible to
+        the first, which a cached object would hide.
+        """
+        session_id = self.store.create_session(title="Cross Instance")
+        self.store.add_message(session_id, "user", "first")
+        assert len(self.store.get_extended_session(session_id).messages) == 1
+
+        other = type(self.store)(session_dir=self.store.session_dir)
+        other.add_message(session_id, "user", "second")
+
+        seen = self.store.get_extended_session(session_id)
+        assert [m.content for m in seen.messages] == ["first", "second"]
     
     def test_force_reload_bypasses_cache(self):
         """Test that force_reload=True always loads from disk."""

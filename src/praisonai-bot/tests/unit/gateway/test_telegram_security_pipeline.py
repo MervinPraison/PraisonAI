@@ -381,6 +381,96 @@ async def test_voice_message_not_dropped_when_transcription_unavailable():
     bot._transcribe_audio.assert_called_once()
 
 
+def _add_reply(update, from_user_id):
+    """Attach a ``reply_to_message`` authored by ``from_user_id`` to an update."""
+    replied = MagicMock()
+    replied.from_user = MagicMock()
+    replied.from_user.id = int(from_user_id)
+    update.message.reply_to_message = replied
+    return update
+
+
+def test_is_reply_to_bot_detects_bot_author():
+    """Issue #5029: ``_is_reply_to_bot`` is true only for replies to the bot."""
+    from praisonai_bot.bots.telegram import _is_reply_to_bot
+
+    bot = create_test_bot(unknown_user_policy="allow")  # _bot_user.user_id == "123456789"
+
+    reply_to_bot = create_mock_telegram_update(chat_type="group", text="thanks")
+    _add_reply(reply_to_bot, "123456789")
+    assert _is_reply_to_bot(reply_to_bot, bot) is True
+
+    reply_to_other = create_mock_telegram_update(chat_type="group", text="thanks")
+    _add_reply(reply_to_other, "999")
+    assert _is_reply_to_bot(reply_to_other, bot) is False
+
+    no_reply = create_mock_telegram_update(chat_type="group", text="thanks")
+    no_reply.message.reply_to_message = None
+    assert _is_reply_to_bot(no_reply, bot) is False
+
+
+@pytest.mark.asyncio
+async def test_mention_only_admits_reply_to_bot():
+    """Issue #5029: a reply to the bot is admitted in a mention_only group
+    even without a re-typed @mention, while a reply to another user is not."""
+    bot = create_test_bot(group_policy="mention_only", unknown_user_policy="allow")
+
+    reply_update = create_mock_telegram_update(chat_type="group", text="what about tomorrow?")
+    _add_reply(reply_update, "123456789")
+    reply_message = await process_inbound_telegram_message(reply_update, bot)
+    assert reply_message is not None, "reply to the bot must be admitted without @mention"
+
+    other_update = create_mock_telegram_update(chat_type="group", text="what about tomorrow?")
+    _add_reply(other_update, "999")
+    other_message = await process_inbound_telegram_message(other_update, bot)
+    assert other_message is None, "reply to another user must not be admitted"
+
+
+@pytest.mark.asyncio
+async def test_observe_admits_reply_to_bot():
+    """Issue #5029: under ``observe`` a reply to the bot triggers a real run
+    (returns a message) rather than being recorded as passive-only context."""
+    bot = create_test_bot(group_policy="observe", unknown_user_policy="allow")
+
+    reply_update = create_mock_telegram_update(chat_type="group", text="and next week?")
+    _add_reply(reply_update, "123456789")
+    reply_message = await process_inbound_telegram_message(reply_update, bot)
+    assert reply_message is not None, "reply to the bot must run under observe"
+    assert not bot._session.record_passive.called, (
+        "a reply to the bot is an addressed turn, not passive-only context"
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_mention_required_admits_reply_to_bot():
+    """Issue #5029: the legacy ``mention_required`` fallback (no known
+    ``group_policy``) also admits a reply to the bot as an implicit mention."""
+    config = BotConfig(token="test_token", unknown_user_policy="allow")
+    # Force the legacy fallback branch: an unknown policy with mention_required.
+    config.group_policy = "legacy_unknown"
+    config.mention_required = True
+    bot = TelegramBot(token="test_token", config=config)
+    bot._bot_user = BotUser(
+        user_id="123456789", username="test_bot", display_name="Test Bot", is_bot=True,
+    )
+    bot.fire_message_received = MagicMock(return_value={"drop": False, "content": ""})
+    bot._started_at = 1234567890.0
+    bot._agent = MagicMock()
+    bot._command_handlers = {}
+    bot._session = MagicMock()
+
+    reply_update = create_mock_telegram_update(chat_type="group", text="continue please")
+    _add_reply(reply_update, "123456789")
+    reply_message = await process_inbound_telegram_message(reply_update, bot)
+    assert reply_message is not None, "legacy fallback must admit a reply to the bot"
+
+    no_mention = create_mock_telegram_update(chat_type="group", text="hi all")
+    no_mention.message.reply_to_message = None
+    assert await process_inbound_telegram_message(no_mention, bot) is None, (
+        "legacy fallback still drops unmentioned, non-reply group messages"
+    )
+
+
 def test_security_pipeline_exists():
     """Basic smoke test to ensure the security pipeline function exists and is importable."""
     from praisonai_bot.bots.telegram import process_inbound_telegram_message

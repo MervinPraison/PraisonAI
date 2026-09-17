@@ -29,6 +29,39 @@ logger = logging.getLogger(__name__)
 # timeouts so they cannot exhaust process resources.
 _MAX_ORPHANED_TOOL_EXECUTORS = 4
 
+# Sentinel returned as the "arguments" value when a tool call's argument string
+# cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
+# It is distinct from {} ("no arguments"): {} would silently execute the tool
+# with the WRONG arguments and report success. Callers must detect this sentinel
+# and surface a tool-error so the model can re-emit the call instead.
+# Lives here (agent-side, lightweight) so both chat_mixin.py and llm.py share
+# one identity — an `is` check only works against the same object.
+_TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+def tool_arguments_parse_failed(arguments) -> bool:
+    """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
+    return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
+
+
+def tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
+    """Build a tool-role message telling the model its arguments were lost.
+
+    Surfacing this instead of dispatching with {} converts a silent
+    wrong-action-reported-as-success into a visible, retryable error.
+    """
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": (
+            f"Error: arguments for tool '{function_name}' could not be parsed "
+            f"(the argument string was invalid or truncated). "
+            f"The tool was NOT executed. Please re-emit the tool call with "
+            f"complete, valid JSON arguments."
+        ),
+    }
+
+
 if TYPE_CHECKING:
     pass
 
@@ -54,7 +87,8 @@ class BackoffPolicy:
         # Cap the base delay to prevent excessively long waits
         base = min(base, max_delay)
         jitter_amount = random.uniform(0, jitter * base)
-        return base + jitter_amount
+        # Re-clamp after jitter so max_delay is a hard ceiling
+        return min(base + jitter_amount, max_delay)
 
 
 # Cap on encoded image bytes injected back into the conversation to avoid
@@ -379,6 +413,189 @@ class ToolExecutionMixin:
         from ..tools.resolver import resolve_tools_list
 
         return resolve_tools_list(tools)
+
+    @staticmethod
+    def _tool_name_for_plugin_merge(tool):
+        """Return the runtime name for a plugin-provided tool, if available."""
+        if isinstance(tool, dict):
+            function = tool.get("function")
+            if isinstance(function, dict):
+                return function.get("name")
+            return tool.get("name")
+        return getattr(tool, "name", None) or getattr(tool, "__name__", None)
+
+    @staticmethod
+    def _is_supported_plugin_tool(tool):
+        """Return whether a plugin tool has a local execution boundary."""
+        if callable(tool):
+            return True
+        if not isinstance(tool, dict):
+            return False
+
+        # Provider-hosted tools are intentionally non-callable: the provider
+        # owns their execution. A plain ``type: function`` dictionary only
+        # describes a schema and must not be advertised without a callable.
+        try:
+            from ..tools.hosted import is_hosted_tool
+
+            return is_hosted_tool(tool)
+        except Exception:
+            return False
+
+    def _is_plugin_tool_active(self, tool):
+        """Return whether the plugin owning ``tool`` is still enabled."""
+        owners = getattr(self, "_plugin_tool_owners", None)
+        if not owners:
+            return True
+        owner = owners.get(id(tool))
+        if owner is None:
+            return True
+
+        try:
+            from ..plugins import get_plugin_manager
+
+            # Revocation tracks the OWNING plugin's per-manager enabled state
+            # (and identity, to catch unregister/re-register). It deliberately
+            # does NOT gate on the package-wide ``plugins.enable()`` flag, which
+            # governs background hook/metric plugins — tool plugins are live on
+            # registration, matching how they were attached in ``_merge_plugin_tools``.
+            manager = get_plugin_manager()
+            owner_entries = owner if isinstance(owner, list) else [owner]
+            get_plugin = getattr(manager, "get_plugin", None)
+            for owner_entry in owner_entries:
+                owner_name = owner_entry
+                owner_plugin = None
+                if isinstance(owner_entry, tuple):
+                    owner_name, owner_plugin = owner_entry
+                    current_plugin = (
+                        get_plugin(owner_name) if callable(get_plugin) else None
+                    )
+                    # Revocation tracks plugin identity as well as enabled state,
+                    # so unregister/re-register cannot revive a stale tool.
+                    if current_plugin is not owner_plugin:
+                        continue
+                if manager.is_enabled(owner_name):
+                    return True
+            return False
+        except Exception as exc:  # pragma: no cover - defensive plugin boundary
+            logging.warning("Failed to check plugin tool state: %s", exc)
+            return False
+
+    def _merge_plugin_tools(self):
+        """Attach tools from enabled protocol-driven plugins to this Agent.
+
+        Plugin tools stay on the Agent rather than the process-global
+        ``ToolRegistry``. This preserves declared-tool isolation while
+        allowing the normal formatter and execution pipeline to handle plugin
+        callables exactly like ``tools=`` values. Plugin ownership is recorded
+        so disabling or unregistering a plugin revokes its tools from this
+        agent's discovery and execution paths.
+        """
+        try:
+            from ..plugins import get_plugin_manager
+
+            # NOTE: do NOT gate on the package-wide ``plugins.enable()`` flag.
+            # ``get_all_tools_with_sources()`` already filters to individually
+            # manager-enabled plugins, and registering a tool plugin marks it
+            # enabled. The plugin docs state tools work WITHOUT calling
+            # ``enable()`` (only background hook/metric plugins need it), so a
+            # merely-registered tool plugin must still reach the agent.
+            manager = get_plugin_manager()
+            get_tools_with_sources = getattr(
+                manager, "get_all_tools_with_sources", None
+            )
+            if callable(get_tools_with_sources):
+                plugin_entries = get_tools_with_sources()
+            else:  # pragma: no cover - compatibility with custom managers
+                plugin_entries = [(None, tool) for tool in manager.get_all_tools()]
+        except Exception as exc:  # pragma: no cover - defensive plugin boundary
+            logging.warning("Failed to attach plugin tools: %s", exc)
+            return
+
+        current_tools = self.tools if isinstance(self.tools, list) else [self.tools]
+        existing_ids = {id(tool) for tool in current_tools}
+        existing_names = {
+            name
+            for tool in current_tools
+            if (name := self._tool_name_for_plugin_merge(tool))
+        } | {name for name, _tool in self._iter_active_named_tools()}
+        for owner, tool in plugin_entries:
+            if id(tool) in existing_ids:
+                # Multiple enabled plugins may intentionally expose the same
+                # callable or hosted-tool object. Keep every owner so disabling
+                # one provider does not revoke a capability still supplied by
+                # another provider.
+                plugin_owners = getattr(self, "_plugin_tool_owners", None)
+                if plugin_owners is not None and id(tool) in plugin_owners and owner:
+                    get_plugin = getattr(manager, "get_plugin", None)
+                    owner_entry = (
+                        owner,
+                        get_plugin(owner) if callable(get_plugin) else None,
+                    )
+                    existing_owner = plugin_owners[id(tool)]
+                    owner_entries = (
+                        existing_owner
+                        if isinstance(existing_owner, list)
+                        else [existing_owner]
+                    )
+                    if not any(
+                        isinstance(entry, tuple)
+                        and entry[0] == owner_entry[0]
+                        and entry[1] is owner_entry[1]
+                        for entry in owner_entries
+                    ):
+                        owner_entries.append(owner_entry)
+                        plugin_owners[id(tool)] = owner_entries
+                continue
+            name = self._tool_name_for_plugin_merge(tool)
+            function = tool.get("function") if isinstance(tool, dict) else None
+            if (
+                isinstance(tool, dict)
+                and tool.get("type") == "function"
+                and isinstance(function, dict)
+                and isinstance(function.get("name"), str)
+                and function["name"]
+            ):
+                logging.warning(
+                    "Skipping plugin function tool %r: function schemas are not "
+                    "executable without a callable implementation",
+                    name,
+                )
+                continue
+            if not self._is_supported_plugin_tool(tool) or (
+                name is not None and not isinstance(name, str)
+            ) or (callable(tool) and not name):
+                logging.warning(
+                    "Skipping plugin tool %r: expected a named callable or valid tool spec",
+                    name or tool,
+                )
+                continue
+            if name and name in existing_names:
+                logging.warning(
+                    "Skipping plugin tool %r because Agent already has a tool with that name",
+                    name,
+                )
+                continue
+
+            # Only normalize a non-list declared tool source when there is a
+            # valid, non-conflicting plugin tool to append. Enabling plugins
+            # must not otherwise change the public shape of ``self.tools``.
+            if not isinstance(self.tools, list):
+                self.tools = [self.tools] if self.tools else []
+            self.tools.append(tool)
+            existing_ids.add(id(tool))
+            if name:
+                existing_names.add(name)
+            if owner:
+                if not hasattr(self, "_plugin_tool_owners"):
+                    self._plugin_tool_owners = {}
+                get_plugin = getattr(manager, "get_plugin", None)
+                plugin = get_plugin(owner) if callable(get_plugin) else None
+                self._plugin_tool_owners[id(tool)] = (owner, plugin)
+            display_name = name
+            if not display_name and isinstance(tool, dict):
+                display_name = tool.get("type", "spec")
+            logging.debug("Added plugin tool to Agent: %s", display_name or tool)
 
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
@@ -954,6 +1171,16 @@ class ToolExecutionMixin:
                             # ``is_retryable`` above decides only whether the outer
                             # loop retries, not whether it raises.
                             raised_exception = "_praison_retryable" in result
+                            # NOTE: an unknown tool is deliberately NOT escalated
+                            # here. GHSA-gmjg-hv98-qggq's regression tests in
+                            # tests/unit/agent/test_tool_resolution_boundary.py
+                            # pin the contract that execute_tool returns None or
+                            # an error dict for an unresolved name rather than
+                            # raising, and the self-repair feature depends on it:
+                            # the corrective dict (with its "Did you mean" hint
+                            # and the tool inventory) is fed back so the model
+                            # can retry with a real tool name. Raising would
+                            # abort the run and make repair impossible.
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
                             result.pop("_praison_retryable", None)
@@ -2701,6 +2928,8 @@ class ToolExecutionMixin:
         if not isinstance(candidates, (list, tuple)):
             return None
         for tool_obj in candidates:
+            if not self._is_plugin_tool_active(tool_obj):
+                continue
             if getattr(tool_obj, "name", None) == function_name:
                 return tool_obj
             if getattr(tool_obj, "__name__", None) == function_name:
@@ -2983,7 +3212,10 @@ class ToolExecutionMixin:
 
         # Try to find the function in the agent's tools list first
         func = None
+        plugin_owners = getattr(self, "_plugin_tool_owners", None)
         for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
+            if plugin_owners and not self._is_plugin_tool_active(tool):
+                continue
             # Check for BaseTool instances (plugin system)
             from ..tools.base import BaseTool
             if isinstance(tool, BaseTool) and tool.name == function_name:
@@ -3051,9 +3283,11 @@ class ToolExecutionMixin:
                 # sync tool-calling path we must await it, otherwise a bare
                 # un-awaited coroutine is handed to the model as the tool result
                 # and the tool body never runs (silent data loss).
+                from .async_safety import run_async_in_sync_context
+
                 def _resolve_result(value):
                     if inspect.iscoroutine(value):
-                        return self._run_async_in_sync_context(value)
+                        return run_async_in_sync_context(value)
                     return value
 
                 # BaseTool instances (plugin system) - call run() method
@@ -3239,6 +3473,8 @@ class ToolExecutionMixin:
             yield from _expand(tools)
             return
         for tool in tools if isinstance(tools, (list, tuple)) else []:
+            if not self._is_plugin_tool_active(tool):
+                continue
             yield from _expand(tool)
 
     def _available_active_tool_names(self):

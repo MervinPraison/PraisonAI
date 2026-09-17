@@ -115,8 +115,13 @@ function ensureBuiltinToolPlaces(): void {
     toolPlaces.set(name, () => ({
       placeName: name,
       async runTool(toolName, args, localImplementation) {
-        const specifier = ['../../comp', 'ute/tool-place'].join('');
-        const mod: any = await import(specifier);
+        // A literal dynamic import: `esm-shim` rewrites this to
+        // '../../compute/tool-place.js' (a computed/concatenated specifier is
+        // invisible to the shim and throws ERR_MODULE_NOT_FOUND under native
+        // ESM). It stays a DYNAMIC import, so a bundler still defers it and
+        // compute/ never lands on any static graph -- the mobile/chrome58
+        // constraint that ruled out `require` in the first place.
+        const mod: any = await import('../../compute/tool-place');
         mod.registerComputeToolPlaces?.();
         const factory = toolPlaces.get(name);
         const real = factory ? factory() : null;

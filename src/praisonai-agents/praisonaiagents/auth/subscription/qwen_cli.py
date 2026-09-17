@@ -31,16 +31,24 @@ class QwenCliAuth:
     name = "qwen-cli"
 
     def resolve_credentials(self) -> SubscriptionCredentials:
+        """Resolve Qwen CLI credentials.
+
+        The origin comes from the `PRAISONAI_QWEN_BASE_URL` environment variable when it is set
+        to a non-empty value, and otherwise from the Qwen default.
+        """
         tokens = _read_qwen_tokens()
         if not tokens:
             raise AuthError(
                 "No Qwen CLI credentials at ~/.qwen/oauth_creds.json. "
                 "Install Qwen CLI and run 'qwen login'."
             )
+        # Resolve once and use the same value for both: `headers_for` takes the origin the request
+        # will actually go to, which is not necessarily the Qwen default.
+        base_url = os.environ.get("PRAISONAI_QWEN_BASE_URL", "").strip() or _QWEN_BASE_URL
         return SubscriptionCredentials(
             api_key=tokens["access_token"],
-            base_url=os.environ.get("PRAISONAI_QWEN_BASE_URL", "").strip() or _QWEN_BASE_URL,
-            headers=self.headers_for(_QWEN_BASE_URL, ""),
+            base_url=base_url,
+            headers=self.headers_for(base_url, ""),
             auth_scheme="bearer",
             source="qwen-cli-file",
         )

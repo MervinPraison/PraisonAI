@@ -1,14 +1,14 @@
 {
-  "version": "1.5.87",
-  "lastUpdated": "2026-09-07",
+  "version": "1.7.6",
+  "lastUpdated": "2026-09-17",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "IN_PROGRESS",
   "summary": {
-    "pythonCoreFeatures": 417,
+    "pythonCoreFeatures": 421,
     "rustFeatures": 667,
-    "gapCount": 134,
-    "parityPercentage": 67.9
+    "gapCount": 138,
+    "parityPercentage": 67.2
   },
   "pythonCoreSDK": {
     "exports": [
@@ -257,6 +257,7 @@
       "RulesConfig",
       "RunOutcome",
       "RunStatus",
+      "RunTerminal",
       "SandboxConfig",
       "SandboxProtocol",
       "SandboxResult",
@@ -323,6 +324,7 @@
       "async_display_callbacks",
       "clean_triple_backticks",
       "cleanup_telemetry_resources",
+      "collapse",
       "config",
       "configure_structured_logging",
       "create_context_agent",
@@ -371,6 +373,7 @@
       "include",
       "is_path_like",
       "is_policy_string",
+      "is_sticky",
       "list_memory_adapters",
       "list_runtimes",
       "list_toolsets",
@@ -378,6 +381,7 @@
       "load_skill",
       "loop",
       "memory",
+      "merge_run_terminal",
       "no_model_requests",
       "parallel",
       "parallel_handoffs",
@@ -4524,6 +4528,15 @@
         "category": "other"
       },
       {
+        "feature": "RunTerminal",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SandboxConfig",
         "python": true,
         "rust": true,
@@ -4902,6 +4915,15 @@
         "category": "main"
       },
       {
+        "feature": "collapse",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "config",
         "python": true,
         "rust": false,
@@ -5217,6 +5239,15 @@
         "category": "config"
       },
       {
+        "feature": "is_sticky",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "list_memory_adapters",
         "python": true,
         "rust": false,
@@ -5254,6 +5285,15 @@
       },
       {
         "feature": "memory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "merge_run_terminal",
         "python": true,
         "rust": false,
         "priority": "P3",

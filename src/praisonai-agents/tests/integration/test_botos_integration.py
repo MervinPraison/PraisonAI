@@ -45,6 +45,18 @@ class MockPlatformAdapter:
         self.started = False
         self.stopped = False
         self.messages_sent = []
+        self.gateway_seams = None
+
+    def attach_gateway_runtime(self, seams):
+        """Satisfy the SupportsGatewayRuntime contract.
+
+        Bot._attach_gateway_runtime raises GatewayAdapterContractError for an
+        adapter without this, rather than silently dropping admission control,
+        delivery routing and cross-platform turn locking. That is correct, and
+        it made every supervised start of this mock a fatal channel error, so
+        the mock implements the contract instead of the tests routing around it.
+        """
+        self.gateway_seams = seams
 
     async def start(self):
         self.started = True
@@ -65,6 +77,15 @@ class MockPlatformAdapter:
 # 1. Integration: Bot with mock adapter
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# These tests construct Bot with enable_supervision=False. Since Issue #2869,
+# a supervised Bot.start() deliberately does not return: it awaits the
+# supervisor task and, for adapters whose start() returns immediately, holds
+# open via _wait_until_stopped until the adapter reports it stopped. The mock
+# adapter reports is_running=True forever, so a bare `await bot.start()` hangs
+# and takes the whole `pytest tests/unit` run with it. These tests are about
+# adapter construction and wiring, not the supervised run loop, so they opt out
+# of supervision; TestBotOSLifecycle still exercises the running path via
+# asyncio.create_task.
 class TestBotWithMockAdapter:
     """Integration tests for Bot class with a mock platform adapter."""
 
@@ -80,7 +101,7 @@ class TestBotWithMockAdapter:
     @pytest.mark.asyncio
     async def test_bot_start_creates_adapter(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="test-token")
+        bot = Bot("mockbot", token="test-token", enable_supervision=False)
         await bot.start()
         assert bot.adapter is not None
         assert isinstance(bot.adapter, MockPlatformAdapter)
@@ -89,7 +110,7 @@ class TestBotWithMockAdapter:
     @pytest.mark.asyncio
     async def test_bot_stop(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="test-token")
+        bot = Bot("mockbot", token="test-token", enable_supervision=False)
         await bot.start()
         await bot.stop()
         assert bot.adapter.stopped is True
@@ -98,7 +119,7 @@ class TestBotWithMockAdapter:
     @pytest.mark.asyncio
     async def test_bot_passes_token_to_adapter(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="my-secret-token")
+        bot = Bot("mockbot", token="my-secret-token", enable_supervision=False)
         await bot.start()
         assert bot.adapter.token == "my-secret-token"
 
@@ -107,14 +128,14 @@ class TestBotWithMockAdapter:
         from praisonai.bots import Bot
         agent = MagicMock()
         agent.name = "test-agent"
-        bot = Bot("mockbot", agent=agent, token="t")
+        bot = Bot("mockbot", agent=agent, token="t", enable_supervision=False)
         await bot.start()
         assert bot.adapter.agent is agent
 
     @pytest.mark.asyncio
     async def test_bot_send_message(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="t")
+        bot = Bot("mockbot", token="t", enable_supervision=False)
         await bot.start()
         result = await bot.send_message("channel-1", "Hello!")
         assert result is True
@@ -124,14 +145,14 @@ class TestBotWithMockAdapter:
     @pytest.mark.asyncio
     async def test_bot_send_message_before_start_raises(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="t")
+        bot = Bot("mockbot", token="t", enable_supervision=False)
         with pytest.raises(RuntimeError, match="not started"):
             await bot.send_message("ch", "msg")
 
     @pytest.mark.asyncio
     async def test_bot_passes_kwargs_to_adapter(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot", token="t", custom_param="hello")
+        bot = Bot("mockbot", token="t", custom_param="hello", enable_supervision=False)
         await bot.start()
         assert bot.adapter.kwargs.get("custom_param") == "hello"
 
@@ -140,13 +161,13 @@ class TestBotWithMockAdapter:
         from praisonai.bots import Bot
         agent = MagicMock()
         agent.name = "myagent"
-        bot = Bot("mockbot", agent=agent)
+        bot = Bot("mockbot", agent=agent, enable_supervision=False)
         assert "mockbot" in repr(bot)
         assert "myagent" in repr(bot)
 
     def test_bot_has_run_method(self):
         from praisonai.bots import Bot
-        bot = Bot("mockbot")
+        bot = Bot("mockbot", enable_supervision=False)
         assert hasattr(bot, "run")
         assert callable(bot.run)
 
@@ -174,13 +195,35 @@ class TestBotOSLifecycle:
     @pytest.mark.asyncio
     async def test_botos_starts_all_bots(self):
         from praisonai.bots import BotOS, Bot
-        bot1 = Bot("mock1", token="t1")
-        bot2 = Bot("mock2", token="t2")
+        # Supervision off for the same reason as above, plus one of its own:
+        # the supervisor now rejects an adapter that does not implement
+        # SupportsGatewayRuntime as a fatal channel error rather than silently
+        # losing admission control and turn locking. MockPlatformAdapter does
+        # not, so with supervision on the adapters are never started and
+        # bot.adapter stays None. What this test checks is that BotOS starts
+        # every bot it holds.
+        bot1 = Bot("mock1", token="t1", enable_supervision=False)
+        bot2 = Bot("mock2", token="t2", enable_supervision=False)
         botos = BotOS(bots=[bot1, bot2])
 
-        # Start in background, stop quickly
+        # Start in background and wait for the bots to actually come up.
+        # A fixed 0.05s sleep is no longer enough: BotOS.start() now wires the
+        # delivery router, the admission gate and the shared turn LockMap
+        # before it starts any bot, so the sleep expired mid-setup and both
+        # adapters were still None. Poll for the condition instead, with a
+        # bound so a genuine regression fails rather than hangs.
         start_task = asyncio.create_task(botos.start())
-        await asyncio.sleep(0.05)
+
+        async def _both_started() -> bool:
+            for _ in range(200):  # <= 2s
+                if (bot1.adapter is not None and bot1.adapter.started
+                        and bot2.adapter is not None and bot2.adapter.started):
+                    return True
+                await asyncio.sleep(0.01)
+            return False
+
+        started = await _both_started()
+
         await botos.stop()
         start_task.cancel()
         try:
@@ -188,6 +231,7 @@ class TestBotOSLifecycle:
         except asyncio.CancelledError:
             pass
 
+        assert started, "BotOS did not start both bots within 2s"
         assert bot1.adapter.started is True
         assert bot2.adapter.started is True
 
@@ -239,7 +283,7 @@ class TestRealAgentInBot:
         from praisonai.bots import Bot
         from praisonaiagents import Agent
         agent = Agent(name="helper", instructions="Be helpful")
-        bot = Bot("mockbot", agent=agent, token="t")
+        bot = Bot("mockbot", agent=agent, token="t", enable_supervision=False)
         assert bot.agent is agent
         assert bot.agent.name == "helper"
 
@@ -248,7 +292,7 @@ class TestRealAgentInBot:
         from praisonai.bots import Bot
         from praisonaiagents import Agent
         agent = Agent(name="helper", instructions="Be helpful")
-        bot = Bot("mockbot", agent=agent, token="t")
+        bot = Bot("mockbot", agent=agent, token="t", enable_supervision=False)
         await bot.start()
         assert bot.adapter.agent is agent
         assert bot.adapter.agent.name == "helper"
@@ -279,7 +323,7 @@ class TestAgentTeamInBotOS:
         t2 = Task(name="write", description="Write about AI", agent=writer)
         team = AgentTeam(agents=[researcher, writer], tasks=[t1, t2])
 
-        bot = Bot("mockbot", agent=team, token="t")
+        bot = Bot("mockbot", agent=team, token="t", enable_supervision=False)
         assert bot.agent is team
 
     @pytest.mark.asyncio
@@ -292,7 +336,7 @@ class TestAgentTeamInBotOS:
         t2 = Task(name="t2", description="Task 2", agent=a2)
         team = AgentTeam(agents=[a1, a2], tasks=[t1, t2])
 
-        bot = Bot("mockbot", agent=team, token="t")
+        bot = Bot("mockbot", agent=team, token="t", enable_supervision=False)
         await bot.start()
         assert bot.adapter.agent is team
 
@@ -334,7 +378,7 @@ class TestAgentFlowInBotOS:
         t2 = Task(name="t2", description="Step 2", agent=a2)
         flow = AgentFlow(steps=[t1, t2])
 
-        bot = Bot("mockbot", agent=flow, token="t")
+        bot = Bot("mockbot", agent=flow, token="t", enable_supervision=False)
         assert bot.agent is flow
 
     @pytest.mark.asyncio
@@ -347,7 +391,7 @@ class TestAgentFlowInBotOS:
         t2 = Task(name="t2", description="S2", agent=a2)
         flow = AgentFlow(steps=[t1, t2])
 
-        bot = Bot("mockbot", agent=flow, token="t")
+        bot = Bot("mockbot", agent=flow, token="t", enable_supervision=False)
         await bot.start()
         assert bot.adapter.agent is flow
 
@@ -392,7 +436,7 @@ class TestPlatformExtensibility:
         from praisonai.bots._registry import register_platform
         from praisonai.bots import Bot
         register_platform("custom_chat", MockPlatformAdapter)
-        bot = Bot("custom_chat", token="tok")
+        bot = Bot("custom_chat", token="tok", enable_supervision=False)
         await bot.start()
         assert bot.adapter.started is True
 

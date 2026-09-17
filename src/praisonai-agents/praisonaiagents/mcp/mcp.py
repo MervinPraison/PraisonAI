@@ -252,20 +252,29 @@ class MCPToolRunner(threading.Thread):
         """
         self.queue.put(None)
 
-    def stop(self):
-        """Best-effort teardown for a runner that failed to initialize.
+    def stop(self, timeout=None):
+        """Best-effort teardown for the runner thread.
 
-        Queues the shutdown sentinel and joins the thread briefly so that if
-        the handshake eventually completes the request loop exits immediately
-        instead of leaving a background thread (and its stdio subprocess) alive.
-        The thread is a daemon, so this never blocks interpreter exit.
+        Queues the shutdown sentinel and joins the thread so the request loop
+        exits and its stdio subprocess is terminated instead of leaking a
+        background thread (and its child) across the process lifetime. The
+        request loop polls the queue between async operations, so once any
+        in-flight call unwinds the sentinel is consumed promptly.
+
+        Args:
+            timeout: Seconds to wait for the thread to exit. Defaults to the
+                runner's own operation ``timeout`` so an in-flight call has a
+                chance to finish before we give up. The thread is a daemon, so
+                this never blocks interpreter exit even if the join times out.
         """
         try:
             self.queue.put(None)
         except Exception:
             pass
+        if timeout is None:
+            timeout = getattr(self, "timeout", 60)
         if self.is_alive():
-            self.join(timeout=1)
+            self.join(timeout=timeout)
 
 class MCP:
     """
@@ -314,13 +323,39 @@ class MCP:
     _active_server_names: set = set()
     _active_server_names_lock = threading.Lock()
 
+    # Default init/tool-call timeout (seconds). Used when the caller does not
+    # pass an explicit ``timeout``.
+    DEFAULT_TIMEOUT = 60
+    # Larger default applied only for cold-start package launchers (npx/uvx/bunx),
+    # whose first run downloads the server package before the MCP handshake can
+    # begin. On a fresh cache this routinely exceeds 60s (issue #5099), so the
+    # 60s trap fires before the server ever prints "listening on stdio". An
+    # explicit ``timeout`` from the caller always wins over this.
+    COLD_START_TIMEOUT = 180
+    # Executables that fetch-and-run a package on first use; their cold start
+    # is dominated by an npm/PyPI download, not by the MCP server itself.
+    _COLD_START_LAUNCHERS = ('npx', 'uvx', 'bunx', 'pnpm', 'yarn')
+
     @classmethod
     def list_active_server_names(cls) -> set:
         """Return the set of sanitized names of MCP servers namespaced this run."""
         with cls._active_server_names_lock:
             return set(cls._active_server_names)
 
-    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
+    @classmethod
+    def _is_cold_start_launcher(cls, cmd) -> bool:
+        """True when ``cmd`` is a package launcher (npx/uvx/...) whose first run
+        downloads the server before the MCP handshake starts."""
+        if not isinstance(cmd, str):
+            return False
+        # Split on both separators so a Windows-style path is handled even when
+        # this runs on a POSIX host (and vice versa).
+        base = re.split(r'[\\/]', cmd)[-1]
+        # Strip Windows executable extensions (npx.cmd, npx.exe, ...).
+        base = re.sub(r'\.(cmd|exe|bat|ps1)$', '', base, flags=re.IGNORECASE).lower()
+        return base in cls._COLD_START_LAUNCHERS
+
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False, 
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
@@ -333,7 +368,11 @@ class MCP:
                              - An SSE URL (e.g., "http://localhost:8080/sse")
             args: Arguments to pass to the command (when command_or_string is the command)
             command: Alternative parameter name for backward compatibility
-            timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
+            timeout: Timeout in seconds for MCP server initialization and tool calls.
+                     Defaults to 60s, or 180s for cold-start launchers such as
+                     ``npx``/``uvx`` whose first run must download the server
+                     package before the handshake starts (issue #5099). Pass an
+                     explicit value to override either default.
             debug: Enable debug logging for MCP operations (default: False)
             allowed_tools: Include whitelist - only these tools will be available (default: None = all tools)
             disabled_tools: Exclude blacklist - these tools will be filtered out (default: None = no exclusions)
@@ -377,8 +416,14 @@ class MCP:
             get_logger("httpx").setLevel(logging.WARNING)
             get_logger("llm").setLevel(logging.WARNING)
         
-        # Store additional parameters
-        self.timeout = timeout
+        # Store additional parameters. ``timeout=None`` is a sentinel meaning
+        # "use the default", which lets us tell an explicit caller value apart
+        # from the default and only auto-extend for cold-start launchers below.
+        self._timeout_explicit = timeout is not None
+        # URL transports (ws/http/sse) resolve to the plain default here; the
+        # stdio path re-resolves once the launcher command is known.
+        self.timeout = timeout if self._timeout_explicit else self.DEFAULT_TIMEOUT
+        timeout = self.timeout
         self.debug = debug
         self.allowed_tools = allowed_tools
         self.disabled_tools = disabled_tools
@@ -485,7 +530,16 @@ class MCP:
         # Set up stdio client
         self.is_sse = False
         self.is_http_stream = False
-        
+
+        # Cold-start launchers (npx/uvx/bunx/...) download the server package on
+        # first run, which on a fresh cache regularly exceeds the 60s default and
+        # trips the init timeout before the handshake even begins (issue #5099).
+        # When the caller did not set an explicit timeout, raise the effective
+        # init timeout for these commands. An explicit timeout always wins.
+        if not self._timeout_explicit and self._is_cold_start_launcher(cmd):
+            self.timeout = self.COLD_START_TIMEOUT
+            timeout = self.timeout
+
         # Build safe environment for stdio MCP servers
         # Use safe baseline + explicit env from config (B5 security policy)
         custom_env = kwargs.get('env', {})
@@ -506,13 +560,32 @@ class MCP:
         # so a blocked handshake does not leave a background thread and stdio
         # child process alive across construction retries.
         if not self.runner.initialized.wait(timeout=self.timeout):
-            self.runner.stop()
+            # Fast-fail teardown: the handshake is stuck, so join briefly and
+            # let the daemon thread be reclaimed at exit rather than blocking
+            # the raise for the full operation timeout.
+            self.runner.stop(timeout=1)
+            # shlex.join preserves argv boundaries so a copy-pasteable command is
+            # produced even when the executable path or an argument contains
+            # spaces or shell metacharacters.
+            full_cmd = shlex.join([str(cmd), *[str(a) for a in arguments]])
+            if self._is_cold_start_launcher(cmd):
+                hint = (
+                    f" This looks like a first-run package download; pre-warm it "
+                    f"once with `{full_cmd}` (wait for the server to start), or "
+                    f"pass a larger timeout, e.g. MCP(..., timeout=300)."
+                )
+            else:
+                hint = (
+                    f" Verify the command runs manually (`{full_cmd}`), or pass a "
+                    f"larger timeout, e.g. MCP(..., timeout=180)."
+                )
             raise TimeoutError(
                 f"MCP initialization timed out after {self.timeout} seconds "
                 f"(command={cmd!r} args={arguments!r})."
+                f"{hint}"
             )
         if getattr(self.runner, "_init_error", None):
-            self.runner.stop()
+            self.runner.stop(timeout=1)
             raise RuntimeError(
                 f"MCP initialization failed: {self.runner._init_error} "
                 f"(command={cmd!r} args={arguments!r})."
@@ -956,7 +1029,10 @@ class MCP:
             
         Example:
             ```python
-            mcp = MCP("npx -y @modelcontextprotocol/server-time")
+            # Point the filesystem server at any directory the agent may access.
+            # Use a platform-appropriate path (e.g. "." for the current dir);
+            # on Windows npx may need to be invoked as "npx.cmd".
+            mcp = MCP("npx -y @modelcontextprotocol/server-filesystem .")
             tools = mcp.get_tools()
             for tool in tools:
                 print(f"Tool: {tool.__name__}")
@@ -1176,6 +1252,20 @@ class MCP:
                 self.runner.shutdown()
             except Exception:
                 pass  # Best effort cleanup
+            # Join the daemon thread (and terminate its stdio subprocess) so
+            # long-lived processes don't leak one child per MCP server. Plain
+            # shutdown() only enqueues a sentinel; stop() also joins the thread.
+            try:
+                if hasattr(self.runner, "stop"):
+                    self.runner.stop()
+            except Exception:
+                pass  # Best effort cleanup
+            # Only drop the reference once the thread has actually exited so a
+            # later shutdown() can retry the join if an in-flight call kept the
+            # runner alive past the join timeout. The thread is a daemon, so a
+            # surviving runner never blocks interpreter exit.
+            if not getattr(self.runner, "is_alive", lambda: False)():
+                self.runner = None
         
         # Shutdown SSE client if present
         if hasattr(self, 'sse_client') and self.sse_client is not None:

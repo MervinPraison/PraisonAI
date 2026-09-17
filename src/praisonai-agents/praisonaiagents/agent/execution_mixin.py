@@ -518,7 +518,7 @@ class ExecutionMixin:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async)
                 return future.result()
-                
+
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
             return asyncio.run(self.backend.execute(prompt, **kwargs))
@@ -1577,14 +1577,46 @@ Write the complete compiled report:"""
             ),
         )
 
+        # Bound the worker thread's wait on the async tool by the same per-agent
+        # tool timeout the direct path applies (ToolConfig.timeout, seconds). The
+        # inner coroutine already wraps itself in asyncio.wait_for, but the worker
+        # blocking on future.result() has no bound of its own: if the inner path
+        # hangs (or no timeout is configured) the middleware worker would block a
+        # thread-pool worker indefinitely. Give it a slightly larger grace bound so
+        # the inner wait_for surfaces its structured timeout first when configured.
+        tool_timeout = getattr(self, '_tool_timeout', None)
+        worker_timeout = (tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
+
         def _final_handler(req):
+            import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(
                 self._execute_tool_async_with_retry(
                     req.tool_name, req.arguments, tool_call_id, tools_override
                 ),
                 loop,
             )
-            result = future.result()
+            try:
+                result = future.result(timeout=worker_timeout)
+            except concurrent.futures.TimeoutError:
+                # The scheduled coroutine did not finish within the bound. Request
+                # cancellation on the running loop so it stops rather than leaking,
+                # and surface the same structured timeout error the direct async
+                # path returns (retryable=False: an uncancellable side effect must
+                # not be re-run).
+                future.cancel()
+                logger.warning(
+                    "Middleware async tool '%s' timed out after %ss (agent=%s, run_id=%s, tool_call_id=%s)",
+                    req.tool_name,
+                    tool_timeout,
+                    self.name,
+                    getattr(self, '_current_run_id', 'unknown'),
+                    tool_call_id,
+                )
+                result = {
+                    "error": f"Tool timed out after {tool_timeout}s",
+                    "timeout": True,
+                    "_praison_retryable": False,
+                }
             return ToolResponse(tool_name=req.tool_name, result=result)
 
         def _run_chain():
@@ -1766,7 +1798,10 @@ Write the complete compiled report:"""
             func = None
             tools_to_search = tools_override if tools_override is not None else self.tools
             from ..tools.base import BaseTool
+            plugin_owners = getattr(self, "_plugin_tool_owners", None)
             for tool in tools_to_search:
+                if plugin_owners and not self._is_plugin_tool_active(tool):
+                    continue
                 if isinstance(tool, BaseTool) and getattr(tool, 'name', None) == function_name:
                     func = tool
                     break
@@ -1860,6 +1895,21 @@ Write the complete compiled report:"""
                     _emitter.emit(_event)
 
             from ..streaming.events import tool_progress_channel
+
+            # breaker.acall() records the invocation outcome itself. Both record
+            # sites below then recorded the same failure a SECOND time -- once
+            # off the returned error dict, once in the raised-exception handler
+            # -- so every async tool failure counted twice and the breaker
+            # opened after ceil(threshold/2) calls (3 instead of the configured
+            # 5), out of parity with the sync path. This flag marks that the
+            # breaker already owns the outcome; it stays False when
+            # asyncio.wait_for times out, since the breaker never got a result.
+            #
+            # Declared outside the try: the except handler below reads it, and
+            # roughly seventy lines run between the try and the breaker setup.
+            # An exception in that window would otherwise raise NameError here
+            # and mask the original failure.
+            breaker_saw_outcome = {"done": False}
 
             try:
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
@@ -1986,6 +2036,12 @@ Write the complete compiled report:"""
                 async def _invoke_guarded():
                     if breaker is None:
                         return await _invoke()
+                    # Set before the await: acall records an outcome however it
+                    # exits (returning, raising _ToolFailure, or letting a raw
+                    # tool exception through). The only exit that records
+                    # nothing is _CircuitBreakerException, and that path returns
+                    # _circuit_open_result() without reaching either record site.
+                    breaker_saw_outcome["done"] = True
                     try:
                         return await breaker.acall(_invoke_for_breaker)
                     except _ToolFailure as tf:
@@ -2029,6 +2085,24 @@ Write the complete compiled report:"""
                         # Fall through (not return) so the loop guard records this
                         # timeout as a failure — repeated timeouts must accumulate
                         # toward the BLOCK/HALT thresholds like any other failure.
+                        #
+                        # A timeout cancels the awaited ``_invoke_guarded``; the
+                        # cancellation surfaces inside ``breaker.acall`` as
+                        # ``asyncio.CancelledError`` (a BaseException, not
+                        # Exception), so ``acall`` never ran ``_on_failure`` for
+                        # it. The fall-through breaker-record block below only
+                        # runs when ``breaker is None``, so without recording it
+                        # here a repeatedly timing-out tool would never open the
+                        # circuit. Record the one failure directly on the breaker
+                        # (the block below stays disabled, so it is counted once).
+                        if breaker is not None:
+                            try:
+                                breaker._on_failure()
+                            except Exception:
+                                logging.debug(
+                                    "Failed to record tool timeout on circuit breaker",
+                                    exc_info=True,
+                                )
                         result = {
                             "error": f"Tool timed out after {tool_timeout}s",
                             "timeout": True,
@@ -2047,7 +2121,18 @@ Write the complete compiled report:"""
                 # NOT counted as tool failures (same exclusions the sync wrapper
                 # applies in _execute_tool_with_circuit_breaker_impl), so a gated
                 # tool never trips the breaker.
-                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                #
+                # Only when the breaker wrapper did not already run. When
+                # ``breaker`` is set, ``breaker.acall`` above has already called
+                # _on_success/_on_failure for this invocation, and recording
+                # again counted every outcome twice -- halving the configured
+                # failure_threshold (a breaker set to 5 opened after 3) and, on
+                # the success side, closing a HALF_OPEN circuit in half the
+                # required successes.
+                breaker_record = (
+                    getattr(self, '_circuit_breaker_record', None)
+                    if breaker is None else None
+                )
                 if breaker_record is not None:
                     is_breaker_failure = (
                         isinstance(result, dict)
@@ -2099,13 +2184,18 @@ Write the complete compiled report:"""
                 logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
                 # Circuit breaker (failure on raised exception) — a raised tool
                 # exception is a failure just like an error-dict result, and the
-                # sync path's ``breaker.call`` counts it. Record it here so the
-                # breaker still opens after repeated raises; otherwise the
-                # post-invoke record block above is skipped and raised failures
-                # never trip the breaker. Approval/permission/policy/guardrail
-                # denials surface as error dicts (handled above), not raises, so
-                # this path only ever sees genuine tool failures.
-                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                # sync path's ``breaker.call`` counts it. Approval/permission/
+                # policy/guardrail denials surface as error dicts (handled
+                # above), not raises, so this path only ever sees genuine tool
+                # failures.
+                #
+                # Again only when the breaker wrapper did not run: ``acall``
+                # records the failure and re-raises, so the exception arriving
+                # here has already been counted once.
+                breaker_record = (
+                    getattr(self, '_circuit_breaker_record', None)
+                    if breaker is None else None
+                )
                 if breaker_record is not None:
                     breaker_record(function_name, False)
                 # Record the failed invocation so repeated identical failures

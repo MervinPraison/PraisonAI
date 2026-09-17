@@ -116,13 +116,10 @@ describe('the registry', () => {
     expect(listComputeProviders()).toContain('fake');
   });
 
-  it('a registered provider also becomes a toolsRunOn place', () => {
-    // Registering only the provider registry, not the placement one, let
-    // resolveComputeProvider('e2b') succeed while new Agent({ toolsRunOn: 'e2b' })
-    // threw "not a known place". The two must move together.
-    const custom: any = { name: 'e2b-like', execute: async () => ({}) };
-    registerComputeProvider('e2b-like', () => custom);
-    expect(toolPlaceNames()).toContain('e2b-like');
+  it('a registered custom provider is also selectable through toolsRunOn', () => {
+    const custom: any = { name: 'e2b', execute: async () => ({}) };
+    registerComputeProvider('e2b', () => custom);
+    expect(toolPlaceNames()).toContain('e2b');
   });
 
   it('an object implementing execute() is accepted directly', () => {

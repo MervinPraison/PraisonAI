@@ -10,6 +10,15 @@ from unittest.mock import Mock, patch
 
 def pytest_configure(config):
     """Register custom markers to avoid warnings."""
+    # litellm fetches its model-cost map from a remote GitHub URL at import
+    # time (litellm/__init__.py). Under the network guard that outbound call is
+    # blocked, so any unit test that freshly imports litellm (e.g. constructing
+    # an LLM) fails with NetworkBlockedError. Force litellm to use its bundled
+    # local cost map so imports stay fully offline. Set before any test module
+    # imports litellm; skip if the environment already opts in to live network.
+    if os.environ.get('PRAISONAI_ALLOW_NETWORK') != '1' and os.environ.get('PRAISONAI_LIVE_TESTS') != '1':
+        os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+
     config.pluginmanager.import_plugin("tests._pytest_plugins.test_gating")
     config.pluginmanager.import_plugin("tests._pytest_plugins.network_guard")
     config.addinivalue_line("markers", "real: Test requires real API keys")
@@ -47,6 +56,26 @@ def event_loop():
     yield loop
     loop.close()
 
+
+
+@pytest.fixture(autouse=True)
+def _reset_framework_availability_cache():
+    """Drop the process-global optional-framework availability memo per test.
+
+    ``praisonai_code._framework_availability`` memoises answers in a module-global
+    ``_cache``. Without per-test invalidation, an answer computed while a test has
+    stubbed ``importlib.util.find_spec`` / ``importlib.metadata.distribution`` leaks
+    into later tests in the same process. Reset before and after each test so a
+    stubbed answer never outlives the patch that produced it.
+    """
+    try:
+        from praisonai_code import _framework_availability
+    except ImportError:
+        yield
+        return
+    _framework_availability.invalidate()
+    yield
+    _framework_availability.invalidate()
 
 
 @pytest.fixture(autouse=True)

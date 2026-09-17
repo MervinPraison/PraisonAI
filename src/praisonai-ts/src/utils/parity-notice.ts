@@ -31,6 +31,29 @@
  * To close one: implement the behaviour, delete its entry here, add a test
  * that proves the option changes what the code does, and regenerate.
  * The list is the work queue, and it is meant to shrink to nothing.
+ *
+ * READ THIS BEFORE "CLOSING" ANY OF THE ENTRIES BELOW.
+ *
+ * Verified against praisonaiagents on 2026-09-08: Python does not act on most
+ * of them either, so implementing them here would make TypeScript DIVERGE from
+ * the reference rather than match it.
+ *
+ *   - AgentTeam knowledge / guardrails / web / reflection / caching / learn:
+ *     Python's AgentTeam constructor logs that it "does not yet apply them at
+ *     the team level; pass these to individual Agent(...) instances instead".
+ *     See TEAM_OPTION_NOTES in agent/team.ts.
+ *   - Task web / reflection / autonomy / planning: Python's Task assigns each
+ *     to self, and nothing in agents.py or process.py ever reads them back
+ *     (grep for `task.<option>`: zero hits). They are stored and ignored.
+ *
+ * That leaves AgentTeam.autonomy and AgentTeam.toolsRunOn as the only two
+ * entries blocked on TypeScript-side work, and both wait on larger subsystems
+ * (per-Agent autonomy, and sandbox compute providers).
+ *
+ * The count below is therefore NOT a backlog of ten missing features. It is
+ * kept as-is rather than trimmed, because silently shrinking a parity number
+ * is the failure this tooling exists to catch -- but anyone treating it as a
+ * work queue should start from the two entries named above.
  */
 export const UNHONOURED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   'AgentTeam.__init__': [

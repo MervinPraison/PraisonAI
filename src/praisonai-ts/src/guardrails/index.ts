@@ -302,3 +302,29 @@ export const builtinGuardrails = {
     });
   },
 };
+
+export { GuardrailRetry } from './retry';
+
+// ============================================================================
+// Per-tool guardrails (Python parity: guardrails/tool_guardrails.py)
+// ============================================================================
+
+export {
+  INPUT,
+  OUTPUT,
+  ATTR_FOR,
+  METHOD_FOR,
+  ToolInputGuardrail,
+  ToolOutputGuardrail,
+  ToolGuardrailChain,
+  buildToolGuardrails,
+  getToolGuardrailChain,
+  interpretGuardrailOutcome,
+  isToolGuardrailDenial,
+  toolGuardrailDenial,
+  type GuardrailDirection,
+  type GuardrailVerdict,
+  type ToolGuardrailSpec,
+  type ToolGuardrailLike,
+  type ToolGuardrailDenial,
+} from './tool-guardrails';
