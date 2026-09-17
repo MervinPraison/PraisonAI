@@ -22,6 +22,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _default_enabled_for_registration(plugin_name: str) -> bool:
+    """Whether a newly registered plugin should start enabled.
+
+    When ``plugins.enable([...])`` has established a selective allow-list,
+    late registrations must default to disabled unless explicitly allowed.
+    """
+    try:
+        from . import _enabled_plugin_names
+
+        if isinstance(_enabled_plugin_names, list):
+            return plugin_name in _enabled_plugin_names
+    except Exception:
+        pass
+    return True
+
+
 def _env_plugins_suppressed() -> bool:
     """Return True when external plugins are suppressed via env for this run.
 
@@ -174,7 +190,7 @@ class PluginManager:
                     return False
                 
                 self._plugins[info.name] = plugin
-                self._enabled[info.name] = True
+                self._enabled[info.name] = _default_enabled_for_registration(info.name)
                 
                 # Initialize plugin
                 plugin.on_init({})
