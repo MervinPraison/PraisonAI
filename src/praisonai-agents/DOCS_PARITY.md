@@ -25,9 +25,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3879 |
 | ✅ Autonomy | 3 | 7 | 2794 |
-| ✅ Bots | 7 | 36 | 14678 |
+| ✅ Bots | 7 | 36 | 14750 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 38873 |
+| ✅ CLI | 5 | 124 | 38915 |
 | ✅ Chunking | 2 | 2 | 424 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 19 | 5964 |
 | ✅ LLM | 3 | 15 | 5944 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 63 | 14860 |
+| ✅ MCP | 1 | 63 | 14859 |
 | ✅ Memory | 6 | 21 | 8186 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2842 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2815 |
-| ✅ Workflows | 5 | 21 | 8851 |
+| ✅ Workflows | 5 | 21 | 8862 |
 
 ## Documentation Without Features
 
