@@ -23,7 +23,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 | Surface | Params | Exact | camelCase | Alias | Flattened | Missing | Mismatches | Waived | TS-only / TS total |
 |---|---|---|---|---|---|---|---|---|---|
-| `Agent.__init__` | 42 | 29 | 8 | 2 | 3 | 0 | 8 | 8 | 13 / 59 |
+| `Agent.__init__` | 42 | 29 | 8 | 2 | 3 | 0 | 8 | 8 | 14 / 60 |
 | `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 3 / 26 |
 | `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 3 / 64 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 20 / 21 |
@@ -40,15 +40,15 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 224 | 123 | 90 | 8 | 3 | 0 | 28 | 28 | 86 / 316 |
+| **Total (17 surfaces)** | 224 | 123 | 90 | 8 | 3 | 0 | 28 | 28 | 87 / 317 |
 
 ## Surfaces
 
 ### `Agent.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:621`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:196` (ctor `src/praisonai-ts/src/agent/simple.ts:1008`)
-- Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 13 TS-only of 59
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:196` (ctor `src/praisonai-ts/src/agent/simple.ts:1018`)
+- Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -95,7 +95,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `retry` | keyword | null | `Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]` | exact | `retry` | undefined | `boolean \| AgentRetryConfig` | ok |
 | `reasoning_effort` | keyword | null | `Optional[str]` | camelCase | `reasoningEffort` | undefined | `'off' \| 'minimal' \| 'low' \| 'medium' \| 'high' \| string` | ok |
 
-TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `telemetry`?
+TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `telemetry`?, `maxGuardrailRetries`?
 
 ### `AgentTeam.__init__`
 
@@ -206,7 +206,7 @@ TS-only members: `dependencies`?, `humanInput`?, `humanReviewPrompt`?
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2468`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2493`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -218,7 +218,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3539`
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3588`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |

@@ -10,8 +10,8 @@
         "mismatches": 8,
         "missing": 0,
         "params": 42,
-        "ts_only": 13,
-        "ts_total": 59,
+        "ts_only": 14,
+        "ts_total": 60,
         "waived": 8
       },
       "params": [
@@ -1318,11 +1318,21 @@
           "required": false,
           "type_class": "boolean",
           "type_text": "boolean"
+        },
+        {
+          "canonical": "maxGuardrailRetries",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxGuardrailRetries",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
         }
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1008",
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1018",
         "location": "src/praisonai-ts/src/agent/simple.ts:196",
         "options_parameters": [
           "config"
@@ -1814,7 +1824,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3539",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3588",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2073,7 +2083,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2468",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2493",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -7363,8 +7373,8 @@
     "missing": 0,
     "params": 224,
     "surfaces": 17,
-    "ts_only": 86,
-    "ts_total": 316,
+    "ts_only": 87,
+    "ts_total": 317,
     "waived": 28
   },
   "waivers": [
