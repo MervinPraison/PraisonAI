@@ -20,8 +20,12 @@ import pytest
 from praisonaiagents import Agent
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="exercises the real streaming path; needs a provider credential",
+    (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+     and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+    or not os.environ.get("OPENAI_API_KEY"),
+    # Gating on the key alone treats owning one as consent to spend it,
+    # so this billed a real account on any machine with the key exported.
+    reason="Live provider call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
 )
 
 SENTINEL = "PRAISONAI-TOOL-SENTINEL"

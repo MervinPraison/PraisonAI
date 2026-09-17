@@ -196,7 +196,12 @@ async def test_async_memory_search_enforces_configured_identity_scope():
         user_id="user-7",
         session_id="session-9",
     ))
-    backend = MagicMock()
+    # A sync-only backend: spec it so it never satisfies the runtime-checkable
+    # AsyncMemoryProtocol. A bare MagicMock exposes every attribute, and under
+    # Python 3.11's laxer Protocol isinstance semantics that made asearch_memory
+    # take the async branch (asearch_long_term) instead of the sync fallback,
+    # so the scoped search_long_term assertion below never fired.
+    backend = MagicMock(spec=["search_long_term", "search_short_term"])
     backend.search_long_term.return_value = []
     agent._memory_instance = backend
 

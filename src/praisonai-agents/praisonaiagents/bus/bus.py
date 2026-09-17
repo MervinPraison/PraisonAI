@@ -172,19 +172,15 @@ class EventBus:
         Returns:
             The published Event object
         """
-        # Fast path: if no subscribers and no durable sinks, return a minimal
-        # event without expensive operations.
-        if not self._subscribers and not self._sinks:
-            # Convert EventType enum to string
-            type_str = event_type.value if isinstance(event_type, EventType) else event_type
-            return Event(
-                type=type_str,
-                data=data or {},
-                source=source,
-                metadata=metadata or {},
-            )
-        
-        # Convert EventType enum to string
+        # There is no separate no-subscriber shortcut here. It built the same
+        # Event and returned it, so the only work it saved was the sink
+        # dispatch and the history append below -- and skipping the append
+        # meant an event published with nobody listening vanished from
+        # get_history(). History is a debugging record of what was published;
+        # whether anyone happened to be subscribed at the time is not something
+        # it should silently depend on. The append is O(1) under a lock already
+        # held and the list is capped at _max_history, so the saving was not
+        # worth the hole it left.
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
         event = Event(
@@ -212,16 +208,19 @@ class EventBus:
         # the event even when there are no in-memory subscribers.
         self._dispatch_to_sinks(event)
         
-        # Fast path: if no subscribers, skip expensive work
-        if not self._subscribers:
-            return event
-        
-        # Store in history
+        # Record the event before considering subscribers, for the same reason
+        # _dispatch_to_sinks runs above: an event that was published happened,
+        # whether or not anyone was listening for it.
         with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history:]
-            
+
+        # Fast path: with nothing subscribed there is no dispatch to do.
+        if not self._subscribers:
+            return event
+
+        with self._lock:
             # Get matching subscribers
             subscribers = [
                 sub for sub in self._subscribers

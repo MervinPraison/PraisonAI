@@ -5,6 +5,7 @@ import os
 import asyncio
 import json
 import time
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai'))
 
@@ -256,14 +257,29 @@ class TestSignatureVerification:
 
 # ── Message Processing ──────────────────────────────────────────
 
+# Message ids are unique per run on purpose. BotSessionManager.chat()
+# deduplicates by message_id against a journal that PERSISTS ON DISK, and
+# returns "" for a repeat. With a hard-coded "msg-1" these tests therefore
+# passed exactly once on a given machine and were silently deduped forever
+# after -- the bot produced no reply, the assertion said "nothing sent", and
+# nothing in the output mentioned deduplication. Real WhatsApp message ids are
+# unique, so this also matches production.
 class TestMessageProcessing:
     """Test incoming message processing."""
 
-    def _make_bot(self):
+    def _make_bot(self, **kwargs):
         from praisonai.bots.whatsapp import WhatsAppBot
-        return WhatsAppBot(
-            token="t", phone_number_id="p", agent=MockAgent(), verify_token="v"
+        # respond_to_all=True by default here: the bot now filters inbound
+        # messages and, with no allowed_numbers configured, replies only to
+        # itself, so webhooks from this test's 1234567890 were dropped. These
+        # tests then saw "nothing sent" and read as a processing failure. The
+        # filtering itself is covered in test_whatsapp_message_filtering.py.
+        defaults = dict(
+            token="t", phone_number_id="p", agent=MockAgent(), verify_token="v",
+            respond_to_all=True,
         )
+        defaults.update(kwargs)
+        return WhatsAppBot(**defaults)
 
     @pytest.mark.asyncio
     async def test_process_text_message(self):
@@ -283,7 +299,7 @@ class TestMessageProcessing:
                         "contacts": [{"profile": {"name": "Test User"}}],
                         "messages": [{
                             "from": "1234567890",
-                            "id": "msg-1",
+                            "id": f"msg-{uuid.uuid4()}",
                             "type": "text",
                             "text": {"body": "Hello bot"},
                             "timestamp": str(int(time.time())),
@@ -294,8 +310,14 @@ class TestMessageProcessing:
         }
 
         await bot._process_webhook_data(data)
-        # Give async task time to complete
-        await asyncio.sleep(0.1)
+        # Wait for the reply rather than guessing at a delay: the inbound
+        # dispatch path now runs through the session manager, admission gate
+        # and per-turn lock, so a fixed 0.1s expired before the reply existed
+        # and the assertion reported "nothing sent" for what was only slowness.
+        for _ in range(200):
+            if sent_messages:
+                break
+            await asyncio.sleep(0.01)
         assert len(sent_messages) == 1
         assert sent_messages[0][0] == "1234567890"
         assert "Reply:" in sent_messages[0][1]
@@ -318,7 +340,7 @@ class TestMessageProcessing:
                         "contacts": [{"profile": {"name": "Test User"}}],
                         "messages": [{
                             "from": "1234567890",
-                            "id": "msg-2",
+                            "id": f"msg-{uuid.uuid4()}",
                             "type": "text",
                             "text": {"body": "/help"},
                             "timestamp": str(int(time.time())),
@@ -329,7 +351,14 @@ class TestMessageProcessing:
         }
 
         await bot._process_webhook_data(data)
-        await asyncio.sleep(0.1)
+        # Wait for the reply rather than guessing at a delay: the inbound
+        # dispatch path now runs through the session manager, admission gate
+        # and per-turn lock, so a fixed 0.1s expired before the reply existed
+        # and the assertion reported "nothing sent" for what was only slowness.
+        for _ in range(200):
+            if sent_messages:
+                break
+            await asyncio.sleep(0.01)
         assert len(sent_messages) == 1
         assert "Available Commands" in sent_messages[0][1]
 
@@ -351,7 +380,7 @@ class TestMessageProcessing:
                         "contacts": [{"profile": {"name": "Test"}}],
                         "messages": [{
                             "from": "111",
-                            "id": "msg-3",
+                            "id": f"msg-{uuid.uuid4()}",
                             "type": "location",
                             "location": {"latitude": 37.7749, "longitude": -122.4194},
                             "timestamp": str(int(time.time())),
@@ -362,7 +391,14 @@ class TestMessageProcessing:
         }
 
         await bot._process_webhook_data(data)
-        await asyncio.sleep(0.1)
+        # Wait for the reply rather than guessing at a delay: the inbound
+        # dispatch path now runs through the session manager, admission gate
+        # and per-turn lock, so a fixed 0.1s expired before the reply existed
+        # and the assertion reported "nothing sent" for what was only slowness.
+        for _ in range(200):
+            if sent_messages:
+                break
+            await asyncio.sleep(0.01)
         assert len(sent_messages) == 1
         assert "Location:" in sent_messages[0][1] or "Reply:" in sent_messages[0][1]
 

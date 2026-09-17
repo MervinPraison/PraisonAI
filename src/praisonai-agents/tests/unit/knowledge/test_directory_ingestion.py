@@ -10,7 +10,15 @@ import pytest
 
 # Check if knowledge dependencies are installed
 _KNOWLEDGE_DEPS_INSTALLED = importlib.util.find_spec("chromadb") is not None
-_HAS_OPENAI_KEY = bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_API_KEY") != "not-needed")
+# Owning a key is not consent to spend it: these ingest documents through a
+# real embedding provider, so an explicit opt-in is required as well.
+_LIVE_OPT_IN = (os.environ.get("PRAISONAI_LIVE_TESTS") == "1"
+                or os.environ.get("RUN_REAL_KEY_TESTS") == "1")
+_HAS_OPENAI_KEY = bool(
+    _LIVE_OPT_IN
+    and os.environ.get("OPENAI_API_KEY")
+    and os.environ.get("OPENAI_API_KEY") != "not-needed"
+)
 
 requires_knowledge = pytest.mark.skipif(
     not _KNOWLEDGE_DEPS_INSTALLED or not _HAS_OPENAI_KEY,

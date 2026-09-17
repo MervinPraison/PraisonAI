@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from praisonaiagents.skills import (
     SkillReviewProtocol,
     DefaultSkillReviewPolicy,

@@ -77,7 +77,12 @@ class TestAllowedToolsFilter:
         filter_instance = AllowedToolsFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch.object(logging.getLogger(), 'warning') as mock_warn:
+        # The module logs through its own logger, not the root one, so
+        # patching logging.getLogger() intercepted nothing and the
+        # assertion below reported a missing warning that was in fact
+        # emitted (it shows up in the captured log).
+        module_logger = logging.getLogger('praisonaiagents.allowed_tools_filter')
+        with patch.object(module_logger, 'warning') as mock_warn:
             filtered = filter_instance.filter_tools(available_tools)
             
         # Should return intersection of available and whitelisted tools
@@ -145,7 +150,13 @@ class TestAllowedToolsFilter:
         
         assert diagnostics["env_var_name"] == "ALLOWED_TOOLS"
         assert diagnostics["env_value"] == "search,send_message,unknown_in_whitelist"
-        assert diagnostics["whitelist"] == ["search", "send_message", "unknown_in_whitelist"]
+        # whitelist is derived from a set, so its order is not stable across
+        # runs (it varies with PYTHONHASHSEED). Comparing lists made this pass
+        # or fail depending on the interpreter's hash seed, which is what made
+        # it look order-dependent in full-suite runs.
+        assert set(diagnostics["whitelist"]) == {
+            "search", "send_message", "unknown_in_whitelist"
+        }
         assert set(diagnostics["registered_before_filter"]) == {"search", "send_message", "extract_pdf"}
         assert set(diagnostics["registered_after_filter"]) == {"search", "send_message"}
         assert set(diagnostics["dropped_tools"]) == {"extract_pdf"}

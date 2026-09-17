@@ -1893,6 +1893,21 @@ Write the complete compiled report:"""
 
             from ..streaming.events import tool_progress_channel
 
+            # breaker.acall() records the invocation outcome itself. Both record
+            # sites below then recorded the same failure a SECOND time -- once
+            # off the returned error dict, once in the raised-exception handler
+            # -- so every async tool failure counted twice and the breaker
+            # opened after ceil(threshold/2) calls (3 instead of the configured
+            # 5), out of parity with the sync path. This flag marks that the
+            # breaker already owns the outcome; it stays False when
+            # asyncio.wait_for times out, since the breaker never got a result.
+            #
+            # Declared outside the try: the except handler below reads it, and
+            # roughly seventy lines run between the try and the breaker setup.
+            # An exception in that window would otherwise raise NameError here
+            # and mask the original failure.
+            breaker_saw_outcome = {"done": False}
+
             try:
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
                 # directly callable — dispatch to their .run() method like the sync path.
@@ -2018,6 +2033,12 @@ Write the complete compiled report:"""
                 async def _invoke_guarded():
                     if breaker is None:
                         return await _invoke()
+                    # Set before the await: acall records an outcome however it
+                    # exits (returning, raising _ToolFailure, or letting a raw
+                    # tool exception through). The only exit that records
+                    # nothing is _CircuitBreakerException, and that path returns
+                    # _circuit_open_result() without reaching either record site.
+                    breaker_saw_outcome["done"] = True
                     try:
                         return await breaker.acall(_invoke_for_breaker)
                     except _ToolFailure as tf:

@@ -146,8 +146,12 @@ def test_inert_fields_are_documented_as_inert():
 
 # ── real agentic run: sandbox= adds no model-visible execution tools ─────────
 @pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="requires a live LLM key; run locally to exercise the real path",
+    (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+     and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+    or not os.environ.get("OPENAI_API_KEY"),
+    # Gating on the key alone treats owning one as consent to spend it,
+    # so this billed a real account on any machine with the key exported.
+    reason="Live provider call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
 )
 def test_sandbox_agent_start_adds_no_execution_tools():
     """End-to-end guard: build a sandboxed Agent, run a real prompt through the

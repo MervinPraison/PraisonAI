@@ -7,8 +7,28 @@ import time
 from unittest.mock import patch
 
 from praisonaiagents import Agent, tool
-from praisonaiagents.config import ToolConfig
+
+import os
+
+# Every test here drives a real provider turn -- the names say so. Nothing
+# gated them, so they billed a real account on any machine with a key and now
+# fail against the suite's egress guard. Marked live/network like the rest.
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.network,
+    pytest.mark.skipif(
+        (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+         and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+        or not os.environ.get("OPENAI_API_KEY"),
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+    ),
+]
 from praisonaiagents.tools.retry import RetryPolicy
+from praisonaiagents.config.feature_configs import ToolConfig
+
+# Agent(tool_retry_policy=...) was consolidated into the ToolConfig object:
+# agent.py sets self._tool_retry_policy from _tool_config.retry_policy, and the
+# constructor now rejects the old keyword outright.
 
 
 @pytest.mark.live

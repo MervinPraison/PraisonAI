@@ -48,9 +48,9 @@ def test_unknown_tool_returns_available_inventory():
 
     agent = _make_agent([web_search, calculator])
 
-    # The corrective dict is produced by the dispatch impl; the public
-    # execute_tool() wrapper escalates it as a ToolExecutionError whose message
-    # carries the same actionable text back to the model.
+    # The corrective dict is produced by the dispatch impl and passes through
+    # the public execute_tool() wrapper unchanged -- see the test below. It is
+    # returned, not raised, so the model can act on it and retry.
     result = agent._execute_tool_impl("totally_made_up_tool", {})
     assert isinstance(result, dict)
     assert "not found" in result["error"]
