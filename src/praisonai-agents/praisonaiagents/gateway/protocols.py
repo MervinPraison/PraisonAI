@@ -7199,3 +7199,77 @@ class FileEmergencyStop:
             # JSON object with a non-numeric ``at`` (e.g. a list) raises
             # TypeError from ``float()`` and must also fail-safe engaged.
             return EmergencyStopState(engaged=True, reason="unreadable-sentinel")
+
+
+# ---------------------------------------------------------------------------
+# Per-session stop scope (Issue #5129)
+# ---------------------------------------------------------------------------
+#
+# The existing stop primitives cover the two ends of the spectrum: per-turn
+# (``agent/interrupt.py:InterruptController`` cancels the *running* turn) and
+# global (``EmergencyStop*`` above, an operator-wide brake for the *whole*
+# gateway). Neither owns the middle case a chat-first gateway hits constantly:
+# a single conversation's *queued-but-not-yet-started* backlog. A user fires
+# several messages, the agent is mid-turn, the user types "stop" — the running
+# turn halts but the leftover queue is still executed.
+#
+# ``StopScope`` is the missing pure vocabulary: it names whether a stop owns
+# just the in-flight turn (``TURN``, the back-compat default) or the whole
+# session — the running turn *and* its pending ingress (``SESSION``). It is a
+# decision primitive only; the inbox drain itself lives in the gateway/bot
+# implementation that owns the queue.
+
+
+class StopScope(str, Enum):
+    """How much of a session's work a stop owns.
+
+    ``TURN`` cancels only the running turn (today's behaviour; default for
+    backward compatibility). ``SESSION`` cancels the running turn *and* drains
+    the session's queued-but-unstarted ingress so no backlogged message is
+    executed after the stop.
+    """
+
+    TURN = "turn"
+    SESSION = "session"
+
+    @classmethod
+    def coerce(cls, value: Any, default: "StopScope" = None) -> "StopScope":
+        """Best-effort parse of an external ``scope`` value.
+
+        Accepts a ``StopScope``, its string value (case-insensitively), or a
+        boolean/None ``stop_cancels_pending`` style flag. Unknown values fall
+        back to ``default`` (``TURN`` when unset) so a malformed scope never
+        escalates a stop beyond the caller's intent.
+        """
+        fallback = cls.TURN if default is None else default
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, bool):
+            return cls.SESSION if value else cls.TURN
+        if value is None:
+            return fallback
+        try:
+            return cls(str(value).strip().lower())
+        except ValueError:
+            return fallback
+
+
+@dataclass(frozen=True)
+class StopResult:
+    """Outcome of a scoped stop, reported to the requesting client.
+
+    ``pending_cancelled`` is a visible, intentional non-outcome: the count of
+    queued messages drained by a ``SESSION`` stop, never silently dropped. For
+    a ``TURN`` stop it is always ``0``.
+    """
+
+    scope: StopScope
+    turn_aborted: bool
+    pending_cancelled: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "scope": self.scope.value,
+            "turn_aborted": self.turn_aborted,
+            "pending_cancelled": self.pending_cancelled,
+        }
