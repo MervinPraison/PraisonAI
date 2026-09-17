@@ -185,12 +185,30 @@ def enable(plugins: list = None, options_by_name: dict = None) -> None:
     # Snapshot the names under lock to avoid TOCTOU
     with _plugins_lock:
         target_plugins = list(_enabled_plugin_names) if _enabled_plugin_names is not None else None
+
+    # Record the selective allow-list on this singleton manager so plugins
+    # registered *after* enable() default to disabled unless allow-listed.
+    # Setting it only here keeps standalone managers unrestricted.
+    manager.set_registration_allow_list(target_plugins)
     
-    # Enable specific plugins or all
+    def _plugin_name(plugin_info):
+        """Read a plugin name from either PluginInfo or legacy dict data."""
+        if isinstance(plugin_info, dict):
+            return plugin_info.get("name", "")
+        return getattr(plugin_info, "name", "")
+
+    # Enable specific plugins or all.  Registration defaults each plugin to
+    # enabled, so a selective call must also disable discovered plugins that
+    # are outside the facade's allow-list; otherwise get_all_tools() would
+    # expose tools from unselected plugins to every new Agent.
     if target_plugins is not None:
-        # Enable only specified plugins
-        for name in target_plugins:
-            manager.enable(name)
+        selected = set(target_plugins)
+        for plugin_info in manager.list_plugins():
+            name = _plugin_name(plugin_info)
+            if name in selected:
+                manager.enable(name)
+            else:
+                manager.disable(name)
     else:
         # Enable all discovered plugins
         for plugin_info in manager.list_plugins():
@@ -244,6 +262,9 @@ def disable(plugins: list = None) -> None:
         with _plugins_lock:
             _plugins_enabled = False
             _enabled_plugin_names = None
+        # Clear the singleton's late-registration allow-list so subsequent
+        # registrations return to the default (enabled) behaviour.
+        manager.set_registration_allow_list(None)
         for plugin_info in manager.list_plugins():
             manager.disable(_plugin_name(plugin_info))
 

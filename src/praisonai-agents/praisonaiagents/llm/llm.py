@@ -6,6 +6,7 @@ import warnings
 import re
 import inspect
 import asyncio
+import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -545,7 +546,12 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # ContextVar, not a plain attribute: this LLM instance can be shared
+        # across agents in a team, and asyncio.gather runs their tasks on one
+        # thread, so a plain attribute lets one task's agent name clobber another's.
+        self._current_agent_name_var: "contextvars.ContextVar[Optional[str]]" = (
+            contextvars.ContextVar(f"praisonai_current_agent_name_{id(self)}", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6291,9 +6297,51 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Agent name to attribute the next tracked completion to.
+
+        Isolated per asyncio task via a ContextVar: asyncio.gather copies the
+        context into each task it creates, so this survives an await and is
+        never visible to a sibling task running concurrently on this instance.
+        """
+        return self._current_agent_name_var.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        self._current_agent_name_var.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
         """Set the current agent name for token tracking."""
         self.current_agent_name = agent_name
+
+    def __deepcopy__(self, memo: dict) -> "LLM":
+        """Custom deepcopy that gives the clone its own ContextVar.
+
+        ``contextvars.ContextVar`` cannot be deep-copied (it has no
+        ``__deepcopy__``/``__reduce__`` support), so the default
+        ``copy.deepcopy`` walk raises ``TypeError`` as soon as it reaches
+        ``_current_agent_name_var``. That attribute only holds task-local,
+        runtime attribution state anyway - it is meaningless to carry across
+        a clone - so this hook allocates a fresh ContextVar (default
+        ``None``, same as ``__init__``) for the copy instead of copying the
+        original one.
+        """
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "_current_agent_name_var":
+                object.__setattr__(
+                    result,
+                    k,
+                    contextvars.ContextVar(
+                        f"praisonai_current_agent_name_{id(result)}", default=None
+                    ),
+                )
+            else:
+                object.__setattr__(result, k, copy.deepcopy(v, memo))
+        return result
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.

@@ -905,6 +905,12 @@ Your Goal: {self.goal}"""
         elif isinstance(tools, list) and len(tools) == 0:
             # Explicit empty list - return immediately to enforce boundary
             return []
+
+        # Plugin tools are copied into the Agent's local tool list at
+        # construction time. Re-check ownership before advertising them so a
+        # later plugin disable/unregister revokes the advertised capability.
+        if getattr(self, "_plugin_tool_owners", None) and isinstance(tools, (list, tuple)):
+            tools = [tool for tool in tools if self._is_plugin_tool_active(tool)]
         
         if not tools:
             return []
@@ -920,9 +926,18 @@ Your Goal: {self.goal}"""
             return cached_tools
             
         formatted_tools = []
+        # Provider-hosted tool specs have no local callable; the provider
+        # executes them after this formatter forwards the allowlisted dict.
+        try:
+            from ..tools.hosted import is_hosted_tool
+        except ImportError:
+            is_hosted_tool = lambda _tool: False
+
         for tool in tools:
+            if isinstance(tool, dict) and is_hosted_tool(tool):
+                formatted_tools.append(tool)
             # Handle pre-formatted OpenAI tools
-            if isinstance(tool, dict) and tool.get('type') == 'function':
+            elif isinstance(tool, dict) and tool.get('type') == 'function':
                 # Validate nested dictionary structure before accessing
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     formatted_tools.append(tool)
@@ -931,7 +946,9 @@ Your Goal: {self.goal}"""
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
-                    if isinstance(subtool, dict) and subtool.get('type') == 'function':
+                    if isinstance(subtool, dict) and is_hosted_tool(subtool):
+                        formatted_tools.append(subtool)
+                    elif isinstance(subtool, dict) and subtool.get('type') == 'function':
                         # Validate nested dictionary structure before accessing
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             formatted_tools.append(subtool)
@@ -3355,6 +3372,36 @@ Your Goal: {self.goal}"""
                     
                     # Append formatted knowledge to the prompt
                     prompt = f"{prompt}\n\n{formatted_context}"
+
+                    # Sync llm_prompt with the retrieved context so the RAG block
+                    # actually reaches the model. llm_prompt (not prompt) is what
+                    # gets sent to the LLM in both the custom-LLM and OpenAI paths
+                    # below; without this the retrieved knowledge is appended to
+                    # `prompt` but never delivered, so the model answers from
+                    # parametric memory only. Append (rather than reassign) to
+                    # preserve any response-template instruction already baked into
+                    # llm_prompt.
+                    if isinstance(llm_prompt, str):
+                        llm_prompt = f"{llm_prompt}\n\n{formatted_context}"
+                    elif isinstance(llm_prompt, list):
+                        # Multimodal prompt: append the retrieved context to the
+                        # last text part so attachment-bearing turns still receive
+                        # the RAG block. Copy dicts before mutating to avoid
+                        # aliasing the caller's attachment structures; if no text
+                        # part exists, add one.
+                        appended = False
+                        for i in range(len(llm_prompt) - 1, -1, -1):
+                            item = llm_prompt[i]
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                updated = dict(item)
+                                updated["text"] = f"{updated.get('text', '')}\n\n{formatted_context}"
+                                llm_prompt[i] = updated
+                                appended = True
+                                break
+                        if not appended:
+                            llm_prompt = list(llm_prompt) + [
+                                {"type": "text", "text": formatted_context}
+                            ]
 
         if self._using_custom_llm:
             # Track messages THIS turn appends so a failure rolls back only our

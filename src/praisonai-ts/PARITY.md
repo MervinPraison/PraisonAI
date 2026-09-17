@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2085 |
+| TypeScript Features | 2082 |
 | **Gap Count** | **0** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -975,7 +975,7 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (142 exports)</summary>
+<summary><strong>tools</strong> (139 exports)</summary>
 
 ```typescript
 import { ArxivDownloadTool, ArxivPaper, ArxivSearchTool, BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MCP, MCPTool... } from 'praisonai';

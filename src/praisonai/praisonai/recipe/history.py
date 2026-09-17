@@ -8,15 +8,48 @@ Provides storage and retrieval of recipe run history for:
 """
 
 import json
+import os
 import shutil
+import tempfile
+import threading
+from contextlib import contextmanager, nullcontext as _nullcontext
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .models import RecipeResult
 
+try:
+    import fcntl
+except ImportError:  # Windows / non-POSIX
+    fcntl = None
+
 if TYPE_CHECKING:
     from praisonaiagents.storage.protocols import StorageBackendProtocol
+
+
+@contextmanager
+def _index_flock(lock_path: Path):
+    """Cross-process advisory lock around index read-modify-write.
+
+    Uses a sidecar ``.lock`` file so the exclusive lock is held even while
+    ``_save_index`` atomically replaces ``index.json`` underneath it. On
+    platforms without ``fcntl`` (Windows) this degrades to a no-op — the
+    in-process ``RLock`` still serialises threads in the same interpreter.
+    """
+    if fcntl is None:
+        yield
+        return
+    lock_file = str(lock_path) + ".lock"
+    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 # Default storage path
@@ -77,9 +110,27 @@ class RunHistory:
         self.path = Path(path) if path else DEFAULT_RUNS_PATH
         self.index_path = self.path / "index.json"
         self._backend = backend
+        # In-process serialisation for the index read-modify-write. Reentrant so
+        # methods that lock then call ``delete()`` (which also locks) don't
+        # deadlock. Cross-process safety is handled by ``_index_flock``.
+        self._lock = threading.RLock()
         
         if backend is None:
             self._ensure_structure()
+
+    def _index_lock(self):
+        """Return the cross-process index lock guard.
+
+        Only file-based storage has a real filesystem sidecar to lock; backends
+        manage their own index persistence (``save("_index")``) and deliberately
+        skip local directory creation, so opening a ``.lock`` file under an
+        uninitialised ``self.path`` would raise ``FileNotFoundError``. For
+        backends we rely on the in-process ``RLock`` (and the backend's own
+        atomicity) instead of a filesystem advisory lock.
+        """
+        if self._backend is not None:
+            return _nullcontext()
+        return _index_flock(self.index_path)
     
     def _ensure_structure(self):
         """Ensure storage directory structure exists."""
@@ -99,15 +150,31 @@ class RunHistory:
         return {"runs": {}, "updated": _get_timestamp()}
     
     def _save_index(self, index: Dict[str, Any]):
-        """Save run index."""
+        """Save run index.
+
+        File-based writes go to a temp file in the same directory and are then
+        atomically ``os.replace``d over ``index.json`` so a crash mid-write can
+        never leave a half-written (truncated) index behind.
+        """
         index["updated"] = _get_timestamp()
         
         if self._backend is not None:
             self._backend.save("_index", index)
             return
         
-        with open(self.index_path, "w") as f:
-            json.dump(index, f, indent=2)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".index-", suffix=".json", dir=str(self.path)
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(index, f, indent=2)
+            os.replace(tmp_path, self.index_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     
     def store(
         self,
@@ -184,16 +251,18 @@ class RunHistory:
                     for event in events:
                         f.write(json.dumps(event) + "\n")
         
-        # Update index
-        index = self._load_index()
-        index["runs"][run_id] = {
-            "recipe": result.recipe,
-            "version": result.version,
-            "status": result.status,
-            "stored_at": run_data["stored_at"],
-            "session_id": result.trace.get("session_id"),
-        }
-        self._save_index(index)
+        # Update index under lock so concurrent store()/delete() calls don't
+        # clobber each other's entries (in-process + cross-process).
+        with self._lock, self._index_lock():
+            index = self._load_index()
+            index["runs"][run_id] = {
+                "recipe": result.recipe,
+                "version": result.version,
+                "status": result.status,
+                "stored_at": run_data["stored_at"],
+                "session_id": result.trace.get("session_id"),
+            }
+            self._save_index(index)
         
         return run_id
     
@@ -356,17 +425,18 @@ class RunHistory:
         Returns:
             True if deleted
         """
-        if self._backend is not None:
-            self._backend.delete(f"run:{run_id}")
-        else:
-            run_dir = self.path / run_id
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
-        
-        index = self._load_index()
-        if run_id in index["runs"]:
-            del index["runs"][run_id]
-            self._save_index(index)
+        with self._lock, self._index_lock():
+            if self._backend is not None:
+                self._backend.delete(f"run:{run_id}")
+            else:
+                run_dir = self.path / run_id
+                if run_dir.exists():
+                    shutil.rmtree(run_dir)
+
+            index = self._load_index()
+            if run_id in index["runs"]:
+                del index["runs"][run_id]
+                self._save_index(index)
         
         return True
     
@@ -380,20 +450,31 @@ class RunHistory:
         Returns:
             Number of runs deleted
         """
-        index = self._load_index()
         deleted = 0
         now = datetime.now(timezone.utc)
         
-        for run_id in list(index["runs"].keys()):
-            run_dir = self.path / run_id
-            run_path = run_dir / "run.json"
-            
+        # Snapshot the index under lock, then act on the snapshot. Orphan
+        # pruning is persisted under the same lock; retention deletes go through
+        # ``delete()`` which locks independently (RLock is reentrant).
+        with self._lock, self._index_lock():
+            index = self._load_index()
+            orphans_removed = False
+            for run_id in list(index["runs"].keys()):
+                run_dir = self.path / run_id
+                run_path = run_dir / "run.json"
+                if not run_path.exists():
+                    # Clean up orphaned index entry
+                    del index["runs"][run_id]
+                    deleted += 1
+                    orphans_removed = True
+            if orphans_removed:
+                self._save_index(index)
+            expired = list(index["runs"].keys())
+        
+        for run_id in expired:
+            run_path = self.path / run_id / "run.json"
             if not run_path.exists():
-                # Clean up orphaned index entry
-                del index["runs"][run_id]
-                deleted += 1
                 continue
-            
             with open(run_path) as f:
                 run_data = json.load(f)
             
@@ -430,16 +511,30 @@ class RunHistory:
 
 # Global instance for convenience
 _default_history: Optional[RunHistory] = None
+_default_history_lock = threading.Lock()
+# Cache of file-based instances keyed by resolved path so repeated
+# ``get_history(path)`` calls share one ``RunHistory`` (and therefore one
+# in-process ``RLock``). Without this each call built a fresh instance with its
+# own lock, so concurrent stores could not be serialised on platforms where the
+# ``fcntl`` advisory lock is a no-op (Windows).
+_path_histories: Dict[str, RunHistory] = {}
 
 
 def get_history(path: Optional[Path] = None) -> RunHistory:
     """Get or create default run history instance."""
     global _default_history
     if path:
-        return RunHistory(path)
-    if _default_history is None:
-        _default_history = RunHistory()
-    return _default_history
+        key = str(Path(path).expanduser().resolve())
+        with _default_history_lock:
+            history = _path_histories.get(key)
+            if history is None:
+                history = RunHistory(path)
+                _path_histories[key] = history
+            return history
+    with _default_history_lock:
+        if _default_history is None:
+            _default_history = RunHistory()
+        return _default_history
 
 
 def store_run(

@@ -10,6 +10,7 @@ Validates:
 import asyncio
 import copy
 import threading
+import uuid
 
 import pytest
 
@@ -82,6 +83,37 @@ class TestAgentDeepCopy:
         agent = self._make_agent(llm="gpt-4o-mini")
         assert agent.clone_for_channel().llm == "gpt-4o-mini"
 
+    def test_deepcopy_agent_with_built_llm_instance_does_not_raise(self):
+        """An already-built LLM stores its agent-attribution state in a
+        ContextVar (issue #5052), which has no __deepcopy__/__reduce__ of its
+        own. Agent.__deepcopy__ recursively deep-copies _llm_instance, so
+        without LLM.__deepcopy__ giving the clone a fresh ContextVar, this
+        raises TypeError: cannot pickle '_contextvars.ContextVar' object.
+        """
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="custom/test-model", api_key="test")
+        agent = self._make_agent(llm=llm)
+
+        cloned = copy.deepcopy(agent)
+
+        assert cloned is not agent
+        assert cloned._llm_instance is not agent._llm_instance
+        # The clone gets its own task-local attribution state, not the
+        # original ContextVar (which is not copyable, and whose value is
+        # runtime/task-local anyway).
+        assert (
+            cloned._llm_instance._current_agent_name_var
+            is not agent._llm_instance._current_agent_name_var
+        )
+        assert cloned._llm_instance.current_agent_name is None
+
+        # The two instances' attribution state stays independent afterwards.
+        agent._llm_instance.set_current_agent("Original")
+        cloned._llm_instance.set_current_agent("Clone")
+        assert agent._llm_instance.current_agent_name == "Original"
+        assert cloned._llm_instance.current_agent_name == "Clone"
+
     def test_multiple_clones_are_isolated(self):
         """Regression: creating two clones (simulating 2nd+ gateway channel) must work."""
         agent = self._make_agent()
@@ -89,6 +121,54 @@ class TestAgentDeepCopy:
         clone2 = agent.clone_for_channel()
         assert clone1 is not clone2
         assert clone1._Agent__cache_lock is not clone2._Agent__cache_lock
+
+    def test_clone_preserves_ownership_for_plugin_enabled_after_source(self):
+        """A clone keeps ownership for tools merged after the source was built."""
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+
+        suffix = uuid.uuid4().hex
+        source_name = f"clone_owner_source_{suffix}"
+        late_name = f"clone_owner_late_{suffix}"
+
+        def source_tool() -> str:
+            return "source"
+
+        def late_tool() -> str:
+            return "late"
+
+        class SourcePlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name=source_name)
+
+            def get_tools(self):
+                return [source_tool]
+
+        class LatePlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name=late_name)
+
+            def get_tools(self):
+                return [late_tool]
+
+        manager = get_plugin_manager()
+        assert manager.register(SourcePlugin())
+        try:
+            source = self._make_agent()
+            assert source_tool in source.tools
+            assert manager.register(LatePlugin())
+            clone = source.clone_for_channel()
+
+            assert late_tool in clone.tools
+            assert clone._plugin_tool_owners[id(late_tool)][0] == late_name
+
+            manager.disable(late_name)
+            assert clone._is_plugin_tool_active(late_tool) is False
+        finally:
+            manager.unregister(late_name)
+            manager.unregister(source_name)
 
     def test_deepcopy_multiple_times(self):
         """Successive deepcopies must all succeed (no cumulative state corruption)."""

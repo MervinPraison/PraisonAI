@@ -17,7 +17,6 @@ export { VALYU_METADATA } from './valyu';
 export { BEDROCK_AGENTCORE_METADATA } from './bedrock-agentcore';
 export { AIRWEAVE_METADATA } from './airweave';
 export { CODE_MODE_METADATA } from './code-mode';
-export { ANYAPI_METADATA } from './anyapi';
 
 // Code Execution
 export { codeExecution, createCodeExecutionTool } from './code-execution';
@@ -77,17 +76,6 @@ export type { AirweaveSearchConfig, AirweaveSearchInput, AirweaveSearchResult } 
 export { codeMode, createCodeModeTool } from './code-mode';
 export type { CodeModeConfig, CodeModeInput, CodeModeResult } from './code-mode';
 
-// AnyAPI
-export {
-  anyapiSearchApis, anyapiGetApi, anyapiRunApi,
-  createAnyapiSearchApisTool, createAnyapiGetApiTool, createAnyapiRunApiTool
-} from './anyapi';
-export type {
-  AnyapiSearchApisConfig, AnyapiSearchApisInput, AnyapiSearchApisResult, AnyapiApiSummary,
-  AnyapiGetApiInput, AnyapiGetApiResult,
-  AnyapiRunApiConfig, AnyapiRunApiInput, AnyapiRunApiResult
-} from './anyapi';
-
 // Custom Tools
 export { registerCustomTool, createCustomTool, registerNpmTool, registerLocalTool, Tool } from './custom';
 export type { CustomToolConfig } from './custom';
@@ -113,7 +101,6 @@ export async function getAllBuiltinMetadata() {
   const { BEDROCK_AGENTCORE_METADATA } = await import('./bedrock-agentcore');
   const { AIRWEAVE_METADATA } = await import('./airweave');
   const { CODE_MODE_METADATA } = await import('./code-mode');
-  const { ANYAPI_METADATA } = await import('./anyapi');
 
   return [
     CODE_EXECUTION_METADATA,
@@ -128,6 +115,5 @@ export async function getAllBuiltinMetadata() {
     BEDROCK_AGENTCORE_METADATA,
     AIRWEAVE_METADATA,
     CODE_MODE_METADATA,
-    ANYAPI_METADATA,
   ];
 }

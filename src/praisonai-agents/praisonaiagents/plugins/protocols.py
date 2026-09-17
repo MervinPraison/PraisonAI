@@ -72,12 +72,12 @@ class ToolPluginProtocol(PluginProtocol, Protocol):
             def version(self) -> str:
                 return "1.0.0"
             
-            def get_tools(self) -> List[Dict[str, Any]]:
-                return [{"name": "my_tool", "description": "Does something"}]
+            def get_tools(self) -> List[Any]:
+                return [{"type": "function", "function": {"name": "my_tool"}}]
     """
     
-    def get_tools(self) -> List[Dict[str, Any]]:
-        """Return tools provided by this plugin."""
+    def get_tools(self) -> List[Any]:
+        """Return callable or provider-ready tools provided by this plugin."""
         ...
 
 
