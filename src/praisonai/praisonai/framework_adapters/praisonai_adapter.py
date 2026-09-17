@@ -45,7 +45,14 @@ def _active_correlation_id() -> Optional[str]:
 def _resolve_output_budget(model: str, requested: Any = None) -> Optional[int]:
     """Resolve a YAML agent budget against LiteLLM's model ceiling."""
     try:
-        value = _DEFAULT_MAX_TOKENS if requested is None else int(requested)
+        if requested is None:
+            value = _DEFAULT_MAX_TOKENS
+        elif isinstance(requested, bool):
+            raise ValueError("boolean max_tokens is invalid")
+        else:
+            value = int(requested)
+            if not isinstance(requested, str) and requested != value:
+                raise ValueError("fractional max_tokens is invalid")
     except (TypeError, ValueError, OverflowError):
         correlation_id = _active_correlation_id()
         logger.warning(

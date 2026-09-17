@@ -46,6 +46,16 @@ def _coerce_output_token_limit(value) -> int | None:
         coerced = int(value)
     except (TypeError, ValueError, OverflowError):
         return None
+    # ``int`` truncates fractional metadata (for example, ``8192.5``), which
+    # would turn an invalid ceiling into an apparently authoritative limit.
+    # Keep numeric strings such as ``"8192"`` compatible with LiteLLM's
+    # metadata while rejecting non-integral numeric values before conversion.
+    if not isinstance(value, str):
+        try:
+            if value != coerced:
+                return None
+        except Exception:
+            return None
     return coerced if coerced > 0 else None
 
 

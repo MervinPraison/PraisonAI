@@ -215,3 +215,13 @@ def test_max_output_tokens_unknown_or_invalid_is_none():
     with patch.object(mc, "_get_litellm", return_value=fake):
         assert mc.max_output_tokens("unknown-model") is None
     mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_rejects_fractional_metadata():
+    mc.max_output_tokens.cache_clear()
+    fake = SimpleNamespace(
+        get_model_info=lambda *, model: {"max_output_tokens": 8192.5}
+    )
+    with patch.object(mc, "_get_litellm", return_value=fake):
+        assert mc.max_output_tokens("fractional-model") is None
+    mc.max_output_tokens.cache_clear()

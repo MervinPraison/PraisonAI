@@ -128,3 +128,16 @@ def test_yaml_explicit_cli_budget_wins_over_nested_value():
         details,
         {"max_tokens": 4096, "_max_tokens_explicit": True},
     ) == 4096
+
+
+def test_agents_generator_does_not_apply_unmarked_legacy_default():
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = AgentsGenerator.__new__(AgentsGenerator)
+    generator.logger = SimpleNamespace(debug=lambda *args, **kwargs: None)
+    config = {"roles": {"writer": {"llm": {"model": "provider/model", "max_tokens": 2048}}}}
+
+    generator._merge_cli_config(config, {"max_tokens": 16000})
+
+    assert "max_tokens" not in config["roles"]["writer"]
+    assert config["roles"]["writer"]["llm"]["max_tokens"] == 2048

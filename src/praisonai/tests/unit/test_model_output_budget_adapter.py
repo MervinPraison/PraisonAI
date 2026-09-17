@@ -31,3 +31,8 @@ def test_yaml_llm_spec_preserves_provider_options():
         "max_tokens": 4096,
     }
     assert resolved is not raw
+
+
+def test_yaml_budget_rejects_boolean_and_fractional_values():
+    assert _resolve_output_budget("provider/model", True) == 16000
+    assert _resolve_output_budget("provider/model", 2048.5) == 16000

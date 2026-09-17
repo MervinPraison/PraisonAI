@@ -393,6 +393,8 @@ class PraisonAI:
                 'approve_all_tools',
                 'approval_timeout',
                 'output',
+                'max_tokens',
+                '_max_tokens_explicit',
             ):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
