@@ -29,6 +29,39 @@ logger = logging.getLogger(__name__)
 # timeouts so they cannot exhaust process resources.
 _MAX_ORPHANED_TOOL_EXECUTORS = 4
 
+# Sentinel returned as the "arguments" value when a tool call's argument string
+# cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
+# It is distinct from {} ("no arguments"): {} would silently execute the tool
+# with the WRONG arguments and report success. Callers must detect this sentinel
+# and surface a tool-error so the model can re-emit the call instead.
+# Lives here (agent-side, lightweight) so both chat_mixin.py and llm.py share
+# one identity — an `is` check only works against the same object.
+_TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+def tool_arguments_parse_failed(arguments) -> bool:
+    """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
+    return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
+
+
+def tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
+    """Build a tool-role message telling the model its arguments were lost.
+
+    Surfacing this instead of dispatching with {} converts a silent
+    wrong-action-reported-as-success into a visible, retryable error.
+    """
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": (
+            f"Error: arguments for tool '{function_name}' could not be parsed "
+            f"(the argument string was invalid or truncated). "
+            f"The tool was NOT executed. Please re-emit the tool call with "
+            f"complete, valid JSON arguments."
+        ),
+    }
+
+
 if TYPE_CHECKING:
     pass
 

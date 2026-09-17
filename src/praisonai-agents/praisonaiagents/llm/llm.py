@@ -34,7 +34,9 @@ from ..tools.schema import build_tool_definition
 # It is distinct from {} ("no arguments"): {} would silently execute the tool
 # with the WRONG arguments and report success. Callers must detect this sentinel
 # and surface a tool-error so the model can re-emit the call instead.
-_TOOL_ARGUMENTS_PARSE_FAILED = object()
+# Shared with the chat_mixin.py tool-dispatch paths via agent.tool_execution so
+# both use ONE object identity — an `is` check only works against the same object.
+from ..agent.tool_execution import _TOOL_ARGUMENTS_PARSE_FAILED
 
 
 async def _dispatch_async_tool(

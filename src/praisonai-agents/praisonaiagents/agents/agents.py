@@ -2030,6 +2030,20 @@ class AgentTeam(SpawnAnnounceProtocol):
         "praisonai_tools_scope_depths", default=()
     )
 
+    # ── re-entrancy ownership ────────────────────────────────────────────────
+    # A ContextVar, not an instance attribute keyed by threading.get_ident():
+    # every asyncio Task scheduled on one event loop shares a single OS thread
+    # id, so two coroutines that astart() the SAME team under one asyncio.gather
+    # would both see current == _run_owner_ident and take the re-entrant branch,
+    # bypassing the lock and interleaving writes to shared task state. Same
+    # reasoning as _tools_scope_depths above. The sync threading.Lock still
+    # blocks genuinely concurrent OS threads; the ContextVar only fixes the
+    # asyncio-tasks-on-one-thread case. Value is id(self) so nested runs on the
+    # same team pass through while unrelated tasks each get their own ownership.
+    _run_owner: "contextvars.ContextVar" = contextvars.ContextVar(
+        "praisonai_run_owner", default=None
+    )
+
     def _needs_tools_scope(self) -> bool:
         """True when this call should provision the team's shared sandbox."""
         if getattr(self, "tools_run_on", None) is None:
@@ -2094,9 +2108,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         (``variables``/task snapshot) can never interleave with a competing run.
         """
         lock = self._execution_lock
-        current = threading.get_ident()
-        if getattr(self, '_run_owner_ident', None) == current:
-            # Re-entrant on the owning thread (e.g. batch → per-item start()).
+        owner = id(self)
+        if self._run_owner.get() == owner:
+            # Re-entrant on the owning asyncio task / thread (e.g. batch →
+            # per-item start()). Tracked via ContextVar, not threading.get_ident(),
+            # so coroutines sharing one OS thread under asyncio.gather don't
+            # falsely see each other as the same owner and bypass the lock.
             yield
             return
         if not lock.acquire(blocking=False):
@@ -2105,11 +2122,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                 "safe to run concurrently on the same object. Create a separate "
                 "AgentTeam/PraisonAIAgents instance per concurrent run."
             )
-        self._run_owner_ident = current
+        token = self._run_owner.set(owner)
         try:
             yield
         finally:
-            self._run_owner_ident = None
+            self._run_owner.reset(token)
             lock.release()
 
     async def astart(self, content=None, return_dict=False, **kwargs):

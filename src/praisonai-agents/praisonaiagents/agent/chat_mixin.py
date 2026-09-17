@@ -3571,12 +3571,12 @@ Your Goal: {self.goal}"""
                 # Extract text from multimodal prompts
                 normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self._append_to_chat_history({"role": "user", "content": normalized_content})
+            # Add user message to chat history BEFORE LLM call so handoffs can
+            # access it. Use atomic check-then-act to prevent TOCTOU races: an
+            # unatomic read of chat_history[-1] followed by a separate append
+            # lets a concurrent turn's user message be mistaken for this turn's
+            # own duplicate, silently dropping this user turn from the record.
+            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
                 # Persist user message to DB (OpenAI path)
                 self._persist_message("user", normalized_content)
 
@@ -4215,12 +4215,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Extract text from multimodal prompts
                 normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self._append_to_chat_history({"role": "user", "content": normalized_content})
+            # Add user message to chat history BEFORE LLM call so handoffs can
+            # access it. Use atomic check-then-act to prevent TOCTOU races: an
+            # unatomic read of chat_history[-1] followed by a separate append
+            # lets a concurrent turn's user message be mistaken for this turn's
+            # own duplicate, silently dropping this user turn from the record.
+            self._add_to_chat_history_if_not_duplicate("user", normalized_content)
 
             # --- Proactive Context Budget Management (async standard OpenAI path) ---
             try:
@@ -4694,13 +4694,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             for tool_call in message.tool_calls:
                 try:
                     function_name = tool_call.function.name
-                    # Parse JSON arguments safely 
+                    # Parse JSON arguments safely. A parse failure is NOT {}: a
+                    # truncated/malformed argument string must not silently run
+                    # the tool with defaults and be reported as success. Surface
+                    # a retryable tool-error to the model instead (mirrors
+                    # llm.py's _tool_arguments_parse_failed handling).
+                    from .tool_execution import (
+                        _TOOL_ARGUMENTS_PARSE_FAILED,
+                        tool_arguments_parse_failed,
+                        tool_parse_error_message,
+                    )
                     try:
-                        arguments = json.loads(tool_call.function.arguments)
+                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
                     except json.JSONDecodeError as json_error:
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
-                        arguments = {}
-                    
+                        arguments = _TOOL_ARGUMENTS_PARSE_FAILED
+                    if tool_arguments_parse_failed(arguments):
+                        results.append(
+                            tool_parse_error_message(
+                                function_name,
+                                getattr(tool_call, "id", None),
+                            )["content"]
+                        )
+                        continue
+
                     # Find the matching tool by comparing every supported identifier:
                     # __name__ (plain callables), .name (BaseTool instances like
                     # BrowserBaseTool, or aliased FunctionTools), or the class name.
@@ -5287,13 +5304,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         for tool_call in tool_calls_data:
                             if tool_call['id'] and tool_call['function']['name']:
                                 try:
-                                    # Parse JSON arguments safely 
+                                    # Parse JSON arguments safely. A parse failure
+                                    # is NOT {}: a truncated/malformed argument
+                                    # string must not silently run the tool with
+                                    # defaults and report success. Surface a
+                                    # retryable tool-error to the model instead.
+                                    from .tool_execution import (
+                                        _TOOL_ARGUMENTS_PARSE_FAILED,
+                                        tool_arguments_parse_failed,
+                                        tool_parse_error_message,
+                                    )
                                     try:
                                         parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
                                     except json.JSONDecodeError as json_error:
                                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
-                                        parsed_args = {}
-                                    
+                                        parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
+                                    if tool_arguments_parse_failed(parsed_args):
+                                        self._notify_tool_call(
+                                            tool_call['function']['name'],
+                                            {},
+                                            None,
+                                            elapsed_time=0.0,
+                                            success=False,
+                                        )
+                                        _err_msg = tool_parse_error_message(
+                                            tool_call['function']['name'],
+                                            tool_call['id'],
+                                        )
+                                        self._append_to_chat_history(_err_msg)
+                                        self._persist_message(
+                                            "tool",
+                                            _err_msg["content"],
+                                            tool_call_id=tool_call['id'],
+                                        )
+                                        continue
+
                                     executor = self._durable_sync_tool_executor(
                                         self.execute_tool
                                     )
