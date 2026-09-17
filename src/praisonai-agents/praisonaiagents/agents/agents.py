@@ -2095,6 +2095,21 @@ class AgentTeam(SpawnAnnounceProtocol):
                     self._run_lock = lock
         return lock
 
+    def _execution_identity(self):
+        """Identity of the current execution for re-entrancy checks.
+
+        Pins ``id(self)`` to the *acquiring* thread and asyncio task so a child
+        task (which copies the parent ContextVar and would inherit the plain
+        ``id(self)`` marker) cannot be mistaken for legitimate same-execution
+        nesting and bypass the held lock. A synchronous batch → per-item run
+        stays on the same thread and task, so it still re-enters as intended.
+        """
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            task = None
+        return (id(self), threading.get_ident(), id(task) if task is not None else None)
+
     @contextlib.contextmanager
     def _guard_execution(self):
         """Refuse concurrent runs on the same instance, re-entrant for one owner.
@@ -2108,12 +2123,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         (``variables``/task snapshot) can never interleave with a competing run.
         """
         lock = self._execution_lock
-        owner = id(self)
+        owner = self._execution_identity()
         if self._run_owner.get() == owner:
             # Re-entrant on the owning asyncio task / thread (e.g. batch →
             # per-item start()). Tracked via ContextVar, not threading.get_ident(),
             # so coroutines sharing one OS thread under asyncio.gather don't
-            # falsely see each other as the same owner and bypass the lock.
+            # falsely see each other as the same owner and bypass the lock. The
+            # identity also pins the acquiring thread + asyncio task id, so a
+            # child task (which copies the parent context and would otherwise
+            # inherit the owner marker) does NOT falsely re-enter and bypass the
+            # held lock when a tool/guardrail starts the same team.
             yield
             return
         if not lock.acquire(blocking=False):

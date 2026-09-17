@@ -36,7 +36,11 @@ from ..tools.schema import build_tool_definition
 # and surface a tool-error so the model can re-emit the call instead.
 # Shared with the chat_mixin.py tool-dispatch paths via agent.tool_execution so
 # both use ONE object identity — an `is` check only works against the same object.
-from ..agent.tool_execution import _TOOL_ARGUMENTS_PARSE_FAILED
+from ..agent.tool_execution import (
+    _TOOL_ARGUMENTS_PARSE_FAILED,
+    tool_arguments_parse_failed as _shared_tool_arguments_parse_failed,
+    tool_parse_error_message as _shared_tool_parse_error_message,
+)
 
 
 async def _dispatch_async_tool(
@@ -7130,26 +7134,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     @staticmethod
     def _tool_arguments_parse_failed(arguments) -> bool:
-        """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
-        return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
+        """True when tool-call arguments could not be parsed (vs. legitimately empty).
+
+        Thin delegate to the shared helper in ``agent.tool_execution`` so the
+        agent and language-model dispatch paths keep exactly one source of truth.
+        """
+        return _shared_tool_arguments_parse_failed(arguments)
 
     @staticmethod
     def _tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
         """Build a tool-role message telling the model its arguments were lost.
 
-        Surfacing this instead of dispatching with {} converts a silent
-        wrong-action-reported-as-success into a visible, retryable error.
+        Thin delegate to the shared helper in ``agent.tool_execution`` so the
+        agent and language-model dispatch paths keep exactly one source of truth.
         """
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": (
-                f"Error: arguments for tool '{function_name}' could not be parsed "
-                f"(the argument string was invalid or truncated). "
-                f"The tool was NOT executed. Please re-emit the tool call with "
-                f"complete, valid JSON arguments."
-            ),
-        }
+        return _shared_tool_parse_error_message(function_name, tool_call_id)
 
     # Response without tool calls
     def response(

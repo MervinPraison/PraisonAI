@@ -4706,10 +4706,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     )
                     try:
                         arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                    except json.JSONDecodeError as json_error:
+                    except (json.JSONDecodeError, TypeError) as json_error:
+                        # TypeError: a custom client can hand back a non-text
+                        # argument value, which json.loads rejects. Treat it the
+                        # same as malformed JSON (mirrors llm.py's parser).
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                         arguments = _TOOL_ARGUMENTS_PARSE_FAILED
                     if tool_arguments_parse_failed(arguments):
+                        # Report the failure to streaming observers before skipping
+                        # execution, so a malformed call is never silently dropped
+                        # (mirrors the sync streaming path).
+                        self._notify_tool_call(
+                            function_name,
+                            {},
+                            None,
+                            elapsed_time=0.0,
+                            success=False,
+                        )
                         results.append(
                             tool_parse_error_message(
                                 function_name,
@@ -5316,7 +5329,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     )
                                     try:
                                         parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
-                                    except json.JSONDecodeError as json_error:
+                                    except (json.JSONDecodeError, TypeError) as json_error:
+                                        # TypeError: a non-text argument value also
+                                        # cannot be parsed; treat it as malformed.
                                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                                         parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
                                     if tool_arguments_parse_failed(parsed_args):
