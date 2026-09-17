@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-09-08
+> **Version:** 1.5.87 | **Last Updated:** 2026-09-09
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 417 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2058 |
+| TypeScript Features | 2075 |
 | **Gap Count** | **6** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -822,10 +822,10 @@ import { AgentEventBus, AgentEvents, Event, EventEmitterPubSub, EventHandler, Pu
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (16 exports)</summary>
+<summary><strong>guardrails</strong> (33 exports)</summary>
 
 ```typescript
-import { Guardrail, GuardrailConfig, GuardrailContext, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailStatus, GuardrailValidationResult, LLMGuardrail, LLMGuardrailConfig... } from 'praisonai';
+import { ATTR_FOR, Guardrail, GuardrailConfig, GuardrailContext, GuardrailDirection, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailStatus, GuardrailValidationResult... } from 'praisonai';
 ```
 
 </details>

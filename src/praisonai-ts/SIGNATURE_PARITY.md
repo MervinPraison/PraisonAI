@@ -32,7 +32,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 13 / 21 |
 | `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 1 / 26 |
 | `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 5 / 12 |
-| `tool()` | 13 | 5 | 5 | 1 | 0 | 2 | 3 | 5 | 3 / 14 |
+| `tool()` | 13 | 5 | 7 | 1 | 0 | 0 | 3 | 3 | 3 / 16 |
 | `GoalEngineer.__init__` | 6 | 4 | 2 | 0 | 0 | 0 | 5 | 5 | 2 / 8 |
 | `DoomLoopDetector.__init__` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 15 / 16 |
 | `EscalationPipeline.__init__` | 5 | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 4 / 9 |
@@ -40,7 +40,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 224 | 123 | 88 | 8 | 3 | 2 | 28 | 30 | 86 / 314 |
+| **Total (17 surfaces)** | 224 | 123 | 90 | 8 | 3 | 0 | 28 | 28 | 86 / 316 |
 
 ## Surfaces
 
@@ -332,8 +332,8 @@ TS-only members: `config`?, `id`?, `parent`?, `db`?, `ttl`?
 ### `tool()`
 
 - Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:257`
-- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:49` (ctor `src/praisonai-ts/src/tools/decorator.ts:214`)
-- Counts: 13 python params: 5 exact, 5 camelCase, 1 alias, 0 flattened, 2 missing; 3 mismatches; 5 waived; 3 TS-only of 14
+- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:57` (ctor `src/praisonai-ts/src/tools/decorator.ts:238`)
+- Counts: 13 python params: 5 exact, 7 camelCase, 1 alias, 0 flattened, 0 missing; 3 mismatches; 3 waived; 3 TS-only of 16
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -348,8 +348,8 @@ TS-only members: `config`?, `id`?, `parent`?, `db`?, `ttl`?
 | `requires_approval` | keyword | `_UNSET` | `Union[bool, str]` | camelCase | `requiresApproval` | undefined | `boolean \| RiskLevel \| string` | ok |
 | `to_model_output` | keyword | null | `Optional[Callable[[Any], Any]]` | camelCase | `toModelOutput` | undefined | `(result: TResult) => unknown` | ok |
 | `restart_safe` | keyword | null | `Optional[bool]` | camelCase | `restartSafe` | undefined | `boolean` | ok |
-| `input_guardrails` | keyword | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `output_guardrails` | keyword | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
+| `input_guardrails` | keyword | null | `Optional[Any]` | camelCase | `inputGuardrails` | undefined | `ToolGuardrailSpec \| ToolGuardrailSpec[]` | ok |
+| `output_guardrails` | keyword | null | `Optional[Any]` | camelCase | `outputGuardrails` | undefined | `ToolGuardrailSpec \| ToolGuardrailSpec[]` | ok |
 
 TS-only members: `config`, `parameters`?, `category`?
 
@@ -487,6 +487,4 @@ TS-only members: none
 | `Task.__init__.routing` | TS routing falls back to condition, as Python does, and a plain-dict routing value lands identically on both sides. NOTE (verified, wider than this key): TS lists `routing` in ENGINE_LEVEL_OPTIONS, so any value raises a `notYetHonoured` notice and never reaches execution, whereas Python's workflow executor reads it. | praisonai-ts |  |  |
 | `tool().description` | Same fallback string, built at a different moment. TS now derives `Tool: <name>`, matching Python's `description or func.__doc__ or f"Tool: {self.name}"` (it previously said `Function <name>`, which shipped in the tool schema the model reads). TS has no docstring to fall back to between the two. | praisonai-ts |  |  |
 | `tool().func` | TS execute is required; Python's `func` is optional only so `@tool` can be applied bare, and `FunctionTool.__init__` still requires it. | praisonai-ts |  |  |
-| `tool().input_guardrails` | NOT an equivalence -- unlike every other waiver in this file, this records a real gap. Per-tool input guardrails were added to Python (praisonaiagents/guardrails/tool_guardrails.py) and have no TypeScript counterpart yet; nothing in praisonai-ts resolves the same behaviour by another route. Waived only to unblock the Python PR, since porting is a praisonai-ts change and the two packages do not share a branch. `expires` is set deliberately so this fails the gate rather than becoming permanent if the port is forgotten. | praisonai-ts |  | 2026-12-07 |
 | `tool().name` | TS cannot infer a name from an anonymous function; Python infers it from __name__ | praisonai-ts |  |  |
-| `tool().output_guardrails` | NOT an equivalence -- the output half of the same missing capability. See tool().input_guardrails above. Same expiry, for the same reason. | praisonai-ts |  | 2026-12-07 |
