@@ -65,6 +65,21 @@ class TestLazyImports:
         from praisonaiagents.agent.autonomy import AutonomyConfig as Canonical
         assert AutonomyConfig is Canonical
 
+    def test_autonomy_config_lazy_import_matches_tool_search_pattern(self):
+        """resolve_autonomy uses the same PEP 562 lazy pattern as resolve_tool_search.
+
+        Both back-compat resolvers keep AutonomyConfig / ToolSearchConfig out of
+        module globals until first access so `from praisonaiagents import Agent`
+        does not pull agent.autonomy / escalation.types (#5056). Explicit
+        attribute access must still resolve the canonical class and cache it.
+        """
+        import praisonaiagents.config.feature_configs as fc
+        assert 'AutonomyConfig' not in fc.__dict__
+        resolved = fc.AutonomyConfig
+        from praisonaiagents.agent.autonomy import AutonomyConfig as Canonical
+        assert resolved is Canonical
+        assert fc.__dict__['AutonomyConfig'] is Canonical
+
     def test_litellm_not_loaded_on_import(self):
         """litellm should NOT be loaded when importing praisonaiagents."""
         import praisonaiagents  # noqa: F401
