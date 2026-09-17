@@ -47,9 +47,49 @@ from praisonaiagents.gateway.protocols import (
     compute_config_revision,
     HealthPressure,
     evaluate_pressure,
-    StopScope,
-    StopResult,
 )
+
+try:  # Scoped-stop primitive (Issue #5129); optional at import time.
+    from praisonaiagents.gateway.protocols import StopScope, StopResult
+except Exception:  # pragma: no cover - only when core predates scoped stop
+    # Core installs older than the scoped-stop vocabulary (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack these symbols. Fall back to
+    # a dependency-free local mirror so ``/stop all`` / ``/cancel`` still drain
+    # the backlog instead of failing the gateway import outright.
+    from enum import Enum as _Enum
+    from dataclasses import dataclass as _dataclass
+
+    class StopScope(str, _Enum):  # type: ignore[no-redef]
+        TURN = "turn"
+        SESSION = "session"
+
+        @classmethod
+        def coerce(cls, value, default=None):
+            fallback = cls.TURN if default is None else default
+            if isinstance(value, cls):
+                return value
+            if isinstance(value, bool):
+                return cls.SESSION if value else cls.TURN
+            if value is None:
+                return fallback
+            try:
+                return cls(str(value).strip().lower())
+            except ValueError:
+                return fallback
+
+    @_dataclass(frozen=True)
+    class StopResult:  # type: ignore[no-redef]
+        scope: "StopScope"
+        turn_aborted: bool
+        pending_cancelled: int = 0
+
+        def to_dict(self):
+            return {
+                "scope": self.scope.value,
+                "turn_aborted": self.turn_aborted,
+                "pending_cancelled": self.pending_cancelled,
+            }
+
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
 
@@ -365,6 +405,16 @@ class GatewaySession:
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
     _is_executing: bool = False
+    # Issue #5129: monotonic counter bumped by a SESSION-scoped stop. The queue
+    # worker snapshots it right after dequeuing a message and re-checks it after
+    # admission/executor placement; a mismatch means a session stop landed in the
+    # dequeue-to-registration gap, so the already-dequeued message is dropped
+    # rather than executed after the user cancelled it.
+    _stop_epoch: int = 0
+    # Issue #5129: ``True`` only while a message has been dequeued from ``_inbox``
+    # but its turn is not yet registered/dispatched (the race window). A SESSION
+    # stop counts this in-flight-but-unstarted message toward ``pending_cancelled``.
+    _inflight_unstarted: bool = False
     # Issue #3379: for channel-originated sessions (e.g. a Telegram user), the
     # ``"channel:target"`` address to proactively notify if an in-flight turn is
     # interrupted by a gateway restart. ``None`` for direct-client sessions,
@@ -3784,12 +3834,25 @@ class WebSocketGateway:
         count is returned as a visible, intentional non-outcome rather than
         silently dropped, so a session stop always accounts for both running and
         queued work even when there is no active turn.
+
+        The queue worker dequeues a message *before* registering it as an active
+        turn, so a naive inbox drain would miss a message caught in that
+        dequeue-to-registration gap. Bumping ``_stop_epoch`` closes that race:
+        the worker re-checks the epoch after admission/placement and drops any
+        message whose epoch is stale, and that in-flight message is counted here
+        so the reported ``pending_cancelled`` reflects it.
         """
         turn_aborted = self._abort_active_turn(session_id, reason=reason)
         cancelled = 0
         if scope is StopScope.SESSION:
             session = self._sessions.get(session_id)
             if session is not None:
+                # Invalidate any message already dequeued but not yet running
+                # (the race window). The worker will observe the bumped epoch and
+                # drop it; count it here so it is not silently lost.
+                if getattr(session, "_inflight_unstarted", False):
+                    cancelled += 1
+                session._stop_epoch = getattr(session, "_stop_epoch", 0) + 1
                 inbox = session._inbox
                 while not inbox.empty():
                     try:
@@ -3931,7 +3994,17 @@ class WebSocketGateway:
                 content = session.get_next_message()
                 if not content:
                     break  # Queue is empty, exit loop
-                
+
+                # Issue #5129: snapshot the session stop epoch the instant this
+                # message leaves the inbox. A SESSION-scoped stop that lands in
+                # the gap before the turn is registered bumps this epoch; we
+                # re-check it just before dispatch and drop the message so a
+                # cancelled backlog item is never executed after the stop.
+                dequeued_stop_epoch = getattr(session, "_stop_epoch", 0)
+                # Mark this message as in-flight-but-unstarted so a SESSION stop
+                # in the gap below counts it toward ``pending_cancelled``.
+                session._inflight_unstarted = True
+
                 # Wire streaming relay if agent has a stream_emitter.
                 # ``relay_futures`` collects the cross-thread sends the relay
                 # schedules so we can drain them before the final frame,
@@ -3953,6 +4026,10 @@ class WebSocketGateway:
                 controller = InterruptController()
                 timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 outcome_status = "ok"
+                # Issue #5129: a SESSION stop during admission/placement drops
+                # this already-dequeued message instead of running it. Skipped
+                # here is accounted for by ``_abort_session`` (pending_cancelled).
+                _stop_sentinel = object()
                 try:
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
@@ -3962,13 +4039,20 @@ class WebSocketGateway:
                         from ..bots._admission import AdmissionRejected
                         try:
                             async with gate.admit(session_id=session.session_id):
-                                response = await self._drive_turn(
-                                    session, agent, content, controller, timeout
-                                )
+                                if getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
+                                    response = _stop_sentinel
+                                else:
+                                    session._inflight_unstarted = False
+                                    response = await self._drive_turn(
+                                        session, agent, content, controller, timeout
+                                    )
                         except AdmissionRejected as rej:
                             response = rej.message
                             outcome_status = "rejected"
+                    elif getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
+                        response = _stop_sentinel
                     else:
+                        session._inflight_unstarted = False
                         response = await self._drive_turn(
                             session, agent, content, controller, timeout
                         )
@@ -4001,6 +4085,12 @@ class WebSocketGateway:
                         return_exceptions=True,
                     )
 
+                # Issue #5129: a SESSION stop cancelled this dequeued message in
+                # the registration gap — emit nothing and pull the next one.
+                if response is _stop_sentinel:
+                    session._inflight_unstarted = False
+                    continue
+
                 response_message = GatewayMessage(
                     content=response,
                     sender_id=session.agent_id,
@@ -4020,6 +4110,7 @@ class WebSocketGateway:
                 })
         finally:
             session.mark_executing(False)
+            session._inflight_unstarted = False
 
     def _make_stream_relay(
         self,
