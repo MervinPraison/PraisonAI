@@ -471,7 +471,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         Candidate sessions are found with a bounded ``LIKE`` query against the
         stored JSON payload (not an ``os.listdir`` scan); the parent store's
         per-session scoring, bookends, automated-demotion and lineage-dedup are
-        then reused verbatim so results are identical in shape.
+        then reused verbatim so results are identical in shape. Scanning spans
+        the shared archived-plus-active projection so compacted history stays
+        recallable (Issue #5031).
         """
         from .protocols import SessionHit
 
@@ -498,8 +500,8 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 data = json.loads(row[0])
             except (json.JSONDecodeError, TypeError):
                 continue
-            messages = data.get("messages", [])
-            if not isinstance(messages, list):
+            messages = self._searchable_messages(data)
+            if not messages:
                 continue
 
             best_index = -1
@@ -532,6 +534,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                     "role": messages[i].get("role", ""),
                     "content": messages[i].get("content", ""),
                     "timestamp": messages[i].get("timestamp"),
+                    "archived": bool(messages[i].get("archived")),
                 }
                 for i in range(start, end)
                 if isinstance(messages[i], dict)

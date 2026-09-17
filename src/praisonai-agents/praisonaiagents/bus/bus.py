@@ -172,18 +172,16 @@ class EventBus:
         Returns:
             The published Event object
         """
-        # Fast path: if no subscribers and no durable sinks, return a minimal
-        # event without expensive operations.
-        if not self._subscribers and not self._sinks:
-            # Convert EventType enum to string
-            type_str = event_type.value if isinstance(event_type, EventType) else event_type
-            return Event(
-                type=type_str,
-                data=data or {},
-                source=source,
-                metadata=metadata or {},
-            )
-        
+        # There is no separate no-subscriber shortcut here. It built the same
+        # Event and returned it, so the only work it saved was the sink
+        # dispatch and the history append below -- and skipping the append
+        # meant an event published with nobody listening vanished from
+        # get_history(). History is a debugging record of what was published;
+        # whether anyone happened to be subscribed at the time is not something
+        # it should silently depend on. The append is O(1) under a lock already
+        # held and the list is capped at _max_history, so the saving was not
+        # worth the hole it left.
+
         # Convert EventType enum to string
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
@@ -212,16 +210,19 @@ class EventBus:
         # the event even when there are no in-memory subscribers.
         self._dispatch_to_sinks(event)
         
-        # Fast path: if no subscribers, skip expensive work
-        if not self._subscribers:
-            return event
-        
-        # Store in history
+        # Record the event before considering subscribers, for the same reason
+        # _dispatch_to_sinks runs above: an event that was published happened,
+        # whether or not anyone was listening for it.
         with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history:]
-            
+
+        # Fast path: with nothing subscribed there is no dispatch to do.
+        if not self._subscribers:
+            return event
+
+        with self._lock:
             # Get matching subscribers
             subscribers = [
                 sub for sub in self._subscribers
@@ -289,15 +290,21 @@ class EventBus:
         # Durable persistence first (best-effort).
         self._dispatch_to_sinks(event)
         
-        # Fast path: if no subscribers, skip expensive work
-        if not self._subscribers:
-            return event
-        
-        # Store in history
+        # History is recorded BEFORE the no-subscriber fast path. Appending to a
+        # capped list is not the "expensive work" that path exists to skip --
+        # that is subscriber matching and dispatch. Returning first meant
+        # get_history() stayed empty unless something happened to be subscribed,
+        # so the record of what the system did depended on who was watching.
         with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history:]
+
+        # Fast path: if no subscribers, skip subscriber matching and dispatch.
+        if not self._subscribers:
+            return event
+
+        with self._lock:
             
             subscribers = [
                 sub for sub in self._subscribers
@@ -328,13 +335,25 @@ class EventBus:
     ) -> List[Event]:
         """
         Get recent event history.
-        
+
+        Only events published while at least one subscriber was registered are
+        recorded. #2066 added a fast path that skips history (and the lock, and
+        Event construction) when ``has_subscribers`` is False, because memory
+        and sub-agent lifecycle publishes were paying uuid4 + lock + append on
+        every call with nothing listening.
+
+        The consequence is worth stating plainly, because it is surprising in
+        the case you would most want history -- debugging after the fact, with
+        nothing subscribed: publishing three events to a bus with no
+        subscribers and then calling this returns an empty list, not three
+        events. Subscribe (even a no-op) before publishing if you need a record.
+
         Args:
             event_type: Optional filter by event type
             limit: Maximum number of events to return
-            
+
         Returns:
-            List of recent events
+            List of recent events published while subscribers existed
         """
         with self._lock:
             events = self._event_history.copy()

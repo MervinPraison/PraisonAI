@@ -13,6 +13,27 @@ from praisonaiagents.tools.protocols import ToolAvailabilityProtocol
 from praisonaiagents.tools.base import BaseTool
 
 
+@pytest.fixture(autouse=True)
+def _restore_registry_tuning():
+    """Restore the registry's availability tuning after each test.
+
+    get_registry() is a process-global singleton, and registry.clear() resets the
+    caches but NOT _availability_grace. One test below shrinks the grace window
+    to 0.0 to exercise the sustained-failure path and never puts it back, so
+    test_transient_probe_failure_serves_last_good -- which needs a non-zero grace
+    window to serve last-good -- failed whenever it ran afterwards. Passed in
+    collection order, failed under a random seed.
+    """
+    registry = get_registry()
+    grace = registry._availability_grace
+    ttl = registry._availability_cache_ttl
+    try:
+        yield
+    finally:
+        registry._availability_grace = grace
+        registry._availability_cache_ttl = ttl
+
+
 def test_tool_availability_protocol():
     """Test that the ToolAvailabilityProtocol works correctly."""
     

@@ -1,6 +1,7 @@
 """Tests for built-in PraisonAI runtime."""
 
 import pytest
+from unittest.mock import patch
 from praisonaiagents.runtime.builtin import PraisonAIRuntime
 from praisonaiagents.runtime.protocols import RuntimeResult, RuntimeDelta
 
@@ -49,15 +50,21 @@ async def test_praisonai_runtime_run_turn():
 async def test_praisonai_runtime_run_turn_with_params():
     """Test PraisonAI runtime with various parameters."""
     runtime = PraisonAIRuntime()
-    
-    # Test with system prompt and model
-    result = await runtime.run_turn(
-        "Hello test",
-        system_prompt="You are a helpful assistant",
-        model_ref="gpt-3.5-turbo",
-        temperature=0.7,
-        max_tokens=100
-    )
+
+    # achat is stubbed: without this the test made a real billed call to the
+    # provider, and its result depended on whoever ran it having model access.
+    # The empty return stands in for any failed call.
+    async def _empty_achat(self, prompt, **kwargs):
+        return ""
+
+    with patch("praisonaiagents.agent.agent.Agent.achat", _empty_achat):
+        result = await runtime.run_turn(
+            "Hello test",
+            system_prompt="You are a helpful assistant",
+            model_ref="gpt-3.5-turbo",
+            temperature=0.7,
+            max_tokens=100
+        )
     
     assert isinstance(result, RuntimeResult)
     assert isinstance(result.content, str)
@@ -73,22 +80,29 @@ async def test_praisonai_runtime_run_turn_with_params():
 async def test_praisonai_runtime_stream_turn():
     """Test PraisonAI runtime stream_turn method."""
     runtime = PraisonAIRuntime()
-    
+
+    # Stubbed for the same reason as the sibling test above: unstubbed this
+    # made a real billed provider call, and the assertions only concern the
+    # shape of the deltas, not what a model said.
+    async def _empty_achat(self, prompt, **kwargs):
+        return ""
+
     deltas = []
-    async for delta in runtime.stream_turn(
-        "Hello test",
-        system_prompt="You are a helpful assistant"
-    ):
-        assert isinstance(delta, RuntimeDelta)
-        assert hasattr(delta, 'type')
-        assert hasattr(delta, 'content')
-        assert hasattr(delta, 'metadata')
-        assert delta.metadata.get('runtime') == 'praisonai'
-        deltas.append(delta)
+    with patch("praisonaiagents.agent.agent.Agent.achat", _empty_achat):
+        async for delta in runtime.stream_turn(
+            "Hello test",
+            system_prompt="You are a helpful assistant"
+        ):
+            assert isinstance(delta, RuntimeDelta)
+            assert hasattr(delta, 'type')
+            assert hasattr(delta, 'content')
+            assert hasattr(delta, 'metadata')
+            assert delta.metadata.get('runtime') == 'praisonai'
+            deltas.append(delta)
         
-        # Limit collection for tests
-        if len(deltas) >= 5:
-            break
+            # Limit collection for tests
+            if len(deltas) >= 5:
+                break
     
     # Should have received at least one delta (even if error)
     assert len(deltas) > 0

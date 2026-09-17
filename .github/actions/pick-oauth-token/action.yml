@@ -1,0 +1,36 @@
+name: Pick Claude OAuth token
+description: Probe primary/secondary Claude OAuth tokens and select a working one (dual OAuth Option B).
+inputs:
+  token_primary:
+    description: Primary Claude OAuth token (CLAUDE_CODE_OAUTH_TOKEN)
+    required: false
+  token_secondary:
+    description: Secondary Claude OAuth token (CLAUDE_CODE_OAUTH_TOKEN_B)
+    required: false
+  active_slot:
+    description: Preferred slot — primary or secondary (repo variable CLAUDE_OAUTH_ACTIVE)
+    required: false
+    default: primary
+outputs:
+  token:
+    description: Selected OAuth token
+    value: ${{ steps.pick.outputs.token }}
+  slot:
+    description: Slot used (primary, secondary, or *-unprobed fallback)
+    value: ${{ steps.pick.outputs.slot }}
+runs:
+  using: composite
+  steps:
+    - id: pick
+      shell: bash
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.token_primary }}
+        CLAUDE_CODE_OAUTH_TOKEN_B: ${{ inputs.token_secondary }}
+        CLAUDE_OAUTH_ACTIVE: ${{ inputs.active_slot }}
+      run: |
+        if [[ -n "${HUB_SCRIPTS:-}" && -f "${HUB_SCRIPTS}/oauth-pick-token.sh" ]]; then
+          SCRIPT="${HUB_SCRIPTS}/oauth-pick-token.sh"
+        else
+          SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/oauth-pick-token.sh"
+        fi
+        bash "$SCRIPT"

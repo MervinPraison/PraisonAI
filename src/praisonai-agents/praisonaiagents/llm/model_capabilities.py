@@ -39,66 +39,6 @@ def _base_model_name(model_name: str) -> str:
     return name
 
 
-def _model_info(litellm: Any, model_name: str) -> Optional[Dict[str, Any]]:
-    """Best-effort lookup of LiteLLM metadata for ``model_name``.
-
-    Newer LiteLLM releases expose ``get_model_info`` while older releases
-    expose the same records through ``model_cost``.  Keep both lookups lazy so
-    lean installs retain the existing optional-dependency behaviour.
-    """
-    getter = getattr(litellm, "get_model_info", None)
-    if getter is not None:
-        try:
-            info = getter(model=model_name)
-            if isinstance(info, dict):
-                return info
-        except Exception:
-            pass
-
-    model_cost = getattr(litellm, "model_cost", None)
-    if not isinstance(model_cost, dict):
-        return None
-    candidates = [model_name.lower(), _base_model_name(model_name)]
-    if "/" in model_name:
-        candidates.append(model_name.rsplit("/", 1)[-1].lower())
-    for candidate in candidates:
-        info = model_cost.get(candidate)
-        if isinstance(info, dict):
-            return info
-    return None
-
-
-@lru_cache(maxsize=256)
-def max_output_tokens(model_name: str) -> Optional[int]:
-    """Return LiteLLM's known maximum output tokens for a model.
-
-    ``None`` means the model is unknown or LiteLLM is unavailable.  The
-    accessor is intentionally best-effort: callers can preserve their current
-    defaults when metadata is missing without making model resolution fail.
-    """
-    if not model_name:
-        return None
-
-    litellm = _get_litellm()
-    if litellm is None:
-        return None
-    try:
-        info = _model_info(litellm, model_name)
-        if not info:
-            return None
-        # LiteLLM's ``max_tokens`` field is the model context window.  It is
-        # intentionally not a fallback here: using it as an output ceiling
-        # can send provider-invalid completion limits.  Only the explicit
-        # output-limit field is safe for this accessor.
-        value = info.get("max_output_tokens")
-        if isinstance(value, bool) or value is None:
-            return None
-        value = int(value)
-        return value if value > 0 else None
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
 def _fallback_supports_structured_outputs(model_name: str) -> bool:
     """Static heuristic used only when litellm is unavailable.
 
@@ -596,6 +536,70 @@ def is_reasoning_model(model_name: str) -> bool:
         or model.startswith('o4')
         or model.startswith('gpt-5')
     )
+
+
+@lru_cache(maxsize=256)
+def max_output_tokens(model_name: str):
+    """Best-effort maximum *output* tokens for a model, or ``None`` if unknown.
+
+    Reuses the same LiteLLM ``get_model_info`` lookup already relied on for
+    input/context budgeting (``context/budgeter.py``), so the output budget can
+    be derived from — and clamped to — the resolved model's real ceiling.
+
+    Lazy and dependency-free: returns ``None`` when litellm is unavailable or
+    the model is unknown, letting callers keep their existing constant default.
+
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+
+    Returns:
+        Optional[int]: The model's maximum output tokens, or None if unknown.
+    """
+    if not model_name:
+        return None
+
+    litellm = None
+    try:
+        litellm = _get_litellm()
+    except Exception:
+        litellm = None
+    if litellm is None:
+        return None
+
+    # Only ``max_output_tokens`` is a true output ceiling. The generic
+    # ``max_tokens`` field is treated as a context-window limit elsewhere in
+    # this codebase (see ``context/budgeter.py``), so substituting it here would
+    # return an inflated ceiling and leave an over-limit request unclamped —
+    # exactly the 400 this accessor exists to prevent. When output-specific
+    # metadata is absent we return ``None`` and let the caller fall back.
+
+    # Primary: litellm's get_model_info (handles provider inference).
+    if hasattr(litellm, "get_model_info"):
+        try:
+            info = litellm.get_model_info(model=model_name)
+            if info:
+                out = info.get("max_output_tokens")
+                if out:
+                    return out
+        except Exception:
+            pass
+
+    # Fallback: the model_cost registry the context budgeter reads directly,
+    # which resolves several names get_model_info raises on (e.g. bare
+    # Anthropic ids). Mirrors context/budgeter.py's _litellm_model_info.
+    try:
+        model_cost = getattr(litellm, "model_cost", None)
+        if model_cost:
+            model_lower = model_name.lower()
+            info = model_cost.get(model_lower)
+            if info is None and "/" in model_name:
+                info = model_cost.get(model_name.split("/")[-1].lower())
+            if info:
+                return info.get("max_output_tokens")
+    except Exception:
+        pass
+
+    return None
 
 
 def is_gemini_internal_tool(tool) -> bool:

@@ -11,6 +11,34 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path, monkeypatch):
+    """Every test in this file gets an EMPTY home and a cleared path cache.
+
+    get_data_dir() returns ~/.praisonai if it exists, else the legacy ~/.praison
+    if THAT exists, else the default. Several tests here assert the default
+    while relying on whatever happens to be in the ambient home -- so once any
+    earlier test created a legacy ~/.praison in the shared temp home, 17 tests
+    in this file started asserting '.praisonai' and getting '.praison'. They
+    passed alone and failed under a random seed.
+
+    A fresh empty home makes the default actually the default. Tests that patch
+    Path.home() or set PRAISONAI_HOME themselves still override this.
+    """
+    from praisonaiagents.paths import _clear_cache
+
+    home = tmp_path / "isolated-home"
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("PRAISONAI_HOME", raising=False)
+    _clear_cache()
+    yield
+    _clear_cache()
+
+
 class TestGetDataDir:
     """Tests for get_data_dir() function."""
     
@@ -572,10 +600,19 @@ class TestModuleWiring:
 
     def test_policy_config_uses_paths(self):
         """policy/config.py should resolve rules dir via paths.py."""
-        from praisonaiagents.policy.config import DEFAULT_RULES_DIR
+        import importlib
+
+        import praisonaiagents.policy.config as policy_config
         from praisonaiagents.paths import get_rules_dir
 
-        assert DEFAULT_RULES_DIR == str(get_rules_dir())
+        # Reload: DEFAULT_RULES_DIR is computed at IMPORT time from the home in
+        # effect then. Comparing it to a get_rules_dir() call made later only
+        # holds if the home has not moved since -- which in a full suite run is
+        # not something this test can assume. Reloading recomputes the constant
+        # under the current home, which is what "resolves via paths.py" means.
+        importlib.reload(policy_config)
+
+        assert policy_config.DEFAULT_RULES_DIR == str(get_rules_dir())
 
     def test_policy_config_no_hardcoded_expanduser(self):
         """policy/config.py should not have hardcoded expanduser for rules."""
@@ -608,10 +645,16 @@ class TestModuleWiring:
 
     def test_scheduler_store_uses_paths(self):
         """scheduler/store.py should resolve default dir via paths.py."""
-        from praisonaiagents.scheduler.store import _DEFAULT_DIR
+        import importlib
+
+        import praisonaiagents.scheduler.store as scheduler_store
         from praisonaiagents.paths import get_schedules_dir
 
-        assert _DEFAULT_DIR == str(get_schedules_dir())
+        # See test_policy_config_uses_paths: _DEFAULT_DIR is an import-time
+        # constant, so it must be recomputed under the current home.
+        importlib.reload(scheduler_store)
+
+        assert scheduler_store._DEFAULT_DIR == str(get_schedules_dir())
 
     def test_sqlite_backend_default_uses_paths(self):
         """SQLiteBackend default db_path should use paths.py."""

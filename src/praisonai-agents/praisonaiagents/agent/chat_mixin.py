@@ -778,6 +778,35 @@ Your Goal: {self.goal}"""
             )
             return False
 
+    def _load_session_history(self):
+        """Persisted session history for this agent, or [] when unavailable.
+
+        Extracted so BOTH branches of _build_messages can use it. The injection
+        used to live only in the manual-message branch, so an agent configured
+        with memory="history" silently dropped its persisted history whenever
+        _openai_client was set -- which is the default path for OpenAI models.
+        """
+        if not self._history_enabled or self._session_store is None:
+            return []
+        try:
+            # Prefer compacted working history (summary + tail) on resume when a
+            # compaction checkpoint exists (Issue #2741); falls back to raw chat
+            # history for backward compatibility.
+            if hasattr(self._session_store, "get_working_history"):
+                session_history = self._session_store.get_working_history(
+                    self._history_session_id,
+                    max_messages=self._history_limit
+                )
+            else:
+                session_history = self._session_store.get_chat_history(
+                    self._history_session_id,
+                    max_messages=self._history_limit
+                )
+            return list(session_history) if session_history else []
+        except Exception as e:
+            logging.debug(f"Failed to load session history: {e}")
+            return []
+
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True, memory_prefetch_context: str = ""):
         """Build messages list for chat completion.
         
@@ -803,7 +832,7 @@ Your Goal: {self.goal}"""
                     tools=tools,
                     memory_prefetch_context=memory_prefetch_context,
                 ),
-                chat_history=self.chat_history,
+                chat_history=self._load_session_history() + list(self.chat_history or []),
                 output_json=None if use_native_format else output_json,
                 output_pydantic=None if use_native_format else output_pydantic
             )
@@ -817,25 +846,7 @@ Your Goal: {self.goal}"""
                 messages.append({"role": "system", "content": system_prompt})
             
             # Inject session history if enabled (from persistent storage)
-            if self._history_enabled and self._session_store is not None:
-                try:
-                    # Prefer compacted working history (summary + tail) on
-                    # resume when a compaction checkpoint exists (Issue #2741);
-                    # falls back to raw chat history for backward compatibility.
-                    if hasattr(self._session_store, "get_working_history"):
-                        session_history = self._session_store.get_working_history(
-                            self._history_session_id,
-                            max_messages=self._history_limit
-                        )
-                    else:
-                        session_history = self._session_store.get_chat_history(
-                            self._history_session_id,
-                            max_messages=self._history_limit
-                        )
-                    if session_history:
-                        messages.extend(session_history)
-                except Exception as e:
-                    logging.debug(f"Failed to load session history: {e}")
+            messages.extend(self._load_session_history())
             
             # Add in-memory chat history (current conversation)
             if self.chat_history:
@@ -894,6 +905,12 @@ Your Goal: {self.goal}"""
         elif isinstance(tools, list) and len(tools) == 0:
             # Explicit empty list - return immediately to enforce boundary
             return []
+
+        # Plugin tools are copied into the Agent's local tool list at
+        # construction time. Re-check ownership before advertising them so a
+        # later plugin disable/unregister revokes the advertised capability.
+        if getattr(self, "_plugin_tool_owners", None) and isinstance(tools, (list, tuple)):
+            tools = [tool for tool in tools if self._is_plugin_tool_active(tool)]
         
         if not tools:
             return []
@@ -909,9 +926,18 @@ Your Goal: {self.goal}"""
             return cached_tools
             
         formatted_tools = []
+        # Provider-hosted tool specs have no local callable; the provider
+        # executes them after this formatter forwards the allowlisted dict.
+        try:
+            from ..tools.hosted import is_hosted_tool
+        except ImportError:
+            is_hosted_tool = lambda _tool: False
+
         for tool in tools:
+            if isinstance(tool, dict) and is_hosted_tool(tool):
+                formatted_tools.append(tool)
             # Handle pre-formatted OpenAI tools
-            if isinstance(tool, dict) and tool.get('type') == 'function':
+            elif isinstance(tool, dict) and tool.get('type') == 'function':
                 # Validate nested dictionary structure before accessing
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     formatted_tools.append(tool)
@@ -920,7 +946,9 @@ Your Goal: {self.goal}"""
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
-                    if isinstance(subtool, dict) and subtool.get('type') == 'function':
+                    if isinstance(subtool, dict) and is_hosted_tool(subtool):
+                        formatted_tools.append(subtool)
+                    elif isinstance(subtool, dict) and subtool.get('type') == 'function':
                         # Validate nested dictionary structure before accessing
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             formatted_tools.append(subtool)
@@ -3345,6 +3373,36 @@ Your Goal: {self.goal}"""
                     # Append formatted knowledge to the prompt
                     prompt = f"{prompt}\n\n{formatted_context}"
 
+                    # Sync llm_prompt with the retrieved context so the RAG block
+                    # actually reaches the model. llm_prompt (not prompt) is what
+                    # gets sent to the LLM in both the custom-LLM and OpenAI paths
+                    # below; without this the retrieved knowledge is appended to
+                    # `prompt` but never delivered, so the model answers from
+                    # parametric memory only. Append (rather than reassign) to
+                    # preserve any response-template instruction already baked into
+                    # llm_prompt.
+                    if isinstance(llm_prompt, str):
+                        llm_prompt = f"{llm_prompt}\n\n{formatted_context}"
+                    elif isinstance(llm_prompt, list):
+                        # Multimodal prompt: append the retrieved context to the
+                        # last text part so attachment-bearing turns still receive
+                        # the RAG block. Copy dicts before mutating to avoid
+                        # aliasing the caller's attachment structures; if no text
+                        # part exists, add one.
+                        appended = False
+                        for i in range(len(llm_prompt) - 1, -1, -1):
+                            item = llm_prompt[i]
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                updated = dict(item)
+                                updated["text"] = f"{updated.get('text', '')}\n\n{formatted_context}"
+                                llm_prompt[i] = updated
+                                appended = True
+                                break
+                        if not appended:
+                            llm_prompt = list(llm_prompt) + [
+                                {"type": "text", "text": formatted_context}
+                            ]
+
         if self._using_custom_llm:
             # Track messages THIS turn appends so a failure rolls back only our
             # own messages, never a concurrent turn's (see memory_mixin).
@@ -3571,12 +3629,12 @@ Your Goal: {self.goal}"""
                 # Extract text from multimodal prompts
                 normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self._append_to_chat_history({"role": "user", "content": normalized_content})
+            # Add user message to chat history BEFORE LLM call so handoffs can
+            # access it. Use atomic check-then-act to prevent TOCTOU races: an
+            # unatomic read of chat_history[-1] followed by a separate append
+            # lets a concurrent turn's user message be mistaken for this turn's
+            # own duplicate, silently dropping this user turn from the record.
+            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
                 # Persist user message to DB (OpenAI path)
                 self._persist_message("user", normalized_content)
 
@@ -4215,12 +4273,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Extract text from multimodal prompts
                 normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self._append_to_chat_history({"role": "user", "content": normalized_content})
+            # Add user message to chat history BEFORE LLM call so handoffs can
+            # access it. Use atomic check-then-act to prevent TOCTOU races: an
+            # unatomic read of chat_history[-1] followed by a separate append
+            # lets a concurrent turn's user message be mistaken for this turn's
+            # own duplicate, silently dropping this user turn from the record.
+            self._add_to_chat_history_if_not_duplicate("user", normalized_content)
 
             # --- Proactive Context Budget Management (async standard OpenAI path) ---
             try:
@@ -4694,13 +4752,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             for tool_call in message.tool_calls:
                 try:
                     function_name = tool_call.function.name
-                    # Parse JSON arguments safely 
+                    # Parse JSON arguments safely. A parse failure is NOT {}: a
+                    # truncated/malformed argument string must not silently run
+                    # the tool with defaults and be reported as success. Surface
+                    # a retryable tool-error to the model instead (mirrors
+                    # llm.py's _tool_arguments_parse_failed handling).
+                    from .tool_execution import (
+                        _TOOL_ARGUMENTS_PARSE_FAILED,
+                        tool_arguments_parse_failed,
+                        tool_parse_error_message,
+                    )
                     try:
-                        arguments = json.loads(tool_call.function.arguments)
-                    except json.JSONDecodeError as json_error:
+                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                    except (json.JSONDecodeError, TypeError) as json_error:
+                        # TypeError: a custom client can hand back a non-text
+                        # argument value, which json.loads rejects. Treat it the
+                        # same as malformed JSON (mirrors llm.py's parser).
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
-                        arguments = {}
-                    
+                        arguments = _TOOL_ARGUMENTS_PARSE_FAILED
+                    if tool_arguments_parse_failed(arguments):
+                        # Report the failure to streaming observers before skipping
+                        # execution, so a malformed call is never silently dropped
+                        # (mirrors the sync streaming path).
+                        self._notify_tool_call(
+                            function_name,
+                            {},
+                            None,
+                            elapsed_time=0.0,
+                            success=False,
+                        )
+                        results.append(
+                            tool_parse_error_message(
+                                function_name,
+                                getattr(tool_call, "id", None),
+                            )["content"]
+                        )
+                        continue
+
                     # Find the matching tool by comparing every supported identifier:
                     # __name__ (plain callables), .name (BaseTool instances like
                     # BrowserBaseTool, or aliased FunctionTools), or the class name.
@@ -5008,6 +5096,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'reasoning_effort', getattr(self, 'reasoning_effort', None))
                     if _stream_effort is not None:
                         stream_sampling_kwargs['reasoning_effort'] = _stream_effort
+                    # Forward the cancellation token so a Stop/interrupt during
+                    # the streamed tool phase short-circuits pending tool calls
+                    # (Issue #5073). Resolve the explicit token first, then fall
+                    # back to the agent's interrupt controller, mirroring chat().
+                    _stream_cancel_source = kwargs.get('cancel_token')
+                    if _stream_cancel_source is None:
+                        _stream_cancel_source = getattr(self, "interrupt_controller", None)
+                    _stream_cancel_token = self._turn_cancel_token(
+                        _stream_cancel_source,
+                        explicit=kwargs.get('cancel_token') is not None,
+                    )
+                    if _stream_cancel_token is not None:
+                        stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
@@ -5274,13 +5375,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         for tool_call in tool_calls_data:
                             if tool_call['id'] and tool_call['function']['name']:
                                 try:
-                                    # Parse JSON arguments safely 
+                                    # Parse JSON arguments safely. A parse failure
+                                    # is NOT {}: a truncated/malformed argument
+                                    # string must not silently run the tool with
+                                    # defaults and report success. Surface a
+                                    # retryable tool-error to the model instead.
+                                    from .tool_execution import (
+                                        _TOOL_ARGUMENTS_PARSE_FAILED,
+                                        tool_arguments_parse_failed,
+                                        tool_parse_error_message,
+                                    )
                                     try:
                                         parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
-                                    except json.JSONDecodeError as json_error:
+                                    except (json.JSONDecodeError, TypeError) as json_error:
+                                        # TypeError: a non-text argument value also
+                                        # cannot be parsed; treat it as malformed.
                                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
-                                        parsed_args = {}
-                                    
+                                        parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
+                                    if tool_arguments_parse_failed(parsed_args):
+                                        self._notify_tool_call(
+                                            tool_call['function']['name'],
+                                            {},
+                                            None,
+                                            elapsed_time=0.0,
+                                            success=False,
+                                        )
+                                        _err_msg = tool_parse_error_message(
+                                            tool_call['function']['name'],
+                                            tool_call['id'],
+                                        )
+                                        self._append_to_chat_history(_err_msg)
+                                        self._persist_message(
+                                            "tool",
+                                            _err_msg["content"],
+                                            tool_call_id=tool_call['id'],
+                                        )
+                                        continue
+
                                     executor = self._durable_sync_tool_executor(
                                         self.execute_tool
                                     )

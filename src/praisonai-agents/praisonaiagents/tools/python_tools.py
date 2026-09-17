@@ -1009,6 +1009,47 @@ def _build_unsafe_execute_code(
     return execute_code
 
 
+def _build_isolated_execute_code(
+    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None
+):
+    """Build the ``execute_code`` tool for ``code_mode="isolated"``.
+
+    Unlike ``unsafe`` (same process) this runs the model's code in a separate
+    process via the shipped :class:`~.tool_proxy.LocalProcessBridge`, while the
+    allow-listed tools are still serviced in *this* process under the same
+    allow-list + approval gate. ``registry`` scopes which tools the allow-list
+    can resolve, exactly as in unsafe mode. Because a bridge is supplied,
+    ``timeout`` is enforced as a hard subprocess kill.
+    """
+
+    @require_approval(risk_level="critical")
+    def execute_code(code: str) -> Dict[str, Any]:
+        """Execute Python code in an isolated subprocess and return its output.
+
+        The code runs with real process isolation; the agent's allow-listed
+        tools are reachable from the code (by bare name or ``tools.name``) and
+        are executed back in the parent under the approval gate. Only stdout /
+        the last-expression value returns.
+
+        Args:
+            code: Python code to execute.
+
+        Returns:
+            Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
+        """
+        from .tool_proxy import LocalProcessBridge
+
+        return execute_code_with_tools(
+            code,
+            allowed_tools=allowed_tools,
+            timeout=timeout,
+            registry=registry,
+            bridge=LocalProcessBridge(),
+        )
+
+    return execute_code
+
+
 def build_code_execution_tools(
     code_mode: str = "safe",
     allowed_tools: Optional[List[str]] = None,
@@ -1035,23 +1076,37 @@ def build_code_execution_tools(
       runaway loop can block the worker. This is why unsafe mode is opt-in and
       approval-gated "critical"; use ``"safe"`` (subprocess) when the timeout
       must be a hard guarantee.
+    * ``"isolated"`` — subprocess isolation (like ``"safe"``) **and** the
+      ``allowed_tools`` allow-list reachable from the code. The script runs in a
+      separate process; each tool call is marshalled back to this parent and
+      serviced under the same allow-list + approval gate (via the shipped
+      :class:`~.tool_proxy.LocalProcessBridge`). Only the script's stdout /
+      last-expression value returns; intermediate tool results stay out of
+      context. This is the safe-and-tool-capable path.
 
     Args:
-        code_mode: ``"safe"`` or ``"unsafe"``.
-        allowed_tools: Tool names callable from code; only honoured in
-            ``"unsafe"`` mode. Empty/None exposes no tools.
+        code_mode: ``"safe"``, ``"unsafe"`` or ``"isolated"``.
+        allowed_tools: Tool names callable from code; honoured in ``"unsafe"``
+            and ``"isolated"`` modes. Empty/None exposes no tools.
         timeout: Per-execution timeout in seconds.
 
     Returns:
         A one-element list holding the ``execute_code`` tool.
     """
-    if code_mode not in ("safe", "unsafe"):
+    if code_mode not in ("safe", "unsafe", "isolated"):
         raise ValueError(
-            f"Unknown code_mode {code_mode!r}; expected 'safe' or 'unsafe'."
+            f"Unknown code_mode {code_mode!r}; expected 'safe', 'unsafe' or "
+            f"'isolated'."
         )
     if code_mode == "unsafe":
         return [
             _build_unsafe_execute_code(
+                list(allowed_tools or []), timeout=timeout, registry=registry
+            )
+        ]
+    if code_mode == "isolated":
+        return [
+            _build_isolated_execute_code(
                 list(allowed_tools or []), timeout=timeout, registry=registry
             )
         ]

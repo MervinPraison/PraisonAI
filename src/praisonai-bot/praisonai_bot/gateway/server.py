@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import re
 import secrets
@@ -47,6 +48,48 @@ from praisonaiagents.gateway.protocols import (
     HealthPressure,
     evaluate_pressure,
 )
+
+try:  # Scoped-stop primitive (Issue #5129); optional at import time.
+    from praisonaiagents.gateway.protocols import StopScope, StopResult
+except Exception:  # pragma: no cover - only when core predates scoped stop
+    # Core installs older than the scoped-stop vocabulary (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack these symbols. Fall back to
+    # a dependency-free local mirror so ``/stop all`` / ``/cancel`` still drain
+    # the backlog instead of failing the gateway import outright.
+    from enum import Enum as _Enum
+    from dataclasses import dataclass as _dataclass
+
+    class StopScope(str, _Enum):  # type: ignore[no-redef]
+        TURN = "turn"
+        SESSION = "session"
+
+        @classmethod
+        def coerce(cls, value, default=None):
+            fallback = cls.TURN if default is None else default
+            if isinstance(value, cls):
+                return value
+            if isinstance(value, bool):
+                return cls.SESSION if value else cls.TURN
+            if value is None:
+                return fallback
+            try:
+                return cls(str(value).strip().lower())
+            except ValueError:
+                return fallback
+
+    @_dataclass(frozen=True)
+    class StopResult:  # type: ignore[no-redef]
+        scope: "StopScope"
+        turn_aborted: bool
+        pending_cancelled: int = 0
+
+        def to_dict(self):
+            return {
+                "scope": self.scope.value,
+                "turn_aborted": self.turn_aborted,
+                "pending_cancelled": self.pending_cancelled,
+            }
+
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
 
@@ -362,6 +405,16 @@ class GatewaySession:
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
     _is_executing: bool = False
+    # Issue #5129: monotonic counter bumped by a SESSION-scoped stop. The queue
+    # worker snapshots it right after dequeuing a message and re-checks it after
+    # admission/executor placement; a mismatch means a session stop landed in the
+    # dequeue-to-registration gap, so the already-dequeued message is dropped
+    # rather than executed after the user cancelled it.
+    _stop_epoch: int = 0
+    # Issue #5129: ``True`` only while a message has been dequeued from ``_inbox``
+    # but its turn is not yet registered/dispatched (the race window). A SESSION
+    # stop counts this in-flight-but-unstarted message toward ``pending_cancelled``.
+    _inflight_unstarted: bool = False
     # Issue #3379: for channel-originated sessions (e.g. a Telegram user), the
     # ``"channel:target"`` address to proactively notify if an in-flight turn is
     # interrupted by a gateway restart. ``None`` for direct-client sessions,
@@ -2440,11 +2493,21 @@ class WebSocketGateway:
         try:
             interval = float(watchdog_cfg.get("liveness_interval", 5.0))
             strikes = int(watchdog_cfg.get("liveness_strikes", 3))
-            policy = LoopWatchdogPolicy(
+            policy_kwargs: Dict[str, Any] = dict(
                 probe_interval_s=interval,
                 missed_probes_before_wedged=strikes,
                 dump_file=watchdog_cfg.get("dump_file") or None,
             )
+            # Issue #5079: optional shutdown-phase deadline grace budget. Only
+            # forwarded when the core policy supports it, so an older core
+            # (liveness only) still loads.
+            if "shutdown_grace" in watchdog_cfg and hasattr(
+                LoopWatchdogPolicy, "shutdown_grace_s"
+            ):
+                policy_kwargs["shutdown_grace_s"] = float(
+                    watchdog_cfg.get("shutdown_grace")
+                )
+            policy = LoopWatchdogPolicy(**policy_kwargs)
         except (TypeError, ValueError) as exc:
             logger.warning("Invalid gateway.watchdog config (%s); disabling", exc)
             return
@@ -2477,6 +2540,57 @@ class WebSocketGateway:
             watchdog.disarm()
         except Exception:  # pragma: no cover - fail open
             pass
+
+    def _arm_shutdown_deadline(self, deadline_s: float) -> None:
+        """Arm a bounded self-exit around the stop path (Issue #5079).
+
+        The liveness watchdog only fires on a *wedged loop* and is disarmed on
+        a deliberate stop (#3410) — so a teardown step that blocks while the
+        loop is still alive would otherwise hang until an external ``SIGKILL``.
+        Arming the core watchdog's deadline mode gives that path an all-thread
+        stack dump + bounded ``os._exit`` before the supervisor kills us. Opt-in
+        and no-op when the watchdog is unconfigured; fail-open on any error.
+        """
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.arm_deadline(deadline_s)
+        except Exception:  # pragma: no cover - fail open, never block stop
+            logger.debug("Could not arm shutdown deadline", exc_info=True)
+
+    def _cancel_shutdown_deadline(self) -> None:
+        """Cancel the shutdown deadline so a clean stop never self-exits."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.cancel()
+        except Exception:  # pragma: no cover - fail open
+            pass
+
+    def _resolve_shutdown_grace(self, grace: Optional[float]) -> float:
+        """Resolve the shutdown grace budget (CLI/Python override or policy)."""
+        if grace is not None:
+            try:
+                grace = float(grace)
+            except (TypeError, ValueError):
+                grace = None
+            # Issue #5079: a NaN/inf override would flow into ``deadline_s`` and
+            # make ``arm_deadline`` silently no-op (it rejects non-finite),
+            # quietly disabling the backstop it was asked to size. Treat a
+            # non-finite override as "unset" and fall back to the policy default.
+            if grace is not None and not math.isfinite(grace):
+                grace = None
+        if grace is None:
+            watchdog = self._watchdog
+            if watchdog is not None:
+                grace = getattr(watchdog.policy, "shutdown_grace_s", 5.0)
+            else:
+                grace = 5.0
+        if grace < 0:
+            grace = 0.0
+        return grace
 
     # ── Gateway lifecycle: idle/scale-to-zero + drain marker (Issue #3021) ──
 
@@ -2973,15 +3087,34 @@ class WebSocketGateway:
                 except Exception as e:
                     logger.error(f"Failed to persist timed-out session {session.session_id}: {e}")
 
-    async def stop(self, drain_timeout: float = 10.0) -> None:
+    async def stop(self, drain_timeout: float = 10.0, grace: Optional[float] = None) -> None:
         """Stop the gateway server with graceful drain.
         
         Args:
             drain_timeout: Maximum time to wait for active sessions to complete (default: 10.0)
+            grace: Extra budget (seconds) beyond ``drain_timeout`` before the
+                shutdown-phase deadline watchdog fires a bounded, diagnosable
+                self-exit (Issue #5079). ``None`` uses ``gateway.watchdog.
+                shutdown_grace`` (default 5s). Only active when a watchdog is
+                configured; otherwise this is a plain no-op.
         """
         if not self._is_running:
             return
-        
+
+        # Issue #5079: arm a wall-clock shutdown deadline so a teardown step
+        # that blocks while the loop is still alive gets an all-thread stack
+        # dump + bounded os._exit instead of an external SIGKILL. Armed at the
+        # start of the drain; cancelled in the finally on a clean stop so a
+        # healthy shutdown never self-exits. No-op unless a watchdog is set.
+        shutdown_grace = self._resolve_shutdown_grace(grace)
+        self._arm_shutdown_deadline(drain_timeout + shutdown_grace)
+        try:
+            await self._stop_inner(drain_timeout)
+        finally:
+            self._cancel_shutdown_deadline()
+
+    async def _stop_inner(self, drain_timeout: float) -> None:
+        """The ordered teardown, bounded by the shutdown deadline (#5079)."""
         # Flip readiness to draining BEFORE draining so load balancers stop
         # routing new traffic while in-flight sessions finish. Keep _is_running
         # True so liveness (/live) still reports the process as alive during drain.
@@ -3419,12 +3552,27 @@ class WebSocketGateway:
                     # Issue #3467: portable stop command. A chat/operator client
                     # can abort the in-flight turn by sending "/stop" (or "stop")
                     # instead of a dedicated abort frame.
-                    if isinstance(content, str) and content.strip().lower() in ("/stop", "stop"):
-                        aborted = self._abort_active_turn(session_id, reason="user")
-                        await self._send_to_client(client_id, {
-                            "type": "aborted" if aborted else "no_active_turn",
+                    if isinstance(content, str) and content.strip().lower() in (
+                        "/stop", "stop", "/stop all", "/cancel",
+                    ):
+                        # Issue #5129: "/stop"/"stop" stay turn-scoped (back-compat);
+                        # "/stop all" or "/cancel" also drain the queued backlog so
+                        # no message the user just cancelled is answered afterwards.
+                        normalised = content.strip().lower()
+                        scope = (
+                            StopScope.SESSION
+                            if normalised in ("/stop all", "/cancel")
+                            else StopScope.TURN
+                        )
+                        result = self._abort_session(session_id, scope=scope, reason="user")
+                        payload = {
+                            "type": "aborted" if (
+                                result.turn_aborted or result.pending_cancelled
+                            ) else "no_active_turn",
                             "session_id": session_id,
-                        })
+                        }
+                        payload.update(result.to_dict())
+                        await self._send_to_client(client_id, payload)
                         return True
                     message = GatewayMessage(
                         content=content,
@@ -3483,11 +3631,18 @@ class WebSocketGateway:
                 })
                 return True
             reason = data.get("reason") or "user"
-            aborted = self._abort_active_turn(session_id, reason=str(reason))
-            await self._send_to_client(client_id, {
-                "type": "aborted" if aborted else "no_active_turn",
+            # Issue #5129: an abort frame may carry {"scope": "session"} to drain
+            # the queued backlog too; absent/unknown scope stays turn-scoped.
+            scope = StopScope.coerce(data.get("scope"))
+            result = self._abort_session(session_id, scope=scope, reason=str(reason))
+            payload = {
+                "type": "aborted" if (
+                    result.turn_aborted or result.pending_cancelled
+                ) else "no_active_turn",
                 "session_id": session_id,
-            })
+            }
+            payload.update(result.to_dict())
+            await self._send_to_client(client_id, payload)
 
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
@@ -3664,6 +3819,49 @@ class WebSocketGateway:
                 pass
         return True
 
+    def _abort_session(
+        self,
+        session_id: str,
+        *,
+        scope: StopScope = StopScope.TURN,
+        reason: str = "user",
+    ) -> StopResult:
+        """Scoped stop for ``session_id`` (Issue #5129).
+
+        ``scope=TURN`` (default) cancels only the in-flight turn — today's
+        behaviour. ``scope=SESSION`` additionally drains the session inbox so no
+        queued-but-unstarted message is executed after the stop. The drained
+        count is returned as a visible, intentional non-outcome rather than
+        silently dropped, so a session stop always accounts for both running and
+        queued work even when there is no active turn.
+
+        The queue worker dequeues a message *before* registering it as an active
+        turn, so a naive inbox drain would miss a message caught in that
+        dequeue-to-registration gap. Bumping ``_stop_epoch`` closes that race:
+        the worker re-checks the epoch after admission/placement and drops any
+        message whose epoch is stale, and that in-flight message is counted here
+        so the reported ``pending_cancelled`` reflects it.
+        """
+        turn_aborted = self._abort_active_turn(session_id, reason=reason)
+        cancelled = 0
+        if scope is StopScope.SESSION:
+            session = self._sessions.get(session_id)
+            if session is not None:
+                # Invalidate any message already dequeued but not yet running
+                # (the race window). The worker will observe the bumped epoch and
+                # drop it; count it here so it is not silently lost.
+                if getattr(session, "_inflight_unstarted", False):
+                    cancelled += 1
+                session._stop_epoch = getattr(session, "_stop_epoch", 0) + 1
+                inbox = session._inbox
+                while not inbox.empty():
+                    try:
+                        inbox.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    cancelled += 1
+        return StopResult(scope=scope, turn_aborted=turn_aborted, pending_cancelled=cancelled)
+
     async def _drive_turn(
         self,
         session: GatewaySession,
@@ -3796,7 +3994,17 @@ class WebSocketGateway:
                 content = session.get_next_message()
                 if not content:
                     break  # Queue is empty, exit loop
-                
+
+                # Issue #5129: snapshot the session stop epoch the instant this
+                # message leaves the inbox. A SESSION-scoped stop that lands in
+                # the gap before the turn is registered bumps this epoch; we
+                # re-check it just before dispatch and drop the message so a
+                # cancelled backlog item is never executed after the stop.
+                dequeued_stop_epoch = getattr(session, "_stop_epoch", 0)
+                # Mark this message as in-flight-but-unstarted so a SESSION stop
+                # in the gap below counts it toward ``pending_cancelled``.
+                session._inflight_unstarted = True
+
                 # Wire streaming relay if agent has a stream_emitter.
                 # ``relay_futures`` collects the cross-thread sends the relay
                 # schedules so we can drain them before the final frame,
@@ -3818,6 +4026,10 @@ class WebSocketGateway:
                 controller = InterruptController()
                 timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 outcome_status = "ok"
+                # Issue #5129: a SESSION stop during admission/placement drops
+                # this already-dequeued message instead of running it. Skipped
+                # here is accounted for by ``_abort_session`` (pending_cancelled).
+                _stop_sentinel = object()
                 try:
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
@@ -3827,13 +4039,20 @@ class WebSocketGateway:
                         from ..bots._admission import AdmissionRejected
                         try:
                             async with gate.admit(session_id=session.session_id):
-                                response = await self._drive_turn(
-                                    session, agent, content, controller, timeout
-                                )
+                                if getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
+                                    response = _stop_sentinel
+                                else:
+                                    session._inflight_unstarted = False
+                                    response = await self._drive_turn(
+                                        session, agent, content, controller, timeout
+                                    )
                         except AdmissionRejected as rej:
                             response = rej.message
                             outcome_status = "rejected"
+                    elif getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
+                        response = _stop_sentinel
                     else:
+                        session._inflight_unstarted = False
                         response = await self._drive_turn(
                             session, agent, content, controller, timeout
                         )
@@ -3866,6 +4085,12 @@ class WebSocketGateway:
                         return_exceptions=True,
                     )
 
+                # Issue #5129: a SESSION stop cancelled this dequeued message in
+                # the registration gap — emit nothing and pull the next one.
+                if response is _stop_sentinel:
+                    session._inflight_unstarted = False
+                    continue
+
                 response_message = GatewayMessage(
                     content=response,
                     sender_id=session.agent_id,
@@ -3885,6 +4110,7 @@ class WebSocketGateway:
                 })
         finally:
             session.mark_executing(False)
+            session._inflight_unstarted = False
 
     def _make_stream_relay(
         self,
@@ -8026,7 +8252,15 @@ class WebSocketGateway:
             init_kwargs[key] = value
 
         try:
-            return adapter_cls(**init_kwargs)
+            adapter = adapter_cls(**init_kwargs)
+            # Enforce the capability contract on the gateway construction path
+            # too (parity with ``Bot._build_adapter``): a declared-but-unbacked
+            # ``supports_*`` flag must fail here — recorded as a degraded
+            # channel — rather than surfacing later inside a live turn.
+            from praisonai_bot.bots.bot import Bot
+
+            Bot._verify_capability_contract(adapter)
+            return adapter
         except Exception as exc:
             logger.warning(
                 "Failed to construct channel %r adapter: %s", channel_type, exc
@@ -9924,31 +10158,47 @@ class WebSocketGateway:
         try:
             await _run_all()
         finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            if self._cleanup_task:
-                self._cleanup_task.cancel()
-            # Issue #3021: stop lifecycle loops on shutdown.
-            if self._lifecycle_task:
-                self._lifecycle_task.cancel()
-            if self._drain_marker_task:
-                self._drain_marker_task.cancel()
-            # Issue #2375: drain in-flight agent turns (channel bots) and
-            # websocket sessions before final teardown when a drain timeout
-            # is configured. The configured timeout bounds the *total*
-            # shutdown drain: track elapsed across both phases so channel
-            # bots + websocket sessions don't sum to 2 * drain_timeout.
-            # No-op when unset (today's behaviour).
-            drain_overall_start = time.monotonic()
-            await self.stop_channels(drain_timeout=drain_timeout_cfg)
+            # Issue #5079: this ``finally`` is the *real* supervisor-driven
+            # teardown (SIGINT/SIGTERM flips ``should_exit``; ``serve()``
+            # returns; ``start()`` disarms the liveness watchdog). It never
+            # calls ``stop()``, so without arming the deadline here a wedged
+            # ``stop_channels`` / session drain (adapter ``disconnect()``, WS
+            # drain, ledger/DB close) would hang until the supervisor's
+            # ``SIGKILL`` — the exact gap this feature closes. Arm the same
+            # bounded self-exit around the drain and cancel it on clean
+            # completion. No-op unless a watchdog is configured; fail-open.
+            drain_deadline = self._resolve_shutdown_grace(None)
             if drain_timeout_cfg and drain_timeout_cfg > 0:
-                remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
-                if remaining > 0:
-                    try:
-                        await self._drain_active_sessions(
-                            reason="shutdown", timeout=float(remaining)
-                        )
-                    except Exception as e:
-                        logger.warning("Error draining websocket sessions: %s", e)
+                drain_deadline += float(drain_timeout_cfg)
+            self._arm_shutdown_deadline(drain_deadline)
+            try:
+                if self._config_watch_task:
+                    self._config_watch_task.cancel()
+                if self._scheduler_task:
+                    self._scheduler_task.cancel()
+                if self._cleanup_task:
+                    self._cleanup_task.cancel()
+                # Issue #3021: stop lifecycle loops on shutdown.
+                if self._lifecycle_task:
+                    self._lifecycle_task.cancel()
+                if self._drain_marker_task:
+                    self._drain_marker_task.cancel()
+                # Issue #2375: drain in-flight agent turns (channel bots) and
+                # websocket sessions before final teardown when a drain timeout
+                # is configured. The configured timeout bounds the *total*
+                # shutdown drain: track elapsed across both phases so channel
+                # bots + websocket sessions don't sum to 2 * drain_timeout.
+                # No-op when unset (today's behaviour).
+                drain_overall_start = time.monotonic()
+                await self.stop_channels(drain_timeout=drain_timeout_cfg)
+                if drain_timeout_cfg and drain_timeout_cfg > 0:
+                    remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
+                    if remaining > 0:
+                        try:
+                            await self._drain_active_sessions(
+                                reason="shutdown", timeout=float(remaining)
+                            )
+                        except Exception as e:
+                            logger.warning("Error draining websocket sessions: %s", e)
+            finally:
+                self._cancel_shutdown_deadline()

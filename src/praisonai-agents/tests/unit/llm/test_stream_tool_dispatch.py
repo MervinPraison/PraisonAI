@@ -43,7 +43,8 @@ def test_streaming_tool_call_is_executed_before_follow_up(monkeypatch):
     batches = []
 
     class Executor:
-        def execute_batch(self, tool_calls, execute_tool_fn, timeout_ms=None):
+        def execute_batch(self, tool_calls, execute_tool_fn, timeout_ms=None,
+                          cancel_token=None):
             batches.append(tool_calls)
             return [
                 SimpleNamespace(

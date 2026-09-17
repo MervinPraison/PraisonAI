@@ -213,7 +213,11 @@ class AllowedToolsFilter:
             "env_var_name": self.env_var_name,
             "env_value": self.env_value,
             "is_ci": self.is_ci,
-            "whitelist": list(self._whitelist) if self._whitelist else None,
+            # sorted, not list(): _whitelist is a set, so list() gave a
+            # different order on different runs. A diagnostic report you cannot
+            # diff between two runs is much less useful for the debugging it
+            # exists for.
+            "whitelist": sorted(self._whitelist) if self._whitelist else None,
             **self._diagnostics
         }
     

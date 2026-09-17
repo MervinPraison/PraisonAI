@@ -648,9 +648,13 @@ class TestPerformance:
     
     def test_import_time(self):
         """Test that import time is minimal (relative to base package)."""
+        import os
         import subprocess
         import sys
-        
+        from pathlib import Path
+
+        agents_root = Path(__file__).resolve().parents[3]
+
         # First measure baseline import time for the base package
         baseline_code = """
 import time
@@ -663,7 +667,7 @@ print(f"{elapsed:.1f}")
             [sys.executable, "-c", baseline_code],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai-agents",
+            cwd=str(agents_root),
         )
         
         # Now measure context_events import (should add minimal overhead)
@@ -679,7 +683,7 @@ print(f"{elapsed:.1f}")
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai-agents",
+            cwd=str(agents_root),
         )
         
         if result.returncode == 0:

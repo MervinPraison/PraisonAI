@@ -100,9 +100,15 @@ class ToolRegistry:
     - Trust level management for security
     """
     
-    def __init__(self):
+    def __init__(self, discovery_enabled: bool = True):
         self._tools: Dict[str, ToolEntry] = {}  # Unified storage for tools and functions
         self._discovered: bool = False
+        # When False, a missing-name lookup does NOT auto-discover entry-point
+        # plugins. Agent-scoped registries (e.g. isolated code execution) set
+        # this so an allow-listed name absent from the agent's own tools cannot
+        # silently resolve to an installed global plugin — the agent-only tool
+        # boundary is authoritative. Defaults True (unchanged global behaviour).
+        self._discovery_enabled: bool = discovery_enabled
         self._lock = threading.RLock()  # Thread-safe operations for multi-agent scenarios
         # TTL cache for availability checks (tool_name -> (is_available, timestamp))
         self._availability_cache: Dict[str, tuple[bool, float]] = {}
@@ -222,8 +228,9 @@ class ToolRegistry:
             if name in self._tools:
                 return self._tools[name].tool
             
-            # Try auto-discovery if not found
-            if not self._discovered:
+            # Try auto-discovery if not found (skipped for discovery-disabled
+            # agent-scoped registries so un-granted global plugins never leak in).
+            if self._discovery_enabled and not self._discovered:
                 self.discover_plugins()
                 if name in self._tools:
                     return self._tools[name].tool
@@ -303,7 +310,42 @@ class ToolRegistry:
                     continue
             
             return definitions
-    
+
+    def get_tool_definition(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get the effective OpenAI-compatible definition for one registered name.
+
+        Unlike :meth:`get`, which returns the raw tool object, this applies any
+        dynamic ``schema_override`` (via ``ToolEntry.schema``) and forces the
+        advertised ``function.name`` to the registry key, so a callable
+        registered under an alias is offered — and later resolved — under that
+        alias rather than its underlying ``__name__``.
+
+        Returns ``None`` if the name is unknown or unavailable.
+        """
+        with self._lock:
+            entry = self._tools.get(name)
+            if entry is None and self._discovery_enabled and not self._discovered:
+                self.discover_plugins()
+                entry = self._tools.get(name)
+            if entry is None or not entry.available:
+                return None
+            try:
+                schema = entry.schema
+            except Exception as e:
+                logging.error(f"Failed to get schema for tool '{name}': {e}")
+                return None
+        # Force the advertised name to the requested registry key (copy so we
+        # never mutate a cached override result).
+        if (
+            isinstance(schema, dict)
+            and isinstance(schema.get("function"), dict)
+            and schema["function"].get("name") != name
+        ):
+            schema = dict(schema)
+            schema["function"] = dict(schema["function"])
+            schema["function"]["name"] = name
+        return schema
+
     def list_available_tools(
         self, 
         context: Optional[Dict[str, Any]] = None, 

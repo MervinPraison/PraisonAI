@@ -129,26 +129,81 @@ def test_empty_model_name_is_false():
     _clear_caches()
 
 
-def test_max_output_tokens_uses_litellm_model_info():
-    _clear_caches()
-    fake = SimpleNamespace(
-        get_model_info=lambda *, model: {
-            "max_output_tokens": 8192,
-            "max_tokens": 16384,
-        }
-    )
-    with patch.object(mc, "_get_litellm", return_value=fake):
-        assert mc.max_output_tokens("anthropic/claude-test") == 8192
+# ---------------------------------------------------------------------------
+# max_output_tokens — CLI output-budget ceiling accessor
+# ---------------------------------------------------------------------------
+
+
+def _litellm_with(get_info=None, model_cost=None):
+    """Return a fake litellm exposing get_model_info / model_cost."""
+    ns = SimpleNamespace()
+    if get_info is not None:
+        ns.get_model_info = get_info
+    if model_cost is not None:
+        ns.model_cost = model_cost
+    return patch.object(mc, "_get_litellm", return_value=ns)
+
+
+def test_max_output_tokens_none_without_litellm():
+    mc.max_output_tokens.cache_clear()
+    with _no_litellm():
+        assert mc.max_output_tokens("gpt-4o") is None
     mc.max_output_tokens.cache_clear()
 
 
-def test_max_output_tokens_falls_back_to_model_cost():
+def test_max_output_tokens_empty_name_is_none():
     mc.max_output_tokens.cache_clear()
-    fake = SimpleNamespace(
-        model_cost={"gpt-test": {"max_output_tokens": 4096}}
-    )
-    with patch.object(mc, "_get_litellm", return_value=fake):
-        assert mc.max_output_tokens("openai/gpt-test") == 4096
+    assert mc.max_output_tokens("") is None
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_from_get_model_info():
+    mc.max_output_tokens.cache_clear()
+
+    def _info(model):
+        return {"max_output_tokens": 4096, "max_tokens": 128000}
+
+    with _litellm_with(get_info=_info):
+        assert mc.max_output_tokens("gpt-4o") == 4096
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_ignores_context_only_max_tokens():
+    # Regression: ``max_tokens`` is a context-window field here. When output
+    # metadata is absent, the accessor must NOT substitute it (that would leak
+    # a 128k context as a 128k output ceiling and defeat the clamp).
+    mc.max_output_tokens.cache_clear()
+
+    def _info(model):
+        return {"max_tokens": 128000}  # no max_output_tokens
+
+    with _litellm_with(get_info=_info, model_cost={}):
+        assert mc.max_output_tokens("some-model") is None
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_model_cost_fallback():
+    mc.max_output_tokens.cache_clear()
+
+    def _raise(model):
+        raise RuntimeError("get_model_info miss")
+
+    cost = {"claude-3-5-sonnet-latest": {"max_output_tokens": 8192}}
+    with _litellm_with(get_info=_raise, model_cost=cost):
+        assert mc.max_output_tokens("claude-3-5-sonnet-latest") == 8192
+        # Provider-prefixed name resolves via the strip-prefix branch.
+        assert mc.max_output_tokens("anthropic/claude-3-5-sonnet-latest") == 8192
+    mc.max_output_tokens.cache_clear()
+
+
+def test_max_output_tokens_unknown_model_is_none():
+    mc.max_output_tokens.cache_clear()
+
+    def _raise(model):
+        raise RuntimeError("miss")
+
+    with _litellm_with(get_info=_raise, model_cost={}):
+        assert mc.max_output_tokens("totally-unknown-model") is None
     mc.max_output_tokens.cache_clear()
 
 
@@ -159,14 +214,4 @@ def test_max_output_tokens_unknown_or_invalid_is_none():
     )
     with patch.object(mc, "_get_litellm", return_value=fake):
         assert mc.max_output_tokens("unknown-model") is None
-
-
-def test_max_output_tokens_does_not_treat_context_limit_as_output_limit():
-    mc.max_output_tokens.cache_clear()
-    fake = SimpleNamespace(
-        get_model_info=lambda *, model: {"max_tokens": 128000}
-    )
-    with patch.object(mc, "_get_litellm", return_value=fake):
-        assert mc.max_output_tokens("unknown-model") is None
-    mc.max_output_tokens.cache_clear()
     mc.max_output_tokens.cache_clear()

@@ -33,11 +33,13 @@ Usage:
 
 from dataclasses import dataclass, field
 import math
-from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet
+from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet, TYPE_CHECKING
 from enum import Enum
 
-# Import AutonomyConfig from canonical location (no circular dep)
-from ..agent.autonomy import AutonomyConfig
+if TYPE_CHECKING:
+    # Type-only: the eager import pulled agent.autonomy and escalation.types onto
+    # every `from praisonaiagents import Agent` path (see resolve_autonomy).
+    from ..agent.autonomy import AutonomyConfig
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth shared by OutputConfig.tool_output_limit and
@@ -898,7 +900,7 @@ class ExecutionConfig:
     
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
     code_execution: bool = False
-    code_mode: str = "safe"  # "safe" or "unsafe"
+    code_mode: str = "safe"  # "safe", "unsafe" or "isolated"
     
     # Code-execution-with-tools (code mode): when True, model-generated code may
     # call the agent's registered tools directly via injected proxies, enabling
@@ -963,6 +965,15 @@ class ExecutionConfig:
         # Validate the unified step budget early (before any early returns below).
         if self.max_steps is not None and self.max_steps < 1:
             raise ValueError("ExecutionConfig.max_steps must be >= 1 when set.")
+        # code_mode is a security-shaped switch: "safe" (subprocess, no tools),
+        # "unsafe" (same-process + tools, timeout not enforced), or "isolated"
+        # (subprocess + tools bridged back to the parent under the approval
+        # gate). Reject typos loudly rather than silently degrading isolation.
+        if self.code_mode not in ("safe", "unsafe", "isolated"):
+            raise ValueError(
+                "ExecutionConfig.code_mode must be 'safe', 'unsafe' or "
+                f"'isolated'; got {self.code_mode!r}."
+            )
         # Handle context_compaction serialization round-trip
         if isinstance(self.context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
@@ -1785,13 +1796,16 @@ def resolve_caching(value: CachingParam) -> Optional[CachingConfig]:
     return _resolve(value, CachingConfig)
 
 
-def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
+def resolve_autonomy(value: AutonomyParam) -> Optional["AutonomyConfig"]:
     """
     Resolve autonomy= parameter following precedence ladder.
     
     Delegates to the canonical resolver in param_resolver.py.
     Kept for backward compatibility with tests.
     """
+    # Lazy: agent.autonomy (and, through it, escalation.types) is only needed
+    # when a caller actually resolves an autonomy= value.
+    from ..agent.autonomy import AutonomyConfig
     from .param_resolver import resolve_autonomy as _resolve
     return _resolve(value, AutonomyConfig)
 
@@ -2052,10 +2066,18 @@ def __getattr__(name):
 
     ``ToolSearchConfig`` is resolved (and the tools subsystem imported) only on
     first access, so ``from praisonaiagents import Agent`` does not eagerly load
-    the entire tools package (issue #3191).
+    the entire tools package (issue #3191). ``AutonomyConfig`` follows the same
+    pattern (issue #5056).
     """
     if name == "ToolSearchConfig":
         cfg = _resolve_tool_search_config()
         globals()["ToolSearchConfig"] = cfg  # cache for subsequent access
         return cfg
+    if name == "AutonomyConfig":
+        # Same idea for AutonomyConfig: keep the historical import path
+        # (``from ...feature_configs import AutonomyConfig``) working without
+        # loading agent.autonomy / escalation.types at module import (#5056).
+        from ..agent.autonomy import AutonomyConfig
+        globals()["AutonomyConfig"] = AutonomyConfig
+        return AutonomyConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

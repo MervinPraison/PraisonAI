@@ -14,8 +14,11 @@ Usage:
     # Returns wrapped content for external tools, unchanged for trusted tools
 """
 
+import logging
 from enum import Enum
 from typing import Union
+
+logger = logging.getLogger(__name__)
 
 
 class ToolTrustLevel(str, Enum):
@@ -24,8 +27,14 @@ class ToolTrustLevel(str, Enum):
     EXTERNAL = "external"  # Results originate outside the agent's control
 
 
-# Tools that fetch external content and need security wrapping
-EXTERNAL_TOOL_NAMES = frozenset({
+# Tools that fetch external content and need security wrapping.
+#
+# A mutable set, mutated in place by ``add_external_tool``. It was a frozenset
+# that the adder *rebound*, so any module holding a reference imported earlier
+# ("from .trust import EXTERNAL_TOOL_NAMES") kept the pre-registration copy and
+# went on treating the tool as trusted. Nothing in-tree held such a reference
+# yet, but this is a security boundary and that is a bad way to find out.
+EXTERNAL_TOOL_NAMES = set({
     # Web search tools
     "internet_search", "duckduckgo", "tavily_search", "exa_search",
     "searxng_search", "web_search",
@@ -63,6 +72,15 @@ INLINE_REQUEST_NOTICE = (
 
 # Minimum content length to trigger wrapping (avoid overhead for short results)
 MIN_CONTENT_LENGTH_FOR_WRAPPING = 32
+
+# Bound at module level rather than imported inside the lookup, so callers can
+# see (and tests can patch) the dependency, and so "no registry available" is
+# distinguishable from "the registry raised while answering" -- which must not
+# be treated the same way on a trust decision.
+try:  # pragma: no cover - exercised via the fallback below
+    from .registry import get_registry
+except Exception:  # pragma: no cover
+    get_registry = None  # type: ignore[assignment]
 
 
 def wrap_if_external(tool_name: str, result: Union[str, dict, list, None]) -> Union[str, dict, list, None]:
@@ -166,14 +184,31 @@ def _is_tool_external(tool_name: str) -> bool:
         return True
     
     # Then check registry metadata (for MCP tools and others)
-    try:
-        from .registry import get_registry
-        registry = get_registry()
-        trust_level = registry.get_trust_level(tool_name)
-        return trust_level == ToolTrustLevel.EXTERNAL
-    except Exception:
-        # Registry not available or raised, fall back to hardcoded list only
+    if get_registry is None:
+        # No registry in this build: the hardcoded list is the whole answer.
         return False
+    try:
+        registry = get_registry()
+    except Exception:
+        logger.debug("tool registry unavailable; using the hardcoded list only",
+                     exc_info=True)
+        return False
+
+    try:
+        trust_level = registry.get_trust_level(tool_name)
+    except Exception:
+        # The registry exists and failed to answer. Fail CLOSED: the caller
+        # (agent/tool_execution.py) uses this to decide whether to fence tool
+        # output against prompt injection, so guessing "trusted" here lets an
+        # untrusted result reach the model unfenced. Over-fencing a trusted
+        # tool costs a wrapper; under-fencing an external one is the bug the
+        # fence exists to prevent.
+        logger.warning(
+            "trust lookup for %r failed; treating it as external", tool_name,
+            exc_info=True,
+        )
+        return True
+    return trust_level == ToolTrustLevel.EXTERNAL
 
 
 def is_external_tool(tool_name: str) -> bool:
@@ -193,14 +228,14 @@ def add_external_tool(tool_name: str) -> None:
     """
     Add a tool name to the external tools set.
     
-    Note: This modifies a frozenset by creating a new one.
-    For dynamic registration, consider using ToolRegistry metadata instead.
+    Mutates the set in place, so a module that imported ``EXTERNAL_TOOL_NAMES``
+    before the call sees the addition too. For dynamic registration, consider
+    using ToolRegistry metadata instead.
     
     Args:
         tool_name: Name of the tool to mark as external
     """
-    global EXTERNAL_TOOL_NAMES
-    EXTERNAL_TOOL_NAMES = EXTERNAL_TOOL_NAMES | frozenset({tool_name})
+    EXTERNAL_TOOL_NAMES.add(tool_name)
 
 
 def get_system_prompt_addition() -> str:

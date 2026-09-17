@@ -68,6 +68,8 @@ class Task:
         images: Optional[List[str]] = None,
         next_tasks: Optional[List[str]] = None,
         task_type: str = "task",
+        human_input: bool = False,
+        human_review_prompt: Optional[str] = None,
         condition: Optional[Dict[str, List[str]]] = None,
         is_start: bool = False,
         loop_state: Optional[Dict[str, Union[str, int]]] = None,
@@ -199,6 +201,13 @@ class Task:
         self.images = images if images else []
         self.next_tasks = next_tasks if next_tasks else []
         self.task_type = task_type
+        #: Require a person to approve this task's OUTPUT before the next task
+        #: consumes it. Distinct from the approval system, which gates a TOOL
+        #: CALL, and from guardrails, which validate automatically. Python
+        #: parity target: CrewAI's Task(human_input=True).
+        self.human_input = human_input
+        #: What the reviewer is asked. Defaults to a generic prompt.
+        self.human_review_prompt = human_review_prompt
         self.condition = condition if condition else {}
         self.is_start = is_start
         self.loop_state = loop_state if loop_state else {}

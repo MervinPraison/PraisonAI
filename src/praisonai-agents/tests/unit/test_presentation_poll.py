@@ -151,7 +151,11 @@ def test_poll_result_handler_routes_result():
         user_id="u1",
         platform_data={"poll_result": PollResult("slot", {"a": 1, "b": 4})},
     )
-    out = asyncio.get_event_loop().run_until_complete(handler(ctx))
+    # asyncio.run(), not get_event_loop().run_until_complete(): since
+    # Python 3.12 get_event_loop() raises when no loop is set instead of
+    # creating one, so this passed only when some earlier test happened
+    # to leave a usable loop installed.
+    out = asyncio.run(handler(ctx))
     assert out == "ok"
     assert captured["winner"] == "b"
 
@@ -166,7 +170,11 @@ def test_poll_result_handler_accepts_dict_payload():
         user_id="u1",
         platform_data={"poll_result": {"poll_id": "slot", "counts": {"a": 1}}},
     )
-    out = asyncio.get_event_loop().run_until_complete(handler(ctx))
+    # asyncio.run(), not get_event_loop().run_until_complete(): since
+    # Python 3.12 get_event_loop() raises when no loop is set instead of
+    # creating one, so this passed only when some earlier test happened
+    # to leave a usable loop installed.
+    out = asyncio.run(handler(ctx))
     assert out == "slot"
 
 

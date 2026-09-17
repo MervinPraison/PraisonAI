@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-09-08
+> **Version:** 1.7.6 | **Last Updated:** 2026-09-17
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -22,15 +22,15 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 417 |
+| Python Core Features | 421 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2058 |
-| **Gap Count** | **6** |
+| TypeScript Features | 2082 |
+| **Gap Count** | **4** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
-| P2 (Medium) | 1 |
-| P3 (Low) | 5 |
+| P2 (Medium) | 0 |
+| P3 (Low) | 4 |
 
 ## Gap Matrix
 
@@ -123,11 +123,10 @@
 | `route` | ✅ | ✅ | low | ✅ exported |
 | `when` | ✅ | ✅ | low | ✅ exported |
 
-### P2_CLI (47 exported, 0 stub, 1 missing)
+### P2_CLI (48 exported, 0 stub, 0 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `GuardrailRetry` | ✅ | ❌ | high | ⏳ missing |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ exported |
 | `Citation` | ✅ | ✅ | high | ✅ exported |
 | `CitationsMode` | ✅ | ✅ | high | ✅ exported |
@@ -139,6 +138,7 @@
 | `FastContextResult` | ✅ | ✅ | low | ✅ exported |
 | `FileMatch` | ✅ | ✅ | high | ✅ exported |
 | `GuardrailResult` | ✅ | ✅ | low | ✅ exported |
+| `GuardrailRetry` | ✅ | ✅ | high | ✅ exported |
 | `LLMGuardrail` | ✅ | ✅ | high | ✅ exported |
 | `LineRange` | ✅ | ✅ | high | ✅ exported |
 | `MCP` | ✅ | ✅ | low | ✅ exported |
@@ -176,15 +176,14 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (285 exported, 0 stub, 5 missing)
+### P3_Advanced (290 exported, 0 stub, 4 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `ModelRequestBlocked` | ✅ | ❌ | high | ⏳ missing |
-| `ScriptExhausted` | ✅ | ❌ | high | ⏳ missing |
-| `ScriptedModel` | ✅ | ❌ | high | ⏳ missing |
-| `allow\_model\_requests` | ✅ | ❌ | low | ⏳ missing |
-| `no\_model\_requests` | ✅ | ❌ | low | ⏳ missing |
+| `RunTerminal` | ✅ | ❌ | high | ⏳ missing |
+| `collapse` | ✅ | ❌ | low | ⏳ missing |
+| `is\_sticky` | ✅ | ❌ | low | ⏳ missing |
+| `merge\_run\_terminal` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
 | `AGGRESSIVE\_POLICY` | ✅ | ✅ | low | ✅ exported |
@@ -314,6 +313,7 @@
 | `MemoryBackend` | ✅ | ✅ | high | ✅ exported |
 | `MemoryConfig` | ✅ | ✅ | low | ✅ exported |
 | `MessageType` | ✅ | ✅ | high | ✅ exported |
+| `ModelRequestBlocked` | ✅ | ✅ | high | ✅ exported |
 | `MultiAgentExecutionConfig` | ✅ | ✅ | low | ✅ exported |
 | `MultiAgentHooksConfig` | ✅ | ✅ | low | ✅ exported |
 | `MultiAgentMemoryConfig` | ✅ | ✅ | low | ✅ exported |
@@ -357,6 +357,8 @@
 | `SandboxResult` | ✅ | ✅ | low | ✅ exported |
 | `SandboxStatus` | ✅ | ✅ | high | ✅ exported |
 | `ScopeRequiredError` | ✅ | ✅ | low | ✅ exported |
+| `ScriptExhausted` | ✅ | ✅ | high | ✅ exported |
+| `ScriptedModel` | ✅ | ✅ | high | ✅ exported |
 | `SecurityPolicy` | ✅ | ✅ | high | ✅ exported |
 | `SendResult` | ✅ | ✅ | low | ✅ exported |
 | `SessionConfig` | ✅ | ✅ | low | ✅ exported |
@@ -388,6 +390,7 @@
 | `aembed` | ✅ | ✅ | low | ✅ exported |
 | `aembedding` | ✅ | ✅ | low | ✅ exported |
 | `aembeddings` | ✅ | ✅ | low | ✅ exported |
+| `allow\_model\_requests` → `allowModelRequests` | ✅ | ✅ | low | ✅ exported |
 | `apply\_config\_defaults` | ✅ | ✅ | low | ✅ exported |
 | `async\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
 | `clean\_triple\_backticks` | ✅ | ✅ | low | ✅ exported |
@@ -431,6 +434,7 @@
 | `list\_toolsets` | ✅ | ✅ | low | ✅ exported |
 | `load\_plugin` | ✅ | ✅ | low | ✅ exported |
 | `memory` | ✅ | ✅ | low | ✅ exported |
+| `no\_model\_requests` → `noModelRequests` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ✅ exported |
 | `parse\_policy\_string` | ✅ | ✅ | low | ✅ exported |
@@ -620,7 +624,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (111 exports)</summary>
+<summary><strong>other</strong> (115 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
@@ -822,10 +826,10 @@ import { AgentEventBus, AgentEvents, Event, EventEmitterPubSub, EventHandler, Pu
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (16 exports)</summary>
+<summary><strong>guardrails</strong> (34 exports)</summary>
 
 ```typescript
-import { Guardrail, GuardrailConfig, GuardrailContext, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailStatus, GuardrailValidationResult, LLMGuardrail, LLMGuardrailConfig... } from 'praisonai';
+import { ATTR_FOR, Guardrail, GuardrailConfig, GuardrailContext, GuardrailDirection, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailRetry, GuardrailStatus... } from 'praisonai';
 ```
 
 </details>
@@ -903,7 +907,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
-<summary><strong>other</strong> (504 exports)</summary>
+<summary><strong>other</strong> (510 exports)</summary>
 
 ```typescript
 import { A2UI, A2UIAdapter, A2UINotInstalledError, A2UISystemPromptOptions, A2UIToolResultProtocol, A2UI_MIME_TYPE, AGENT_ERROR_KINDS, ARITY, AUTONOMY_PRESETS, ActionRecord... } from 'praisonai';

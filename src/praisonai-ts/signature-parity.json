@@ -10,8 +10,8 @@
         "mismatches": 8,
         "missing": 0,
         "params": 42,
-        "ts_only": 13,
-        "ts_total": 59,
+        "ts_only": 14,
+        "ts_total": 60,
         "waived": 8
       },
       "params": [
@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:618",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:621",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -1318,11 +1318,21 @@
           "required": false,
           "type_class": "boolean",
           "type_text": "boolean"
+        },
+        {
+          "canonical": "maxGuardrailRetries",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxGuardrailRetries",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
         }
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1008",
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1018",
         "location": "src/praisonai-ts/src/agent/simple.ts:196",
         "options_parameters": [
           "config"
@@ -1787,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3110",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -1814,7 +1824,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3495",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3588",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2073,7 +2083,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2424",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2493",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2741,8 +2751,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/team.ts:377",
-        "location": "src/praisonai-ts/src/agent/team.ts:91",
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:381",
+        "location": "src/praisonai-ts/src/agent/team.ts:93",
         "options_parameters": [
           "configOrAgents"
         ]
@@ -2842,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2385",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2554",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -2859,7 +2869,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:1076",
+        "location": "src/praisonai-ts/src/agent/team.ts:1125",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
@@ -4646,7 +4656,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:425",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:426",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -5139,14 +5149,14 @@
     "Task.__init__": {
       "counts": {
         "alias": 0,
-        "camelCase": 29,
+        "camelCase": 31,
         "exact": 31,
         "flattened": 0,
         "mismatches": 7,
         "missing": 0,
-        "params": 60,
+        "params": 62,
         "ts_only": 1,
-        "ts_total": 62,
+        "ts_total": 64,
         "waived": 7
       },
       "params": [
@@ -5713,6 +5723,58 @@
           "ts_name": "taskType",
           "type_class": "string",
           "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "humanInput",
+          "default": false,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "human_input",
+          "required": false,
+          "ts": {
+            "canonical": "humanInput",
+            "default": false,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "humanInput",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_members": null,
+          "ts_name": "humanInput",
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "humanReviewPrompt",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "human_review_prompt",
+          "required": false,
+          "ts": {
+            "canonical": "humanReviewPrompt",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "humanReviewPrompt",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_members": null,
+          "ts_name": "humanReviewPrompt",
+          "type_class": "string",
+          "type_text": "Optional[str]",
           "waived": null,
           "warnings": []
         },
@@ -6764,7 +6826,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/types.ts:379",
+        "ctor_location": "src/praisonai-ts/src/agent/types.ts:394",
         "location": "src/praisonai-ts/src/agent/types.ts:115",
         "options_parameters": [
           "config"
@@ -6930,15 +6992,15 @@
     "tool()": {
       "counts": {
         "alias": 1,
-        "camelCase": 5,
+        "camelCase": 7,
         "exact": 5,
         "flattened": 0,
         "mismatches": 3,
-        "missing": 2,
+        "missing": 0,
         "params": 13,
         "ts_only": 3,
-        "ts_total": 14,
-        "waived": 5
+        "ts_total": 16,
+        "waived": 3
       },
       "params": [
         {
@@ -7240,40 +7302,52 @@
           "canonical": "inputGuardrails",
           "default": null,
           "default_kind": "literal",
-          "gap": {
-            "detail": "is missing from TypeScript (looked for `inputGuardrails`)",
-            "kind": "missing"
-          },
+          "gap": null,
           "kind": "keyword",
-          "match": "missing",
+          "match": "camelCase",
           "name": "input_guardrails",
           "required": false,
-          "ts": null,
+          "ts": {
+            "canonical": "inputGuardrails",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "inputGuardrails",
+            "required": false,
+            "type_class": "union",
+            "type_text": "ToolGuardrailSpec | ToolGuardrailSpec[]"
+          },
           "ts_members": null,
-          "ts_name": null,
+          "ts_name": "inputGuardrails",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
-          "waived": "tool().input_guardrails",
+          "waived": null,
           "warnings": []
         },
         {
           "canonical": "outputGuardrails",
           "default": null,
           "default_kind": "literal",
-          "gap": {
-            "detail": "is missing from TypeScript (looked for `outputGuardrails`)",
-            "kind": "missing"
-          },
+          "gap": null,
           "kind": "keyword",
-          "match": "missing",
+          "match": "camelCase",
           "name": "output_guardrails",
           "required": false,
-          "ts": null,
+          "ts": {
+            "canonical": "outputGuardrails",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "outputGuardrails",
+            "required": false,
+            "type_class": "union",
+            "type_text": "ToolGuardrailSpec | ToolGuardrailSpec[]"
+          },
           "ts_members": null,
-          "ts_name": null,
+          "ts_name": "outputGuardrails",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
-          "waived": "tool().output_guardrails",
+          "waived": null,
           "warnings": []
         }
       ],
@@ -7314,8 +7388,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:214",
-        "location": "src/praisonai-ts/src/tools/decorator.ts:49",
+        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:238",
+        "location": "src/praisonai-ts/src/tools/decorator.ts:57",
         "options_parameters": [
           "config"
         ]
@@ -7324,16 +7398,16 @@
   },
   "totals": {
     "alias": 8,
-    "camelCase": 88,
+    "camelCase": 92,
     "exact": 123,
     "flattened": 3,
     "mismatches": 28,
-    "missing": 2,
-    "params": 224,
+    "missing": 0,
+    "params": 226,
     "surfaces": 17,
-    "ts_only": 84,
-    "ts_total": 312,
-    "waived": 30
+    "ts_only": 85,
+    "ts_total": 317,
+    "waived": 28
   },
   "waivers": [
     {
@@ -7526,25 +7600,11 @@
       "reason": "TS execute is required; Python's `func` is optional only so `@tool` can be applied bare, and `FunctionTool.__init__` still requires it."
     },
     {
-      "expires": "2026-12-07",
-      "issue": null,
-      "key": "tool().input_guardrails",
-      "owner": "praisonai-ts",
-      "reason": "NOT an equivalence -- unlike every other waiver in this file, this records a real gap. Per-tool input guardrails were added to Python (praisonaiagents/guardrails/tool_guardrails.py) and have no TypeScript counterpart yet; nothing in praisonai-ts resolves the same behaviour by another route. Waived only to unblock the Python PR, since porting is a praisonai-ts change and the two packages do not share a branch. `expires` is set deliberately so this fails the gate rather than becoming permanent if the port is forgotten."
-    },
-    {
       "expires": null,
       "issue": null,
       "key": "tool().name",
       "owner": "praisonai-ts",
       "reason": "TS cannot infer a name from an anonymous function; Python infers it from __name__"
-    },
-    {
-      "expires": "2026-12-07",
-      "issue": null,
-      "key": "tool().output_guardrails",
-      "owner": "praisonai-ts",
-      "reason": "NOT an equivalence -- the output half of the same missing capability. See tool().input_guardrails above. Same expiry, for the same reason."
     }
   ]
 }

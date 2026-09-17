@@ -267,6 +267,14 @@ jobs:
       - name: Stash merge gate helpers
         run: cp .github/scripts/merge-gate.js /tmp/merge-gate.js
 
+      - name: Pick Claude OAuth token
+        id: oauth
+        uses: MervinPraison/github-automation-template/.github/actions/pick-oauth-token@v1.1.9
+        with:
+          token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
+
       - name: Fetch PR branch
         env:
           PR_NUMBER: ${{ matrix.pr_number }}
@@ -283,7 +291,7 @@ jobs:
           CLAUDE_CODE_SUBAGENT_MODEL: inherit
           ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ steps.oauth.outputs.token }}
           github_token: ${{ steps.app-token.outputs.token }}
           model: claude-opus-4-8
           trigger_phrase: '@claude-merge-gate-internal'
@@ -547,10 +555,12 @@ jobs:
 
             try {
               const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
-              const comments = ctx.comments;
-              const verdictMin = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-              const verdict = mergeGate.findMergeGateVerdict(
-                comments, verdictMin, ctx.headPushedAt, { excludeAutomatedFallback: true }
+              const { verdict } = await mergeGate.waitForMergeGateVerdict(
+                github, owner, repo, prNumber, {
+                  headPushedAt: ctx.headPushedAt,
+                  excludeAutomatedFallback: true,
+                  core,
+                }
               );
               if (verdict !== 'APPROVE') {
                 core.info(`Skip merge: verdict=${verdict || 'NONE'}`);

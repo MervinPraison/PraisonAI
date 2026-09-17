@@ -31,6 +31,13 @@ env:
   PRAISONAI_ALLOW_NETWORK: '0'
   PRAISONAI_LIVE_TESTS: '0'
   PRAISONAI_TEST_TIER: main
+  # litellm reads this at import and, without it, downloads its model-price
+  # table from raw.githubusercontent.com before a single test runs -- which
+  # made the suite depend on that host being reachable. It has to be set in
+  # the environment rather than a conftest, because pytest imports plugins
+  # (and litellm with them) before any conftest is loaded.
+  LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+  HF_HUB_OFFLINE: '1'
 
 jobs:
   test-core-collect:
@@ -109,6 +116,55 @@ jobs:
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
+          - shard: agents-core
+            workdir: src/praisonai-agents
+            # src/praisonai-agents/tests holds 727 files and 11,437 test
+            # functions, and until now NO workflow referenced the directory at
+            # all -- so the LLM layer, the provider adapters, the local-model
+            # package and the streaming paths were guarded by tests that never
+            # ran. Nearly every defect found in the recent local-model audits
+            # had a working test sitting unused beside it.
+            #
+            # The ten directories originally left out of this shard (knowledge,
+            # runtime, session, tools, bus, plugins, skills, agents, rag,
+            # streaming -- about 52 failures) have since been repaired, so they
+            # are all listed below: 1,567 tests in the seven added here alone.
+            # Leaving them out would have meant the repairs were never exercised.
+            #
+            # The whole tree in one invocation was hanging. The cause was NOT
+            # the pytest-rerunfailures run_server thread guessed at here
+            # earlier: it is test_botos_integration.py, where a supervised
+            # Bot.start() deliberately never returns and the mock adapter
+            # reports is_running=True forever (fixed on this branch). Naming
+            # directories explicitly is still the safer shape for a shard.
+            paths: >-
+              tests/unit/agent/ tests/unit/app/ tests/unit/approval/
+              tests/unit/auth/ tests/unit/background/ tests/unit/checkpoints/
+              tests/unit/cli/ tests/unit/compaction/ tests/unit/conditions/
+              tests/unit/config/ tests/unit/context/ tests/unit/embedding/
+              tests/unit/eval/ tests/unit/gateway/ tests/unit/goal/
+              tests/unit/hooks/ tests/unit/llm/ tests/unit/lsp/ tests/unit/mcp/
+              tests/unit/memory/ tests/unit/permissions/ tests/unit/policy/
+              tests/unit/process/ tests/unit/runs/ tests/unit/sandbox/
+              tests/unit/security/ tests/unit/server/ tests/unit/snapshot/
+              tests/unit/storage/ tests/unit/task/ tests/unit/telemetry/
+              tests/unit/trace/ tests/unit/utils/ tests/unit/workflows/
+              tests/unit/workspace/ tests/unit/knowledge/ tests/unit/session/
+              tests/unit/plugins/ tests/unit/runtime/ tests/unit/tools/
+              tests/unit/bus/ tests/unit/skills/ tests/unit/agents/
+              tests/unit/rag/ tests/unit/streaming/
+              tests/unit/test_adapter_registry.py
+            # Both tests previously deselected here now pass in combination.
+            # test_lazy_litellm_import was looking the loader module up by
+            # name and could get a different object than the one get_litellm()
+            # mutates; it reads the function's own __globals__ now.
+            # test_skills_discovery_uses_paths_module read the real home
+            # directory and asserted every discovered dir was named "skills",
+            # which is false once a remote skill has ever been cached; it runs
+            # against a temp HOME and asserts the paths module is used.
+            extra_ignore: ""
+            pythonpath: >-
+              ${{ github.workspace }}/src/praisonai-agents
           - shard: train
             workdir: src/praisonai-train
             # tests/unit/data/ (96 tests) was collected by no workflow at all.

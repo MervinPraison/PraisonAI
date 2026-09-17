@@ -5,10 +5,24 @@ import os
 
 import pytest
 
-os.environ.setdefault("PRAISONAI_AUTO_APPROVE", "true")
 
 from praisonaiagents.tools import delegation_tools
 from praisonaiagents.tools.delegation_tools import DelegationTools, delegate_task
+
+
+@pytest.fixture(autouse=True)
+def _auto_approve_delegation(monkeypatch):
+    """Auto-approve for this module only.
+
+    This was `os.environ.setdefault("PRAISONAI_AUTO_APPROVE", "true")` at
+    module import: never undone, so from the moment this file was collected
+    every later test in the process ran with approval disabled. It silently
+    broke the doom-loop approval-gate tests in
+    tests/unit/agent/test_loop_detector_wiring.py, which pass alone and failed
+    only after this module had been imported. monkeypatch restores it.
+    """
+    monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
 
 
 def _fake_subagent_tool(output="delegated result", success=True, error=None):

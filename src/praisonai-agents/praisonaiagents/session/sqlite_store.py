@@ -47,6 +47,11 @@ class SqliteSessionStore(DefaultSessionStore):
     full-text index on top so ``search`` is a bounded index lookup.
     """
 
+    # Bumped whenever ``_flatten`` changes what content lands in the index, so
+    # a store built by an older release rebuilds its FTS rows once on upgrade.
+    # v2: archived_messages included (Issue #5031).
+    INDEX_CONTENT_VERSION = 2
+
     def __init__(
         self,
         session_dir: Optional[str] = None,
@@ -116,6 +121,7 @@ class SqliteSessionStore(DefaultSessionStore):
                 "session_id TEXT PRIMARY KEY, updated_at TEXT)"
             )
             self._init_route_schema(conn)
+            self._init_index_meta_schema(conn)
             return True
         except Exception as exc:
             logger.info("FTS5 not available (%s); using LIKE fallback index.", exc)
@@ -129,6 +135,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     "session_id TEXT PRIMARY KEY, updated_at TEXT)"
                 )
                 self._init_route_schema(conn)
+                self._init_index_meta_schema(conn)
                 return False
             except Exception:
                 self._conn = None
@@ -161,10 +168,58 @@ class SqliteSessionStore(DefaultSessionStore):
         )
 
     @staticmethod
+    def _init_index_meta_schema(conn) -> None:
+        """Create the key/value table tracking the index-content version.
+
+        Lets an upgrade detect that ``_flatten`` now indexes different content
+        (e.g. archived turns, Issue #5031) and force a one-time rebuild of the
+        FTS rows so pre-existing sessions become searchable immediately rather
+        than only after their next write.
+        """
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_index_meta ("
+            "  key TEXT PRIMARY KEY,"
+            "  value TEXT"
+            ")"
+        )
+
+    def _index_content_version(self, conn) -> Optional[int]:
+        """Read the persisted index-content version, or None if unset."""
+        try:
+            row = conn.execute(
+                "SELECT value FROM session_index_meta WHERE key = 'content_version'"
+            ).fetchone()
+        except Exception:
+            return None
+        if not row or row[0] is None:
+            return None
+        try:
+            return int(row[0])
+        except (TypeError, ValueError):
+            return None
+
+    def _set_index_content_version(self, conn, version: int) -> None:
+        """Persist the current index-content version."""
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO session_index_meta (key, value) "
+                "VALUES ('content_version', ?)",
+                (str(version),),
+            )
+        except Exception as exc:
+            logger.debug("Failed to persist index content version: %s", exc)
+
+    @staticmethod
     def _flatten(session: SessionData) -> str:
-        """Concatenate a session's message content for indexing."""
+        """Concatenate a session's message content for indexing.
+
+        Includes ``archived_messages`` (turns rolled out of the active window
+        by ``retention="compact"``) ahead of the active ``messages`` so a
+        compaction re-index preserves — rather than deletes — the raw turns,
+        keeping the whole conversation searchable (Issue #5031).
+        """
         parts = []
-        for msg in session.messages:
+        for msg in (*session.archived_messages, *session.messages):
             content = getattr(msg, "content", "")
             if content:
                 parts.append(str(content))
@@ -268,12 +323,26 @@ class SqliteSessionStore(DefaultSessionStore):
             return set()
 
     def _reindex_all(self) -> None:
-        """Backfill the index from existing JSON transcripts (skip indexed)."""
+        """Backfill the index from existing JSON transcripts.
+
+        Normally cheap: sessions already fully indexed are skipped. When the
+        persisted index-content version is older than
+        ``INDEX_CONTENT_VERSION`` (e.g. a store built before archived turns were
+        indexed, Issue #5031), every session's FTS row is rebuilt once so
+        archived-only queries work immediately after upgrade rather than only
+        after each session's next write. The new version is then persisted so
+        subsequent startups fall back to the cheap skip behaviour.
+        """
         try:
             filenames = os.listdir(self.session_dir)
         except (IOError, OSError):
             return
-        already = self._indexed_ids()
+        conn = self._connect()
+        stale = (
+            conn is not None
+            and self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
+        )
+        already = set() if stale else self._indexed_ids()
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
@@ -285,6 +354,8 @@ class SqliteSessionStore(DefaultSessionStore):
             except Exception:
                 continue
             self._index_session(session)
+        if conn is not None:
+            self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
 
     # ── write path: keep the index in sync ────────────────────────────
 
@@ -487,8 +558,8 @@ class SqliteSessionStore(DefaultSessionStore):
             except (json.JSONDecodeError, IOError, OSError):
                 continue
 
-            messages = data.get("messages", [])
-            if not isinstance(messages, list):
+            messages = self._searchable_messages(data)
+            if not messages:
                 continue
 
             best_index = -1
@@ -521,6 +592,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     "role": messages[i].get("role", ""),
                     "content": messages[i].get("content", ""),
                     "timestamp": messages[i].get("timestamp"),
+                    "archived": bool(messages[i].get("archived")),
                 }
                 for i in range(start, end)
                 if isinstance(messages[i], dict)

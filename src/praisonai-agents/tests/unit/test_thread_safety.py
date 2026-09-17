@@ -166,7 +166,14 @@ class TestAgentThreadSafety:
         )
         
         assert hasattr(agent, '_history_lock')
-        assert isinstance(agent._history_lock, type(threading.Lock()))
+        # _history_lock is an AsyncSafeState now, not a raw threading.Lock, so
+        # an isinstance check against _thread.lock fails while the guarantee it
+        # stands for -- mutual exclusion around history -- still holds. Assert
+        # that it works as a lock rather than what class it is.
+        lock = agent._history_lock
+        assert hasattr(lock, '__enter__') and hasattr(lock, '__exit__')
+        with lock:
+            pass
     
     def test_agent_has_cache_lock(self):
         """Agent should have a cache lock for thread safety."""

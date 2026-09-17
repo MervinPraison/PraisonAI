@@ -288,7 +288,16 @@ class TestChromaKnowledgeAdapterWhereFilters:
         from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
 
         adapter = ChromaKnowledgeAdapter.__new__(ChromaKnowledgeAdapter)
+        # Mirrors __init__, which is skipped here to avoid the chromadb import.
+        # _resolve_embedder reads this on every search.
+        adapter._embedder = {}
         adapter.collection = MagicMock()
+        # __init__ is bypassed to avoid a real chromadb client, so every
+        # attribute the methods under test read must be supplied here.
+        # ``_embedder`` was added to __init__ later (so an agent that had
+        # selected a local embedder stopped being silently routed to
+        # OpenAI) and these tests began failing with AttributeError.
+        adapter._embedder = {}
         adapter.collection.query.return_value = {
             "ids": [[]],
             "documents": [[]],
