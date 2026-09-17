@@ -143,7 +143,6 @@ export {
   valyuPatentSearch, valyuSecSearch, valyuEconomicsSearch, valyuCompanyResearch,
   bedrockCodeInterpreter, bedrockBrowserNavigate, bedrockBrowserClick, bedrockBrowserFill,
   airweaveSearch, codeMode,
-  anyapiSearchApis, anyapiGetApi, anyapiRunApi,
   registerCustomTool, createCustomTool, registerNpmTool, registerLocalTool
 } from './tools/builtins';
 
