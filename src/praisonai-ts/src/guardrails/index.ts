@@ -303,6 +303,8 @@ export const builtinGuardrails = {
   },
 };
 
+export { GuardrailRetry } from './retry';
+
 // ============================================================================
 // Per-tool guardrails (Python parity: guardrails/tool_guardrails.py)
 // ============================================================================

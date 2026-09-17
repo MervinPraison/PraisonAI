@@ -6,13 +6,13 @@
   "summary": {
     "pythonCoreFeatures": 417,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 2078,
-    "gapCount": 6,
+    "typescriptFeatures": 2085,
+    "gapCount": 0,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
-    "priorityP2": 1,
-    "priorityP3": 5
+    "priorityP2": 0,
+    "priorityP3": 0
   },
   "pythonCoreSDK": {
     "path": "src/praisonai-agents/praisonaiagents",
@@ -1154,6 +1154,7 @@
       "Guardrail",
       "GuardrailAction",
       "GuardrailManager",
+      "GuardrailRetry",
       "HTMLReader",
       "Handoff",
       "HandoffCycleError",
@@ -1238,6 +1239,7 @@
       "MinimalTelemetry",
       "MissingDependencyError",
       "MissingEnvVarError",
+      "ModelRequestBlocked",
       "MongoDBLearnBackend",
       "N8NIntegration",
       "NLPostgresClient",
@@ -1335,6 +1337,8 @@
       "SandboxStatus",
       "Scheduler",
       "ScopeRequiredError",
+      "ScriptExhausted",
+      "ScriptedModel",
       "SendErrorKind",
       "SendResult",
       "Session",
@@ -1425,6 +1429,7 @@
       "aiStreamObject",
       "aiStreamText",
       "airweaveSearch",
+      "allowModelRequests",
       "andConditions",
       "anyapiGetApi",
       "anyapiRunApi",
@@ -1914,7 +1919,9 @@
       "memory",
       "mergeConfig",
       "mergeRanges",
+      "modelRequestsAllowed",
       "noHarmfulContentCriterion",
+      "noModelRequests",
       "noopAdapter",
       "normalizeEmbedding",
       "normalizeLoggerName",
@@ -2778,6 +2785,7 @@
         "GuardrailFunction",
         "GuardrailManager",
         "GuardrailResult",
+        "GuardrailRetry",
         "GuardrailStatus",
         "GuardrailValidationResult",
         "GuardrailVerdict",
@@ -3498,6 +3506,7 @@
         "MemoryBackend",
         "MessageContent",
         "MessageType",
+        "ModelRequestBlocked",
         "MultiAgentExecutionConfig",
         "MultiAgentHooksConfig",
         "MultiAgentMemoryConfig",
@@ -3579,6 +3588,8 @@
         "SandboxProtocol",
         "SandboxResult",
         "SandboxStatus",
+        "ScriptExhausted",
+        "ScriptedModel",
         "SendErrorKind",
         "SendOptions",
         "SendResult",
@@ -3633,6 +3644,7 @@
         "aembed",
         "aembedding",
         "aembeddings",
+        "allowModelRequests",
         "andConditions",
         "apply_config_defaults",
         "approvalDecision",
@@ -3736,6 +3748,8 @@
         "load_plugin",
         "logError",
         "markdownToSlack",
+        "modelRequestsAllowed",
+        "noModelRequests",
         "normalizeEmbedding",
         "notCondition",
         "orConditions",
@@ -5012,10 +5026,10 @@
       {
         "feature": "GuardrailRetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "guardrails"
       },
       {
@@ -6508,10 +6522,10 @@
       {
         "feature": "ModelRequestBlocked",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -6904,19 +6918,19 @@
       {
         "feature": "ScriptExhausted",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
         "feature": "ScriptedModel",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -7201,11 +7215,12 @@
       {
         "feature": "allow_model_requests",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
-        "category": "other"
+        "status": "DONE",
+        "category": "other",
+        "tsName": "allowModelRequests"
       },
       {
         "feature": "apply_config_defaults",
@@ -7598,11 +7613,12 @@
       {
         "feature": "no_model_requests",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
-        "category": "other"
+        "status": "DONE",
+        "category": "other",
+        "tsName": "noModelRequests"
       },
       {
         "feature": "parse_plugin_header",
