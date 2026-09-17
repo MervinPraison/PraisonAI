@@ -125,7 +125,7 @@ def test_streaming_ollama_resolves_same_turn_tool_result_references(monkeypatch)
     seen_batches = []
 
     class Executor:
-        def execute_batch(self, tool_calls, execute_tool_fn, timeout_ms=None):
+        def execute_batch(self, tool_calls, execute_tool_fn, timeout_ms=None, cancel_token=None):
             seen_batches.append(tool_calls)
             call = tool_calls[0]
             result = 3 if call.function_name == "first" else 9
