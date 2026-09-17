@@ -25,7 +25,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 |---|---|---|---|---|---|---|---|---|---|
 | `Agent.__init__` | 42 | 29 | 8 | 2 | 3 | 0 | 8 | 8 | 14 / 60 |
 | `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 3 / 26 |
-| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 3 / 64 |
+| `Task.__init__` | 62 | 31 | 31 | 0 | 0 | 0 | 7 | 7 | 1 / 64 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 20 / 21 |
 | `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 0 | 0 | 2 / 19 |
 | `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 / 4 |
@@ -40,7 +40,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 224 | 123 | 90 | 8 | 3 | 0 | 28 | 28 | 87 / 317 |
+| **Total (17 surfaces)** | 226 | 123 | 92 | 8 | 3 | 0 | 28 | 28 | 85 / 317 |
 
 ## Surfaces
 
@@ -136,7 +136,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:48`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:115` (ctor `src/praisonai-ts/src/agent/types.ts:394`)
-- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 3 TS-only of 64
+- Counts: 62 python params: 31 exact, 31 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 64
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -161,6 +161,8 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 | `images` | positional | null | `Optional[List[str]]` | exact | `images` | [] | `string[]` | ok |
 | `next_tasks` | positional | null | `Optional[List[str]]` | camelCase | `nextTasks` | [] | `string[]` | ok |
 | `task_type` | positional | "task" | `str` | camelCase | `taskType` | "task" | `string` | ok |
+| `human_input` | positional | false | `bool` | camelCase | `humanInput` | false | `boolean` | ok |
+| `human_review_prompt` | positional | null | `Optional[str]` | camelCase | `humanReviewPrompt` | undefined | `string` | ok |
 | `condition` | positional | null | `Optional[Dict[str, List[str]]]` | exact | `condition` | {} | `Record<string, string[]>` | ok |
 | `is_start` | positional | false | `bool` | camelCase | `isStart` | false | `boolean` | ok |
 | `loop_state` | positional | null | `Optional[Dict[str, Union[str, int]]]` | camelCase | `loopState` | {} | `Record<string, string \| number>` | ok |
@@ -201,7 +203,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 | `fail_on_callback_error` | positional | false | `bool` | camelCase | `failOnCallbackError` | false | `boolean` | ok |
 | `fail_on_memory_error` | positional | false | `bool` | camelCase | `failOnMemoryError` | false | `boolean` | ok |
 
-TS-only members: `dependencies`?, `humanInput`?, `humanReviewPrompt`?
+TS-only members: `dependencies`?
 
 ### `Agent.start`
 
@@ -217,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3099`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3588`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -245,7 +247,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2395`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2518`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1125`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -277,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:419`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:420`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 

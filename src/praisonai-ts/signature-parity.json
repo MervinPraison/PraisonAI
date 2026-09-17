@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3082",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3099",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2395",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2518",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4656,7 +4656,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:419",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:420",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -5149,13 +5149,13 @@
     "Task.__init__": {
       "counts": {
         "alias": 0,
-        "camelCase": 29,
+        "camelCase": 31,
         "exact": 31,
         "flattened": 0,
         "mismatches": 7,
         "missing": 0,
-        "params": 60,
-        "ts_only": 3,
+        "params": 62,
+        "ts_only": 1,
         "ts_total": 64,
         "waived": 7
       },
@@ -5723,6 +5723,58 @@
           "ts_name": "taskType",
           "type_class": "string",
           "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "humanInput",
+          "default": false,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "human_input",
+          "required": false,
+          "ts": {
+            "canonical": "humanInput",
+            "default": false,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "humanInput",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_members": null,
+          "ts_name": "humanInput",
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "humanReviewPrompt",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "human_review_prompt",
+          "required": false,
+          "ts": {
+            "canonical": "humanReviewPrompt",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "humanReviewPrompt",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_members": null,
+          "ts_name": "humanReviewPrompt",
+          "type_class": "string",
+          "type_text": "Optional[str]",
           "waived": null,
           "warnings": []
         },
@@ -6770,26 +6822,6 @@
           "required": false,
           "type_class": "array",
           "type_text": "Task[]"
-        },
-        {
-          "canonical": "humanInput",
-          "default": false,
-          "default_kind": "literal",
-          "kind": "property",
-          "name": "humanInput",
-          "required": false,
-          "type_class": "boolean",
-          "type_text": "boolean"
-        },
-        {
-          "canonical": "humanReviewPrompt",
-          "default": null,
-          "default_kind": null,
-          "kind": "property",
-          "name": "humanReviewPrompt",
-          "required": false,
-          "type_class": "string",
-          "type_text": "string"
         }
       ],
       "ts_only_required": [],
@@ -7366,14 +7398,14 @@
   },
   "totals": {
     "alias": 8,
-    "camelCase": 90,
+    "camelCase": 92,
     "exact": 123,
     "flattened": 3,
     "mismatches": 28,
     "missing": 0,
-    "params": 224,
+    "params": 226,
     "surfaces": 17,
-    "ts_only": 87,
+    "ts_only": 85,
     "ts_total": 317,
     "waived": 28
   },
