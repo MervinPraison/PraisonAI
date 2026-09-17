@@ -4108,34 +4108,41 @@ Summary:"""
         * ``"safe"``  -> subprocess isolation, no tool access from the code.
         * ``"unsafe"`` -> same process, restricted builtins, and the
           ``code_tools_allow`` allow-list injected as callable tool proxies.
+        * ``"isolated"`` -> subprocess isolation AND the ``code_tools_allow``
+          allow-list, with each tool call bridged back to the parent under the
+          approval gate (the safe-and-tool-capable path).
 
-        Both expose one tool named ``execute_code``, which the approval registry
+        All expose one tool named ``execute_code``, which the approval registry
         classes as "critical", so it stays gated under every preset but "full".
         """
         from ..tools.python_tools import build_code_execution_tools
 
+        _tool_capable = ("unsafe", "isolated")
         code_tools = bool(getattr(exec_config, "code_tools", False))
         allowed = list(getattr(exec_config, "code_tools_allow", None) or [])
-        if code_tools and code_execution_mode != "unsafe":
+        if code_tools and code_execution_mode not in _tool_capable:
             import warnings
             warnings.warn(
-                "ExecutionConfig(code_tools=True) needs code_mode='unsafe': in "
-                "'safe' mode the code runs in a separate process and cannot "
-                "reach the agent's tools, so code_tools_allow is ignored.",
+                "ExecutionConfig(code_tools=True) needs code_mode='unsafe' or "
+                "'isolated': in 'safe' mode the code runs in a separate process "
+                "and cannot reach the agent's tools, so code_tools_allow is "
+                "ignored.",
                 UserWarning,
                 stacklevel=3,
             )
             code_tools = False
 
-        # In unsafe mode the allow-list must resolve against ONLY the tools this
-        # agent was granted, never the process-global registry (which can hold
-        # plugin/entry-point tools the agent was never given). Build a private
-        # registry from self.tools and pass it down so code-mode inherits the
-        # agent's exact tool boundary.
+        # In tool-capable modes the allow-list must resolve against ONLY the
+        # tools this agent was granted, never the process-global registry (which
+        # can hold plugin/entry-point tools the agent was never given). Build a
+        # private registry from self.tools and pass it down so code-mode
+        # inherits the agent's exact tool boundary.
         scoped_registry = None
-        if code_tools and code_execution_mode == "unsafe":
+        if code_tools and code_execution_mode in _tool_capable:
             from ..tools.registry import ToolRegistry
-            scoped_registry = ToolRegistry()
+            # discovery_enabled=False: an allow-listed name absent from THIS
+            # agent's tools must NOT resolve to an installed global plugin.
+            scoped_registry = ToolRegistry(discovery_enabled=False)
             for t in (self.tools or []):
                 if callable(t) or hasattr(t, "name"):
                     try:

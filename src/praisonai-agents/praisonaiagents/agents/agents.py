@@ -2818,7 +2818,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         ``variables``, keeping the public Task API backward-compatible.
         """
         snapshot = {}
-        for task_id, task in self.tasks.items():
+        for task_id, task in getattr(self, "tasks", {}).items():
             snapshot[task_id] = {
                 "status": getattr(task, "status", None),
                 "result": getattr(task, "result", None),
@@ -3111,8 +3111,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         import hashlib
         parts = []
-        for task_id in sorted(self.tasks, key=lambda k: str(k)):
-            task = self.tasks[task_id]
+        tasks = getattr(self, "tasks", {})
+        for task_id in sorted(tasks, key=lambda k: str(k)):
+            task = tasks[task_id]
             agent = getattr(task, "agent", None)
             agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
             parts.append("|".join([
@@ -3177,10 +3178,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         half-restore, which would look like a resume and behave like a fresh run.
         """
         restored = 0
+        tasks = getattr(self, "tasks", {})
         for task_id, state in (snapshot or {}).items():
-            task = self.tasks.get(task_id)
+            task = tasks.get(task_id)
             if task is None:
-                for key, candidate in self.tasks.items():
+                for key, candidate in tasks.items():
                     if str(key) == str(task_id):
                         task = candidate
                         break

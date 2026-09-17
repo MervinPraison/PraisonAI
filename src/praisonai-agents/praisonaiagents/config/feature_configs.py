@@ -900,7 +900,7 @@ class ExecutionConfig:
     
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
     code_execution: bool = False
-    code_mode: str = "safe"  # "safe" or "unsafe"
+    code_mode: str = "safe"  # "safe", "unsafe" or "isolated"
     
     # Code-execution-with-tools (code mode): when True, model-generated code may
     # call the agent's registered tools directly via injected proxies, enabling
@@ -965,6 +965,15 @@ class ExecutionConfig:
         # Validate the unified step budget early (before any early returns below).
         if self.max_steps is not None and self.max_steps < 1:
             raise ValueError("ExecutionConfig.max_steps must be >= 1 when set.")
+        # code_mode is a security-shaped switch: "safe" (subprocess, no tools),
+        # "unsafe" (same-process + tools, timeout not enforced), or "isolated"
+        # (subprocess + tools bridged back to the parent under the approval
+        # gate). Reject typos loudly rather than silently degrading isolation.
+        if self.code_mode not in ("safe", "unsafe", "isolated"):
+            raise ValueError(
+                "ExecutionConfig.code_mode must be 'safe', 'unsafe' or "
+                f"'isolated'; got {self.code_mode!r}."
+            )
         # Handle context_compaction serialization round-trip
         if isinstance(self.context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
