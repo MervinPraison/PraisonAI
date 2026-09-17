@@ -59,6 +59,26 @@ def event_loop():
 
 
 @pytest.fixture(autouse=True)
+def _reset_framework_availability_cache():
+    """Drop the process-global optional-framework availability memo per test.
+
+    ``praisonai_code._framework_availability`` memoises answers in a module-global
+    ``_cache``. Without per-test invalidation, an answer computed while a test has
+    stubbed ``importlib.util.find_spec`` / ``importlib.metadata.distribution`` leaks
+    into later tests in the same process. Reset before and after each test so a
+    stubbed answer never outlives the patch that produced it.
+    """
+    try:
+        from praisonai_code import _framework_availability
+    except ImportError:
+        yield
+        return
+    _framework_availability.invalidate()
+    yield
+    _framework_availability.invalidate()
+
+
+@pytest.fixture(autouse=True)
 def cleanup_async_resources():
     """Clean up async resources after each test to prevent unclosed session warnings.
     
