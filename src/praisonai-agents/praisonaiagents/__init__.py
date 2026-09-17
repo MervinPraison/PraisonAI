@@ -146,6 +146,10 @@ _LAZY_IMPORTS = {
     'TerminationReason': ('praisonaiagents.run_outcome', 'TerminationReason'),
     'termination_to_run_status': ('praisonaiagents.run_outcome', 'termination_to_run_status'),
     'validate_decision_string': ('praisonaiagents.run_outcome', 'validate_decision_string'),
+    'RunTerminal': ('praisonaiagents.run_outcome', 'RunTerminal'),
+    'merge_run_terminal': ('praisonaiagents.run_outcome', 'merge_run_terminal'),
+    'is_sticky': ('praisonaiagents.run_outcome', 'is_sticky'),
+    'collapse': ('praisonaiagents.run_outcome', 'collapse'),
     
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
