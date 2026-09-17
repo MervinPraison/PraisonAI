@@ -165,32 +165,40 @@ class TestCostModule:
         """_get_litellm should cache the import result."""
         import praisonaiagents.llm._cost as cost_module
 
-        # Reach the loader's state through the FUNCTION'S OWN GLOBALS, not by
-        # importing the module by name and not via sys.modules.
-        #
-        # get_litellm mutates its module globals with `global
-        # _litellm_module, _litellm_import_attempted`. Several test modules in
-        # this suite evict every sys.modules key matching 'praison' or 'litellm'
-        # and re-import, which can leave TWO live module objects with separate
-        # globals -- one that _cost's get_litellm was defined in, another that a
-        # by-name lookup returns. This test then reset and asserted one dict
-        # while the calls updated the other, and failed with
-        # "assert False is True" under some orderings. __globals__ is by
-        # definition the dict the function writes to, so it cannot drift.
-        loader_globals = cost_module._get_litellm.__globals__["get_litellm"].__globals__
-
-        # Reset shared loader state
+        # Resolve the loader through the function _cost actually calls, not by
+        # importing it afresh. Several teardowns in this suite delete every
+        # module whose name contains "praison" or "litellm" -- which includes
+        # praisonaiagents.llm._litellm_loader -- and restore only what they had
+        # backed up. Anything imported after the backup comes back as a NEW
+        # module object, so `import ... as loader_module` could hand back a
+        # different object than the one get_litellm() reads its globals from:
+        # the test set flags on one and asserted about the other.
+        # __globals__, not sys.modules: looking the module up by NAME can
+        # return a different object than the one this function closes over,
+        # and the flag lives in the namespace the function actually mutates.
+        loader_globals = cost_module.get_litellm.__globals__
+        
+        # Reset shared loader state -- and put it back afterwards. These are
+        # module globals shared by everything that loads litellm lazily, so
+        # leaving them reset changed later tests' behaviour and left this one
+        # dependent on whether something had already populated them.
+        _saved_module = loader_globals["_litellm_module"]
+        _saved_attempted = loader_globals["_litellm_import_attempted"]
         loader_globals["_litellm_module"] = None
         loader_globals["_litellm_import_attempted"] = False
 
-        # First call
-        result1 = cost_module._get_litellm()
+        try:
+            # First call
+            result1 = cost_module._get_litellm()
 
-        # Second call should use cache
-        result2 = cost_module._get_litellm()
+            # Second call should use cache
+            result2 = cost_module._get_litellm()
 
-        assert result1 is result2
-        assert loader_globals["_litellm_import_attempted"] is True
+            assert result1 is result2
+            assert loader_globals["_litellm_import_attempted"] is True
+        finally:
+            loader_globals["_litellm_module"] = _saved_module
+            loader_globals["_litellm_import_attempted"] = _saved_attempted
 
     def test_on_missing_fires_regardless_of_call_order(self):
         """on_missing must fire even if another caller attempted the import first.
@@ -232,18 +240,30 @@ class TestCostModuleIntegration:
         os.environ.pop('PRAISONAI_SAVE_OUTPUT', None)
     
     def test_agent_creation_does_not_import_litellm(self):
-        """Creating an agent with output='silent' should not import litellm."""
-        # Clear litellm from modules
-        for mod in list(sys.modules.keys()):
-            if 'litellm' in mod:
-                del sys.modules[mod]
-        
-        from praisonaiagents import Agent
-        
-        _agent = Agent(name='Test', llm='gpt-4o-mini', output='silent')
-        
-        # litellm should not be loaded
-        assert 'litellm' not in sys.modules
-        
-        # Use _agent to avoid unused variable warning
-        assert _agent is not None
+        """Creating an agent with output='silent' should not import litellm.
+
+        The litellm modules removed to set this up are restored afterwards.
+        They were not, and a torn-down litellm is not a neutral state: modules
+        already imported keep references to the old objects while anything
+        importing it afterwards gets a fresh, different one. That broke tool
+        resolution in tests/unit/tools/test_mixed_tools_list_resolution.py --
+        which passes alone and failed only once this file had run -- and left
+        this test itself dependent on whether something else had imported
+        litellm first.
+        """
+        removed = {name: mod for name, mod in sys.modules.items() if 'litellm' in name}
+        for name in removed:
+            del sys.modules[name]
+
+        try:
+            from praisonaiagents import Agent
+
+            _agent = Agent(name='Test', llm='gpt-4o-mini', output='silent')
+
+            # litellm should not be loaded
+            assert 'litellm' not in sys.modules
+
+            # Use _agent to avoid unused variable warning
+            assert _agent is not None
+        finally:
+            sys.modules.update(removed)

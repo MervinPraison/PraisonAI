@@ -537,6 +537,70 @@ def is_reasoning_model(model_name: str) -> bool:
     )
 
 
+@lru_cache(maxsize=256)
+def max_output_tokens(model_name: str):
+    """Best-effort maximum *output* tokens for a model, or ``None`` if unknown.
+
+    Reuses the same LiteLLM ``get_model_info`` lookup already relied on for
+    input/context budgeting (``context/budgeter.py``), so the output budget can
+    be derived from — and clamped to — the resolved model's real ceiling.
+
+    Lazy and dependency-free: returns ``None`` when litellm is unavailable or
+    the model is unknown, letting callers keep their existing constant default.
+
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+
+    Returns:
+        Optional[int]: The model's maximum output tokens, or None if unknown.
+    """
+    if not model_name:
+        return None
+
+    litellm = None
+    try:
+        litellm = _get_litellm()
+    except Exception:
+        litellm = None
+    if litellm is None:
+        return None
+
+    # Only ``max_output_tokens`` is a true output ceiling. The generic
+    # ``max_tokens`` field is treated as a context-window limit elsewhere in
+    # this codebase (see ``context/budgeter.py``), so substituting it here would
+    # return an inflated ceiling and leave an over-limit request unclamped —
+    # exactly the 400 this accessor exists to prevent. When output-specific
+    # metadata is absent we return ``None`` and let the caller fall back.
+
+    # Primary: litellm's get_model_info (handles provider inference).
+    if hasattr(litellm, "get_model_info"):
+        try:
+            info = litellm.get_model_info(model=model_name)
+            if info:
+                out = info.get("max_output_tokens")
+                if out:
+                    return out
+        except Exception:
+            pass
+
+    # Fallback: the model_cost registry the context budgeter reads directly,
+    # which resolves several names get_model_info raises on (e.g. bare
+    # Anthropic ids). Mirrors context/budgeter.py's _litellm_model_info.
+    try:
+        model_cost = getattr(litellm, "model_cost", None)
+        if model_cost:
+            model_lower = model_name.lower()
+            info = model_cost.get(model_lower)
+            if info is None and "/" in model_name:
+                info = model_cost.get(model_name.split("/")[-1].lower())
+            if info:
+                return info.get("max_output_tokens")
+    except Exception:
+        pass
+
+    return None
+
+
 def is_gemini_internal_tool(tool) -> bool:
     """
     Check if a tool is a Gemini internal tool and should be included in formatted tools.

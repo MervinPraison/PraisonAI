@@ -9,6 +9,8 @@ TDD tests for:
 5. Thread safety
 """
 
+import pathlib
+
 import pytest
 import threading
 import asyncio
@@ -32,31 +34,48 @@ class TestPathCentralization:
         for d in dirs:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
-    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch):
-        """skills/discovery.py should use paths.get_skills_dir()."""
-        from praisonaiagents.skills.discovery import get_default_skill_dirs
-        from praisonaiagents.paths import get_skills_dir
+    def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch, request):
+        """skills/discovery.py should use paths.get_skills_dir().
 
-        # Hermetic: this asserted on whatever directories happened to exist on
-        # the machine. get_default_skill_dirs() walks every cwd ancestor for
-        # .claude/skills and .praisonai/skills AND appends the remote-skills
-        # cache, whose leaf is "remote-skills"/"current" -- not "skills". So a
-        # cache directory created by an earlier test made the loop fail, under
-        # some orderings only. Pointing PRAISONAI_HOME and cwd at a temp tree
-        # gives the function a known input instead of the developer's disk.
-        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
+        This asserted every returned directory is named "skills". Remote-skill
+        caching later added entries like
+        ``~/.praisonai/cache/remote-skills/<hash>/current``, so the assertion
+        stopped holding -- and because it ran against the real home it was
+        checking whatever the developer happened to have cached (84 such
+        directories on this machine, none of them named "skills").
+
+        HOME is redirected and the paths cache cleared, so the result depends
+        only on the paths module. The original intent -- discovery derives its
+        location from paths rather than hardcoding one -- is asserted directly.
+        """
+        from praisonaiagents import paths as paths_mod
+        from praisonaiagents.skills.discovery import get_default_skill_dirs
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        paths_mod._clear_cache()
         monkeypatch.chdir(tmp_path)
 
-        expected = get_skills_dir()
-        expected.mkdir(parents=True, exist_ok=True)
+        # The paths module caches its resolved directories process-wide. Clearing
+        # only on entry would leave this test's tmp_path cached after monkeypatch
+        # restores HOME, handing a deleted directory to later tests in the same
+        # process. Clear again on teardown so the cache is rebuilt from the real
+        # environment.
+        request.addfinalizer(paths_mod._clear_cache)
+
+        # discovery only returns directories that exist, so create the one the
+        # paths module designates.
+        skills_dir = paths_mod.get_skills_dir()
+        skills_dir.mkdir(parents=True, exist_ok=True)
 
         dirs = get_default_skill_dirs()
 
-        # The user skills dir from paths.py is the one discovery must return.
-        assert expected in dirs
-        for d in dirs:
-            assert d.name == "skills", f"Expected 'skills' dir, got {d}"
-    
+        assert skills_dir in dirs, (
+            f"discovery does not include paths.get_skills_dir(): {dirs}"
+        )
+        stray = [d for d in dirs if tmp_path not in d.parents and d != tmp_path]
+        assert not stray, f"discovery returned paths outside the paths module: {stray}"
+
     def test_paths_module_returns_praisonai_dir(self):
         """paths.py should return ~/.praisonai/ as default."""
         from praisonaiagents.paths import get_data_dir, DEFAULT_DIR_NAME

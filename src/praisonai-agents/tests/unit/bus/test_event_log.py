@@ -223,6 +223,12 @@ class TestBusSinkWiring:
         matching and dispatch; only the O(1) append to a capped list remains.
         """
         bus = EventBus()
+        # No subscribers and no sinks: publish still returns the event and
+        # does no dispatch work. It DOES record the event in history -- three
+        # tests in test_event_bus.py (test_event_history and friends) publish
+        # with no subscribers and expect exactly that, and the old behaviour
+        # made get_history() silently depend on whether anyone happened to be
+        # listening. What the fast path saves is the dispatch, not the record.
         ev = bus.publish("custom", {"session_id": "s1"})
         assert ev.type == "custom"
         assert [e.type for e in bus.get_history()] == ["custom"]

@@ -518,7 +518,7 @@ class ExecutionMixin:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async)
                 return future.result()
-                
+
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
             return asyncio.run(self.backend.execute(prompt, **kwargs))
@@ -1577,14 +1577,46 @@ Write the complete compiled report:"""
             ),
         )
 
+        # Bound the worker thread's wait on the async tool by the same per-agent
+        # tool timeout the direct path applies (ToolConfig.timeout, seconds). The
+        # inner coroutine already wraps itself in asyncio.wait_for, but the worker
+        # blocking on future.result() has no bound of its own: if the inner path
+        # hangs (or no timeout is configured) the middleware worker would block a
+        # thread-pool worker indefinitely. Give it a slightly larger grace bound so
+        # the inner wait_for surfaces its structured timeout first when configured.
+        tool_timeout = getattr(self, '_tool_timeout', None)
+        worker_timeout = (tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
+
         def _final_handler(req):
+            import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(
                 self._execute_tool_async_with_retry(
                     req.tool_name, req.arguments, tool_call_id, tools_override
                 ),
                 loop,
             )
-            result = future.result()
+            try:
+                result = future.result(timeout=worker_timeout)
+            except concurrent.futures.TimeoutError:
+                # The scheduled coroutine did not finish within the bound. Request
+                # cancellation on the running loop so it stops rather than leaking,
+                # and surface the same structured timeout error the direct async
+                # path returns (retryable=False: an uncancellable side effect must
+                # not be re-run).
+                future.cancel()
+                logger.warning(
+                    "Middleware async tool '%s' timed out after %ss (agent=%s, run_id=%s, tool_call_id=%s)",
+                    req.tool_name,
+                    tool_timeout,
+                    self.name,
+                    getattr(self, '_current_run_id', 'unknown'),
+                    tool_call_id,
+                )
+                result = {
+                    "error": f"Tool timed out after {tool_timeout}s",
+                    "timeout": True,
+                    "_praison_retryable": False,
+                }
             return ToolResponse(tool_name=req.tool_name, result=result)
 
         def _run_chain():
@@ -1861,6 +1893,21 @@ Write the complete compiled report:"""
 
             from ..streaming.events import tool_progress_channel
 
+            # breaker.acall() records the invocation outcome itself. Both record
+            # sites below then recorded the same failure a SECOND time -- once
+            # off the returned error dict, once in the raised-exception handler
+            # -- so every async tool failure counted twice and the breaker
+            # opened after ceil(threshold/2) calls (3 instead of the configured
+            # 5), out of parity with the sync path. This flag marks that the
+            # breaker already owns the outcome; it stays False when
+            # asyncio.wait_for times out, since the breaker never got a result.
+            #
+            # Declared outside the try: the except handler below reads it, and
+            # roughly seventy lines run between the try and the breaker setup.
+            # An exception in that window would otherwise raise NameError here
+            # and mask the original failure.
+            breaker_saw_outcome = {"done": False}
+
             try:
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
                 # directly callable — dispatch to their .run() method like the sync path.
@@ -1986,6 +2033,12 @@ Write the complete compiled report:"""
                 async def _invoke_guarded():
                     if breaker is None:
                         return await _invoke()
+                    # Set before the await: acall records an outcome however it
+                    # exits (returning, raising _ToolFailure, or letting a raw
+                    # tool exception through). The only exit that records
+                    # nothing is _CircuitBreakerException, and that path returns
+                    # _circuit_open_result() without reaching either record site.
+                    breaker_saw_outcome["done"] = True
                     try:
                         return await breaker.acall(_invoke_for_breaker)
                     except _ToolFailure as tf:

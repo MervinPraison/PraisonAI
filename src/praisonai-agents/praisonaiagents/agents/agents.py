@@ -1174,8 +1174,15 @@ class AgentTeam(SpawnAnnounceProtocol):
             has_handler_only_task = any(
                 _task_has_custom_handler(t) for t in (tasks or [])
             )
-            if not has_handler_only_task:
-                raise ValueError("At least one agent must be provided")
+            # An empty team is legitimate for the spawn-announce pattern:
+            # AgentTeam.spawn_sub_agent and SpawnAnnounceProtocol are exported
+            # public API, and their documented use is a team created with no
+            # agents that spawns them dynamically at runtime. Refusing to
+            # construct one made that shipped feature unusable. The mistake
+            # this guard exists to catch -- forgetting to pass agents -- is
+            # still caught loudly by _require_runnable_agents() before any
+            # work starts.
+            self._constructed_without_agents = not has_handler_only_task
         
         # ─────────────────────────────────────────────────────────────────────
         # Core initialization
@@ -1568,6 +1575,72 @@ class AgentTeam(SpawnAnnounceProtocol):
         task_result = _process_task_result(self, context, agent_output)
         return task_result.task_output
 
+    def _apply_human_review(self, task, task_id, task_output):
+        """Ask a person to approve this task's OUTPUT before the next task uses it.
+
+        Fills a real gap between the two things that already existed: the
+        approval system gates a TOOL CALL, and guardrails validate
+        automatically. Neither let an orchestrator say "a person must sign this
+        off". Python parity target: CrewAI's ``Task(human_input=True)``.
+
+        Reuses the approval backends rather than prompting directly, so this
+        works wherever approvals already do -- console, callback, bot, UI --
+        instead of hard-wiring input() and breaking every non-TTY caller.
+
+        Returns:
+            tuple: (task_output, should_retry)
+        """
+        if not getattr(task, "human_input", False):
+            return task_output, False
+
+        try:
+            from ..approval import ApprovalRequest, get_approval_registry
+        except ImportError:
+            # Never silently skip a review a caller asked for: a task that was
+            # supposed to be signed off and simply was not is the failure this
+            # feature exists to prevent.
+            raise RuntimeError(
+                f"Task {task_id} sets human_input=True but praisonaiagents.approval "
+                f"is unavailable, so the output cannot be reviewed. Install it, or "
+                f"remove human_input."
+            )
+
+        backend = get_approval_registry().get_backend()
+        prompt = task.human_review_prompt or (
+            f"Approve the output of task {getattr(task, 'name', None) or task_id}?"
+        )
+        request = ApprovalRequest(
+            tool_name=f"task_output:{getattr(task, 'name', None) or task_id}",
+            arguments={"output": str(getattr(task_output, "raw", task_output))[:4000]},
+            risk_level="high",
+            agent_name=getattr(getattr(task, "agent", None), "name", None),
+            context={"kind": "task_output_review", "prompt": prompt},
+        )
+        decision = backend.request_approval_sync(request)
+
+        if getattr(decision, "approved", False):
+            return task_output, False
+
+        reason = getattr(decision, "reason", None) or "a reviewer rejected this output"
+        if task.retry_count >= task.max_retries:
+            raise Exception(
+                f"Task {task_id} was rejected by a reviewer after "
+                f"{task.max_retries} retries. Last reason: {reason}"
+            )
+        task.retry_count += 1
+        task.status = "in progress"
+        # Reuse the slot the guardrail retry already fills, so the reviewer's
+        # reason reaches the re-run's prompt through machinery that exists.
+        # Must be the SAME shape the guardrail writes: Process._build_task_context
+        # indexes feedback['validation_response'], so a bare string would raise
+        # the moment the workflow engine consumed it.
+        task.validation_feedback = {
+            'validation_response': reason,
+            'validated_task': getattr(task, 'name', None) or getattr(task, 'description', None),
+            'rejected_output': str(getattr(task_output, 'raw', task_output)),
+        }
+        return task_output, True
+
     def _apply_task_guardrail(self, task, task_id, task_output):
         """Apply guardrail validation to task output.
         
@@ -1654,6 +1727,25 @@ class AgentTeam(SpawnAnnounceProtocol):
             None,
             copy_context_to_callable(
                 lambda: self._apply_task_guardrail(task, task_id, task_output)
+            ),
+        )
+
+    async def _aapply_human_review(self, task, task_id, task_output):
+        """Async wrapper for _apply_human_review.
+
+        The approval backend's ``request_approval_sync`` blocks (console input,
+        a bot round-trip, a UI wait). Offload it to a thread so the review does
+        not stall the event loop and every other task running concurrently under
+        asyncio.gather, mirroring _aapply_task_guardrail.
+        """
+        if not getattr(task, "human_input", False):
+            return task_output, False
+        loop = asyncio.get_event_loop()
+        from ..trace.context_events import copy_context_to_callable
+        return await loop.run_in_executor(
+            None,
+            copy_context_to_callable(
+                lambda: self._apply_human_review(task, task_id, task_output)
             ),
         )
 
@@ -1745,6 +1837,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     # Apply guardrail validation using shared helper (offloaded to
                     # a thread so a blocking LLM guardrail does not stall the loop)
                     task_output, should_retry = await self._aapply_task_guardrail(task, task_id, task_output)
+                    if not should_retry:
+                        # A person reviews only what already passed the automatic
+                        # checks, mirroring run_task. Without this an async task
+                        # with human_input=True would release unreviewed output.
+                        task_output, should_retry = await self._aapply_human_review(task, task_id, task_output)
                     if should_retry:
                         retries += 1
                         continue
@@ -2112,6 +2209,25 @@ class AgentTeam(SpawnAnnounceProtocol):
             self._run_owner_ident = None
             lock.release()
 
+    def _require_runnable_agents(self):
+        """Fail before execution if the team has nothing that can run.
+
+        Construction of an empty team is allowed so the spawn-announce pattern
+        works, so the "you forgot the agents" error moves here, where we can
+        also see anything spawned in the meantime.
+        """
+        if not getattr(self, "_constructed_without_agents", False):
+            return
+        if self.agents:
+            return
+        if getattr(self, "_spawned_agents", None):
+            return
+        raise ValueError(
+            "At least one agent must be provided. This team was created with "
+            "an empty agents list and nothing was spawned into it before "
+            "starting -- pass agents=[...] or call spawn_sub_agent() first."
+        )
+
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
         
@@ -2120,6 +2236,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             return_dict: If True, returns the full results dictionary instead of only the final response
             **kwargs: Additional arguments
         """
+        self._require_runnable_agents()
         # Same shared sandbox as start(). Without this, an async team with
         # tools_run_on= ran every tool on the host and said nothing.
         if self._needs_tools_scope():
@@ -2147,12 +2264,21 @@ class AgentTeam(SpawnAnnounceProtocol):
                         task.context = []
                     task.context.append(content)
 
-        await self.arun_all_tasks()
-        
+        if self.planning:
+            await self._arun_with_planning()
+        else:
+            await self.arun_all_tasks()
+
+        # When planning ran, results live in the executed plan-step tasks
+        # (self.tasks is restored to the user's original set for reuse).
+        result_tasks = getattr(self, "_plan_tasks", None) if self.planning else None
+        if not result_tasks:
+            result_tasks = self.tasks
+
         # Get results
         results = {
-            "task_status": self.get_all_tasks_status(),
-            "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
+            "task_status": {tid: getattr(t, "status", "not started") for tid, t in result_tasks.items()},
+            "task_results": {task_id: self.get_task_result(task_id, result_tasks) for task_id in result_tasks}
         }
         
         # By default, return only the final agent's response
@@ -2161,11 +2287,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             # the synthetic manager_task never masks the real final result);
             # otherwise fall back to the last task in insertion order.
             last_task_id = getattr(self, "_last_real_task_id", None)
-            if last_task_id is None:
-                task_ids = list(self.tasks.keys())
+            if last_task_id is None or last_task_id not in result_tasks:
+                task_ids = list(result_tasks.keys())
                 last_task_id = task_ids[-1] if task_ids else None
             if last_task_id is not None:
-                last_result = self.get_task_result(last_task_id)
+                last_result = self.get_task_result(last_task_id, result_tasks)
                 if last_result:
                     return last_result.raw
                     
@@ -2259,6 +2385,12 @@ class AgentTeam(SpawnAnnounceProtocol):
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper
                     task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if not should_retry:
+                        # A person reviews only what already passed the automatic
+                        # checks: waking someone to reject output a guardrail
+                        # would have caught wastes the one resource this feature
+                        # spends.
+                        task_output, should_retry = self._apply_human_review(task, task_id, task_output)
                     if should_retry:
                         retries += 1
                         continue
@@ -2351,9 +2483,10 @@ class AgentTeam(SpawnAnnounceProtocol):
     def get_all_tasks_status(self):
         return {task_id: self.tasks[task_id].status for task_id in self.tasks}
 
-    def get_task_result(self, task_id):
-        if task_id in self.tasks:
-            return self.tasks[task_id].result
+    def get_task_result(self, task_id, tasks=None):
+        source = tasks if tasks is not None else self.tasks
+        if task_id in source:
+            return source[task_id].result
         return None
 
     def get_task_details(self, task_id):
@@ -2406,6 +2539,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             result = agents.start(output="silent")
             ```
         """
+        self._require_runnable_agents()
         # Remote execution: provision ONE sandbox shared by every agent on the
         # team, and tear it down even if execution raises.
         if self._needs_tools_scope():
@@ -2598,10 +2732,16 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logging.debug(f"Unexpected error in token metrics display: {e}")
         
+        # When planning ran, results live in the executed plan-step tasks
+        # (self.tasks is restored to the user's original set for reuse).
+        result_tasks = getattr(self, "_plan_tasks", None) if self.planning else None
+        if not result_tasks:
+            result_tasks = self.tasks
+
         # Get results
         results = {
-            "task_status": self.get_all_tasks_status(),
-            "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
+            "task_status": {tid: getattr(t, "status", "not started") for tid, t in result_tasks.items()},
+            "task_results": {task_id: self.get_task_result(task_id, result_tasks) for task_id in result_tasks}
         }
         
         # By default, return only the final agent's response
@@ -2610,11 +2750,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             # the synthetic manager_task never masks the real final result);
             # otherwise fall back to the last task in insertion order.
             last_task_id = getattr(self, "_last_real_task_id", None)
-            if last_task_id is None:
-                task_ids = list(self.tasks.keys())
+            if last_task_id is None or last_task_id not in result_tasks:
+                task_ids = list(result_tasks.keys())
                 last_task_id = task_ids[-1] if task_ids else None
             if last_task_id is not None:
-                last_result = self.get_task_result(last_task_id)
+                last_result = self.get_task_result(last_task_id, result_tasks)
                 if last_result:
                     return last_result.raw
                     
@@ -3863,6 +4003,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         console.print("\n[bold blue]📋 PLANNING PHASE[/bold blue]")
         console.print("[dim]Creating implementation plan...[/dim]\n")
         
+        # Reset any plan tasks from a previous run so result collection never
+        # reads stale executed tasks after a fallback/rejected plan.
+        self._plan_tasks = None
+
         # Build request from tasks
         task_descriptions = [task.description for task in self.tasks.values()]
         request = " AND ".join(task_descriptions)
@@ -3872,6 +4016,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if not plan:
             console.print("[yellow]⚠️ Planning failed, falling back to normal execution[/yellow]")
             self.run_all_tasks()
+            self._plan_tasks = self.tasks
             return
         
         # Display the plan
@@ -3886,6 +4031,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             approved = self._request_approval_sync(plan)
             if not approved:
                 console.print("[red]❌ Plan rejected. Aborting execution.[/red]")
+                self._plan_tasks = self.tasks
                 return
         else:
             plan.approve()
@@ -3920,75 +4066,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # Step 4: Create proper Task objects from plan steps
         console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
-        
-        # Map agent names to agent instances
-        agent_map = {agent.display_name: agent for agent in self.agents}
-        
-        # Store original tasks and create new tasks from plan
+
+        # Store original tasks and build plan-step tasks via the shared helper
+        # so start() and astart() always construct identical plan tasks.
         original_tasks = self.tasks.copy()
-        self.tasks = {}
-        with self._task_id_lock:
-            self.task_id_counter = 0
-        
-        # Create Task objects from plan steps
-        plan_tasks = []
-        step_to_task = {}  # Map step_id to task for context chaining
-        
-        for i, step in enumerate(plan.steps):
-            # Get the appropriate agent
-            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
-            
-            if not agent:
-                console.print(f"[yellow]⚠️ No agent found for '{step.agent}', using first available[/yellow]")
-                agent = self.agents[0] if self.agents else None
-            
-            if not agent:
-                console.print(f"[red]❌ No agents available for step: {step.description}[/red]")
-                continue
-            
-            # Build context from dependencies (previous task results)
-            context = []
-            for dep_id in step.dependencies:
-                # Convert step_X format to actual step index
-                if dep_id.startswith("step_"):
-                    try:
-                        dep_index = int(dep_id.split("_")[1])
-                        if dep_index < len(plan_tasks):
-                            context.append(plan_tasks[dep_index])
-                    except (ValueError, IndexError):
-                        pass
-                elif dep_id in step_to_task:
-                    context.append(step_to_task[dep_id])
-            
-            # Find matching original task for additional config (memory, callbacks, etc.)
-            original_task = None
-            for orig_task in original_tasks.values():
-                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
-                    original_task = orig_task
-                    break
-            
-            # Create Task with full features from original task if available
-            task = Task(
-                description=step.description,
-                expected_output=f"Complete: {step.description}",
-                agent=agent,
-                name=f"Plan Step {i + 1}",
-                tools=agent.tools if agent.tools else [],
-                context=context if context else None,
-                # Inherit from original task if available
-                memory=original_task.memory if original_task else None,
-                on_task_complete=original_task.callback if original_task else None,
-                guardrails=original_task.guardrail if original_task else None,
-                max_retries=original_task.max_retries if original_task else 3,
-                output_json=original_task.output_json if original_task else None,
-                output_pydantic=original_task.output_pydantic if original_task else None,
-                config=original_task.config if original_task else {}
-            )
-            
-            # Add task to our task list
-            task_id = self.add_task(task)
-            plan_tasks.append(task)
-            step_to_task[step.id] = task
+        self._build_plan_tasks(plan, original_tasks)
         
         # Step 5: Execute tasks using the proper Task execution system
         for i, (task_id, task) in enumerate(self.tasks.items()):
@@ -4032,6 +4114,134 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # Keep plan-step tasks/results under _plan_tasks for introspection,
         # then restore the user's original task set as the canonical self.tasks.
+        self._plan_tasks = self.tasks
+        self.tasks = original_tasks
+        with self._task_id_lock:
+            self.task_id_counter = (
+                max(original_tasks.keys()) + 1 if original_tasks else 0
+            )
+
+    def _build_plan_tasks(self, plan, original_tasks):
+        """Create Task objects from plan steps (shared by sync/async planning).
+
+        Replaces ``self.tasks`` with plan-step tasks and returns the list of
+        created tasks. ``original_tasks`` is used to inherit per-task config
+        (memory, callbacks, guardrails, structured output).
+        """
+        from ..task import Task
+
+        agent_map = {agent.display_name: agent for agent in self.agents}
+        self.tasks = {}
+        with self._task_id_lock:
+            self.task_id_counter = 0
+
+        plan_tasks = []
+        step_to_task = {}
+        for i, step in enumerate(plan.steps):
+            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
+            if not agent:
+                agent = self.agents[0] if self.agents else None
+            if not agent:
+                logger.error(f"No agents available for step: {step.description}")
+                continue
+
+            context = []
+            for dep_id in step.dependencies:
+                if dep_id.startswith("step_"):
+                    try:
+                        dep_index = int(dep_id.split("_")[1])
+                        if dep_index < len(plan_tasks):
+                            context.append(plan_tasks[dep_index])
+                    except (ValueError, IndexError):
+                        pass
+                elif dep_id in step_to_task:
+                    context.append(step_to_task[dep_id])
+
+            original_task = None
+            for orig_task in original_tasks.values():
+                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
+                    original_task = orig_task
+                    break
+
+            task = Task(
+                description=step.description,
+                expected_output=f"Complete: {step.description}",
+                agent=agent,
+                name=f"Plan Step {i + 1}",
+                tools=agent.tools if agent.tools else [],
+                context=context if context else None,
+                memory=original_task.memory if original_task else None,
+                on_task_complete=original_task.callback if original_task else None,
+                guardrails=original_task.guardrail if original_task else None,
+                max_retries=original_task.max_retries if original_task else 3,
+                output_json=original_task.output_json if original_task else None,
+                output_pydantic=original_task.output_pydantic if original_task else None,
+                config=original_task.config if original_task else {}
+            )
+            self.add_task(task)
+            plan_tasks.append(task)
+            step_to_task[step.id] = task
+        return plan_tasks
+
+    async def _arun_with_planning(self):
+        """Async counterpart of ``_run_with_planning`` for the ``astart()`` path.
+
+        Mirrors the sync planning flow (create plan → approval gate → todo list
+        → execute plan-step tasks) minus the Rich console output, which is
+        display-only and not required for async/headless entry points.
+        """
+        # Reset any plan tasks from a previous run so result collection never
+        # reads stale executed tasks after a fallback/rejected plan.
+        self._plan_tasks = None
+        task_descriptions = [task.description for task in self.tasks.values()]
+        request = " AND ".join(task_descriptions)
+
+        plan = await self._create_plan(request=request)
+        if not plan:
+            logger.warning("Planning failed, falling back to normal execution")
+            await self.arun_all_tasks()
+            self._plan_tasks = self.tasks
+            return
+
+        if not self.auto_approve_plan:
+            approved = await self._request_approval(plan)
+            if not approved:
+                logger.info("Plan rejected. Aborting execution.")
+                self._plan_tasks = self.tasks
+                return
+        else:
+            plan.approve()
+
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+
+        try:
+            from ..trace.protocol import get_default_emitter, ActionEvent
+            import time as _time
+            emitter = get_default_emitter()
+            if emitter and emitter.enabled:
+                emitter.emit(ActionEvent(
+                    event_type="plan_created",
+                    timestamp=_time.time(),
+                    agent_name="PlanningAgent",
+                    metadata={"plan": self._todo_list.to_markdown()}
+                ))
+        except Exception:
+            pass
+
+        original_tasks = self.tasks.copy()
+        self._build_plan_tasks(plan, original_tasks)
+
+        for i, (task_id, task) in enumerate(list(self.tasks.items())):
+            if i < len(self._todo_list.items):
+                self._todo_list.start(self._todo_list.items[i].id)
+            try:
+                await self.arun_task(task_id)
+                if task.status == "completed" and i < len(self._todo_list.items):
+                    self._todo_list.complete(self._todo_list.items[i].id)
+            except Exception as e:
+                logger.error(f"Error executing plan task {task_id}: {e}")
+
         self._plan_tasks = self.tasks
         self.tasks = original_tasks
         with self._task_id_lock:

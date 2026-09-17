@@ -13,18 +13,20 @@ the interaction between tool execution and the follow-up completion, which is
 precisely what a hand-built mock of that client would define away.
 """
 
+import os
+
 import pytest
 
 from praisonaiagents import Agent
 
-# Gated on the repo's live marker (skipped unless PRAISONAI_LIVE_TESTS=1), not
-# on the presence of OPENAI_API_KEY. The old guard checked only that the
-# variable was SET, and both CI and the local harness export a placeholder --
-# the workflow sets OPENAI_API_KEY: 'sk-not-a-real-key' precisely because some
-# modules bail at import without one. So the skip never fired, these ran against
-# a fake credential, and all three failed with "the harness is broken", which
-# reads like the streaming defect they were written to catch.
-pytestmark = pytest.mark.live
+pytestmark = pytest.mark.skipif(
+    (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+     and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+    or not os.environ.get("OPENAI_API_KEY"),
+    # Gating on the key alone treats owning one as consent to spend it,
+    # so this billed a real account on any machine with the key exported.
+    reason="Live provider call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+)
 
 SENTINEL = "PRAISONAI-TOOL-SENTINEL"
 

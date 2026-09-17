@@ -27,6 +27,10 @@ def test_policy_routing_logic():
     )
     
     # Mock the dependency modules
+    # adapters.py imports get_model_limit inside the function from
+    # .budgeter, so there is no adapters.get_model_limit to patch -- the
+    # decorator raised AttributeError before the body ran. Patch the
+    # defining module.
     with patch('praisonaiagents.context.budgeter.get_model_limit') as mock_limit, \
          patch('praisonaiagents.context.budgeter.ContextBudgeter') as mock_budgeter, \
          patch('praisonaiagents.context.tokens.estimate_messages_tokens') as mock_tokens:
@@ -209,26 +213,30 @@ def test_model_specific_overrides():
         }
     )
     
+    # Utilization is current_tokens / budgeter.usable, not / the model limit.
+    # This mocked 7000 tokens against usable=7200 and called it "87.5%" -- that
+    # is 7000/8000, the model limit. The real ratio was 97%, over the 0.92
+    # override, so the route was compact_then_truncate and the test failed on
+    # an arithmetic slip rather than a behaviour change. 6480/8000 is 81%:
+    # above the 0.85 default is not required here -- it is below the 0.92 gpt-4
+    # override, which is exactly the case this test exists to cover.
     with patch('praisonaiagents.context.budgeter.get_model_limit', return_value=8000), \
          patch('praisonaiagents.context.budgeter.ContextBudgeter') as mock_budgeter, \
-         patch('praisonaiagents.context.tokens.estimate_messages_tokens', return_value=7000):
+         patch('praisonaiagents.context.tokens.estimate_messages_tokens', return_value=6480):
         
         mock_budgeter_instance = MagicMock()
-        # usable, not the model limit, is the denominator: compute_context_budget
-        # divides by budgeter.usable (see test_policy_routing_logic, which asserts
-        # utilization == 2500 / 3600). This was 7200, making the real utilization
-        # 7000/7200 = 97% -- over the 0.92 override, so the route was
-        # compact_then_truncate while the comment below still claimed 87.5%.
+        # Utilization is current_tokens / budgeter.usable, not / model_limit.
+        # 6480/8000 is 81%: below the 0.92 gpt-4 override, so the route is FITS.
         mock_budgeter_instance.usable = 8000
         mock_budgeter.return_value = mock_budgeter_instance
         
-        # Test with gpt-4 (87.5% utilization - would trigger default but not override)
+        # Test with gpt-4 (90% utilization - would trigger default but not override)
         result = policy.compute_context_budget(
             messages=[{"role": "user", "content": "test"}],
             model="gpt-4"
         )
         
-        # 87.5% < 92% (gpt-4 override), so should fit
+        # 90% < 92% (gpt-4 override), so should fit
         assert result.route == CompactionRoute.FITS
         assert result.details["effective_trigger"] == 0.92
 

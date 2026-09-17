@@ -167,6 +167,110 @@ class TestEditDelete:
         bot = RecordingBot()
         assert run(bot.delete_message("c1", "m1")) is False
 
+    def test_delete_declared_but_unbacked_raises_at_call(self):
+        class ClaimsDelete(RecordingBot):
+            capabilities = PlatformCapabilities(supports_delete=True)
+
+        with pytest.raises(NotImplementedError):
+            run(ClaimsDelete().delete_message("c1", "m1"))
+
+
+class TestCapabilityContract:
+    def test_backing_map_covers_declared_flags(self):
+        from praisonaiagents.bots import CAPABILITY_BACKING
+
+        assert CAPABILITY_BACKING["supports_edit"] == "edit_message"
+        assert CAPABILITY_BACKING["supports_delete"] == "delete_message"
+
+    def test_declared_and_backed_passes(self):
+        from praisonaiagents.bots import (
+            verify_capability_contract,
+            enforce_capability_contract,
+        )
+
+        class Backed(RecordingBot):
+            capabilities = PlatformCapabilities(supports_edit=True)
+
+            async def edit_message(self, chat_id, message_id, content):
+                return SendResult(ok=True, chat_id=chat_id)
+
+        bot = Backed()
+        assert verify_capability_contract(bot) == []
+        enforce_capability_contract(bot)  # does not raise
+
+    def test_declared_but_unbacked_is_reported(self):
+        from praisonaiagents.bots import verify_capability_contract
+
+        class Unbacked(RecordingBot):
+            capabilities = PlatformCapabilities(
+                supports_edit=True, supports_delete=True
+            )
+
+        violations = verify_capability_contract(Unbacked())
+        assert any("supports_edit" in v for v in violations)
+        assert any("supports_delete" in v for v in violations)
+
+    def test_enforce_raises_capability_contract_error(self):
+        from praisonaiagents.bots import (
+            CapabilityContractError,
+            enforce_capability_contract,
+        )
+
+        class Unbacked(RecordingBot):
+            capabilities = PlatformCapabilities(supports_edit=True)
+
+        with pytest.raises(CapabilityContractError):
+            enforce_capability_contract(Unbacked())
+
+    def test_unset_flags_do_not_require_backing(self):
+        from praisonaiagents.bots import enforce_capability_contract
+
+        class NoClaims(RecordingBot):
+            capabilities = PlatformCapabilities()
+
+        enforce_capability_contract(NoClaims())  # does not raise
+
+    def test_platform_capabilities_property_is_used(self):
+        from praisonaiagents.bots import verify_capability_contract
+
+        class DictCaps(RecordingBot):
+            capabilities = {"live_edit": True}  # legacy dict, ignored
+
+            @property
+            def platform_capabilities(self):
+                return PlatformCapabilities(supports_edit=True)
+
+        violations = verify_capability_contract(DictCaps())
+        assert any("supports_edit" in v for v in violations)
+
+    def test_non_callable_backing_is_reported(self):
+        from praisonaiagents.bots import verify_capability_contract
+
+        class NoneBacked(RecordingBot):
+            capabilities = PlatformCapabilities(
+                supports_edit=True, supports_delete=True
+            )
+            edit_message = None
+            delete_message = None
+
+        violations = verify_capability_contract(NoneBacked())
+        assert any("supports_edit" in v for v in violations)
+        assert any("supports_delete" in v for v in violations)
+
+    def test_supports_delete_is_appended_positionally(self):
+        # ``supports_delete`` must be the LAST field so external callers using
+        # the previous positional constructor order keep binding each value to
+        # its original meaning (regression for the field-reorder concern).
+        prior_order = PlatformCapabilities(
+            4096,          # max_message_length
+            "codepoints",  # length_unit
+            True,          # supports_edit
+            False,         # supports_typing
+        )
+        assert prior_order.supports_edit is True
+        assert prior_order.supports_typing is False
+        assert prior_order.supports_delete is False
+
 
 class TestFormatting:
     def test_format_message_identity(self):

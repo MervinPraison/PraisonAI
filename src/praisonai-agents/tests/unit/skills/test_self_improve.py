@@ -3,10 +3,14 @@
 import asyncio
 import pytest
 
+import pytest
+
 from praisonaiagents.skills import (
     SkillReviewProtocol,
     DefaultSkillReviewPolicy,
 )
+import pytest
+
 from praisonaiagents import Agent
 
 
@@ -315,6 +319,9 @@ def test_schedule_self_improvement_falls_back_inline_on_failure(monkeypatch):
 
 
 def test_self_improve_falsy_strings_disable():
+    # "" is not in this list any more: 351e30c093 (#4116) made closed-set preset
+    # params reject values outside their vocabulary, and an empty string is not
+    # a documented way to say "off". See the two tests below.
     for value in ("false", "off", "no", "0", "False", "OFF"):
         agent = Agent(instructions="x", self_improve=value)
         assert agent._self_improve is False, value
@@ -322,21 +329,26 @@ def test_self_improve_falsy_strings_disable():
 
 
 def test_self_improve_unknown_string_is_rejected():
-    """A typo must not silently enable inline review -- it is now an error.
+    """A typo must not silently enable inline review -- and no longer silently
+    disables it either.
 
-    This asserted that an unrecognised value silently disabled review. The
-    parser was tightened to reject anything outside the preset list, with a
-    did-you-mean suggestion, which is the stronger guarantee: a typo can neither
-    silently enable review nor silently do nothing. "" is unrecognised too and
-    is rejected on the same grounds, so it moved out of the falsy list above.
+    This asserted that "backround" quietly resolved to disabled. 351e30c093
+    (#4116) made closed-set preset params raise instead, which serves the same
+    concern better: a typo now says so, and names the nearest valid value,
+    rather than leaving the user to wonder why self-improvement never ran.
     """
-    for value in ("backround", ""):
-        with pytest.raises(ValueError, match="Invalid self_improve value"):
-            Agent(instructions="x", self_improve=value)
-
-    # The suggestion is what makes the rejection actionable.
-    with pytest.raises(ValueError, match="Did you mean 'background'"):
+    with pytest.raises(ValueError) as excinfo:
         Agent(instructions="x", self_improve="backround")
+
+    message = str(excinfo.value)
+    assert "backround" in message
+    assert "background" in message, "the near-miss suggestion is the useful part"
+
+
+def test_self_improve_empty_string_is_rejected():
+    """An empty string is not a documented way to say off, so it is not guessed at."""
+    with pytest.raises(ValueError, match="Invalid self_improve value"):
+        Agent(instructions="x", self_improve="")
 
 
 def test_self_improve_truthy_strings_enable_inline():

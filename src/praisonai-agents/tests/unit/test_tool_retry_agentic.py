@@ -7,18 +7,40 @@ import time
 from unittest.mock import patch
 
 from praisonaiagents import Agent, tool
-from praisonaiagents.config.feature_configs import ToolConfig
+
+import os
+
+# Every test here drives a real provider turn -- the names say so. Nothing
+# gated them, so they billed a real account on any machine with a key and now
+# fail against the suite's egress guard. Marked live/network like the rest.
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.network,
+    pytest.mark.skipif(
+        (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+         and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+        or not os.environ.get("OPENAI_API_KEY"),
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+    ),
+]
 from praisonaiagents.tools.retry import RetryPolicy
+from praisonaiagents.config.feature_configs import ToolConfig
+
+# Agent(tool_retry_policy=...) was consolidated into the ToolConfig object:
+# agent.py sets self._tool_retry_policy from _tool_config.retry_policy, and the
+# constructor now rejects the old keyword outright.
 
 
-# Every test here drives a REAL LLM through agent.start() -- that is the point
-# of the file (AGENTS.md §9.4). Without a live key agent.start() returns None
-# and all four fail on "Expected string response, got NoneType", which reads
-# like a retry bug rather than a missing credential. The repo already gates this
-# with the live marker: skipped unless PRAISONAI_LIVE_TESTS=1.
 @pytest.mark.live
 class TestRetryPolicyAgentic:
-    """Real agentic tests where the agent calls LLM and uses retrying tools."""
+    """Real agentic tests where the agent calls LLM and uses retrying tools.
+
+    These genuinely call the model (AGENTS.md 9.4) but live under tests/unit,
+    so running the unit suite issued live API calls. Gated with the repo's
+    ``live`` marker (tests/conftest.py) so ``PRAISONAI_LIVE_TESTS=1`` is the
+    single explicit opt-in — a key merely being present no longer routes real
+    billable requests through the default unit run.
+    """
     
     def test_agent_with_flaky_tool_real_llm(self):
         """

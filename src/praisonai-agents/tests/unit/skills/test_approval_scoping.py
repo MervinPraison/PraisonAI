@@ -14,34 +14,31 @@ from praisonaiagents.approval import get_approval_registry
 
 
 @pytest.fixture(autouse=True)
-def _restore_approval_requirements():
-    """Undo global approval-registry edits made by these tests.
+def _restore_auto_approve_grants():
+    """Keep this file's registry surgery from escaping it.
 
-    The registry is a process-wide singleton, and add_requirement("read_file",
-    "high") below was never removed. read_file therefore stayed an
-    approval-gated HIGH-risk tool for every test that ran afterwards, so an
-    unrelated tools test calling read_file hit the interactive console prompt
-    and failed with "reading from stdin while output is captured". It passed on
-    its own and failed in the suite, on collection order alone.
+    Every test here calls registry._agent_tool_auto_approve.clear() on the
+    PROCESS-GLOBAL approval registry and then adds grants of its own. Both
+    directions leaked: grants made by earlier tests were discarded, and the
+    grants added here outlived the file -- which is why
+    tests/unit/tools/test_mixed_tools_list_resolution.py passes alone and
+    failed once this file had run.
     """
     registry = get_approval_registry()
-    saved_required = set(registry._required_tools)
-    saved_risk = dict(registry._risk_levels)
-    saved_agent_required = {k: set(v) for k, v in registry._agent_required_tools.items()}
-    saved_agent_risk = dict(registry._agent_risk_levels)
+    saved = {
+        name: (dict(value) if isinstance(value, dict)
+               else set(value) if isinstance(value, set) else value)
+        for name, value in vars(registry).items()
+        if isinstance(value, (dict, set))
+    }
     try:
         yield
     finally:
-        registry._required_tools.clear()
-        registry._required_tools.update(saved_required)
-        registry._risk_levels.clear()
-        registry._risk_levels.update(saved_risk)
-        registry._agent_required_tools.clear()
-        registry._agent_required_tools.update(saved_agent_required)
-        registry._agent_risk_levels.clear()
-        registry._agent_risk_levels.update(saved_agent_risk)
-        registry._agent_tool_auto_approve.clear()
-        registry.clear_approved()
+        for name, value in saved.items():
+            current = getattr(registry, name, None)
+            if isinstance(current, (dict, set)):
+                current.clear()
+                current.update(value)
 
 
 def test_skill_allowed_tools_do_not_leak_across_agents():

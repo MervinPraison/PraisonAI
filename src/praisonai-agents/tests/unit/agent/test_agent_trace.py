@@ -13,8 +13,12 @@ from unittest.mock import MagicMock, patch
 
 # Skip tests if OPENAI_API_KEY is not set
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set"
+    (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+     and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+    or not os.environ.get("OPENAI_API_KEY"),
+    # Gating on the key alone treats owning one as consent to spend it,
+    # so this billed a real account on any machine with the key exported.
+    reason="Live provider call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY"
 )
 
 

@@ -44,6 +44,10 @@ from .base import (
     SendStatus,
     SendErrorKind,
     classify_send_error,
+    CapabilityContractError,
+    CAPABILITY_BACKING,
+    verify_capability_contract,
+    enforce_capability_contract,
 )
 from .presentation import (
     MessagePresentation,
@@ -112,7 +116,9 @@ from .failure import (
 )
 from .admission import (
     IngressDecision,
+    MentionFacts,
     resolve_ingress_admission,
+    DEFAULT_IMPLICIT_MENTIONS,
 )
 from .run_status import (
     RunPhase,
@@ -176,6 +182,10 @@ __all__ = [
     "SendStatus",
     "SendErrorKind",
     "classify_send_error",
+    "CapabilityContractError",
+    "CAPABILITY_BACKING",
+    "verify_capability_contract",
+    "enforce_capability_contract",
     "InteractiveContext",
     "InteractiveRegistry",
     "InteractiveHandler",
@@ -208,7 +218,9 @@ __all__ = [
     "FailureReply",
     "render_failure_reply",
     "IngressDecision",
+    "MentionFacts",
     "resolve_ingress_admission",
+    "DEFAULT_IMPLICIT_MENTIONS",
     "RunPhase",
     "RunStatusController",
     "StallState",

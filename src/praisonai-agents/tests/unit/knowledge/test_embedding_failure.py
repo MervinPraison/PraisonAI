@@ -20,11 +20,11 @@ def _make_adapter():
     adapter = ChromaKnowledgeAdapter.__new__(ChromaKnowledgeAdapter)
     adapter.collection = MagicMock()
     adapter.client = MagicMock()
-    # __init__ sets this (config.get("embedder") or {}) and _resolve_embedder
-    # reads it on every add/search. Skipping __init__ to avoid the chromadb
-    # dependency means every attribute it sets has to be mirrored here; this one
-    # was added later and the helper was not updated, so all three tests died on
-    # AttributeError inside the product instead of exercising the failure path.
+    # __init__ is bypassed, so every attribute the methods under test read must
+    # be supplied here. ``_embedder`` was added to __init__ later (so an agent
+    # that had selected a local embedder stopped being silently routed to
+    # OpenAI) and these tests began failing with AttributeError before they
+    # reached the assertions they exist for.
     adapter._embedder = {}
     return adapter
 

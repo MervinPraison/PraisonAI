@@ -685,6 +685,11 @@ class AgentFlow:
     description: str = ""
     steps: List = field(default_factory=list)  # Can be Task, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
+    #: Cache step results by their inputs. True for a process-scoped LRU, or
+    #: any object with get()/set(). OPT-IN: an agent step is not always
+    #: deterministic, and silently serving a cached answer for a call the user
+    #: expected to happen again is worse than paying for it.
+    cache: Any = None
     file_path: Optional[str] = None
     
     # Default configuration for all steps
@@ -748,7 +753,15 @@ class AgentFlow:
     # Status tracking
     status: str = "not_started"  # not_started, running, completed, failed
     step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
-    
+
+    #: Optional type for ``variables``: a Pydantic model or a dataclass. When
+    #: set, the initial variables are validated and ``flow.state`` gives typed
+    #: access, so a misspelled variable is an error instead of a value written
+    #: once and never read. Without it nothing changes -- ``variables`` stays
+    #: the untyped dict it has always been. Declared last so it never shifts
+    #: the positional binding of existing fields like ``file_path``.
+    state_model: Optional[type] = None
+
     # Private resolved fields (set in __post_init__)
     _verbose: bool = field(default=False, repr=False)
     _stream: bool = field(default=True, repr=False)
@@ -795,6 +808,19 @@ class AgentFlow:
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
         from ..utils.model_alias import resolve_model_name
+        from .step_cache import resolve_step_cache
+
+        # Resolved once, not per step: `cache=True` must mean ONE cache shared
+        # across the run, not a fresh empty one for every step (which would
+        # never hit and would look like the feature simply not working).
+        self._step_cache = resolve_step_cache(self.cache)
+
+        # Validate the declared state up front. A misspelled variable found when
+        # the flow is BUILT costs nothing; found mid-run it has already burned
+        # the steps before it, and may never be found at all.
+        if self.state_model is not None:
+            from .state import validate_variables as _validate_state
+            _validate_state(self.state_model, self.variables)
 
         # One rule for the alias pair, shared with Agent and AgentTeam. Must
         # UNWRAP an LLMConfig to its model string: this value seeds the agents
@@ -1262,6 +1288,27 @@ class AgentFlow:
         from .diagram import flow_to_mermaid
         return flow_to_mermaid(self)
 
+    @property
+    def state(self):
+        """The flow's variables as the declared ``state_model``.
+
+        Returns None when no model was declared, so callers can tell "untyped"
+        from "typed and empty" rather than being handed a misleading blank.
+        """
+        from .state import build_state
+        if self.state_model is None:
+            return None
+        return build_state(self.state_model, self.variables)
+
+    def validate_variables(self) -> None:
+        """Raise unless the current variables fit ``state_model``.
+
+        Called for you at construction; exposed so a step that writes variables
+        can re-check before the next step reads them.
+        """
+        from .state import validate_variables
+        validate_variables(self.state_model, self.variables)
+
     def __repr__(self):
         """Show where this workflow's steps run.
 
@@ -1565,6 +1612,28 @@ class AgentFlow:
                 current_step=step.name,
                 variables=all_variables.copy()
             )
+
+            # Step-result cache (opt-in via cache=). This linear path invokes
+            # handlers INLINE rather than through _execute_single_step_internal,
+            # which the pattern paths use -- so both are wrapped. Caching only
+            # one would make the feature work or not depending on whether a step
+            # happened to sit inside a Parallel or an If, which is worse than
+            # not having it.
+            _step_cache = getattr(self, "_step_cache", None)
+            _cache_key = None
+            if _step_cache is not None:
+                from .step_cache import make_step_key
+                _cache_key = make_step_key(step, previous_output, input, all_variables)
+                _cached = _step_cache.get(_cache_key)
+                if _cached is not None:
+                    if verbose:
+                        print(f"↩︎  cache hit: {step.name}")
+                    previous_output = _cached.get("output")
+                    results.append({"step": step.name, "output": previous_output})
+                    if _cached.get("variables"):
+                        all_variables.update(_cached["variables"])
+                    i += 1
+                    continue
             
             # Update step status
             if hasattr(step, 'status'):
@@ -1912,6 +1981,21 @@ class AgentFlow:
                 step_record["error"] = failure_reason
             results.append(step_record)
             previous_output = output
+
+            # Only a SUCCESSFUL step is cached. Caching a failure would serve
+            # the failure again on every re-run, turning a transient error into
+            # a permanent one that no retry could clear. The step's output
+            # variable is stored too: a fresh run starts with empty working
+            # variables, so a cache HIT that only restored `output` would leave
+            # `<step>_output` (or step.output_variable) missing and break the
+            # next step's substitutions. We snapshot exactly the delta this step
+            # writes below (var_name = output_variable or f"{name}_output").
+            if _cache_key is not None and not step_failed:
+                _cached_var_name = step.output_variable or f"{step.name}_output"
+                _step_cache.set(
+                    _cache_key,
+                    {"output": output, "variables": {_cached_var_name: output}},
+                )
             
             if verbose:
                 print(f"✅ {step.name}: {str(output)}")
@@ -2604,6 +2688,46 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             )
     
     def _execute_single_step_internal(
+        self, 
+        step: Any, 
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        index: int = 0,
+        stream: bool = True,
+        depth: int = 0
+    ) -> Dict[str, Any]:
+        """Cache wrapper. The uncached body is _execute_single_step_uncached."""
+        cache = getattr(self, "_step_cache", None)
+        if cache is None:
+            return self._execute_single_step_uncached(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        from .step_cache import make_step_key
+        key = make_step_key(step, previous_output, input, all_variables)
+        hit = cache.get(key)
+        if hit is not None:
+            if verbose:
+                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            # Copy: a caller mutating a returned result must not edit the cache.
+            return dict(hit)
+        result = self._execute_single_step_uncached(
+            step, previous_output, input, all_variables, model, verbose, index,
+            stream=stream, depth=depth,
+        )
+        # Only cache a SUCCESSFUL result. A nested step that exhausts its
+        # retries or fails a guardrail returns a dict carrying an "error" key
+        # (see the failure branches of _execute_single_step_uncached); caching
+        # that would replay the failure on every identical re-run and never let
+        # the step retry -- turning a transient error into a permanent one.
+        if isinstance(result, dict) and not result.get("error"):
+            cache.set(key, result)
+        return result
+
+    def _execute_single_step_uncached(
         self, 
         step: Any, 
         previous_output: Optional[str],
@@ -3901,13 +4025,41 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
         
+        # ``Repeat.step`` is typed ``Any`` and was handed straight to the
+        # single-step executor, so ``repeat([a, b])`` was ACCEPTED and then
+        # stringified into a prompt -- the list became text and the default
+        # agent answered it. Since there is no N-agent discussion loop, that is
+        # exactly the workaround people reach for, which made the silent
+        # misbehaviour worse than a rejection. A list now runs its members in
+        # order, once per iteration.
+        steps = repeat_step.step if isinstance(repeat_step.step, (list, tuple)) else [repeat_step.step]
+
         for iteration in range(repeat_step.max_iterations):
-            step_result = self._execute_single_step_internal(
-                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
-            )
-            results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
-            output = step_result["output"]
-            all_variables.update(step_result.get("variables", {}))
+            last_name = None
+            for position, inner_step in enumerate(steps):
+                step_result = self._execute_single_step_internal(
+                    inner_step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
+                )
+                last_name = step_result['step']
+                # Each member sees the previous member's output, so a two-step
+                # repeat composes the way a two-step flow does.
+                output = step_result["output"]
+                all_variables.update(step_result.get("variables", {}))
+                if len(steps) > 1:
+                    results.append({
+                        "step": f"{last_name}_{iteration}_{position}",
+                        "output": step_result["output"],
+                    })
+                # A member that requests a stop must halt the remaining members
+                # immediately; otherwise a later member's success would silently
+                # discard the stop request and let the flow continue.
+                if step_result.get("stop"):
+                    repeat_stopped = True
+                    break
+            if len(steps) == 1 and last_name is not None:
+                results.append({"step": f"{last_name}_{iteration}", "output": output})
+            if repeat_stopped:
+                break
             
             # Check until condition
             if repeat_step.until:
@@ -3924,12 +4076,8 @@ CONCISE SUMMARY:"""
                         break
                 except Exception as e:
                     logger.error(f"Repeat until condition failed: {e}")
-            
-            if step_result.get("stop"):
-                repeat_stopped = True
-                break
         
-        all_variables["repeat_iterations"] = iteration + 1
+        all_variables["repeat_iterations"] = iteration + 1 if repeat_step.max_iterations > 0 else 0
         return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped}
     
     def _execute_if(
@@ -5397,6 +5545,52 @@ class WorkflowManager:
         }
 
     def _execute_single_step(
+        self,
+        step: Task,
+        step_idx: int,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+        executor: Optional[Callable[[str], str]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        verbose: int = 0,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
+        original_input: str = ""
+    ) -> Dict[str, Any]:
+        """Cache wrapper for the top-level run() path.
+
+        There are two step executors -- this one and
+        _execute_single_step_internal, used inside patterns. Both are wrapped,
+        because caching only one would make the feature work or not depending on
+        whether the step happened to sit inside a Parallel or an If.
+        """
+        cache = getattr(self, "_step_cache", None)
+        if cache is None:
+            return self._execute_single_step_nocache(
+                step, step_idx, results, all_variables, executor, default_agent,
+                default_llm, memory, planning, verbose, on_step, on_result, original_input,
+            )
+        from .step_cache import make_step_key
+        key = make_step_key(step, None, original_input, all_variables)
+        hit = cache.get(key)
+        if hit is not None:
+            if verbose:
+                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            return dict(hit)
+        result = self._execute_single_step_nocache(
+            step, step_idx, results, all_variables, executor, default_agent,
+            default_llm, memory, planning, verbose, on_step, on_result, original_input,
+        )
+        # Only cache a successful result -- a failed step must be free to retry
+        # on the next run rather than replay a cached failure forever.
+        if isinstance(result, dict) and not result.get("error"):
+            cache.set(key, result)
+        return result
+
+    def _execute_single_step_nocache(
         self,
         step: Task,
         step_idx: int,

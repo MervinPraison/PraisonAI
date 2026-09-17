@@ -2,8 +2,12 @@
 Tests for @tool(retry_policy=...) decorator functionality.
 """
 from praisonaiagents import tool, Agent
-from praisonaiagents.config.feature_configs import ToolConfig
+from praisonaiagents.config import ToolConfig
 from praisonaiagents.tools.retry import RetryPolicy
+from praisonaiagents.config.feature_configs import ToolConfig
+
+# Agent(tool_retry_policy=...) was consolidated into ToolConfig; the
+# constructor rejects the old keyword outright.
 
 
 class TestToolDecoratorRetryPolicy:

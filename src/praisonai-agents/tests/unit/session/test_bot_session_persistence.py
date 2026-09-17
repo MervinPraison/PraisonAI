@@ -8,6 +8,8 @@ per-user session isolation instead of in-memory-only storage.
 import pytest
 import asyncio
 import tempfile
+
+import pytest
 from typing import Any, Dict, List
 
 from praisonaiagents.session.store import DefaultSessionStore
@@ -36,26 +38,38 @@ def _run_async(coro):
         loop.close()
 
 
+def _import_bot_session_manager():
+    """Return ``BotSessionManager`` from the optional ``praisonai-bot`` package.
+
+    Skip only when the top-level ``praisonai_bot`` package is unavailable, then
+    import ``_session`` normally. Targeting the deep module with
+    ``importorskip`` would turn a genuine ``ImportError`` *inside* an installed
+    package into a skip, silently dropping these tests from CI instead of
+    surfacing the regression.
+    """
+    pytest.importorskip(
+        "praisonai_bot",
+        reason="praisonai-bot is not installed",
+    )
+    from praisonai_bot.bots._session import BotSessionManager
+
+    return BotSessionManager
+
+
 class TestBotSessionManagerWithStore:
     """Tests for BotSessionManager using persistent session store."""
     
     def _make_manager(self, tmpdir: str, platform: str = "test"):
-        """Create a BotSessionManager with a persistent store."""
-        # Import here to test the refactored version
-        # The bots module moved from the praisonai wrapper to the praisonai-bot
-        # package. This used to reach for src/praisonai/praisonai/bots by walking
-        # five dirname() calls up from __file__ and putting it on sys.path -- a
-        # path that no longer contains _session.py, so every test here failed with
-        # "No module named '_session'".
-        #
-        # A real import instead of a path hack: it follows the module wherever it
-        # lives, and skips clearly when praisonai-bot is not installed rather than
-        # failing as if the code were broken.
-        pytest.importorskip(
-            "praisonai_bot.bots._session",
-            reason="praisonai-bot is not installed",
-        )
-        from praisonai_bot.bots._session import BotSessionManager
+        """Create a BotSessionManager with a persistent store.
+
+        Imported as a package rather than by pushing a directory onto sys.path.
+        The old helper walked five levels up to ``praisonai/praisonai/bots`` and
+        imported a bare ``_session``; the bots code has since moved to the
+        ``praisonai-bot`` package, that directory no longer exists, and all
+        eleven tests in this class had been failing with
+        ``ModuleNotFoundError: No module named '_session'`` ever since.
+        """
+        BotSessionManager = _import_bot_session_manager()
         store = DefaultSessionStore(session_dir=tmpdir)
         return BotSessionManager(store=store, platform=platform)
     
@@ -181,18 +195,7 @@ class TestBotSessionManagerWithStore:
     
     def test_backward_compat_no_store(self):
         """BotSessionManager must still work without a store (in-memory fallback)."""
-        import sys
-        import os
-        wrapper_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))
-            )))),
-            "praisonai", "praisonai", "bots"
-        )
-        if wrapper_path not in sys.path:
-            sys.path.insert(0, wrapper_path)
-        
-        from praisonai_bot.bots._session import BotSessionManager
+        BotSessionManager = _import_bot_session_manager()
         # No store parameter = backward compatible in-memory mode
         mgr = BotSessionManager()
         agent = FakeAgent()

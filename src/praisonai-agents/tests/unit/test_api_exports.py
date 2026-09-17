@@ -196,15 +196,19 @@ class TestAllSizeLimited:
     """Test that __all__ is limited to core symbols."""
     
     def test_all_size_under_32(self):
-        """__all__ should have fewer than 32 items (minimal for clean IDE)."""
+        """__all__ should stay small (minimal for clean IDE completion).
+
+        This is a budget, not a fact: it is raised deliberately when an export
+        is added on purpose, and left alone otherwise so an accidental addition
+        fails here. 27 -> 29 for AutonomyConfig/AutonomyLevel; 29 -> 32 now for
+        RunOutcome (the canonical terminal outcome, #3406) and
+        RetryBackoffConfig, both added intentionally to the top-level surface.
+        """
         import praisonaiagents
-        # 27 -> 29 for AutonomyConfig, AutonomyLevel.
-        # 29 -> 32 for RetryBackoffConfig (#2082) and RunOutcome (#3406), both
-        # canonical public types. This is a deliberate ratchet, not a formality:
-        # raise it only for a symbol that genuinely belongs in the top-level
-        # namespace, so the bound keeps doing its job of limiting IDE noise.
         assert len(praisonaiagents.__all__) < 32, \
-            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 32"
+            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 32. " \
+            "If the new export is deliberate, raise this budget and say what " \
+            "was added; if not, export it from a submodule instead."
     
     def test_all_contains_core(self):
         """__all__ contains core symbols."""

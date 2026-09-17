@@ -5,29 +5,24 @@ import os
 
 import pytest
 
+
 from praisonaiagents.tools import delegation_tools
 from praisonaiagents.tools.delegation_tools import DelegationTools, delegate_task
 
 
 @pytest.fixture(autouse=True)
-def _auto_approve(monkeypatch):
-    """Auto-approve delegate_task, scoped to THIS module's tests.
+def _auto_approve_delegation(monkeypatch):
+    """Auto-approve for this module only.
 
-    This was `os.environ.setdefault("PRAISONAI_AUTO_APPROVE", "true")` at module
-    level, which runs at COLLECTION time and leaves auto-approval on for the
-    entire pytest process. Every later test that checks a tool reaches the
-    approval backend then saw an empty backend, because auto-approve
-    short-circuits it first:
-
-        test_approval_protocol   assert 'execute_command' in []      (x3)
-        test_default_tool_safety "must reach the approval backend"   (x2)
-        test_approval_liveness   "stale resolution is denied"        (x2)
-
-    Seven failures in three other files, none of them a real defect, and all of
-    them invisible when those files were run on their own. A monkeypatch fixture
-    gives these tests the same auto-approval and unsets it afterwards.
+    This was `os.environ.setdefault("PRAISONAI_AUTO_APPROVE", "true")` at
+    module import: never undone, so from the moment this file was collected
+    every later test in the process ran with approval disabled. It silently
+    broke the doom-loop approval-gate tests in
+    tests/unit/agent/test_loop_detector_wiring.py, which pass alone and failed
+    only after this module had been imported. monkeypatch restores it.
     """
     monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
 
 
 def _fake_subagent_tool(output="delegated result", success=True, error=None):

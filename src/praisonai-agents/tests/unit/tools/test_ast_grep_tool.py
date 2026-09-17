@@ -15,17 +15,26 @@ from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture(autouse=True)
-def _auto_approve(monkeypatch):
-    """These tests cover ast-grep's behaviour, not the approval gate.
+def _auto_approve_rewrites():
+    """ast_grep_rewrite is approval-gated; without a backend it reads stdin.
 
-    ast_grep_rewrite is @require_approval(risk_level="high"). With no approval
-    callback configured the gate falls back to an interactive stdin prompt,
-    which under pytest raises "reading from stdin while output is captured" --
-    surfaced as "Execution of ast_grep_rewrite denied: Approval error: ...".
-    That reads like the tool crashing, which is exactly what
-    test_tool_does_not_crash_when_not_installed set out to disprove.
+    Calling the tool directly sent the approval flow to the console, which
+    under pytest raises "reading from stdin while output is captured" and the
+    tool then denied itself with a PermissionError. These tests are about the
+    rewrite behaviour, not the approval gate, so approve automatically for the
+    duration. tests/unit/test_approval_protocol.py covers the gate itself.
     """
-    monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+    from praisonaiagents.approval import get_approval_registry, AutoApproveBackend
+
+    registry = get_approval_registry()
+    registry.set_backend(AutoApproveBackend())
+    try:
+        yield
+    finally:
+        # remove_backend, not a conditional restore: the registry is a global,
+        # so leaving an auto-approver installed would silently approve every
+        # later test in the same process.
+        registry.remove_backend()
 
 
 @pytest.fixture(autouse=True)

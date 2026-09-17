@@ -81,6 +81,11 @@ class PlatformCapabilities:
         max_message_length: Maximum message length in the platform's unit
         length_unit: Unit for message length ("codepoints" or "utf16")
         supports_edit: Whether the platform supports in-place message edits (for streaming)
+        supports_delete: Whether the platform supports deleting a sent message.
+            When True the adapter MUST override ``delete_message``; the
+            capability contract is verified at adapter build time so a
+            declared-but-unbacked flag fails early rather than silently
+            no-opping mid-turn.
         supports_typing: Whether the platform supports typing indicators
         markdown_dialect: Markdown flavor the platform uses (e.g., "markdown", "telegram_markdown_v2")
         needs_rate_limit: Whether the platform needs rate limiting
@@ -133,6 +138,9 @@ class PlatformCapabilities:
     supports_idempotency_token: bool = False
     supports_media: bool = False
     supports_threads: bool = False
+    # Appended after all pre-existing fields to preserve the positional
+    # constructor contract for external callers (do not reorder above).
+    supports_delete: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -140,6 +148,7 @@ class PlatformCapabilities:
             "max_message_length": self.max_message_length,
             "length_unit": self.length_unit,
             "supports_edit": self.supports_edit,
+            "supports_delete": self.supports_delete,
             "supports_typing": self.supports_typing,
             "markdown_dialect": self.markdown_dialect,
             "needs_rate_limit": self.needs_rate_limit,
@@ -162,6 +171,7 @@ class PlatformCapabilities:
             max_message_length=data.get("max_message_length", 4096),
             length_unit=data.get("length_unit", "codepoints"),
             supports_edit=data.get("supports_edit", False),
+            supports_delete=data.get("supports_delete", False),
             supports_typing=data.get("supports_typing", True),
             markdown_dialect=data.get("markdown_dialect", "markdown"),
             needs_rate_limit=data.get("needs_rate_limit", True),
@@ -501,6 +511,14 @@ class BotMessage:
         thread_id: Thread identifier (for threaded conversations)
         attachments: List of attachment URLs or data
         metadata: Additional platform-specific metadata
+        allow_control: Control-trust primitive. ``True`` (the default) only for
+            interactive human turns; producers set it ``False`` for content of
+            untrusted or non-interactive provenance (generic webhook payloads,
+            relayed/mirrored bot-authored content, proactive/wake/scheduler
+            injects). When ``False`` the message is never classified as a
+            gateway control command (``is_command`` returns ``False``), even if
+            its text starts with ``/`` and it is attributed to a privileged
+            identity — it is handled as plain text instead.
     """
     
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -513,6 +531,7 @@ class BotMessage:
     thread_id: Optional[str] = None
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    allow_control: bool = True
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -527,6 +546,7 @@ class BotMessage:
             "thread_id": self.thread_id,
             "attachments": self.attachments,
             "metadata": self.metadata,
+            "allow_control": self.allow_control,
         }
     
     @classmethod
@@ -552,6 +572,7 @@ class BotMessage:
             thread_id=data.get("thread_id"),
             attachments=data.get("attachments", []),
             metadata=data.get("metadata", {}),
+            allow_control=data.get("allow_control", True),
         )
     
     @property
@@ -563,7 +584,18 @@ class BotMessage:
     
     @property
     def is_command(self) -> bool:
-        """Check if message is a command."""
+        """Check if message is a gateway control command.
+
+        Content of untrusted or non-interactive provenance (``allow_control``
+        is ``False``) is never interpreted as a control command, even if its
+        text starts with ``/`` and it is attributed to a privileged identity —
+        it is handled as plain text instead. This closes the control-plane
+        confused-deputy gap where a webhook payload, a relayed/mirrored
+        bot-authored message, or a proactive/wake inject could drive privileged
+        session control (``/stop``, ``/new``, ``/compress``, …).
+        """
+        if not self.allow_control:
+            return False
         return self.message_type == MessageType.COMMAND or (
             isinstance(self.content, str) and self.content.startswith("/")
         )

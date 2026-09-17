@@ -76,6 +76,12 @@ class TestAgentPermissionInit:
         agent = Agent(name="test", instructions="test")
         assert agent._perm_deny == frozenset()
 
+        with patch.dict(os.environ, {"PRAISONAI_TOOL_SAFETY": "off"}):
+            wide_open = Agent(name="test", instructions="test")
+        assert wide_open._perm_deny == frozenset(), (
+            "PRAISONAI_TOOL_SAFETY=off is the documented full bypass"
+        )
+
     def test_approval_safe_sets_deny(self):
         from praisonaiagents import Agent
         agent = Agent(name="test", instructions="test", approval="safe")
@@ -110,6 +116,9 @@ class TestAgentPermissionInit:
         from praisonaiagents import Agent
         monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
         agent = Agent(name="test", instructions="test", approval=False)
+        # approval=False opts out of *prompting*, not out of safety: the
+        # backend is gone, but the default deny preset still stands so
+        # dangerous tools never run unattended without an explicit policy.
         assert agent._approval_backend is None
         assert "execute_command" in agent._perm_deny
 
@@ -179,16 +188,16 @@ class TestPermissionCheck:
 class TestPermissionZeroOverhead:
     """Verify zero overhead when no permission preset is set."""
 
-    def test_empty_frozenset_falsy(self, monkeypatch):
+    def test_empty_frozenset_falsy(self):
         """Empty frozenset is falsy, so 'if self._perm_deny' skips the check.
 
-        Needs PRAISONAI_TOOL_SAFETY=off: a default agent now carries a non-empty
-        deny set, so the zero-overhead path this test describes is only reached
-        when denials are actually switched off.
+        A default Agent no longer has an empty deny set, so the bypass env var
+        is used to produce one -- the property under test is the falsiness of
+        the empty set, not the default policy.
         """
         from praisonaiagents import Agent
-        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
-        agent = Agent(name="test", instructions="test")
+        with patch.dict(os.environ, {"PRAISONAI_TOOL_SAFETY": "off"}):
+            agent = Agent(name="test", instructions="test")
         assert not agent._perm_deny  # frozenset() is falsy
 
     def test_none_perm_allow_skips(self):

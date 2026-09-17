@@ -418,13 +418,17 @@ class TestCircuitBreakerIntegration:
 
 # Real agentic test (MANDATORY per AGENTS.md)
 import os
-# Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
-# PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
-# key ('sk-not-a-real-key') because some modules bail at import without one,
-# so a presence check never skipped and the test ran against a fake
-# credential. Excluding one known placeholder by value does not help -- the
-# next harness uses a different string.
 @pytest.mark.live
+@pytest.mark.network
+@pytest.mark.skipif(
+    (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+     and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+    or not os.getenv("OPENAI_API_KEY")
+    or os.getenv("OPENAI_API_KEY") == "not-needed",
+    # Gating on the key alone treated owning one as consent to spend it, so
+    # this made a real billed call on any machine with OPENAI_API_KEY set.
+    reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 and a real OPENAI_API_KEY",
+)
 def test_circuit_breaker_real_agentic():
     """Real agentic test - create agent and test circuit breaker integration."""
     from praisonaiagents import Agent
@@ -459,6 +463,46 @@ def test_circuit_breaker_real_agentic():
         # Circuit breaker or tool failures are expected in this test
         print(f"Expected failure during circuit breaker test: {e}")
         assert "CircuitBreakerException" in str(type(e)) or "Tool failure" in str(e)
+
+
+class TestHealthMonitorDispatch:
+    """HealthMonitor must dispatch canonical and legacy health-check names."""
+
+    @pytest.mark.asyncio
+    async def test_canonical_protocol_object(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        class DbCheck:
+            def health_check(self):
+                return True
+            async def ahealth_check(self):
+                return True
+
+        monitor = HealthMonitor()
+        monitor.add_service("db", DbCheck())
+        assert await monitor.check_service_health("db") is True
+
+    @pytest.mark.asyncio
+    async def test_legacy_protocol_object(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        class LegacyCheck:
+            def check_health(self):
+                return True
+            async def acheck_health(self):
+                return True
+
+        monitor = HealthMonitor()
+        monitor.add_service("legacy", LegacyCheck())
+        assert await monitor.check_service_health("legacy") is True
+
+    @pytest.mark.asyncio
+    async def test_plain_callable(self):
+        from praisonaiagents.tools.health_monitor import HealthMonitor
+
+        monitor = HealthMonitor()
+        monitor.add_service("fn", lambda: True)
+        assert await monitor.check_service_health("fn") is True
 
 
 if __name__ == "__main__":

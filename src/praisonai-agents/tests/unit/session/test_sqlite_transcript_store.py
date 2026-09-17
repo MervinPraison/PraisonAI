@@ -174,3 +174,65 @@ class TestSqliteTranscriptStore:
         assert store.get_chat_history("old") == [
             {"role": "user", "content": "legacy transcript"}
         ]
+
+
+class TestTranscriptArchivedRecall:
+    """Issue #5031: transcript store must recall compacted (archived) turns."""
+
+    def _seed_with_archive(self, store, session_id, archived, active):
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        session = SessionData(session_id=session_id)
+        for role, content in archived:
+            session.archived_messages.append(
+                SessionMessage(role=role, content=content)
+            )
+        for role, content in active:
+            session.messages.append(SessionMessage(role=role, content=content))
+        store._save_session(session)
+
+    def test_recalls_archived_only_token(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[("user", "the special value was zx-9271-alpha")],
+            active=[("system", "Summary: helped set up X")],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert [h.session_id for h in hits] == ["s1"]
+        assert any(m.get("archived") for m in hits[0].messages)
+
+    def test_real_compaction_stays_searchable(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir, active_window=3)
+        store.add_message("s", "user", "the special value was zx-9271-alpha")
+        for i in range(8):
+            store.add_message("s", "user", f"later message {i}")
+
+        session = store.get_session("s")
+        archived = [m.content for m in session.archived_messages]
+        assert "the special value was zx-9271-alpha" in archived
+
+        hits = store.search("zx-9271-alpha")
+        assert [h.session_id for h in hits] == ["s"]
+
+    def test_window_scrolls_from_archived_anchor(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        self._seed_with_archive(
+            store,
+            "s1",
+            archived=[
+                ("user", "the special value was zx-9271-alpha"),
+                ("assistant", "noted the special value"),
+            ],
+            active=[
+                ("system", "Summary: helped set up X"),
+                ("user", "unrelated recent turn"),
+            ],
+        )
+        hits = store.search("zx-9271-alpha")
+        assert hits and hits[0].session_id == "s1"
+        rows = store.window("s1", str(hits[0].anchor_index), window=1)
+        contents = " ".join(r["content"] for r in rows)
+        assert "zx-9271-alpha" in contents
+        assert any(r.get("archived") for r in rows)

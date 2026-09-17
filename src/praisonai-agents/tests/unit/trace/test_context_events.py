@@ -651,13 +651,9 @@ class TestPerformance:
         import os
         import subprocess
         import sys
+        from pathlib import Path
 
-        # Package root derived from this test file's location, not a hardcoded
-        # absolute path -- the suite must run on any machine and in CI, not only
-        # on the original author's checkout.
-        package_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..")
-        )
+        agents_root = Path(__file__).resolve().parents[3]
 
         # First measure baseline import time for the base package
         baseline_code = """
@@ -671,7 +667,7 @@ print(f"{elapsed:.1f}")
             [sys.executable, "-c", baseline_code],
             capture_output=True,
             text=True,
-            cwd=package_root,
+            cwd=str(agents_root),
         )
         
         # Now measure context_events import (should add minimal overhead)
@@ -687,7 +683,7 @@ print(f"{elapsed:.1f}")
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
-            cwd=package_root,
+            cwd=str(agents_root),
         )
         
         if result.returncode == 0:

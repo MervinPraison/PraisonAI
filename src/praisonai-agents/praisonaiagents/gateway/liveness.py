@@ -73,6 +73,12 @@ class LoopWatchdogPolicy:
             Defaults to EX_TEMPFAIL (75) so a supervisor restarts the process.
         dump_file: Optional path to also write the stack dump to (in addition
             to stderr). ``None`` writes to stderr only.
+        shutdown_grace_s: Extra budget (seconds) added beyond a caller's
+            ``drain_timeout`` when arming the shutdown-phase *deadline* mode
+            (:meth:`LoopWatchdog.arm_deadline`). The deadline fires independent
+            of loop responsiveness, so a wedged *teardown* on a still-alive loop
+            still gets an all-thread stack dump + bounded self-exit rather than
+            an external ``SIGKILL`` (Issue #5079).
     """
 
     probe_interval_s: float = 5.0
@@ -80,6 +86,7 @@ class LoopWatchdogPolicy:
     on_wedge: Literal["dump_and_exit", "dump_only"] = "dump_and_exit"
     exit_code: int = GATEWAY_RESTART_EXIT_CODE
     dump_file: Optional[str] = None
+    shutdown_grace_s: float = 5.0
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.probe_interval_s) or self.probe_interval_s <= 0:
@@ -90,6 +97,8 @@ class LoopWatchdogPolicy:
             raise ValueError(
                 "on_wedge must be 'dump_and_exit' or 'dump_only'"
             )
+        if not math.isfinite(self.shutdown_grace_s) or self.shutdown_grace_s < 0:
+            raise ValueError("shutdown_grace_s must be a finite value >= 0")
 
     @property
     def wedge_after_s(self) -> float:
@@ -132,10 +141,35 @@ class LoopWatchdog:
         # on, exposed rather than only compared against the wedge threshold.
         self._probe_sent_at = 0.0
         self._last_lag_ms = 0.0
+        # Shutdown-phase deadline mode (Issue #5079). A separate daemon thread
+        # + stop event so it is fully independent of the liveness probe loop:
+        # the deadline fires on a wall-clock overrun regardless of whether the
+        # event loop is still responsive (a wedged *teardown*, not a wedged
+        # *loop*), reusing the same stack-dump + os._exit primitive.
+        self._deadline_thread: Optional[threading.Thread] = None
+        self._deadline_stop = threading.Event()
+        self._deadline_expired = False
+        # Guards the deadline generation swap (thread + its stop event) so an
+        # arm racing a cancel can never mix one generation's thread with
+        # another's stop event (Issue #5079 review).
+        self._deadline_lock = threading.Lock()
 
     @property
     def armed(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def deadline_armed(self) -> bool:
+        """True while a shutdown-phase deadline is armed (Issue #5079)."""
+        return (
+            self._deadline_thread is not None
+            and self._deadline_thread.is_alive()
+        )
+
+    @property
+    def deadline_expired(self) -> bool:
+        """True once a shutdown deadline expired (mainly for ``dump_only``)."""
+        return self._deadline_expired
 
     @property
     def last_lag_ms(self) -> float:
@@ -189,6 +223,102 @@ class LoopWatchdog:
                 pass
         self._thread = None
         self._loop = None
+
+    # ── Shutdown-phase deadline mode (Issue #5079) ──────────────────────────
+
+    def arm_deadline(self, deadline_s: float) -> None:
+        """Arm a wall-clock shutdown deadline on a dedicated daemon thread.
+
+        Unlike the liveness probe (which only reacts to a *wedged loop*), this
+        fires after ``deadline_s`` seconds regardless of loop responsiveness —
+        so a teardown coroutine that blocks while the loop is still alive still
+        gets an all-thread stack dump + bounded ``os._exit`` instead of being
+        left to an external ``SIGKILL``. Callers arm this at the *start* of the
+        stop path and :meth:`cancel` it the instant a clean stop completes, so a
+        healthy shutdown never self-exits.
+
+        Idempotent and fail-open: a re-arm while already armed is a no-op, and
+        any failure to start the thread is swallowed.
+        """
+        if not math.isfinite(deadline_s) or deadline_s <= 0:
+            return
+        with self._deadline_lock:
+            if self.deadline_armed:
+                return
+            # Each armed generation gets its *own* stop event, handed directly
+            # to the thread. Cancellation state is therefore per-generation: a
+            # later arm never clears an older thread's event, so a slow old
+            # generation (e.g. still flushing a stack dump) can never observe a
+            # fresh generation's cleared flag and self-exit during a healthy run
+            # (Issue #5079 review).
+            stop = threading.Event()
+            self._deadline_expired = False
+            try:
+                thread = threading.Thread(
+                    target=self._run_deadline,
+                    args=(deadline_s, stop),
+                    name="praisonai-shutdown-watchdog",
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:  # pragma: no cover - fail open
+                self._deadline_thread = None
+                self._deadline_stop = stop
+                return
+            self._deadline_thread = thread
+            self._deadline_stop = stop
+
+    def cancel(self) -> None:
+        """Cancel an armed shutdown deadline. Safe when not armed.
+
+        A clean stop() calls this so the bounded self-exit never fires on a
+        healthy shutdown. Sets the *current* generation's stop event (so that
+        exact thread suppresses its self-exit even if it is mid-dump) and drops
+        the reference; a later arm starts a fresh generation with its own event.
+        """
+        with self._deadline_lock:
+            self._deadline_stop.set()
+            thread = self._deadline_thread
+            self._deadline_thread = None
+        if thread is not None and thread is not threading.current_thread():
+            try:
+                thread.join(timeout=1.0)
+            except Exception:  # pragma: no cover - fail open
+                pass
+
+    def _run_deadline(self, deadline_s: float, stop: "threading.Event") -> None:
+        # Wait out the deadline against *this generation's* event; a clean
+        # cancel() sets it and returns immediately so a healthy shutdown never
+        # trips the self-exit.
+        if stop.wait(deadline_s):
+            return
+        self._on_deadline(deadline_s, stop)
+
+    def _on_deadline(self, deadline_s: float, stop: "threading.Event") -> None:
+        # Only the still-active generation records expiry / self-exits: if this
+        # thread was cancelled its own ``stop`` is set, so a stale generation
+        # that survived a bounded join stays inert.
+        if stop.is_set():
+            return
+        self._deadline_expired = True
+        try:
+            self._dump_stacks(
+                reason=(
+                    f"graceful shutdown did not complete within "
+                    f"~{deadline_s:.0f}s"
+                )
+            )
+        except Exception:  # pragma: no cover - fail open
+            pass
+        if self.policy.on_wedge == "dump_and_exit":
+            # If cancel() raced in while we were dumping, honour the clean stop.
+            if stop.is_set():
+                return
+            try:
+                sys.stderr.flush()
+            except Exception:  # pragma: no cover - fail open
+                pass
+            os._exit(self.policy.exit_code)
 
     def _ack(self) -> None:
         """Callback run *on the loop*; records that the loop is alive."""
@@ -280,12 +410,14 @@ class LoopWatchdog:
                 pass
             os._exit(self.policy.exit_code)
 
-    def _dump_stacks(self) -> None:
+    def _dump_stacks(self, reason: Optional[str] = None) -> None:
         """Dump all-thread stacks to stderr and, if configured, a file."""
-        stall = self.policy.wedge_after_s
+        if reason is None:
+            stall = self.policy.wedge_after_s
+            reason = f"event loop wedged (no progress for ~{stall:.0f}s)"
         header = (
-            f"praisonai-loop-watchdog: event loop wedged "
-            f"(no progress for ~{stall:.0f}s); dumping all-thread stacks\n"
+            f"praisonai-loop-watchdog: {reason}; "
+            f"dumping all-thread stacks\n"
         )
         try:
             sys.stderr.write(header)

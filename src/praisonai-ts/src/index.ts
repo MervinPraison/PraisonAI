@@ -143,6 +143,7 @@ export {
   valyuPatentSearch, valyuSecSearch, valyuEconomicsSearch, valyuCompanyResearch,
   bedrockCodeInterpreter, bedrockBrowserNavigate, bedrockBrowserClick, bedrockBrowserFill,
   airweaveSearch, codeMode,
+  anyapiSearchApis, anyapiGetApi, anyapiRunApi,
   registerCustomTool, createCustomTool, registerNpmTool, registerLocalTool
 } from './tools/builtins';
 
@@ -1112,6 +1113,8 @@ export type { ToolsetSpecConfig } from './toolsets';
 export {
   HarnessProfile, DEFAULT_PROFILE, registerProfile, registerProfile as register_profile,
   resolveHarness, resolveHarness as resolve_harness, listHarnessProfiles, resetHarnessRegistry,
+  ScriptedModel, ScriptExhausted, allowModelRequests, noModelRequests,
+  modelRequestsAllowed, ModelRequestBlocked,
 } from './model-harness';
 export type { HarnessProfileConfig, HarnessResolverProtocol, HarnessRegistryEntry } from './model-harness';
 

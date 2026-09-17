@@ -13,6 +13,16 @@ import os
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
 
+def _run_to_dict(record: Any) -> Dict[str, Any]:
+    """A RunRecord as JSON. Uses whatever the record exposes rather than
+    assuming a shape, so a ledger with extra fields is not silently truncated."""
+    if hasattr(record, "as_dict"):
+        return record.as_dict()
+    if hasattr(record, "__dict__"):
+        return {k: v for k, v in vars(record).items() if not k.startswith("_")}
+    return {"run": str(record)}
+
+
 class AgentOS:
     """
     Production platform for deploying AI agents as web services.
@@ -139,7 +149,7 @@ class AgentOS:
     
     def _register_routes(self, app: Any) -> None:
         """Register API routes."""
-        from fastapi import HTTPException
+        from fastapi import HTTPException, Query
         from pydantic import BaseModel
         
         class ChatRequest(BaseModel):
@@ -166,6 +176,123 @@ class AgentOS:
         async def health():
             return {"status": "healthy"}
         
+        # ── Read endpoints ────────────────────────────────────────────────
+        # AgentOS could list agents and take a chat turn, and nothing else. A
+        # session could not be replayed, a run inspected, or a pending approval
+        # seen over HTTP, even though the protocols to expose all three already
+        # existed. These are READ-only on purpose: mutating a run over HTTP is a
+        # much larger design question than surfacing one.
+        #
+        # Each returns 503 with what to configure when its store is absent.
+        # Returning an empty list would be indistinguishable from "no runs yet",
+        # which is the failure this codebase keeps finding.
+
+        def _unavailable(what: str, how: str):
+            raise HTTPException(
+                status_code=503,
+                detail=f"{what} is not available: {how}",
+            )
+
+        @app.get(f"{self.config.api_prefix}/runs")
+        async def list_runs(limit: int = Query(50, ge=1, le=500)):
+            ledger = getattr(self, "run_ledger", None)
+            if ledger is None:
+                _unavailable(
+                    "Run history",
+                    "no run ledger is configured on this AgentOS instance. "
+                    "Attach a praisonaiagents.runs.SQLiteRunLedger as `run_ledger`.",
+                )
+            records = ledger.list_all(limit=limit)
+            return {"runs": [_run_to_dict(r) for r in records], "count": len(records)}
+
+        @app.get(f"{self.config.api_prefix}/runs/{{run_id}}")
+        async def get_run(run_id: str):
+            ledger = getattr(self, "run_ledger", None)
+            if ledger is None:
+                _unavailable(
+                    "Run history",
+                    "no run ledger is configured on this AgentOS instance.",
+                )
+            record = ledger.get(run_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail=f"No run {run_id!r}")
+            return _run_to_dict(record)
+
+        @app.get(f"{self.config.api_prefix}/sessions")
+        async def list_sessions(limit: int = Query(20, ge=1, le=200)):
+            store = getattr(self, "session_store", None)
+            if store is None or not hasattr(store, "recent"):
+                _unavailable(
+                    "Session history",
+                    "no session store is configured on this AgentOS instance. "
+                    "Attach a praisonaiagents.session store as `session_store`.",
+                )
+            summaries = store.recent(limit=limit)
+            return {
+                "sessions": [
+                    s.as_dict() if hasattr(s, "as_dict") else dict(s) for s in summaries
+                ],
+                "count": len(summaries),
+            }
+
+        @app.get(f"{self.config.api_prefix}/sessions/{{session_id}}")
+        async def get_session(session_id: str, limit: int = Query(100, ge=1, le=500)):
+            store = getattr(self, "session_store", None)
+            if store is None:
+                _unavailable(
+                    "Session history",
+                    "no session store is configured on this AgentOS instance.",
+                )
+            if hasattr(store, "session_exists"):
+                if not store.session_exists(session_id):
+                    raise HTTPException(status_code=404, detail=f"No session {session_id!r}")
+            elif not store.get_chat_history(session_id, limit):
+                # Stores without session_exists cannot distinguish an unknown
+                # session from an empty one; treat an empty transcript as absent
+                # rather than returning a healthy-looking 200 for a bad id.
+                raise HTTPException(status_code=404, detail=f"No session {session_id!r}")
+            return {
+                "session_id": session_id,
+                "messages": store.get_chat_history(session_id, limit),
+            }
+
+        @app.get(f"{self.config.api_prefix}/approvals")
+        async def list_approvals():
+            try:
+                from praisonaiagents.approval import get_approval_registry
+            except ImportError:
+                _unavailable("Approvals", "praisonaiagents.approval is not installed.")
+            registry = get_approval_registry()
+
+            # The registry stores approval requirements across four fields --
+            # global tools plus per-agent overrides -- rather than a single
+            # dict. Reading the public accessors (is_required/get_risk_level)
+            # keeps this decoupled from that private shape. Fall back to the
+            # attributes only to enumerate which (agent, tool) pairs exist.
+            global_tools = getattr(registry, "_required_tools", None)
+            agent_tools = getattr(registry, "_agent_required_tools", None)
+            if global_tools is None and agent_tools is None:
+                _unavailable(
+                    "Approvals",
+                    "this build's approval registry exposes no requirement listing.",
+                )
+
+            requirements = []
+            for tool in sorted(global_tools or ()):
+                requirements.append({
+                    "tool": tool,
+                    "agent": None,
+                    "risk_level": registry.get_risk_level(tool),
+                })
+            for agent, tools in (agent_tools or {}).items():
+                for tool in sorted(tools):
+                    requirements.append({
+                        "tool": tool,
+                        "agent": agent,
+                        "risk_level": registry.get_risk_level(tool, agent),
+                    })
+            return {"requirements": requirements}
+
         @app.get(f"{self.config.api_prefix}/agents")
         async def list_agents():
             return {

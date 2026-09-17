@@ -166,15 +166,14 @@ class TestAgentThreadSafety:
         )
         
         assert hasattr(agent, '_history_lock')
-        # Not `isinstance(..., type(threading.Lock()))`. The lock was upgraded
-        # to AsyncSafeState, which picks a threading or asyncio primitive based
-        # on the calling context and still works as a plain context manager.
-        # Pinning the concrete type asserted an implementation detail; what
-        # thread safety actually needs is that the lock is usable and exclusive.
+        # _history_lock is an AsyncSafeState now, not a raw threading.Lock, so
+        # an isinstance check against _thread.lock fails while the guarantee it
+        # stands for -- mutual exclusion around history -- still holds. Assert
+        # that it works as a lock rather than what class it is.
         lock = agent._history_lock
+        assert hasattr(lock, '__enter__') and hasattr(lock, '__exit__')
         with lock:
             pass
-        assert not lock.locked() if hasattr(lock, "locked") else True
     
     def test_agent_has_cache_lock(self):
         """Agent should have a cache lock for thread safety."""

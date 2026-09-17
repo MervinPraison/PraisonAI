@@ -37,7 +37,7 @@ class TestManagedBackendProtocol:
         # networking became a typed NetworkingConfig; NetworkingType is a str
         # Enum, so the value on the wire is still "unrestricted".
         assert cfg.networking == NetworkingConfig()
-        assert cfg.networking.type == "unrestricted"
+        assert cfg.networking.type.value == "unrestricted"
         assert cfg.packages is None
         assert cfg.mcp_servers == []
         assert cfg.skills == []

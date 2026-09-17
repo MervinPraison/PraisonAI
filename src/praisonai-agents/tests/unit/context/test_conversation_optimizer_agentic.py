@@ -5,6 +5,7 @@ This test ensures the ConversationOptimizer works end-to-end with a real agent
 calling the LLM, as required by AGENTS.md §9.4.
 """
 
+import os
 import pytest
 from praisonaiagents import Agent
 from praisonaiagents.context.optimizer import ConversationOptimizer, get_optimizer
@@ -70,16 +71,20 @@ def test_conversation_optimizer_with_messages():
 
 
 @pytest.mark.live
+@pytest.mark.network
+@pytest.mark.skipif(
+    (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
+     and os.environ.get("RUN_REAL_KEY_TESTS") != "1")
+    or not os.environ.get("OPENAI_API_KEY"),
+    reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 and a real OPENAI_API_KEY",
+)
 def test_conversation_optimizer_real_agentic():
     """
     Real agentic test - agent calls LLM with conversation compaction enabled.
     
     This test satisfies AGENTS.md §9.4 requirement for real agentic testing.
 
-    Marked ``live`` so the collection hook deselects it in ordinary CI
-    (``PRAISONAI_LIVE_TESTS`` unset). Without the marker a fake ``OPENAI_API_KEY``
-    would let this attempt a real network call and then swallow the failure as a
-    skip -- an outbound request the "offline" job could not see.
+    It was ungated and made a real billed OpenAI call on every unit run.
     """
     try:
         # Create agent with conversation compaction strategy

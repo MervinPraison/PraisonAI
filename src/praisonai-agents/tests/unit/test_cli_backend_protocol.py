@@ -86,25 +86,31 @@ def test_cli_backend_delta():
 
 def test_cli_backend_protocol_interface():
     """Test that CliBackendProtocol is properly defined."""
-    # Create a mock implementation
-    mock_backend = Mock()
-    mock_backend.config = CliBackendConfig(command="test")
-    mock_backend.execute = AsyncMock(return_value=CliBackendResult(content="test"))
-    mock_backend.stream = AsyncMock()
-    # capabilities() joined the protocol with the runtime capability system
-    # ("all CLI backends must declare their capabilities"). It has to be ASSIGNED,
-    # not left to Mock's __getattr__: isinstance() against a runtime_checkable
-    # Protocol uses inspect.getattr_static, which does not call __getattr__, so an
-    # auto-created Mock attribute is invisible to the check and the assertion
-    # failed even though hasattr() was True.
-    mock_backend.capabilities = Mock(return_value=None)
+    # A real implementation, not a Mock. isinstance() against a
+    # runtime_checkable Protocol does not accept a Mock even when every
+    # attribute is present -- the check inspects how members are defined, and
+    # a Mock's auto-created attributes do not qualify. The protocol also grew a
+    # `capabilities` member, which a Mock silently "had" without implementing.
+    # A concrete class proves what this test claims: the protocol is
+    # implementable and an implementation satisfies it.
+    class _Backend:
+        def __init__(self):
+            self.config = CliBackendConfig(command="test")
 
-    # Verify it satisfies the protocol
-    assert isinstance(mock_backend, CliBackendProtocol)
-    assert hasattr(mock_backend, 'config')
-    assert hasattr(mock_backend, 'execute')
-    assert hasattr(mock_backend, 'stream')
-    assert hasattr(mock_backend, 'capabilities')
+        def capabilities(self):
+            return None
+
+        async def execute(self, *args, **kwargs):
+            return CliBackendResult(content="test")
+
+        async def stream(self, *args, **kwargs):
+            yield CliBackendResult(content="test")
+
+    backend = _Backend()
+
+    assert isinstance(backend, CliBackendProtocol)
+    for member in ("config", "capabilities", "execute", "stream"):
+        assert hasattr(backend, member), f"missing protocol member: {member}"
 
 
 @pytest.mark.asyncio

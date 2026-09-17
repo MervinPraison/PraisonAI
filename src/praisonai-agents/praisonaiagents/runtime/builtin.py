@@ -93,24 +93,26 @@ class PraisonAIRuntime:
                     'runtime': self.runtime_id
                 }
                 
-                # An empty result ALWAYS carries an error. This used to set one
-                # only when OPENAI_API_KEY was absent, so an invalid key, a
-                # rate limit, a network failure or a refusal all returned
-                # content="" with error=None -- indistinguishable from "the
-                # model had nothing to say". The caller cannot tell those apart,
-                # and the absent-key check is the one case that was already
-                # obvious to the user.
+                # An empty response always carries an error. This reported one
+                # only when OPENAI_API_KEY was unset, so every other cause of an
+                # empty turn -- a model the key cannot access, quota, a provider
+                # error swallowed upstream -- returned content="" with
+                # error=None, and the caller could not tell "the model answered
+                # nothing" from "the call never happened".
                 if not result:
                     import os
                     if not os.environ.get('OPENAI_API_KEY'):
                         error = "OPENAI_API_KEY environment variable is required"
                     else:
                         error = (
-                            "Runtime produced no content. The model returned an "
-                            "empty response -- check credentials, quota and "
-                            "connectivity for the configured provider."
+                            "the runtime produced no content; the model returned "
+                            "an empty response or the call failed upstream"
                         )
-                    return RuntimeResult(content="", metadata=metadata, error=error)
+                    return RuntimeResult(
+                        content="",
+                        metadata=metadata,
+                        error=error,
+                    )
 
                 return RuntimeResult(
                     content=str(result),

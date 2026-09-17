@@ -215,13 +215,18 @@ class TestAgentIntegration:
 class TestAgenticExecution:
     """Test real agentic execution with toolsets (requires LLM)."""
     
-    # Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
-    # PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
-    # key ('sk-not-a-real-key') because some modules bail at import without one,
-    # so a presence check never skipped and the test ran against a fake
-    # credential. Excluding one known placeholder by value does not help -- the
-    # next harness uses a different string.
     @pytest.mark.live
+    @pytest.mark.network
+    @pytest.mark.skipif(
+        (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+         and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+        or not os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY") == "test-key",
+        # Gating on the key alone treated owning one as consent to spend it,
+        # so this billed a real account on any machine with the key exported.
+        # Either opt-in variable works; the suite uses both names.
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+    )
     def test_agent_real_agentic_execution_with_toolsets(self):
         """
         Real agentic test: Agent runs end-to-end with LLM using toolsets.
@@ -252,13 +257,16 @@ class TestAgenticExecution:
         print(f"\n🤖 Agent Response: {result}")
         print(f"✅ Real agentic test passed - Agent successfully used toolsets and called LLM")
     
-    # Gated on the live marker (PRAISONAI_LIVE_TESTS=1) rather than on the
-    # PRESENCE of OPENAI_API_KEY: CI and local harnesses export a placeholder
-    # key ('sk-not-a-real-key') because some modules bail at import without one,
-    # so a presence check never skipped and the test ran against a fake
-    # credential. Excluding one known placeholder by value does not help -- the
-    # next harness uses a different string.
     @pytest.mark.live
+    @pytest.mark.network
+    @pytest.mark.skipif(
+        (os.getenv("PRAISONAI_LIVE_TESTS") != "1"
+         and os.getenv("RUN_REAL_KEY_TESTS") != "1")
+        or not os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY") == "test-key",
+        # Owning a key is not consent to spend it.
+        reason="Live LLM call: set PRAISONAI_LIVE_TESTS=1 (or RUN_REAL_KEY_TESTS=1) and a real OPENAI_API_KEY",
+    )
     def test_agent_with_research_toolset_real(self):
         """
         Test agent with research toolset in real execution.

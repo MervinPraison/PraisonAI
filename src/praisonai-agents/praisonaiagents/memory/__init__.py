@@ -37,6 +37,7 @@ Memory Providers:
 # Import only essential protocols to avoid loading heavy implementations at import time
 # Following AGENTS.md principle: "No module-level imports of optional dependencies"
 from .protocols import (
+    MemoryTrust,
     MemoryProtocol, 
     AsyncMemoryProtocol, 
     ResettableMemoryProtocol,
@@ -44,6 +45,8 @@ from .protocols import (
     AsyncDeletableMemoryProtocol,
     EntityMemoryProtocol,
     AgentMemoryProtocol,
+    MemoryConsolidationProtocol,
+    AsyncMemoryConsolidationProtocol,
 )
 
 
@@ -144,6 +147,9 @@ def __getattr__(name):
     if name == "SearchResult":
         from .results import SearchResult
         return SearchResult
+    if name == "ConsolidationResult":
+        from .results import ConsolidationResult
+        return ConsolidationResult
     # Backward compatibility aliases
     if name == "StepInput":
         from ..workflows import WorkflowContext
@@ -239,11 +245,19 @@ __all__ = [
     "DecisionStore",
     "FeedbackStore",
     "ImprovementStore",
+    # Structured results
+    "MemoryResult",
+    "MemoryResultStatus",
+    "SearchResult",
+    "ConsolidationResult",
     # Protocols
+    "MemoryTrust",
     "MemoryProtocol",
     "AsyncMemoryProtocol",
     "ResettableMemoryProtocol",
     "DeletableMemoryProtocol",
     "AsyncDeletableMemoryProtocol",
     "EntityMemoryProtocol",
+    "MemoryConsolidationProtocol",
+    "AsyncMemoryConsolidationProtocol",
 ] 

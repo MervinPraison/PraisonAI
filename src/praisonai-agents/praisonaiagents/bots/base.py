@@ -64,7 +64,98 @@ __all__ = [
     "SendResult",
     "classify_send_error",
     "BasePlatformAdapter",
+    "CapabilityContractError",
+    "CAPABILITY_BACKING",
+    "verify_capability_contract",
+    "enforce_capability_contract",
 ]
+
+
+class CapabilityContractError(RuntimeError):
+    """A declared ``supports_*`` capability has no backing implementation.
+
+    Raised once, early — when an adapter is built/registered — so a
+    declared-but-unbacked capability can never reach a live turn as a lazy
+    ``NotImplementedError`` buried in the delivery loop. The message names the
+    offending flag and the method that must be overridden to back it.
+    """
+
+
+#: Maps each verifiable ``PlatformCapabilities`` flag to the adapter method that
+#: must be overridden (i.e. not left as the ``BasePlatformAdapter`` default) to
+#: back it. A flag set ``True`` with its backing method still inherited from the
+#: base is a broken promise and fails :func:`verify_capability_contract`.
+#:
+#: Only flags whose backing is a concrete, default-implemented base method are
+#: listed here; purely informational descriptors (e.g.
+#: ``supports_idempotency_token``) carry no method obligation and are omitted.
+CAPABILITY_BACKING: Dict[str, str] = {
+    "supports_edit": "edit_message",
+    "supports_delete": "delete_message",
+}
+
+
+def _resolve_capabilities(adapter: Any) -> Any:
+    """Return the adapter's :class:`PlatformCapabilities` descriptor, if any.
+
+    Prefers the typed ``platform_capabilities`` property (every adapter's
+    canonical descriptor) and falls back to a ``capabilities`` attribute that is
+    itself a :class:`PlatformCapabilities` (the ``BasePlatformAdapter`` shape).
+    Legacy dict-shaped ``capabilities`` (used by some wrapper bots for a
+    different, feature-name mapping) is ignored so it is never misread as the
+    transport descriptor.
+    """
+    caps = getattr(adapter, "platform_capabilities", None)
+    if isinstance(caps, PlatformCapabilities):
+        return caps
+    caps = getattr(adapter, "capabilities", None)
+    if isinstance(caps, PlatformCapabilities):
+        return caps
+    return None
+
+
+def verify_capability_contract(adapter: Any) -> List[str]:
+    """Check that each declared ``supports_*`` flag is actually backed.
+
+    For every flag in :data:`CAPABILITY_BACKING` that the adapter declares
+    ``True``, verify the backing method is present and not left as the unbacked
+    :class:`BasePlatformAdapter` default. Returns the list of human-readable
+    violation strings (empty when the contract holds).
+
+    Callers that want to fail loudly at registration time should call
+    :func:`enforce_capability_contract` instead; this function itself never
+    raises, so it is safe to use in a lenient/warn-only mode.
+    """
+    capabilities = _resolve_capabilities(adapter)
+    if capabilities is None:
+        return []
+
+    violations: List[str] = []
+    name = type(adapter).__name__
+    for flag, method_name in CAPABILITY_BACKING.items():
+        if not bool(getattr(capabilities, flag, False)):
+            continue
+        bound = getattr(type(adapter), method_name, None)
+        base_impl = getattr(BasePlatformAdapter, method_name, None)
+        if bound is None or bound is base_impl or not callable(bound):
+            violations.append(
+                f"{name} declares {flag}=True but does not override "
+                f"{method_name} with a callable implementation"
+            )
+    return violations
+
+
+def enforce_capability_contract(adapter: Any) -> None:
+    """Verify *adapter*'s capability contract and raise on any violation.
+
+    Thin wrapper over :func:`verify_capability_contract` that raises a single
+    :class:`CapabilityContractError` naming every declared-but-unbacked
+    capability, so an adapter cannot advertise something it cannot do. Intended
+    to be called once where adapters are built/registered.
+    """
+    violations = verify_capability_contract(adapter)
+    if violations:
+        raise CapabilityContractError("; ".join(violations))
 
 #: Closed set of delivery outcomes for :attr:`SendResult.status`. Exposed as a
 #: type alias so static callers can verify exhaustive handling of the contract
@@ -534,6 +625,11 @@ class BasePlatformAdapter(ABC):
         """Whether the platform supports typing indicators."""
         return bool(self._cap("supports_typing", False))
 
+    @property
+    def supports_delete(self) -> bool:
+        """Whether the platform supports deleting a sent message."""
+        return bool(self._cap("supports_delete", False))
+
     # ------------------------------------------------------------------ #
     # Default-implemented, capability-driven — override only to improve.  #
     # ------------------------------------------------------------------ #
@@ -597,8 +693,22 @@ class BasePlatformAdapter(ABC):
         )
 
     async def delete_message(self, chat_id: Any, message_id: str) -> bool:
-        """Delete a message. Default: not supported → returns False."""
-        return False
+        """Delete a previously sent message.
+
+        Default behaviour is capability-gated for parity with
+        :meth:`edit_message`: when ``supports_delete`` is False the platform
+        genuinely cannot delete, so this returns ``False`` (unsupported). When
+        an adapter declares ``supports_delete=True`` it MUST override this — the
+        default then raises so the broken promise is caught rather than silently
+        no-opping. :func:`verify_capability_contract` catches this mismatch at
+        registration time, before any live turn.
+        """
+        if not self.supports_delete:
+            return False
+        raise NotImplementedError(
+            "capabilities.supports_delete is True but delete_message is not "
+            "implemented; override delete_message in the adapter."
+        )
 
     def classify_error(self, exc: BaseException) -> SendResult:
         """Map a native send exception into a classified :class:`SendResult`.
