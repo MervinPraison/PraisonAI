@@ -47,6 +47,8 @@ from praisonaiagents.gateway.protocols import (
     compute_config_revision,
     HealthPressure,
     evaluate_pressure,
+    StopScope,
+    StopResult,
 )
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
@@ -3500,12 +3502,27 @@ class WebSocketGateway:
                     # Issue #3467: portable stop command. A chat/operator client
                     # can abort the in-flight turn by sending "/stop" (or "stop")
                     # instead of a dedicated abort frame.
-                    if isinstance(content, str) and content.strip().lower() in ("/stop", "stop"):
-                        aborted = self._abort_active_turn(session_id, reason="user")
-                        await self._send_to_client(client_id, {
-                            "type": "aborted" if aborted else "no_active_turn",
+                    if isinstance(content, str) and content.strip().lower() in (
+                        "/stop", "stop", "/stop all", "/cancel",
+                    ):
+                        # Issue #5129: "/stop"/"stop" stay turn-scoped (back-compat);
+                        # "/stop all" or "/cancel" also drain the queued backlog so
+                        # no message the user just cancelled is answered afterwards.
+                        normalised = content.strip().lower()
+                        scope = (
+                            StopScope.SESSION
+                            if normalised in ("/stop all", "/cancel")
+                            else StopScope.TURN
+                        )
+                        result = self._abort_session(session_id, scope=scope, reason="user")
+                        payload = {
+                            "type": "aborted" if (
+                                result.turn_aborted or result.pending_cancelled
+                            ) else "no_active_turn",
                             "session_id": session_id,
-                        })
+                        }
+                        payload.update(result.to_dict())
+                        await self._send_to_client(client_id, payload)
                         return True
                     message = GatewayMessage(
                         content=content,
@@ -3564,11 +3581,18 @@ class WebSocketGateway:
                 })
                 return True
             reason = data.get("reason") or "user"
-            aborted = self._abort_active_turn(session_id, reason=str(reason))
-            await self._send_to_client(client_id, {
-                "type": "aborted" if aborted else "no_active_turn",
+            # Issue #5129: an abort frame may carry {"scope": "session"} to drain
+            # the queued backlog too; absent/unknown scope stays turn-scoped.
+            scope = StopScope.coerce(data.get("scope"))
+            result = self._abort_session(session_id, scope=scope, reason=str(reason))
+            payload = {
+                "type": "aborted" if (
+                    result.turn_aborted or result.pending_cancelled
+                ) else "no_active_turn",
                 "session_id": session_id,
-            })
+            }
+            payload.update(result.to_dict())
+            await self._send_to_client(client_id, payload)
 
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
@@ -3744,6 +3768,36 @@ class WebSocketGateway:
             except Exception:
                 pass
         return True
+
+    def _abort_session(
+        self,
+        session_id: str,
+        *,
+        scope: StopScope = StopScope.TURN,
+        reason: str = "user",
+    ) -> StopResult:
+        """Scoped stop for ``session_id`` (Issue #5129).
+
+        ``scope=TURN`` (default) cancels only the in-flight turn — today's
+        behaviour. ``scope=SESSION`` additionally drains the session inbox so no
+        queued-but-unstarted message is executed after the stop. The drained
+        count is returned as a visible, intentional non-outcome rather than
+        silently dropped, so a session stop always accounts for both running and
+        queued work even when there is no active turn.
+        """
+        turn_aborted = self._abort_active_turn(session_id, reason=reason)
+        cancelled = 0
+        if scope is StopScope.SESSION:
+            session = self._sessions.get(session_id)
+            if session is not None:
+                inbox = session._inbox
+                while not inbox.empty():
+                    try:
+                        inbox.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    cancelled += 1
+        return StopResult(scope=scope, turn_aborted=turn_aborted, pending_cancelled=cancelled)
 
     async def _drive_turn(
         self,

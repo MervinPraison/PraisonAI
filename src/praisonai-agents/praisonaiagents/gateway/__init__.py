@@ -192,6 +192,9 @@ _LAZY_IMPORTS = {
     "EmergencyStopProtocol": ("praisonaiagents.gateway.protocols", "EmergencyStopProtocol"),
     "NullEmergencyStop": ("praisonaiagents.gateway.protocols", "NullEmergencyStop"),
     "FileEmergencyStop": ("praisonaiagents.gateway.protocols", "FileEmergencyStop"),
+    # Per-session stop scope (Issue #5129)
+    "StopScope": ("praisonaiagents.gateway.protocols", "StopScope"),
+    "StopResult": ("praisonaiagents.gateway.protocols", "StopResult"),
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams": ("praisonaiagents.gateway.protocols", "HelloParams"),
     "HelloResult": ("praisonaiagents.gateway.protocols", "HelloResult"),
@@ -503,6 +506,8 @@ __all__ = [
     "EmergencyStopProtocol",
     "NullEmergencyStop",
     "FileEmergencyStop",
+    "StopScope",
+    "StopResult",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
     "HelloResult",
