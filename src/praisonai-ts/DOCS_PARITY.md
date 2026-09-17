@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 3041 |
+| ✅ Agent | 109 | 7 | 3043 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 290 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -48,7 +48,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Files | 15 | 1 | 151 |
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
-| ✅ Guardrails | 18 | 3 | 744 |
+| ✅ Guardrails | 18 | 3 | 749 |
 | ✅ Handoffs | 16 | 1 | 420 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
@@ -86,7 +86,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 60 | 18 | 3754 |
+| ✅ Tools | 60 | 20 | 4115 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |
