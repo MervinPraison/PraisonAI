@@ -267,20 +267,20 @@ jobs:
       - name: Stash merge gate helpers
         run: cp .github/scripts/merge-gate.js /tmp/merge-gate.js
 
+      - name: Pick Claude OAuth token
+        id: oauth
+        uses: MervinPraison/github-automation-template/.github/actions/pick-oauth-token@v1.1.9
+        with:
+          token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
+
       - name: Fetch PR branch
         env:
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
           git fetch origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
           git checkout "pr-${PR_NUMBER}"
-
-      - name: Pick Claude OAuth token
-        id: oauth
-        uses: ./.github/actions/pick-oauth-token
-        with:
-          token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
-          active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
 
       - name: Claude merge gate assessment (read-only)
         id: assess

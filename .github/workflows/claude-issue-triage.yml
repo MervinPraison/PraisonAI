@@ -30,7 +30,7 @@ jobs:
 
       - name: Pick Claude OAuth token
         id: oauth
-        uses: ./.github/actions/pick-oauth-token
+        uses: MervinPraison/github-automation-template/.github/actions/pick-oauth-token@v1.1.9
         with:
           token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
