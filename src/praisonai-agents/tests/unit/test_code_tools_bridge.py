@@ -388,6 +388,124 @@ def test_serve_tool_call_rejects_unregistered(registry):
         serve_tool_call("ghost", [], {}, allowed=["ghost"], registry=registry)
 
 
+# ---------------------------------------------------------------------------
+# Shipped default transport — LocalProcessBridge (subprocess + bridged tools)
+# ---------------------------------------------------------------------------
+
+
+def test_local_process_bridge_satisfies_protocol():
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    assert isinstance(LocalProcessBridge(), CodeToolBridge)
+
+
+def test_isolated_multi_step_pipeline_over_bridge(registry):
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    code = (
+        "vals = [fetch(u) for u in ['a', 'b', 'c']]\n"
+        "best = max(double(v) for v in vals)\n"
+        "best\n"
+    )
+    result = execute_code_with_tools(
+        code,
+        allowed_tools=["fetch", "double"],
+        registry=registry,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is True
+    assert result["result"] == "6"
+
+
+def test_isolated_stdout_only_returns(registry):
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    code = "print('answer:', fetch('a') + fetch('b'))\n"
+    result = execute_code_with_tools(
+        code,
+        allowed_tools=["fetch"],
+        registry=registry,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is True
+    assert "answer: 3" in result["stdout"]
+
+
+def test_isolated_rejects_disallowed_bare_name(registry):
+    # A disallowed tool is simply not present in the isolated child's namespace,
+    # so the script fails outright (stronger than the in-process path: the name
+    # never even resolves to a proxy).
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    result = execute_code_with_tools(
+        "double(2)\n",
+        allowed_tools=["fetch"],
+        registry=registry,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is False
+
+
+def test_isolated_rejects_disallowed_via_tools_namespace(registry):
+    # The tools.<name> form DOES cross the boundary; the parent-side gate must
+    # reject it (authoritative), surfacing as PermissionError to the caller.
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    with pytest.raises(PermissionError):
+        execute_code_with_tools(
+            "tools.double(x=2)\n",
+            allowed_tools=["fetch"],
+            registry=registry,
+            bridge=LocalProcessBridge(),
+        )
+
+
+def test_isolated_blocks_imports(registry):
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    result = execute_code_with_tools(
+        "import os\nprint(os.getcwd())\n",
+        allowed_tools=["fetch"],
+        registry=registry,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is False
+
+
+def test_build_code_execution_tools_isolated_mode(registry):
+    from praisonaiagents.tools.python_tools import build_code_execution_tools
+
+    tools = build_code_execution_tools(
+        code_mode="isolated",
+        allowed_tools=["fetch"],
+        registry=registry,
+    )
+    assert len(tools) == 1
+    assert tools[0].__name__ == "execute_code"
+
+
+def test_build_code_execution_tools_rejects_unknown_mode():
+    from praisonaiagents.tools.python_tools import build_code_execution_tools
+
+    with pytest.raises(ValueError):
+        build_code_execution_tools(code_mode="bogus")
+
+
+def test_execution_config_accepts_isolated():
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+
+    cfg = ExecutionConfig(code_execution=True, code_mode="isolated")
+    assert cfg.code_mode == "isolated"
+    assert ExecutionConfig.from_dict(cfg.to_dict()).code_mode == "isolated"
+
+
+def test_execution_config_rejects_unknown_code_mode():
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+
+    with pytest.raises(ValueError):
+        ExecutionConfig(code_execution=True, code_mode="bogus")
+
+
 def test_serve_tool_call_honours_approval_gate(registry):
     from praisonaiagents.approval import (
         add_approval_requirement,

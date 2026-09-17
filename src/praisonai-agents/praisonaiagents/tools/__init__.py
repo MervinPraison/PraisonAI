@@ -304,6 +304,7 @@ _PROFILE_EXPORTS = frozenset({
 # default path; only resolved when the opt-in code mode is used).
 _TOOL_PROXY_EXPORTS = frozenset({
     'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
+    'LocalProcessBridge',
 })
 
 def __getattr__(name: str) -> Any:
@@ -315,12 +316,14 @@ def __getattr__(name: str) -> Any:
             build_tool_namespace,
             CodeToolBridge,
             serve_tool_call,
+            LocalProcessBridge,
         )
         return {
             'ToolProxy': ToolProxy,
             'build_tool_namespace': build_tool_namespace,
             'CodeToolBridge': CodeToolBridge,
             'serve_tool_call': serve_tool_call,
+            'LocalProcessBridge': LocalProcessBridge,
         }[name]
 
     # Handle circuit breaker imports first
@@ -438,7 +441,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
     'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
-    'Tools',
+    'LocalProcessBridge', 'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
     'RetryPolicy', 'FallbackChain', 'ToolExecutionConfig',
