@@ -12,7 +12,7 @@ import os
 import shutil
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext as _nullcontext
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -117,6 +117,20 @@ class RunHistory:
         
         if backend is None:
             self._ensure_structure()
+
+    def _index_lock(self):
+        """Return the cross-process index lock guard.
+
+        Only file-based storage has a real filesystem sidecar to lock; backends
+        manage their own index persistence (``save("_index")``) and deliberately
+        skip local directory creation, so opening a ``.lock`` file under an
+        uninitialised ``self.path`` would raise ``FileNotFoundError``. For
+        backends we rely on the in-process ``RLock`` (and the backend's own
+        atomicity) instead of a filesystem advisory lock.
+        """
+        if self._backend is not None:
+            return _nullcontext()
+        return _index_flock(self.index_path)
     
     def _ensure_structure(self):
         """Ensure storage directory structure exists."""
@@ -239,7 +253,7 @@ class RunHistory:
         
         # Update index under lock so concurrent store()/delete() calls don't
         # clobber each other's entries (in-process + cross-process).
-        with self._lock, _index_flock(self.index_path):
+        with self._lock, self._index_lock():
             index = self._load_index()
             index["runs"][run_id] = {
                 "recipe": result.recipe,
@@ -411,14 +425,14 @@ class RunHistory:
         Returns:
             True if deleted
         """
-        if self._backend is not None:
-            self._backend.delete(f"run:{run_id}")
-        else:
-            run_dir = self.path / run_id
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
-        
-        with self._lock, _index_flock(self.index_path):
+        with self._lock, self._index_lock():
+            if self._backend is not None:
+                self._backend.delete(f"run:{run_id}")
+            else:
+                run_dir = self.path / run_id
+                if run_dir.exists():
+                    shutil.rmtree(run_dir)
+
             index = self._load_index()
             if run_id in index["runs"]:
                 del index["runs"][run_id]
@@ -442,7 +456,7 @@ class RunHistory:
         # Snapshot the index under lock, then act on the snapshot. Orphan
         # pruning is persisted under the same lock; retention deletes go through
         # ``delete()`` which locks independently (RLock is reentrant).
-        with self._lock, _index_flock(self.index_path):
+        with self._lock, self._index_lock():
             index = self._load_index()
             orphans_removed = False
             for run_id in list(index["runs"].keys()):
@@ -498,13 +512,25 @@ class RunHistory:
 # Global instance for convenience
 _default_history: Optional[RunHistory] = None
 _default_history_lock = threading.Lock()
+# Cache of file-based instances keyed by resolved path so repeated
+# ``get_history(path)`` calls share one ``RunHistory`` (and therefore one
+# in-process ``RLock``). Without this each call built a fresh instance with its
+# own lock, so concurrent stores could not be serialised on platforms where the
+# ``fcntl`` advisory lock is a no-op (Windows).
+_path_histories: Dict[str, RunHistory] = {}
 
 
 def get_history(path: Optional[Path] = None) -> RunHistory:
     """Get or create default run history instance."""
     global _default_history
     if path:
-        return RunHistory(path)
+        key = str(Path(path).expanduser().resolve())
+        with _default_history_lock:
+            history = _path_histories.get(key)
+            if history is None:
+                history = RunHistory(path)
+                _path_histories[key] = history
+            return history
     with _default_history_lock:
         if _default_history is None:
             _default_history = RunHistory()

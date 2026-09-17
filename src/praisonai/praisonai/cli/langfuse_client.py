@@ -89,6 +89,18 @@ class LangfuseClient:
         self._session = requests.Session()
         self._session.auth = self._auth
     
+    def close(self) -> None:
+        """Close the underlying HTTP session and release its connection pool."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            session.close()
+
+    def __enter__(self) -> "LangfuseClient":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.close()
+
     @classmethod
     def from_config_file(cls, config_path: Optional[Path] = None) -> "LangfuseClient":
         """

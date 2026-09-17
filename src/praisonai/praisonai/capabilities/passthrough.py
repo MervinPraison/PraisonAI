@@ -7,6 +7,7 @@ Provides generic API passthrough functionality for provider-specific endpoints.
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
+import asyncio
 import ipaddress
 import threading
 
@@ -18,6 +19,7 @@ import threading
 # safely serves callers with different ``timeout`` values.
 _sync_client: Any = None
 _async_client: Any = None
+_async_client_loop: Any = None
 _client_lock = threading.Lock()
 
 
@@ -33,14 +35,63 @@ def _get_sync_client() -> Any:
 
 
 def _get_async_client() -> Any:
-    """Return the shared async httpx client, constructing it lazily."""
-    global _async_client
-    if _async_client is None:
-        with _client_lock:
-            if _async_client is None:
-                import httpx
-                _async_client = httpx.AsyncClient()
-    return _async_client
+    """Return the shared async httpx client for the running event loop.
+
+    ``httpx.AsyncClient`` binds its connection pool to the event loop that first
+    used it, so a client cached across separate ``asyncio.run()`` lifecycles (or
+    reused from a different loop) fails with a loop-closed error. We therefore
+    key the cached client to its owning loop and rebuild it whenever the current
+    loop differs from the one that created it.
+    """
+    global _async_client, _async_client_loop
+    import httpx
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    with _client_lock:
+        if _async_client is None or _async_client_loop is not current_loop:
+            _async_client = httpx.AsyncClient()
+            _async_client_loop = current_loop
+        return _async_client
+
+
+def close_clients() -> None:
+    """Close the cached sync client and clear the sync/async globals.
+
+    Provided as an explicit shutdown hook for long-lived hosts that want to
+    release the pooled sockets deterministically. The async client cannot be
+    awaited from this sync helper, so it is dropped (and rebuilt per-loop on next
+    use); the sync client is closed here.
+    """
+    global _sync_client, _async_client, _async_client_loop
+    with _client_lock:
+        if _sync_client is not None:
+            try:
+                _sync_client.close()
+            finally:
+                _sync_client = None
+        _async_client = None
+        _async_client_loop = None
+
+
+async def aclose_clients() -> None:
+    """Await-close the cached async client (in its own loop) and the sync one."""
+    global _sync_client, _async_client, _async_client_loop
+    client = None
+    with _client_lock:
+        client = _async_client
+        _async_client = None
+        _async_client_loop = None
+        if _sync_client is not None:
+            try:
+                _sync_client.close()
+            finally:
+                _sync_client = None
+    if client is not None:
+        await client.aclose()
 
 
 @dataclass

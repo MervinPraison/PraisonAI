@@ -72,7 +72,21 @@ class JobExecutor:
         # POSTs share a keep-alive connection pool instead of doing a fresh TLS
         # handshake per notification. Constructed lazily and closed on stop().
         self._webhook_client = None
+        # Guards the lazy construction of ``_webhook_client`` so two concurrent
+        # first-time webhook sends can't each build a client and leak one that
+        # ``stop()`` never closes. Created lazily inside the running loop.
+        self._webhook_client_lock: Optional[asyncio.Lock] = None
     
+    async def _get_webhook_client(self):
+        """Return the shared webhook client, building it once under a lock."""
+        import httpx
+        if self._webhook_client_lock is None:
+            self._webhook_client_lock = asyncio.Lock()
+        async with self._webhook_client_lock:
+            if self._webhook_client is None:
+                self._webhook_client = httpx.AsyncClient(timeout=30.0)
+            return self._webhook_client
+
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Lazily create semaphore to avoid event loop issues."""
         if self._semaphore is None:
@@ -107,14 +121,18 @@ class JobExecutor:
         
         self._running_tasks.clear()
         
-        # Release the shared webhook connection pool.
-        if self._webhook_client is not None:
+        # Release the shared webhook connection pool. Take the same lock a send
+        # uses so we never close the client out from under an in-flight POST.
+        if self._webhook_client_lock is not None:
+            async with self._webhook_client_lock:
+                client, self._webhook_client = self._webhook_client, None
+        else:
+            client, self._webhook_client = self._webhook_client, None
+        if client is not None:
             try:
-                await self._webhook_client.aclose()
+                await client.aclose()
             except Exception as e:
                 logger.warning(f"Error closing webhook client: {e}")
-            finally:
-                self._webhook_client = None
         
         logger.info("JobExecutor stopped")
     
@@ -507,8 +525,6 @@ class JobExecutor:
             return
         
         try:
-            import httpx
-            
             payload = {
                 "job_id": job.id,
                 "status": job.status.value,
@@ -518,9 +534,8 @@ class JobExecutor:
                 "duration_seconds": job.duration_seconds
             }
             
-            if self._webhook_client is None:
-                self._webhook_client = httpx.AsyncClient(timeout=30.0)
-            response = await self._webhook_client.post(
+            client = await self._get_webhook_client()
+            response = await client.post(
                 job.webhook_url,
                 json=payload,
                 headers={"Content-Type": "application/json"}
