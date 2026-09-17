@@ -65,17 +65,29 @@ def _reset_framework_availability_cache():
     ``praisonai_code._framework_availability`` memoises answers in a module-global
     ``_cache``. Without per-test invalidation, an answer computed while a test has
     stubbed ``importlib.util.find_spec`` / ``importlib.metadata.distribution`` leaks
-    into later tests in the same process. Reset before and after each test so a
-    stubbed answer never outlives the patch that produced it.
+    into later tests in the same process. The process-default framework adapter
+    registry keeps a second memo (``_avail_cache``) fed from the same probe via
+    ``adapter.is_available()``, so a stubbed answer can outlive its patch there too.
+    Reset both before and after each test so a stubbed answer never outlives the
+    patch that produced it.
     """
-    try:
-        from praisonai_code import _framework_availability
-    except ImportError:
-        yield
-        return
-    _framework_availability.invalidate()
+    def _invalidate():
+        try:
+            from praisonai_code import _framework_availability
+        except ImportError:
+            pass
+        else:
+            _framework_availability.invalidate()
+        try:
+            from praisonai.framework_adapters.registry import get_default_registry
+        except ImportError:
+            pass
+        else:
+            get_default_registry().invalidate_availability()
+
+    _invalidate()
     yield
-    _framework_availability.invalidate()
+    _invalidate()
 
 
 @pytest.fixture(autouse=True)
