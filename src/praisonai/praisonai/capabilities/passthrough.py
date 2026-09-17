@@ -8,6 +8,39 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
 import ipaddress
+import threading
+
+
+# Shared HTTP clients for the httpx fallback path (used when litellm's
+# passthrough route is unavailable). Reused across calls so the hot passthrough
+# fallback shares a keep-alive connection pool instead of opening + tearing down
+# a socket per agent call. Timeout is applied per-request, so a single client
+# safely serves callers with different ``timeout`` values.
+_sync_client: Any = None
+_async_client: Any = None
+_client_lock = threading.Lock()
+
+
+def _get_sync_client() -> Any:
+    """Return the shared sync httpx client, constructing it lazily."""
+    global _sync_client
+    if _sync_client is None:
+        with _client_lock:
+            if _sync_client is None:
+                import httpx
+                _sync_client = httpx.Client()
+    return _sync_client
+
+
+def _get_async_client() -> Any:
+    """Return the shared async httpx client, constructing it lazily."""
+    global _async_client
+    if _async_client is None:
+        with _client_lock:
+            if _async_client is None:
+                import httpx
+                _async_client = httpx.AsyncClient()
+    return _async_client
 
 
 @dataclass
@@ -121,22 +154,20 @@ def passthrough(
             metadata=metadata or {},
         )
     except AttributeError:
-        # Fallback to httpx if passthrough not available
-        import httpx
-        
+        # Fallback to a shared httpx client if the passthrough route is missing.
         url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method=method,
-                url=url,
-                headers=request_headers,
-                json=json_data,
-                data=data,
-            )
+        response = _get_sync_client().request(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json=json_data,
+            data=data,
+            timeout=timeout,
+        )
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
@@ -203,21 +234,19 @@ async def apassthrough(
             metadata=metadata or {},
         )
     except AttributeError:
-        import httpx
-        
         url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=request_headers,
-                json=json_data,
-                data=data,
-            )
+        response = await _get_async_client().request(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json=json_data,
+            data=data,
+            timeout=timeout,
+        )
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,

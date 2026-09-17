@@ -111,16 +111,6 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         )
 
     def resolve_or_default(self, name: Optional[str]) -> str:
-        """Resolve an optional framework name to an explicit or default name.
-
-        Callers that accept an optional framework must use the registry's
-        default-selection policy when no name is supplied.  Keeping this small
-        decision here prevents wrapper entry points from silently bypassing
-        ``pick_default()`` with a framework-specific fallback.
-        """
-        return name or self.pick_default()
-    
-    def resolve_or_default(self, name: Optional[str]) -> str:
         """Resolve an explicit framework name, or fall back to the default.
 
         Single source of truth for the ``name or 'praisonai'`` fallbacks that

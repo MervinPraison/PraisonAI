@@ -68,6 +68,10 @@ class JobExecutor:
         # dashboard tabs streaming the same run), so keep a list of callbacks
         # per job and fan-out to all of them.
         self._progress_callbacks: Dict[str, list] = {}
+        # Shared webhook client: reused across every completed job so webhook
+        # POSTs share a keep-alive connection pool instead of doing a fresh TLS
+        # handshake per notification. Constructed lazily and closed on stop().
+        self._webhook_client = None
     
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Lazily create semaphore to avoid event loop issues."""
@@ -102,6 +106,16 @@ class JobExecutor:
                 pass
         
         self._running_tasks.clear()
+        
+        # Release the shared webhook connection pool.
+        if self._webhook_client is not None:
+            try:
+                await self._webhook_client.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing webhook client: {e}")
+            finally:
+                self._webhook_client = None
+        
         logger.info("JobExecutor stopped")
     
     async def _cleanup_loop(self):
@@ -504,17 +518,18 @@ class JobExecutor:
                 "duration_seconds": job.duration_seconds
             }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    job.webhook_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                if response.status_code >= 400:
-                    logger.warning(f"Webhook failed for {job.id}: {response.status_code}")
-                else:
-                    logger.info(f"Webhook sent for {job.id}")
+            if self._webhook_client is None:
+                self._webhook_client = httpx.AsyncClient(timeout=30.0)
+            response = await self._webhook_client.post(
+                job.webhook_url,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code >= 400:
+                logger.warning(f"Webhook failed for {job.id}: {response.status_code}")
+            else:
+                logger.info(f"Webhook sent for {job.id}")
                     
         except Exception as e:
             logger.error(f"Webhook error for {job.id}: {e}")
