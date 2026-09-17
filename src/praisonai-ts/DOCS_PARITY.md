@@ -86,7 +86,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 60 | 20 | 4115 |
+| ✅ Tools | 60 | 18 | 3754 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |
