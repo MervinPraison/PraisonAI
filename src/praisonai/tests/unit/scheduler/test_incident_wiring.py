@@ -81,13 +81,19 @@ class FakeRunner:
         return []
 
 
-def _make(store=None, after=1, deliver=True):
+def _make(store=None, after=1, deliver=True, send_result=True):
     agent = FakeAgent()
     deliveries: List[Tuple[Any, str]] = []
+    # ``send_result`` may be a bool (fixed) or a callable(text)->bool so a test
+    # can make specific sends fail (e.g. the failure alert but not the success
+    # output delivery) to exercise the delivery-failure retry path.
+    _decide = send_result if callable(send_result) else (lambda _t: send_result)
 
     async def handler(delivery, text):
-        deliveries.append((delivery, text))
-        return True
+        ok = _decide(text)
+        if ok:
+            deliveries.append((delivery, text))
+        return ok
 
     executor = ScheduledAgentExecutor(
         runner=FakeRunner(store),
@@ -115,11 +121,8 @@ def _run_failure(executor, agent, job, error):
 
 
 async def _tick_success(executor, job):
-    """Route a success through ``tick`` so the recovery observer fires."""
-    result = await executor._execute_one(job)
-    if getattr(result, "status", None) == "succeeded":
-        await executor._maybe_deliver_recovery(job, result)
-    return result
+    """Route a success through ``_execute_one`` (recovery observed inside it)."""
+    return await executor._execute_one(job)
 
 
 def _alerts(deliveries):
@@ -243,3 +246,83 @@ class TestFallbackAndDisabled:
 
         assert _alerts(deliveries) == []
         assert _recoveries(deliveries) == []
+
+
+class TestDeliveryFailureRetry:
+    """A failed send must NOT consume the alert/recovery (Qodo/Greptile P1)."""
+
+    def test_failed_alert_send_retries_next_tick(self):
+        store = FakeStateStore()
+        # The failure alert never reaches the channel on the first attempt but
+        # succeeds thereafter — the alert must be retried, not swallowed.
+        attempts = {"n": 0}
+
+        def decide(text):
+            if text.startswith("⚠️"):
+                attempts["n"] += 1
+                return attempts["n"] > 1  # first alert send fails
+            return True
+
+        executor, agent, deliveries = _make(store, send_result=decide)
+        job = FakeJob()
+
+        _run_failure(executor, agent, job, "401 unauthorised")
+        # First send failed → nothing recorded, incident not latched as alerted.
+        assert _alerts(deliveries) == []
+        _run_failure(executor, agent, job, "401 unauthorised")
+        # Second identical failure re-observes and this time the alert lands.
+        assert len(_alerts(deliveries)) == 1
+
+    def test_failed_recovery_send_retries_next_success(self):
+        store = FakeStateStore()
+        attempts = {"n": 0}
+
+        def decide(text):
+            if text.startswith("✅"):
+                attempts["n"] += 1
+                return attempts["n"] > 1  # first recovery send fails
+            return True
+
+        executor, agent, deliveries = _make(store, send_result=decide)
+        job = FakeJob()
+
+        _run_failure(executor, agent, job, "401 unauthorised")
+        assert len(_alerts(deliveries)) == 1
+        # First success: recovery send fails → incident stays open.
+        asyncio.run(_tick_success(executor, job))
+        assert _recoveries(deliveries) == []
+        # Next success retries and the recovery note lands exactly once.
+        asyncio.run(_tick_success(executor, job))
+        assert len(_recoveries(deliveries)) == 1
+
+
+class TestDirectExecutePathRecovery:
+    """Direct ``_execute_one`` callers (CLI poller, host bridge) must recover."""
+
+    def test_direct_success_clears_incident_and_recovers(self):
+        store = FakeStateStore()
+        executor, agent, deliveries = _make(store)
+        job = FakeJob()
+
+        _run_failure(executor, agent, job, "401 unauthorised")
+        assert len(_alerts(deliveries)) == 1
+        # A plain ``_execute_one`` success (no manual recovery call) must both
+        # send the recovery note and clear the incident.
+        _run_success(executor, job)
+        assert len(_recoveries(deliveries)) == 1
+        # The same error recurring afterwards re-alerts (incident was cleared).
+        _run_failure(executor, agent, job, "401 unauthorised")
+        assert len(_alerts(deliveries)) == 2
+
+
+class TestRunPolicyBackwardCompat:
+    """Positional constructor order of pre-existing fields must be preserved."""
+
+    def test_positional_audit_dir_and_scanner(self):
+        scanner = object()
+        # Historical positional order: allowed_toolsets, denied_toolsets,
+        # scan_assembled_prompt, deliver_on_failure, audit_dir, scanner.
+        policy = RunPolicy(None, set(), True, True, "/tmp/audit", scanner)
+        assert policy.audit_dir == "/tmp/audit"
+        assert policy.scanner is scanner
+        assert policy.alert_after_failures == 1

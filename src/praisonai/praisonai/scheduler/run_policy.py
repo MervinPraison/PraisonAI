@@ -102,9 +102,11 @@ class RunPolicy:
     )
     scan_assembled_prompt: bool = True
     deliver_on_failure: bool = True
-    alert_after_failures: int = 1
     audit_dir: Optional[str] = None
     scanner: Optional[Any] = None
+    # Appended last to keep the pre-existing positional constructor order of
+    # ``audit_dir``/``scanner`` stable for callers that pass them positionally.
+    alert_after_failures: int = 1
 
     # ── toolset scoping ──────────────────────────────────────────────
 
