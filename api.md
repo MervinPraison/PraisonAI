@@ -1056,7 +1056,7 @@ export type { AsyncLearnProtocol, BaseStoreOptions, LearnEntryConvertible, Learn
 export { Memory, createMemory } from "./memory/memory";
 export type { MemoryConfig, MemoryEntry } from "./memory/memory";
 export { RulesManager, createRulesManager, createSafetyRules } from "./memory/rules-manager";
-export { DEFAULT_PROFILE, HarnessProfile, listHarnessProfiles, registerProfile, register_profile, resetHarnessRegistry, resolveHarness, resolve_harness } from "./model-harness";
+export { DEFAULT_PROFILE, HarnessProfile, ModelRequestBlocked, ScriptExhausted, ScriptedModel, allowModelRequests, listHarnessProfiles, modelRequestsAllowed, noModelRequests, registerProfile, register_profile, resetHarnessRegistry, resolveHarness, resolve_harness } from "./model-harness";
 export type { HarnessProfileConfig, HarnessRegistryEntry, HarnessResolverProtocol } from "./model-harness";
 export { // Adapters
   NoopObservabilityAdapter, // Constants
