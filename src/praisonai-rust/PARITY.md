@@ -1,6 +1,6 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 417 | **Rust Features:** 667 | **Parity:** 68.8%
+> **Python Features:** 421 | **Rust Features:** 667 | **Parity:** 68.2%
 
 > [!IMPORTANT]
 > **What this measures:** whether a matching *exported symbol name* exists in the
@@ -14,11 +14,11 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 417 |
+| Python Core Features | 421 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **130** |
+| **Actual Gap Count** | **134** |
 | Language Limitations (N/A) | 4 |
-| **Parity** | **68.8%** |
+| **Parity** | **68.2%** |
 
 ## Implemented Features
 
@@ -774,6 +774,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `RulesConfig`
 - ❌ `RunOutcome`
 - ❌ `RunStatus`
+- ❌ `RunTerminal`
 - ❌ `ScriptExhausted`
 - ❌ `ScriptedModel`
 - ❌ `SendResult`
@@ -796,6 +797,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `add_memory_adapter`
 - ❌ `add_memory_factory`
 - ❌ `allow_model_requests`
+- ❌ `collapse`
 - ❌ `configure_structured_logging`
 - ❌ `discover_skills`
 - ❌ `get_default_policy`
@@ -809,10 +811,12 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `has_toolset`
 - ❌ `if_`
 - ❌ `include`
+- ❌ `is_sticky`
 - ❌ `list_memory_adapters`
 - ❌ `list_runtimes`
 - ❌ `list_toolsets`
 - ❌ `load_skill`
+- ❌ `merge_run_terminal`
 - ❌ `no_model_requests`
 - ❌ `parallel_handoffs`
 - ❌ `register_memory_adapter`

@@ -4,15 +4,15 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 417,
+    "pythonCoreFeatures": 421,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 2082,
-    "gapCount": 0,
+    "gapCount": 4,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 0
+    "priorityP3": 4
   },
   "pythonCoreSDK": {
     "path": "src/praisonai-agents/praisonaiagents",
@@ -262,6 +262,7 @@
       "RulesConfig",
       "RunOutcome",
       "RunStatus",
+      "RunTerminal",
       "SandboxConfig",
       "SandboxProtocol",
       "SandboxResult",
@@ -328,6 +329,7 @@
       "async_display_callbacks",
       "clean_triple_backticks",
       "cleanup_telemetry_resources",
+      "collapse",
       "config",
       "configure_structured_logging",
       "create_context_agent",
@@ -376,6 +378,7 @@
       "include",
       "is_path_like",
       "is_policy_string",
+      "is_sticky",
       "list_memory_adapters",
       "list_runtimes",
       "list_toolsets",
@@ -383,6 +386,7 @@
       "load_skill",
       "loop",
       "memory",
+      "merge_run_terminal",
       "no_model_requests",
       "parallel",
       "parallel_handoffs",
@@ -727,6 +731,7 @@
         "RetryBackoffConfig",
         "RunOutcome",
         "RunStatus",
+        "RunTerminal",
         "ScopeRequiredError",
         "ScriptExhausted",
         "ScriptedModel",
@@ -746,6 +751,7 @@
         "add_memory_adapter",
         "add_memory_factory",
         "allow_model_requests",
+        "collapse",
         "config",
         "configure_structured_logging",
         "embedding",
@@ -757,10 +763,12 @@
         "get_toolset_registry",
         "has_memory_adapter",
         "has_toolset",
+        "is_sticky",
         "list_memory_adapters",
         "list_runtimes",
         "list_toolsets",
         "memory",
+        "merge_run_terminal",
         "no_model_requests",
         "register_memory_adapter",
         "register_memory_factory",
@@ -6865,6 +6873,15 @@
         "category": "other"
       },
       {
+        "feature": "RunTerminal",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SandboxConfig",
         "python": true,
         "typescript": true,
@@ -7244,6 +7261,15 @@
         "category": "main"
       },
       {
+        "feature": "collapse",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "config",
         "python": true,
         "typescript": true,
@@ -7560,6 +7586,15 @@
         "category": "config"
       },
       {
+        "feature": "is_sticky",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "list_memory_adapters",
         "python": true,
         "typescript": true,
@@ -7602,6 +7637,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "merge_run_terminal",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "other"
       },
       {

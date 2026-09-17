@@ -22,15 +22,15 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 417 |
+| Python Core Features | 421 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 2082 |
-| **Gap Count** | **0** |
+| **Gap Count** | **4** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 0 |
+| P3 (Low) | 4 |
 
 ## Gap Matrix
 
@@ -176,10 +176,14 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (290 exported, 0 stub, 0 missing)
+### P3_Advanced (290 exported, 0 stub, 4 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `RunTerminal` | ✅ | ❌ | high | ⏳ missing |
+| `collapse` | ✅ | ❌ | low | ⏳ missing |
+| `is\_sticky` | ✅ | ❌ | low | ⏳ missing |
+| `merge\_run\_terminal` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
 | `AGGRESSIVE\_POLICY` | ✅ | ✅ | low | ✅ exported |
@@ -620,7 +624,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (111 exports)</summary>
+<summary><strong>other</strong> (115 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

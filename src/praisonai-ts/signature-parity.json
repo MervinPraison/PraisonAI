@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3099",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3110",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2518",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2554",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4656,7 +4656,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:420",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:426",
         "resolved_class": "LLM"
       },
       "ts_only": [
