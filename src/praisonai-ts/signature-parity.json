@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:618",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:621",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -2859,7 +2859,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/team.ts:1112",
+        "location": "src/praisonai-ts/src/agent/team.ts:1125",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
