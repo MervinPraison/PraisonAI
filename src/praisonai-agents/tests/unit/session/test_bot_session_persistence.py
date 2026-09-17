@@ -5,6 +5,7 @@ Tests that BotSessionManager uses SessionStoreProtocol for persistent
 per-user session isolation instead of in-memory-only storage.
 """
 
+import pytest
 import asyncio
 import tempfile
 

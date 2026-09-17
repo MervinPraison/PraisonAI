@@ -669,20 +669,14 @@ class TestCLIToWhatsAppBotWiring:
         from praisonai.cli.features.bots_cli import BotHandler
 
         handler = BotHandler()
-        # Patch where start_whatsapp looks the name up: it does
-        # `from praisonai_bot.bots import WhatsAppBot`, reading the
-        # package-level binding, so patching the `whatsapp` submodule
-        # attribute left that binding untouched.
-        with patch("praisonai_bot.bots.WhatsAppBot") as MockBot:
+        # start_whatsapp does `from praisonai_bot.bots import WhatsAppBot` at
+        # call time, so patching praisonai.bots.whatsapp missed entirely: a REAL
+        # WhatsAppBot was constructed and started, and the test hung until the
+        # 60s pytest timeout instead of asserting anything.
+        with patch("praisonai_bot.bots.WhatsAppBot") as MockBot, \
+                patch("praisonai_bot.cli.features.bots_cli._run_bot"):
             MockBot.return_value = MagicMock()
             MockBot.return_value.start = AsyncMock()
-            # _serve_bot holds the loop open with
-            #   while getattr(bot, "is_running", False): await sleep(0.5)
-            # and a bare MagicMock's is_running is truthy forever, so the CLI
-            # never returned and this test hung the whole run.
-            MockBot.return_value.is_running = False
-            for _attr in ("_poll_task", "_run_task", "_serve_task"):
-                setattr(MockBot.return_value, _attr, None)
             handler.start_whatsapp(
                 mode="web",
                 allowed_numbers=["1234567890", "5555555"],
@@ -702,20 +696,13 @@ class TestCLIToWhatsAppBotWiring:
         from praisonai.cli.features.bots_cli import BotHandler
 
         handler = BotHandler()
-        # Patch where start_whatsapp looks the name up: it does
-        # `from praisonai_bot.bots import WhatsAppBot`, reading the
-        # package-level binding, so patching the `whatsapp` submodule
-        # attribute left that binding untouched.
-        with patch("praisonai_bot.bots.WhatsAppBot") as MockBot:
+        # _run_bot is patched too: start_whatsapp ends with asyncio.run on the
+        # bot's serve loop, which never returns. These tests only care about the
+        # constructor kwargs.
+        with patch("praisonai_bot.bots.WhatsAppBot") as MockBot, \
+                patch("praisonai_bot.cli.features.bots_cli._run_bot"):
             MockBot.return_value = MagicMock()
             MockBot.return_value.start = AsyncMock()
-            # _serve_bot holds the loop open with
-            #   while getattr(bot, "is_running", False): await sleep(0.5)
-            # and a bare MagicMock's is_running is truthy forever, so the CLI
-            # never returned and this test hung the whole run.
-            MockBot.return_value.is_running = False
-            for _attr in ("_poll_task", "_run_task", "_serve_task"):
-                setattr(MockBot.return_value, _attr, None)
             handler.start_whatsapp(
                 mode="web",
                 respond_to_all=True,
@@ -727,127 +714,84 @@ class TestCLIToWhatsAppBotWiring:
 # ── YAML Config Wiring ───────────────────────────────────────────
 
 class TestYAMLConfigWiring:
-    """Test that YAML config fields are parsed and wired correctly."""
+    """Test that YAML config fields are parsed and wired correctly.
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "YAML has no respond_to key. The CLI flag is --respond-to, but the "
-            "channel schema (_config_schema.py) defines allowed_users, and "
-            "start_from_config wires channel.allowed_users -> allowed_numbers. "
-            "Nothing reads respond_to from a config file, so these assert "
-            "behaviour that was never implemented. Whether YAML should accept "
-            "the CLI's spelling as an alias is a praisonai-bot decision, not "
-            "something to invent here -- the naming split is a real usability "
-            "gap and the schema already warns that a channel with no "
-            "restrictions responds to EVERYONE. Note these also guard the "
-            "assertion behind `if mock_start.called:`, so wherever the config "
-            "path does not reach start_whatsapp they pass without asserting "
-            "anything -- strict=False because that is exactly what happens "
-            "against an older installed praisonai-bot."
-        ),
-    )
-    @patch("praisonai.cli.features.bots_cli.BotHandler._load_agent")
-    @patch("praisonai.cli.features.bots_cli.BotHandler._load_dotenv")
-    def test_yaml_respond_to_list(self, mock_dotenv, mock_load_agent):
-        """YAML respond_to as list."""
-        mock_load_agent.return_value = MagicMock()
+    These tests used to patch builtins.open and yaml.safe_load and feed a FLAT
+    dict ({"platform": ..., "respond_to": ...}). start_from_config no longer
+    reads YAML itself -- it checks the path exists, then hands the FILE to
+    load_and_validate_gateway_yaml, which validates a channels-based schema. So
+    the patches never took effect and every test died on "Config file not
+    found: bot.yaml" before reaching any assertion.
+
+    They also guarded every assertion behind `if mock_start.called:`, so once
+    the call stopped happening the tests would have passed while checking
+    nothing. Real temp files and unconditional assertions now.
+    """
+
+    def _run(self, tmp_path, channel_yaml):
+        """Write a real bot.yaml, run start_from_config, return start_whatsapp kwargs."""
+        cfg = tmp_path / "bot.yaml"
+        cfg.write_text(
+            "channels:\n"
+            "  whatsapp:\n"
+            "    platform: whatsapp\n"
+            '    token: "test-token"\n'
+            + channel_yaml +
+            "agent:\n"
+            "  name: test\n"
+        )
         from praisonai.cli.features.bots_cli import BotHandler
 
         handler = BotHandler()
-        config = {
-            "platform": "whatsapp",
-            "mode": "web",
-            "respond_to": ["1234567890", "9876543210"],
-            "agent": {"name": "test"},
-        }
+        with patch(
+            "praisonai.cli.features.bots_cli.BotHandler.start_whatsapp"
+        ) as mock_start:
+            handler.start_from_config(str(cfg))
 
-        with patch("praisonai.cli.features.bots_cli.BotHandler.start_whatsapp") as mock_start:
-            # start_from_config checks os.path.exists() before opening, so
-            # patching open() alone left it failing with "Config file not
-            # found: bot.yaml" before it ever reached the YAML.
-            with patch("praisonai_bot.cli.features.bots_cli.os.path.exists",
-                       return_value=True), patch("builtins.open", create=True):
-                with patch("yaml.safe_load", return_value=config):
-                    handler.start_from_config("bot.yaml")
-
-            if mock_start.called:
-                call_kwargs = mock_start.call_args[1]
-                assert call_kwargs.get("allowed_numbers") == ["1234567890", "9876543210"]
-
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "YAML has no respond_to key. The CLI flag is --respond-to, but the "
-            "channel schema (_config_schema.py) defines allowed_users, and "
-            "start_from_config wires channel.allowed_users -> allowed_numbers. "
-            "Nothing reads respond_to from a config file, so these assert "
-            "behaviour that was never implemented. Whether YAML should accept "
-            "the CLI's spelling as an alias is a praisonai-bot decision, not "
-            "something to invent here -- the naming split is a real usability "
-            "gap and the schema already warns that a channel with no "
-            "restrictions responds to EVERYONE. Note these also guard the "
-            "assertion behind `if mock_start.called:`, so wherever the config "
-            "path does not reach start_whatsapp they pass without asserting "
-            "anything -- strict=False because that is exactly what happens "
-            "against an older installed praisonai-bot."
-        ),
-    )
-    @patch("praisonai.cli.features.bots_cli.BotHandler._load_agent")
-    @patch("praisonai.cli.features.bots_cli.BotHandler._load_dotenv")
-    def test_yaml_respond_to_string(self, mock_dotenv, mock_load_agent):
-        """YAML respond_to as comma-separated string."""
-        mock_load_agent.return_value = MagicMock()
-        from praisonai.cli.features.bots_cli import BotHandler
-
-        handler = BotHandler()
-        config = {
-            "platform": "whatsapp",
-            "mode": "web",
-            "respond_to": "123,456",
-            "agent": {"name": "test"},
-        }
-
-        with patch("praisonai.cli.features.bots_cli.BotHandler.start_whatsapp") as mock_start:
-            # start_from_config checks os.path.exists() before opening, so
-            # patching open() alone left it failing with "Config file not
-            # found: bot.yaml" before it ever reached the YAML.
-            with patch("praisonai_bot.cli.features.bots_cli.os.path.exists",
-                       return_value=True), patch("builtins.open", create=True):
-                with patch("yaml.safe_load", return_value=config):
-                    handler.start_from_config("bot.yaml")
-
-            if mock_start.called:
-                call_kwargs = mock_start.call_args[1]
-                assert call_kwargs.get("allowed_numbers") == ["123", "456"]
+        assert mock_start.called, "start_whatsapp was never reached"
+        return mock_start.call_args[1]
 
     @patch("praisonai.cli.features.bots_cli.BotHandler._load_agent")
     @patch("praisonai.cli.features.bots_cli.BotHandler._load_dotenv")
-    def test_yaml_respond_to_all(self, mock_dotenv, mock_load_agent):
-        """YAML respond_to_all: true."""
+    def test_yaml_allowed_users_list(self, mock_dotenv, mock_load_agent, tmp_path):
+        """allowed_users as a YAML list becomes allowed_numbers."""
         mock_load_agent.return_value = MagicMock()
-        from praisonai.cli.features.bots_cli import BotHandler
 
-        handler = BotHandler()
-        config = {
-            "platform": "whatsapp",
-            "mode": "web",
-            "respond_to_all": True,
-            "agent": {"name": "test"},
-        }
+        kwargs = self._run(
+            tmp_path,
+            '    allowed_users: ["1234567890", "9876543210"]\n',
+        )
 
-        with patch("praisonai.cli.features.bots_cli.BotHandler.start_whatsapp") as mock_start:
-            # start_from_config checks os.path.exists() before opening, so
-            # patching open() alone left it failing with "Config file not
-            # found: bot.yaml" before it ever reached the YAML.
-            with patch("praisonai_bot.cli.features.bots_cli.os.path.exists",
-                       return_value=True), patch("builtins.open", create=True):
-                with patch("yaml.safe_load", return_value=config):
-                    handler.start_from_config("bot.yaml")
+        assert kwargs.get("allowed_numbers") == ["1234567890", "9876543210"]
+        assert kwargs.get("respond_to_all") is False
 
-            if mock_start.called:
-                call_kwargs = mock_start.call_args[1]
-                assert call_kwargs.get("respond_to_all") is True
+    @patch("praisonai.cli.features.bots_cli.BotHandler._load_agent")
+    @patch("praisonai.cli.features.bots_cli.BotHandler._load_dotenv")
+    def test_yaml_allowed_users_comma_string(self, mock_dotenv, mock_load_agent, tmp_path):
+        """allowed_users as a comma-separated string, the form the CLI accepts.
+
+        The schema widened these fields to List[str] and stopped accepting the
+        string, so `--respond-to 123,456` worked but the same value in bot.yaml
+        raised a ValidationError. A before-validator now splits it, matching
+        admin_users/user_allowed_commands which are comma-separated already.
+        """
+        mock_load_agent.return_value = MagicMock()
+
+        kwargs = self._run(tmp_path, '    allowed_users: "123,456"\n')
+
+        assert kwargs.get("allowed_numbers") == ["123", "456"]
+        assert kwargs.get("respond_to_all") is False
+
+    @patch("praisonai.cli.features.bots_cli.BotHandler._load_agent")
+    @patch("praisonai.cli.features.bots_cli.BotHandler._load_dotenv")
+    def test_yaml_no_restrictions_responds_to_all(self, mock_dotenv, mock_load_agent, tmp_path):
+        """No allowed_users/allowlist/blocklist means respond to everyone."""
+        mock_load_agent.return_value = MagicMock()
+
+        kwargs = self._run(tmp_path, "")
+
+        assert kwargs.get("respond_to_all") is True
+        assert kwargs.get("allowed_numbers") is None
 
 
 # ── Edge Cases ───────────────────────────────────────────────────

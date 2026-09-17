@@ -10,6 +10,8 @@ import tempfile
 import pytest
 import time
 
+import pytest
+
 
 class TestCorpusStats:
     """Tests for CorpusStats dataclass."""

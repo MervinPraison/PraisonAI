@@ -14,6 +14,43 @@ def _env_allowlist() -> Set[str]:
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
+
+def is_ambiguous_numeric_host(hostname: str) -> bool:
+    """True for dotted numeric hosts whose labels are not plain decimal.
+
+    Different resolvers disagree about these, and the disagreement is the
+    vulnerability. glibc's inet_aton reads a leading zero as OCTAL, so
+    "0177.0.0.1" is 127.0.0.1 (loopback); getaddrinfo on macOS reads the same
+    label as decimal and answers 177.0.0.1, a public address. A validator that
+    asks the resolver can therefore clear a host the HTTP client then connects
+    to on loopback -- the parser differential behind GHSA-5c6w-wwfq-7qqm.
+
+    Hex labels ("0x7f.0.0.1") are ambiguous the same way. Neither form has a
+    legitimate use in a URL, so callers reject them outright instead of trying
+    to guess which parser the transport will agree with. Canonical decimal
+    dotted-quads and ordinary hostnames are unaffected.
+    """
+    if not hostname:
+        return False
+    labels = hostname.lower().rstrip(".").split(".")
+    if not (2 <= len(labels) <= 4) or not all(labels):
+        return False
+
+    def _numeric(label: str) -> bool:
+        return label.isdigit() or (
+            label.startswith("0x")
+            and len(label) > 2
+            and all(c in "0123456789abcdef" for c in label[2:])
+        )
+
+    def _ambiguous(label: str) -> bool:
+        return label.startswith("0x") or (
+            len(label) > 1 and label.startswith("0") and label.isdigit()
+        )
+
+    return all(_numeric(l) for l in labels) and any(_ambiguous(l) for l in labels)
+
+
 def is_safe_http_url(
     url: str,
     *,
@@ -40,6 +77,10 @@ def is_safe_http_url(
             allow_local = os.environ.get("ALLOW_LOCAL_CRAWL") == "true"
         if allow_local:
             return True
+        # Reject before resolving: getaddrinfo's answer for these is not
+        # necessarily the address the HTTP client will connect to.
+        if is_ambiguous_numeric_host(hostname):
+            return False
         is_allowlisted = hostname.lower() in allowlist
         for info in socket.getaddrinfo(hostname, None):
             ip = ipaddress.ip_address(info[4][0])

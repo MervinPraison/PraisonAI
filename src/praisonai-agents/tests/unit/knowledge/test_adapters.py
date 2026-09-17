@@ -288,6 +288,9 @@ class TestChromaKnowledgeAdapterWhereFilters:
         from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
 
         adapter = ChromaKnowledgeAdapter.__new__(ChromaKnowledgeAdapter)
+        # Mirrors __init__, which is skipped here to avoid the chromadb import.
+        # _resolve_embedder reads this on every search.
+        adapter._embedder = {}
         adapter.collection = MagicMock()
         # __init__ is bypassed to avoid a real chromadb client, so every
         # attribute the methods under test read must be supplied here.

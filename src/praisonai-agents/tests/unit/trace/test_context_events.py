@@ -648,6 +648,7 @@ class TestPerformance:
     
     def test_import_time(self):
         """Test that import time is minimal (relative to base package)."""
+        import os
         import subprocess
         import sys
         from pathlib import Path

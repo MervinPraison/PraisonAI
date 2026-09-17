@@ -1,6 +1,7 @@
 """Tests for the autonomous skill self-improvement loop (issue #2231)."""
 
 import asyncio
+import pytest
 
 import pytest
 

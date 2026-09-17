@@ -17,6 +17,24 @@ from praisonaiagents.tools.tool_proxy import (
 from praisonaiagents.tools.python_tools import execute_code_with_tools
 
 
+@pytest.fixture(autouse=True)
+def _clean_approval_context():
+    """Every test here starts with nothing pre-approved.
+
+    Approvals are remembered in a contextvar so a granted tool is not re-asked.
+    That is correct behaviour and fatal for these tests: an approval left by an
+    earlier test made a denial test see an already-approved tool and not raise
+    (DID NOT RAISE PermissionError), and made the every-call gate test count one
+    callback invocation instead of two. Both passed alone and failed under a
+    random seed.
+    """
+    from praisonaiagents.approval import clear_approval_context
+
+    clear_approval_context()
+    yield
+    clear_approval_context()
+
+
 @pytest.fixture
 def registry():
     reg = ToolRegistry()

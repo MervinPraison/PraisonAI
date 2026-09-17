@@ -145,18 +145,25 @@ class RuntimeResolver:
                 stacklevel=3
             )
             
-            # Only use legacy if no default is available
-            # In practice, default is always available, so this preserves existing behavior
-            # while maintaining correct priority order in the spec
+            # An already-constructed runtime INSTANCE is honoured regardless of
+            # the default. The default-wins order below is about choosing
+            # between runtime *ids*, and an instance is not an id: it cannot be
+            # expressed as model-scoped configuration, so the migration this
+            # warning recommends does not apply to it and the default cannot
+            # stand in for it. Dropping it silently ran the agent on a different
+            # runtime than the caller handed over -- and resolve_runtime_instance
+            # still carries the branch to unwrap it, which had become unreachable.
+            if not isinstance(legacy_cli_backend, str):
+                legacy_config = AgentRuntimeConfig(runtime="legacy")
+                legacy_config.config_overrides["instance"] = legacy_cli_backend
+                legacy_config.metadata["resolution_source"] = "legacy"
+                return legacy_config
+
+            # A legacy backend NAME stays at the documented priority: the
+            # built-in default outranks it, so this is reachable only when no
+            # default is configured.
             if self.default_runtime_id is None:
-                # Convert legacy cli_backend to runtime config
-                if isinstance(legacy_cli_backend, str):
-                    legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
-                else:
-                    # Assume it's already a config or protocol instance
-                    legacy_config = AgentRuntimeConfig(runtime="legacy")
-                    legacy_config.config_overrides["instance"] = legacy_cli_backend
-                
+                legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
                 legacy_config.metadata["resolution_source"] = "legacy"
                 return legacy_config
         

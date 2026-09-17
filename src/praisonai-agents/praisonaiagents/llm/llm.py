@@ -893,7 +893,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription", "plan limit"
+            "payment required", "subscription", "subscription required",
+            "subscription expired", "plan limit"
         ]):
             return "billing"
         
@@ -922,7 +923,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Empty or malformed responses
         if any(indicator in error_str for indicator in [
             "empty response", "no response", "no content", "blank output",
-            "null response", "invalid response format"
+            "null response", "json decode error", "unexpected end of json",
+            "invalid response format"
         ]):
             return "empty_response"
         
@@ -944,8 +946,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Format errors
         if any(indicator in error_str for indicator in [
             "validation error", "invalid format", "parse error",
-            "parsing error", "decode error", "unexpected end of json",
-            "malformed", "invalid json", "schema error"
+            "parsing error", "decode error", "malformed",
+            "malformed response", "invalid json", "schema error"
         ]):
             return "format_error"
         

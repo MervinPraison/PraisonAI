@@ -52,6 +52,13 @@ def _host_is_blocked(hostname: str) -> bool:
         except (ValueError, OverflowError):
             return True
 
+    # Shared with url_safety so both validators reject the same
+    # parser-differential hosts (GHSA-5c6w-wwfq-7qqm). See that helper for why
+    # resolving them is not safe.
+    from .url_safety import is_ambiguous_numeric_host
+    if is_ambiguous_numeric_host(host):
+        return True
+
     try:
         return _ip_blocked(ipaddress.ip_address(host))
     except ValueError:

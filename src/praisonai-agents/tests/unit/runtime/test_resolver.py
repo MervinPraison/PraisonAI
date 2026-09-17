@@ -291,17 +291,18 @@ class TestRuntimeResolver:
         mock_resolve_runtime.assert_not_called()
 
     @patch('praisonaiagents.runtime.registry.resolve_runtime')
-    def test_a_legacy_instance_is_outranked_by_the_built_in_default(
+    def test_a_legacy_instance_is_honoured_even_when_a_default_exists(
         self, mock_resolve_runtime
     ):
-        """Documented precedence, recorded because it is easy to trip over.
+        """An explicitly-passed runtime INSTANCE is used, default or not.
 
-        resolver.py makes the built-in default outrank legacy. Applied to an
-        already-constructed *instance* that means the caller's own object is
-        not used -- the default runtime is resolved instead. That is the
-        current contract for a deprecated parameter, not something this test
-        endorses; it is pinned so the behaviour is visible rather than
-        discovered at runtime.
+        The built-in default outranks a legacy runtime *id* (an id can be
+        migrated to model-scoped config, so the default can stand in for it).
+        An already-constructed instance is different: it cannot be expressed as
+        an id, the migration the deprecation warning recommends does not apply,
+        and silently dropping it would run the agent on a runtime the caller
+        never chose. So resolver.py honours the instance regardless of the
+        default -- this pins that the caller's object is not discarded.
         """
         resolver = RuntimeResolver()
         assert resolver.default_runtime_id is not None
@@ -314,8 +315,11 @@ class TestRuntimeResolver:
                 legacy_cli_backend=legacy_instance,
             )
 
-        assert result.runtime is not legacy_instance
-        assert result.resolution_source == "default"
+        assert result.runtime is legacy_instance
+        assert result.resolution_source == "legacy"
+        assert result.metadata["legacy_instance"] is True
+        # The instance is already constructed: the registry is never consulted.
+        mock_resolve_runtime.assert_not_called()
     
     @patch('praisonaiagents.runtime.registry.resolve_runtime')
     @patch('praisonaiagents.runtime.registry.list_runtimes')
@@ -376,6 +380,20 @@ class TestRuntimeResolver:
         with pytest.raises(TypeError, match="Runtime configuration must have 'runtime' attribute"):
             resolver.validate_runtime_config(invalid_config)
     
+    def test_config_overrides_rejected_at_construction(self):
+        """AgentRuntimeConfig.__post_init__ rejects a non-dict up front.
+
+        This used to build the bad config and expect validate_runtime_config to
+        raise. The check moved into __post_init__, so the TypeError now fires on
+        the AgentRuntimeConfig(...) line -- outside the pytest.raises block --
+        and the test errored instead of passing.
+        """
+        with pytest.raises(TypeError, match="config_overrides must be a dictionary"):
+            AgentRuntimeConfig(
+                runtime="claude-code",
+                config_overrides="invalid",  # Should be dict
+            )
+
     def test_validate_runtime_config_invalid_config_overrides(self):
         """A non-dict config_overrides is rejected -- now at construction.
 
@@ -397,6 +415,14 @@ class TestRuntimeResolver:
         with pytest.raises(TypeError, match="config_overrides must be a dictionary"):
             resolver.validate_runtime_config(config)
     
+    def test_metadata_rejected_at_construction(self):
+        """Same migration as config_overrides: the check is in __post_init__."""
+        with pytest.raises(TypeError, match="metadata must be a dictionary"):
+            AgentRuntimeConfig(
+                runtime="claude-code",
+                metadata="invalid",  # Should be dict
+            )
+
     def test_validate_runtime_config_invalid_metadata(self):
         """A non-dict metadata is rejected at construction, as above."""
         with pytest.raises(TypeError, match="metadata must be a dictionary"):

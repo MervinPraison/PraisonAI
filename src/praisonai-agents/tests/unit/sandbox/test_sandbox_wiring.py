@@ -145,6 +145,11 @@ def test_inert_fields_are_documented_as_inert():
 
 
 # ── real agentic run: sandbox= adds no model-visible execution tools ─────────
+# Marked ``live`` (not merely key-guarded): a fake OPENAI_API_KEY set in CI
+# satisfies a presence check and lets this reach a real network call. The
+# ``live`` marker is deselected unless PRAISONAI_LIVE_TESTS=1, keeping the
+# offline suite genuinely offline.
+@pytest.mark.live
 @pytest.mark.skipif(
     (os.environ.get("PRAISONAI_LIVE_TESTS") != "1"
      and os.environ.get("RUN_REAL_KEY_TESTS") != "1")

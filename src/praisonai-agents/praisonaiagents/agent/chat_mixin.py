@@ -778,6 +778,35 @@ Your Goal: {self.goal}"""
             )
             return False
 
+    def _load_session_history(self):
+        """Persisted session history for this agent, or [] when unavailable.
+
+        Extracted so BOTH branches of _build_messages can use it. The injection
+        used to live only in the manual-message branch, so an agent configured
+        with memory="history" silently dropped its persisted history whenever
+        _openai_client was set -- which is the default path for OpenAI models.
+        """
+        if not self._history_enabled or self._session_store is None:
+            return []
+        try:
+            # Prefer compacted working history (summary + tail) on resume when a
+            # compaction checkpoint exists (Issue #2741); falls back to raw chat
+            # history for backward compatibility.
+            if hasattr(self._session_store, "get_working_history"):
+                session_history = self._session_store.get_working_history(
+                    self._history_session_id,
+                    max_messages=self._history_limit
+                )
+            else:
+                session_history = self._session_store.get_chat_history(
+                    self._history_session_id,
+                    max_messages=self._history_limit
+                )
+            return list(session_history) if session_history else []
+        except Exception as e:
+            logging.debug(f"Failed to load session history: {e}")
+            return []
+
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True, memory_prefetch_context: str = ""):
         """Build messages list for chat completion.
         
@@ -803,7 +832,7 @@ Your Goal: {self.goal}"""
                     tools=tools,
                     memory_prefetch_context=memory_prefetch_context,
                 ),
-                chat_history=self.chat_history,
+                chat_history=self._load_session_history() + list(self.chat_history or []),
                 output_json=None if use_native_format else output_json,
                 output_pydantic=None if use_native_format else output_pydantic
             )
@@ -817,25 +846,7 @@ Your Goal: {self.goal}"""
                 messages.append({"role": "system", "content": system_prompt})
             
             # Inject session history if enabled (from persistent storage)
-            if self._history_enabled and self._session_store is not None:
-                try:
-                    # Prefer compacted working history (summary + tail) on
-                    # resume when a compaction checkpoint exists (Issue #2741);
-                    # falls back to raw chat history for backward compatibility.
-                    if hasattr(self._session_store, "get_working_history"):
-                        session_history = self._session_store.get_working_history(
-                            self._history_session_id,
-                            max_messages=self._history_limit
-                        )
-                    else:
-                        session_history = self._session_store.get_chat_history(
-                            self._history_session_id,
-                            max_messages=self._history_limit
-                        )
-                    if session_history:
-                        messages.extend(session_history)
-                except Exception as e:
-                    logging.debug(f"Failed to load session history: {e}")
+            messages.extend(self._load_session_history())
             
             # Add in-memory chat history (current conversation)
             if self.chat_history:

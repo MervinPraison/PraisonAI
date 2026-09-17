@@ -181,6 +181,8 @@ class EventBus:
         # it should silently depend on. The append is O(1) under a lock already
         # held and the list is capped at _max_history, so the saving was not
         # worth the hole it left.
+
+        # Convert EventType enum to string
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
         event = Event(
@@ -288,15 +290,21 @@ class EventBus:
         # Durable persistence first (best-effort).
         self._dispatch_to_sinks(event)
         
-        # Fast path: if no subscribers, skip expensive work
-        if not self._subscribers:
-            return event
-        
-        # Store in history
+        # History is recorded BEFORE the no-subscriber fast path. Appending to a
+        # capped list is not the "expensive work" that path exists to skip --
+        # that is subscriber matching and dispatch. Returning first meant
+        # get_history() stayed empty unless something happened to be subscribed,
+        # so the record of what the system did depended on who was watching.
         with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history:]
+
+        # Fast path: if no subscribers, skip subscriber matching and dispatch.
+        if not self._subscribers:
+            return event
+
+        with self._lock:
             
             subscribers = [
                 sub for sub in self._subscribers
