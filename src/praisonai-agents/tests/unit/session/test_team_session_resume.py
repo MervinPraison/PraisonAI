@@ -38,6 +38,7 @@ def _bare_team():
     team.agents = []
     team.process = "sequential"
     team.shared_memory = None
+    team.tasks = {}
     return team
 
 
