@@ -136,7 +136,7 @@ def sample_trace_detail():
 class TestLangfuseAPIClient:
     """Tests for the Langfuse API client module."""
     
-    @patch("praisonai.cli.langfuse_client.requests.get")
+    @patch("praisonai.cli.langfuse_client.requests.Session.get")
     def test_fetch_traces_success(self, mock_get, sample_traces):
         """Test successful trace fetching."""
         mock_get.return_value = MagicMock(
@@ -160,7 +160,7 @@ class TestLangfuseAPIClient:
         assert traces[0]["id"] == "trace-001"
         mock_get.assert_called_once()
     
-    @patch("praisonai.cli.langfuse_client.requests.get")
+    @patch("praisonai.cli.langfuse_client.requests.Session.get")
     def test_fetch_traces_with_session_filter(self, mock_get, sample_traces):
         """Test fetching traces filtered by session ID."""
         mock_get.return_value = MagicMock(
@@ -183,7 +183,7 @@ class TestLangfuseAPIClient:
         call_args = mock_get.call_args
         assert "sessionId" in str(call_args)
     
-    @patch("praisonai.cli.langfuse_client.requests.get")
+    @patch("praisonai.cli.langfuse_client.requests.Session.get")
     def test_fetch_sessions_success(self, mock_get, sample_sessions):
         """Test successful session fetching."""
         mock_get.return_value = MagicMock(
@@ -205,7 +205,7 @@ class TestLangfuseAPIClient:
         assert len(sessions) == 2
         assert sessions[0]["id"] == "session-abc"
     
-    @patch("praisonai.cli.langfuse_client.requests.get")
+    @patch("praisonai.cli.langfuse_client.requests.Session.get")
     def test_fetch_trace_detail_success(self, mock_get, sample_trace_detail):
         """Test fetching detailed trace information."""
         mock_get.return_value = MagicMock(
@@ -227,7 +227,7 @@ class TestLangfuseAPIClient:
         assert trace["id"] == "trace-001"
         assert "observations" in trace
     
-    @patch("praisonai.cli.langfuse_client.requests.get")
+    @patch("praisonai.cli.langfuse_client.requests.Session.get")
     def test_api_error_handling(self, mock_get):
         """Test graceful handling of API errors."""
         mock_get.return_value = MagicMock(

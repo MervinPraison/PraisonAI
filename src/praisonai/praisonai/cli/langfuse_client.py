@@ -83,7 +83,24 @@ class LangfuseClient:
         self.secret_key = secret_key
         self.host = host.rstrip("/")  # Remove trailing slash
         self._auth = HTTPBasicAuth(public_key, secret_key)
+        # Reuse a single Session so keep-alive connections and the auth handler
+        # persist across the many trace/session/observation lookups made by the
+        # interactive ``praisonai langfuse`` browser.
+        self._session = requests.Session()
+        self._session.auth = self._auth
     
+    def close(self) -> None:
+        """Close the underlying HTTP session and release its connection pool."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            session.close()
+
+    def __enter__(self) -> "LangfuseClient":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.close()
+
     @classmethod
     def from_config_file(cls, config_path: Optional[Path] = None) -> "LangfuseClient":
         """
@@ -149,7 +166,7 @@ class LangfuseClient:
         url = f"{self.host}{endpoint}"
         
         try:
-            response = requests.get(url, auth=self._auth, params=params, timeout=30)
+            response = self._session.get(url, params=params, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as e:
