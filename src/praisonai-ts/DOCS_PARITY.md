@@ -48,7 +48,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Files | 15 | 1 | 151 |
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
-| ✅ Guardrails | 17 | 3 | 744 |
+| ✅ Guardrails | 18 | 3 | 744 |
 | ✅ Handoffs | 16 | 1 | 420 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
