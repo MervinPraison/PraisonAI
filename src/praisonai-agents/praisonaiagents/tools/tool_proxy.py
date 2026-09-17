@@ -110,6 +110,24 @@ def _resolve_callable(tool: Any) -> Callable[..., Any]:
     return callable_tool
 
 
+def _call_and_resolve(callable_tool: Callable[..., Any], args: tuple, kwargs: Dict[str, Any]) -> Any:
+    """Invoke a tool and resolve an ``async def`` tool's coroutine to its value.
+
+    Registries can hold async tools. Calling one synchronously returns an
+    unawaited coroutine that would otherwise be serialised as a string across
+    the bridge (the requested work never runs). Await it here so isolated code
+    receives the real result, matching how the agent path executes async tools.
+    """
+    import inspect
+
+    result = callable_tool(*args, **kwargs)
+    if inspect.iscoroutine(result):
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
+        return run_coroutine_from_any_context(result)
+    return result
+
+
 def _invoke_with_approval(
     name: str, tool: Any, args: tuple, kwargs: Dict[str, Any]
 ) -> Any:
@@ -182,7 +200,7 @@ def _invoke_with_approval(
             if bound is not None:
                 try:
                     rebound = signature.bind_partial(**approval_args)
-                    return callable_tool(*rebound.args, **rebound.kwargs)
+                    return _call_and_resolve(callable_tool, rebound.args, rebound.kwargs)
                 except TypeError:
                     pass
             # Fall back: apply only keyword modifications.
@@ -190,7 +208,7 @@ def _invoke_with_approval(
                 {k: v for k, v in decision.modified_args.items() if k in kwargs}
             )
 
-    return callable_tool(*args, **kwargs)
+    return _call_and_resolve(callable_tool, args, kwargs)
 
 
 def _make_proxy(
@@ -314,6 +332,25 @@ class LocalProcessBridge:
         import sys
         import tempfile
 
+        # Fail-closed BEFORE spawning a child: reuse the in-process executor's
+        # hardened AST validator so the isolated path has the SAME security
+        # posture (blocks dangerous dunder attributes, introspection escapes,
+        # exec/eval/open/etc.), not just an import check. This closes the
+        # ``type(x).__subclasses__()``/``__globals__`` sandbox-escape class.
+        try:
+            from .python_tools import _validate_code_ast
+
+            ast_error = _validate_code_ast(code)
+        except Exception:
+            ast_error = None
+        if ast_error:
+            return {
+                "result": None,
+                "stdout": "",
+                "stderr": f"Isolated execution blocked: {ast_error}",
+                "success": False,
+            }
+
         allowed = sorted({str(a) for a in allowed_tools})
         script = _CHILD_TEMPLATE.format(
             code=repr(code),
@@ -350,17 +387,28 @@ class LocalProcessBridge:
                 except Exception:
                     preexec_fn = None
 
-            process = subprocess.Popen(
-                [sys.executable, temp_file],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env={},  # clean environment: no parent env leaks into the child
-                text=True,
-                shell=False,
-                cwd=tempfile.gettempdir(),
-                preexec_fn=preexec_fn,
-            )
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, temp_file],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env={},  # clean environment: no parent env leaks into child
+                    text=True,
+                    shell=False,
+                    cwd=tempfile.gettempdir(),
+                    preexec_fn=preexec_fn,
+                )
+            except OSError as exc:
+                # The interpreter is unavailable, the cwd is inaccessible, or the
+                # OS cannot start another process. Return the documented failure
+                # dict instead of raising a separate exception path on callers.
+                return {
+                    "result": None,
+                    "stdout": "",
+                    "stderr": f"Isolated execution error: could not start child: {exc}",
+                    "success": False,
+                }
             # NB: policy errors (PermissionError/NameError from serve_tool_call)
             # are re-raised out of _pump_bridge so the isolated path fails the
             # same way as the in-process one — do not wrap this in a broad
@@ -439,6 +487,12 @@ def _pump_bridge(process, allowed, registry, timeout, max_output_size):
             process.stdin.close()
         except Exception:
             pass
+        # Reap the killed child so repeated timeouts cannot leak zombie
+        # processes on POSIX until an external reaper collects them.
+        try:
+            process.wait(timeout=1)
+        except Exception:
+            pass
         return {
             "result": None,
             "stdout": "",
@@ -504,11 +558,20 @@ def _service_bridge_call(payload, allowed, registry, policy_error):
             name, args, kwargs, allowed=allowed, registry=registry
         )
         return {"ok": True, "value": value}
-    except BaseException as exc:  # noqa: BLE001 - propagate to child + parent
-        # Capture the first policy/tool failure so the parent can re-raise it
-        # (authoritative), and tell the child to raise so the script stops.
+    except (PermissionError, NameError) as exc:
+        # AUTHORITATIVE policy denials only (disallowed tool, denied approval,
+        # unregistered tool). Capture the first so the parent re-raises it after
+        # the child exits — the isolated path fails exactly like the in-process
+        # one for a policy violation.
         if not policy_error:
             policy_error.append(exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        # An ordinary tool failure (ValueError, RuntimeError, domain error) is
+        # NOT a policy denial: report it back to the child as a failed response
+        # so the script sees a normal error and the bridge keeps its documented
+        # result contract (success=False), matching the in-process executor.
+        # SystemExit/KeyboardInterrupt are intentionally NOT caught here.
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 

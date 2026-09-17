@@ -4140,7 +4140,9 @@ Summary:"""
         scoped_registry = None
         if code_tools and code_execution_mode in _tool_capable:
             from ..tools.registry import ToolRegistry
-            scoped_registry = ToolRegistry()
+            # discovery_enabled=False: an allow-listed name absent from THIS
+            # agent's tools must NOT resolve to an installed global plugin.
+            scoped_registry = ToolRegistry(discovery_enabled=False)
             for t in (self.tools or []):
                 if callable(t) or hasattr(t, "name"):
                     try:

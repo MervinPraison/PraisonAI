@@ -528,3 +528,85 @@ def test_serve_tool_call_honours_approval_gate(registry):
     finally:
         set_approval_callback(None)
         remove_approval_requirement("fetch")
+
+
+def test_isolated_blocks_introspection_escape(registry):
+    # A dunder-attribute traversal that could recover unrestricted builtins must
+    # be rejected before the child runs (same posture as the in-process path).
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    result = execute_code_with_tools(
+        "type(tools).__subclasses__()\n",
+        allowed_tools=["fetch"],
+        registry=registry,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is False
+
+
+def test_isolated_ordinary_tool_error_is_not_reraised(registry):
+    # An allowed tool raising an ordinary error must NOT escape the bridge as an
+    # exception; it must return a structured success=False result.
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    reg = ToolRegistry()
+
+    def boom():
+        raise ValueError("kaboom")
+
+    reg.register(boom, name="boom")
+    result = execute_code_with_tools(
+        "boom()\n",
+        allowed_tools=["boom"],
+        registry=reg,
+        bridge=LocalProcessBridge(),
+    )
+    assert result["success"] is False
+    assert "kaboom" in (result.get("stderr") or "")
+
+
+def test_serve_tool_call_awaits_async_tool(registry):
+    # An async def tool must be awaited to its value, not returned as a coroutine.
+    from praisonaiagents.tools.tool_proxy import serve_tool_call
+
+    reg = ToolRegistry()
+
+    async def afetch(url):
+        return {"a": 10}[url]
+
+    reg.register(afetch, name="afetch")
+    value = serve_tool_call("afetch", ["a"], {}, allowed=["afetch"], registry=reg)
+    assert value == 10
+
+
+def test_scoped_registry_does_not_discover_plugins():
+    # A discovery-disabled registry must NOT auto-discover global plugins on a
+    # missing-name lookup: the agent-scoped tool boundary is authoritative.
+    reg = ToolRegistry(discovery_enabled=False)
+    called = {"n": 0}
+
+    def _spy():
+        called["n"] += 1
+        return 0
+
+    reg.discover_plugins = _spy  # type: ignore[assignment]
+    assert reg.get("some_installed_plugin") is None
+    assert called["n"] == 0
+
+
+def test_isolated_startup_error_returns_structured_failure(registry, monkeypatch):
+    # A subprocess launch failure must surface as the documented failure dict,
+    # not a raw exception on the caller.
+    import subprocess
+
+    from praisonaiagents.tools.tool_proxy import LocalProcessBridge
+
+    def _boom(*a, **k):
+        raise OSError("cannot start process")
+
+    monkeypatch.setattr(subprocess, "Popen", _boom)
+    result = LocalProcessBridge().run_code(
+        "fetch('a')\n", allowed_tools=["fetch"], registry=registry
+    )
+    assert result["success"] is False
+    assert "could not start child" in (result.get("stderr") or "")
