@@ -22,22 +22,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _default_enabled_for_registration(plugin_name: str) -> bool:
-    """Whether a newly registered plugin should start enabled.
-
-    When ``plugins.enable([...])`` has established a selective allow-list,
-    late registrations must default to disabled unless explicitly allowed.
-    """
-    try:
-        from . import _enabled_plugin_names
-
-        if isinstance(_enabled_plugin_names, list):
-            return plugin_name in _enabled_plugin_names
-    except Exception:
-        pass
-    return True
-
-
 def _env_plugins_suppressed() -> bool:
     """Return True when external plugins are suppressed via env for this run.
 
@@ -89,6 +73,41 @@ class PluginManager:
         # (e.g. Python ``plugins=False`` parity) forces suppression regardless.
         self._disabled = disabled
         self._suppression_notified = False
+        # Optional instance-local allow-list governing whether *late* plugin
+        # registrations default to enabled. ``None`` (default) means no
+        # restriction — every registration starts enabled, preserving the
+        # behaviour of standalone managers. The facade sets this only on the
+        # singleton used by ``plugins.enable([...])`` so selective enablement
+        # never leaks into independently constructed managers.
+        self._registration_allow_list: Optional[frozenset] = None
+
+    def set_registration_allow_list(
+        self, names: Optional[List[str]]
+    ) -> None:
+        """Set (or clear) the instance-local late-registration allow-list.
+
+        When ``names`` is a list, plugins registered after this call default to
+        disabled unless their name is included. Passing ``None`` clears the
+        restriction so future registrations start enabled again. An immutable
+        snapshot is stored so later mutations of the caller's list cannot
+        silently change registration behaviour.
+        """
+        with self._lock:
+            self._registration_allow_list = (
+                None if names is None else frozenset(names)
+            )
+
+    def _default_enabled_for_registration(self, plugin_name: str) -> bool:
+        """Whether a newly registered plugin should start enabled.
+
+        When a selective allow-list is active on *this* manager, late
+        registrations default to disabled unless explicitly allowed. Managers
+        without an allow-list keep registrations enabled by default.
+        """
+        allow_list = self._registration_allow_list
+        if allow_list is not None:
+            return plugin_name in allow_list
+        return True
 
     def is_discovery_disabled(self) -> bool:
         """Return True when external plugin discovery is suppressed this run.
@@ -190,7 +209,7 @@ class PluginManager:
                     return False
                 
                 self._plugins[info.name] = plugin
-                self._enabled[info.name] = _default_enabled_for_registration(info.name)
+                self._enabled[info.name] = self._default_enabled_for_registration(info.name)
                 
                 # Initialize plugin
                 plugin.on_init({})
