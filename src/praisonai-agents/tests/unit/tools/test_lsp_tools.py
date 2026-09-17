@@ -24,9 +24,11 @@ def test_lsp_tools_are_registered():
     from praisonaiagents.tools import (
         lsp_definition, lsp_references, lsp_hover,
         lsp_document_symbols, lsp_workspace_symbols,
+        lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls,
     )
     for fn in (lsp_definition, lsp_references, lsp_hover,
-               lsp_document_symbols, lsp_workspace_symbols):
+               lsp_document_symbols, lsp_workspace_symbols,
+               lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls):
         assert callable(fn)
 
 
@@ -235,6 +237,159 @@ def test_references_live_pylsp(tmp_path, monkeypatch):
     # The comment (line 4) and string (line 5) must NOT be reported as refs.
     assert "mod.py:4:" not in out
     assert "mod.py:5:" not in out
+
+
+# ---------------------------------------------------------------------------
+# Call hierarchy / implementations: degradation & formatting
+# ---------------------------------------------------------------------------
+
+def test_new_tools_degrade_without_server(tmp_path, monkeypatch):
+    from praisonaiagents.tools import (
+        lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls,
+    )
+    (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
+    monkeypatch.chdir(tmp_path)
+    with patch("shutil.which", return_value=None):
+        for fn in (lsp_implementations, lsp_incoming_calls, lsp_outgoing_calls):
+            out = fn("mod.py", symbol="foo")
+            assert out.startswith("Error:")
+            assert "not installed" in out
+
+
+def test_format_calls_incoming():
+    from praisonaiagents.tools import lsp_tools
+    calls = [
+        {"from": {"name": "caller", "kind": 12,
+                  "uri": "file:///x.py",
+                  "selectionRange": {"start": {"line": 5, "character": 4}}}},
+    ]
+    out = lsp_tools._format_calls(calls, "Incoming calls", "from")
+    assert "function caller" in out
+    assert "6:5" in out  # 0-indexed 5 -> 1-indexed 6
+
+
+def test_format_calls_outgoing_empty():
+    from praisonaiagents.tools import lsp_tools
+    assert "none found" in lsp_tools._format_calls([], "Outgoing calls", "to")
+
+
+# ---------------------------------------------------------------------------
+# Live pylsp integration for call hierarchy (opt-in)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(shutil.which("pylsp") is None,
+                    reason="pylsp language server not installed")
+def test_incoming_calls_live_pylsp(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_incoming_calls
+    src = (
+        "def compute(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "def caller():\n"
+        "    return compute(41)\n"
+    )
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+    monkeypatch.chdir(tmp_path)
+
+    out = lsp_incoming_calls("mod.py", symbol="compute")
+    # Either the caller is resolved, or the server does not advertise the
+    # capability — both are acceptable, non-error outputs.
+    assert not out.startswith("Error:")
+
+
+# ---------------------------------------------------------------------------
+# LocationLink normalization & multi-item call hierarchy (deterministic)
+# ---------------------------------------------------------------------------
+
+def test_to_location_normalizes_location_link():
+    from praisonaiagents.lsp.client import _to_location
+    link = {
+        "targetUri": "file:///x.py",
+        "targetSelectionRange": {"start": {"line": 2, "character": 4},
+                                 "end": {"line": 2, "character": 10}},
+        "targetRange": {"start": {"line": 1, "character": 0},
+                        "end": {"line": 5, "character": 0}},
+    }
+    loc = _to_location(link)
+    assert loc.uri == "file:///x.py"
+    assert loc.range.start.line == 2
+    assert loc.range.start.character == 4
+
+
+def test_to_location_plain_location():
+    from praisonaiagents.lsp.client import _to_location
+    plain = {"uri": "file:///y.py",
+             "range": {"start": {"line": 7, "character": 1},
+                       "end": {"line": 7, "character": 9}}}
+    loc = _to_location(plain)
+    assert loc.uri == "file:///y.py"
+    assert loc.range.start.line == 7
+
+
+def test_call_hierarchy_queries_all_items_and_dedups(tmp_path, monkeypatch):
+    """Multiple prepared items must all be queried, with duplicates removed."""
+    from praisonaiagents.tools import lsp_tools
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
+
+    item_a = {"name": "foo", "uri": "file:///mod.py"}
+    item_b = {"name": "foo", "uri": "file:///other.py"}
+
+    def call(name, uri, line):
+        return {"from": {"name": name, "kind": 12, "uri": uri,
+                         "selectionRange": {"start": {"line": line,
+                                                      "character": 0}}}}
+
+    class FakeClient:
+        async def prepare_call_hierarchy(self, path, line, char):
+            return [item_a, item_b]
+
+        async def get_incoming_calls(self, item):
+            if item is item_a:
+                return [call("caller1", "file:///a.py", 1),
+                        call("shared", "file:///s.py", 9)]
+            return [call("caller2", "file:///b.py", 3),
+                    call("shared", "file:///s.py", 9)]  # duplicate
+
+        async def get_outgoing_calls(self, item):
+            return []
+
+    def fake_run_lsp(language, coro_factory, open_path=None):
+        import asyncio
+        return asyncio.run(coro_factory(FakeClient())), None
+
+    monkeypatch.setattr(lsp_tools, "_run_lsp", fake_run_lsp)
+    monkeypatch.setattr(lsp_tools, "_server_available",
+                        lambda lang: (True, "pylsp", None))
+
+    out = lsp_tools.lsp_incoming_calls("mod.py", symbol="foo")
+    assert "caller1" in out
+    assert "caller2" in out  # results from the 2nd prepared item are included
+    assert out.count("shared") == 1  # duplicate collapsed
+
+
+def test_call_hierarchy_no_symbol_message(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_tools
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
+
+    class FakeClient:
+        async def prepare_call_hierarchy(self, path, line, char):
+            return []
+
+    def fake_run_lsp(language, coro_factory, open_path=None):
+        import asyncio
+        return asyncio.run(coro_factory(FakeClient())), None
+
+    monkeypatch.setattr(lsp_tools, "_run_lsp", fake_run_lsp)
+    monkeypatch.setattr(lsp_tools, "_server_available",
+                        lambda lang: (True, "pylsp", None))
+
+    out = lsp_tools.lsp_outgoing_calls("mod.py", symbol="foo")
+    assert "no call-hierarchy symbol" in out
 
 
 if __name__ == "__main__":

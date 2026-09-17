@@ -376,7 +376,9 @@ class PraisonAIDB:
         if messages is None:
             return []
         
-        # Convert to DbMessage format
+        # Convert to DbMessage format. Carry the structured tool fields so a
+        # resumed tool-using session rebuilds the same transcript the model saw
+        # before (Issue #5075 — parity with the JSON store fix in #3089).
         from praisonaiagents.db.protocol import DbMessage
         return [
             DbMessage(
@@ -384,7 +386,9 @@ class PraisonAIDB:
                 content=msg.content,
                 metadata=msg.metadata or {},
                 timestamp=msg.created_at or time.time(),
-                id=msg.id
+                id=msg.id,
+                tool_calls=getattr(msg, "tool_calls", None),
+                tool_call_id=getattr(msg, "tool_call_id", None),
             )
             for msg in messages
         ]
@@ -449,6 +453,81 @@ class PraisonAIDB:
             msg,
         )
     
+    def on_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_calls: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist an assistant turn that requested tools (Issue #5075).
+
+        Stores the structured ``tool_calls`` verbatim on the
+        ``ConversationMessage`` so a resumed session replays the same
+        assistant turn the model produced. Falls back to a plain assistant
+        message when no tool calls are present.
+        """
+        self._init_stores()
+        if not self._conversation_store:
+            return
+
+        from ..persistence.conversation.base import ConversationMessage
+        import uuid
+
+        msg = ConversationMessage(
+            id=f"msg-{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls,
+            metadata=metadata or {},
+            created_at=time.time(),
+        )
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
+
+    def on_tool_message(
+        self,
+        session_id: str,
+        content: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a tool result turn linked to its call id (Issue #5075).
+
+        Keeps the ``role="tool"`` result and its ``tool_call_id`` so the
+        resumed message list interleaves results in order, matching the JSON
+        store behaviour from #3089.
+        """
+        self._init_stores()
+        if not self._conversation_store:
+            return
+
+        from ..persistence.conversation.base import ConversationMessage
+        import uuid
+
+        msg = ConversationMessage(
+            id=f"tool-{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            role="tool",
+            content=content,
+            tool_call_id=tool_call_id,
+            metadata=metadata or {},
+            created_at=time.time(),
+        )
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
+
     @staticmethod
     def _serialize_tool_call(tool_name: str, args: Any, result: Any) -> str:
         """Serialise a tool call for persistence without dropping data.
@@ -526,25 +605,15 @@ class PraisonAIDB:
             )
             return session
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            run_sync(_do())
-            return
-
-        fut = current_bridge().submit(_do())
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred on_agent_end update failed", exc_info=True)
-
-        fut.add_done_callback(_on_done)
+        dispatch_maybe_awaitable(
+            _do(),
+            kind=DispatchKind.WRITE,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name="on_agent_end",
+        )
     
     def on_run_start(
         self,
@@ -885,26 +954,15 @@ class PraisonAIDB:
             await self._dispatch_async(store, "set", "async_set", key, merged)
             return merged
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return run_sync(_do())
-
-        bridge = current_bridge()
-        fut = bridge.submit(_do())
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred merge_and_set for %s failed", key, exc_info=True)
-
-        fut.add_done_callback(_on_done)
-        return None
+        return dispatch_maybe_awaitable(
+            _do(),
+            kind=DispatchKind.WRITE,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name=f"merge_and_set:{key}",
+        )
 
     def _call_store(self, store, sync_name, async_name, *args, **kwargs):
         """Call a store from a sync hook without ever blocking or losing data.
@@ -936,38 +994,21 @@ class PraisonAIDB:
         fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:
             return None
-        result = fn(*args, **kwargs)
-        if not inspect.isawaitable(result):
-            return result
 
-        from .._async_bridge import current_bridge, run_sync
+        from .._async_bridge import DispatchKind, dispatch_maybe_awaitable
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return run_sync(result)
-
-        if sync_name in PraisonAIDB._READ_OPS:
-            # Reads must return a real value; never fire-and-forget them.
-            from .._async_bridge import run_sync_or_offload
-
-            return run_sync_or_offload(
-                result, thread_name=f"praisonai-db-read-{sync_name}"
-            )
-
-        bridge = current_bridge()
-        fut = bridge.submit(result)
-        with self._bg_writes_lock:
-            self._bg_writes.add(fut)
-
-        def _on_done(f, name=sync_name):
-            try:
-                f.result()
-            except Exception:
-                logger.warning("Deferred store %s failed", name, exc_info=True)
-
-        fut.add_done_callback(_on_done)
-        return None
+        kind = (
+            DispatchKind.READ
+            if sync_name in PraisonAIDB._READ_OPS
+            else DispatchKind.WRITE
+        )
+        return dispatch_maybe_awaitable(
+            fn(*args, **kwargs),
+            kind=kind,
+            tracker=self._bg_writes,
+            tracker_lock=self._bg_writes_lock,
+            op_name=sync_name,
+        )
 
     def flush_pending_writes(self, timeout: Optional[float] = 5.0) -> None:
         """Give this adapter's in-flight fire-and-forget writes a chance to complete.

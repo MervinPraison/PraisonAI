@@ -78,44 +78,92 @@ export class LocalCompute implements ComputeProvider {
       );
     }
 
-    const { exec } = await nodeExec();
+    const { spawn } = await nodeExec();
     const started = Date.now();
     const timeoutMs = (config.timeoutSeconds ?? 60) * 1000;
+    const isPosix = process.platform !== 'win32';
 
     return await new Promise<ExecResult>((resolve) => {
       let settled = false;
-      const child = exec(
-        command,
-        {
-          cwd: config.workdir ?? instance.metadata?.workdir,
-          env: config.env ? { ...process.env, ...config.env } : process.env,
-          timeout: timeoutMs,
-          maxBuffer: 10 * 1024 * 1024,
-        },
-        (error: any, stdout: string, stderr: string) => {
-          if (settled) return;
-          settled = true;
-          // A timeout is reported as ITS OWN outcome, not as a non-zero exit:
-          // "we do not know the answer" and "the answer is no" are different,
-          // and collapsing them makes a slow command look like a failing one.
-          const timedOut = Boolean(error && (error.killed || error.signal === 'SIGTERM'));
-          resolve({
-            stdout: String(stdout ?? ''),
-            stderr: String(stderr ?? ''),
-            exitCode: timedOut ? null : (error?.code ?? 0),
-            timedOut,
-            durationMs: Date.now() - started,
-          });
+      let timedOut = false;
+      let stdout = '';
+      let stderr = '';
+      const limit = 10 * 1024 * 1024;
+
+      // `spawn` with a shell and `detached`, NOT `exec`: exec's own `timeout`
+      // (and exec + detached) kill only the shell, leaving any children it
+      // spawned alive -- a sandbox that reports "stopped" while work continues
+      // is worse than none. A detached shell leads its own process group, so we
+      // can signal the whole group and terminate descendants too. On win32 there
+      // is no group; we fall back to killing the shell.
+      const shell = isPosix ? '/bin/sh' : (process.env.ComSpec || 'cmd.exe');
+      const shellArgs = isPosix ? ['-c', command] : ['/d', '/s', '/c', command];
+      const child = spawn(shell, shellArgs, {
+        cwd: config.workdir ?? instance.metadata?.workdir,
+        env: config.env ? { ...process.env, ...config.env } : process.env,
+        detached: isPosix,
+      });
+
+      const capture = (chunk: Buffer, sink: 'out' | 'err') => {
+        const text = chunk.toString();
+        if (sink === 'out') {
+          if (stdout.length < limit) stdout += text;
+        } else if (stderr.length < limit) {
+          stderr += text;
         }
-      );
-      child.on?.('error', (error: Error) => {
+      };
+      child.stdout?.on('data', (c: Buffer) => capture(c, 'out'));
+      child.stderr?.on('data', (c: Buffer) => capture(c, 'err'));
+
+      // Kill the process GROUP, not just the shell, so descendants do not
+      // outlive the timeout. `-pid` addresses the group led by the detached
+      // shell; on win32 (no group) fall back to the shell's own pid.
+      const killTree = (signal: NodeJS.Signals) => {
+        try {
+          if (isPosix && typeof child.pid === 'number') {
+            process.kill(-child.pid, signal);
+          } else {
+            child.kill?.(signal);
+          }
+        } catch {
+          // Already gone, or no permission -- nothing left to terminate here.
+        }
+      };
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        killTree('SIGTERM');
+        // A shell that ignores SIGTERM still has to go: escalate shortly after.
+        setTimeout(() => killTree('SIGKILL'), 2000).unref?.();
+      }, timeoutMs);
+      timer.unref?.();
+
+      child.on('error', (error: Error) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         resolve({
           stdout: '',
           stderr: error.message,
           exitCode: null,
           timedOut: false,
+          durationMs: Date.now() - started,
+        });
+      });
+
+      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        // A timeout is reported as ITS OWN outcome, not as a non-zero exit:
+        // "we do not know the answer" and "the answer is no" are different,
+        // and collapsing them makes a slow command look like a failing one.
+        const killed = timedOut || signal === 'SIGTERM' || signal === 'SIGKILL';
+        resolve({
+          stdout,
+          stderr,
+          exitCode: killed ? null : (code ?? 0),
+          timedOut: killed,
           durationMs: Date.now() - started,
         });
       });

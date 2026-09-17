@@ -42,6 +42,27 @@ describe('running a tool elsewhere', () => {
     expect(await place.runTool('anything', {}, async () => 'LOCAL')).toBe('LOCAL');
   });
 
+  it('the host fallback is NOT silent: it warns that isolation was not applied', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dockerLike: any = {
+        name: 'docker',
+        isAvailable: async () => true,
+        provision: async () => ({ id: 'x', status: 'running' }),
+        execute: async () => ({ exitCode: 0, stdout: '', stderr: '', timedOut: false }),
+        shutdown: async () => {},
+        listInstances: async () => [],
+        getStatus: async () => null,
+      };
+      const place = new ComputeToolPlace(dockerLike);
+      await place.runTool('anything', {}, async () => 'LOCAL');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toMatch(/HOST|sandbox/i);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('arguments are quoted, so an injection stays one argument', async () => {
     const place = new ComputeToolPlace(new LocalCompute(), { greet: 'echo hello-{{who}}' });
     const out = await place.runTool('greet', { who: 'a; echo pwned' }, async () => 'x');

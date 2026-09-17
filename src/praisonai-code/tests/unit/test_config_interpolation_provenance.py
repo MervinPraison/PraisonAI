@@ -15,6 +15,10 @@ import pytest
 from praisonai_code.cli.utils.env_utils import interpolate
 from praisonai_code.cli.configuration.resolver import ConfigResolver
 
+# Every test here resolves config, so none of them may see the
+# developer's exported MODEL_NAME/OPENAI_MODEL_NAME et al.
+pytestmark = pytest.mark.usefixtures("isolated_config_env")
+
 
 def test_interpolate_env_and_dollar_forms(monkeypatch):
     monkeypatch.setenv("MY_TOKEN", "secret123")

@@ -13,6 +13,7 @@ import {
   registerComputeProvider,
   resolveComputeProvider,
 } from '../../../src/compute';
+import { toolPlaceNames } from '../../../src/agent/features/placement';
 
 describe('LocalCompute', () => {
   it('runs a command and returns its output', async () => {
@@ -33,6 +34,29 @@ describe('LocalCompute', () => {
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).toBeNull();
   });
+
+  it('a timeout terminates descendant processes, not just the shell', async () => {
+    // exec's own `timeout` kills only the shell; a child it spawned keeps
+    // running. On POSIX we lead a process group and kill the group. Verify by
+    // having a backgrounded descendant touch a marker AFTER the timeout: if the
+    // group was killed the marker never appears.
+    if (process.platform === 'win32') return; // POSIX process groups only
+    const os = await import('os');
+    const path = await import('path');
+    const fs = await import('fs');
+    const marker = path.join(os.tmpdir(), `praison-timeout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const local = new LocalCompute();
+    const instance = await local.provision();
+    const result = await local.execute(
+      instance.id,
+      `(sleep 3; touch ${marker}) & sleep 5`,
+      { timeoutSeconds: 1 }
+    );
+    expect(result.timedOut).toBe(true);
+    await new Promise((r) => setTimeout(r, 3500));
+    expect(fs.existsSync(marker)).toBe(false);
+    if (fs.existsSync(marker)) fs.unlinkSync(marker);
+  }, 15000);
 
   it('control: a failing command reports a non-zero exit, not a timeout', async () => {
     const local = new LocalCompute();
@@ -93,13 +117,8 @@ describe('the registry', () => {
   });
 
   it('a registered custom provider is also selectable through toolsRunOn', () => {
-    // The two registries used to drift: registerComputeProvider filled the
-    // compute registry, but toolsRunOn validated against a SEPARATE place
-    // registry, so `new Agent({ toolsRunOn: 'e2b' })` still threw "not a known
-    // place". Registering a provider now bridges both.
     const custom: any = { name: 'e2b', execute: async () => ({}) };
     registerComputeProvider('e2b', () => custom);
-    const { toolPlaceNames } = require('../../../src/agent/features/placement');
     expect(toolPlaceNames()).toContain('e2b');
   });
 
@@ -148,6 +167,14 @@ describe('DockerCompute', () => {
     const instance = await docker.provision();
     await expect(docker.shutdown(instance.id)).rejects.toThrow(/Could not remove container/);
     expect((await docker.getStatus(instance.id))?.status).toBe('error');
+  });
+
+  it('control: a clean removal resolves and forgets the container', async () => {
+    const docker = fakeDocker(() => ok('ok1'));
+    const instance = await docker.provision();
+    await expect(docker.shutdown(instance.id)).resolves.toBeUndefined();
+    // A clean removal drops the container from tracking entirely.
+    expect(await docker.getStatus(instance.id)).toBeNull();
   });
 
   it('a container-side timeout (exit 124) is surfaced as timedOut, not a plain non-zero exit', async () => {

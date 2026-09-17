@@ -124,6 +124,12 @@ __all__ = [
     "compare_fingerprints",
     "assert_comparable",
     "FingerprintMismatch",
+    # Datasets: read a task set from JSONL, export passing runs as SFT data.
+    "load_cases",
+    "iter_jsonl",
+    "export_sft",
+    "sft_records",
+    "DatasetError",
 ]
 
 from .._lazy import create_lazy_getattr
@@ -227,6 +233,12 @@ _LAZY_IMPORTS = {
     "compare_fingerprints": ("praisonaiagents.eval.fingerprint", "compare_fingerprints"),
     "assert_comparable": ("praisonaiagents.eval.fingerprint", "assert_comparable"),
     "FingerprintMismatch": ("praisonaiagents.eval.fingerprint", "FingerprintMismatch"),
+    # Datasets: read a task set from JSONL, export passing runs as SFT data.
+    "load_cases": ("praisonaiagents.eval.datasets", "load_cases"),
+    "iter_jsonl": ("praisonaiagents.eval.datasets", "iter_jsonl"),
+    "export_sft": ("praisonaiagents.eval.datasets", "export_sft"),
+    "sft_records": ("praisonaiagents.eval.datasets", "sft_records"),
+    "DatasetError": ("praisonaiagents.eval.datasets", "DatasetError"),
 }
 
 __getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)

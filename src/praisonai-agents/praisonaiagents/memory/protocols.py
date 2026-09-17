@@ -9,7 +9,56 @@ This enables:
 
 These protocols are lightweight and have zero performance impact.
 """
+from enum import Enum
 from typing import Protocol, runtime_checkable, Optional, Any, Dict, List
+
+# Imported at module scope (not under TYPE_CHECKING) so that the string
+# annotations on the consolidation protocols resolve via typing.get_type_hints().
+# results.py has zero heavy dependencies and does not import protocols, so this
+# is import-safe and adds no measurable startup cost.
+from .results import ConsolidationResult
+
+
+class MemoryTrust(str, Enum):
+    """Provenance/trust signal for a memory write.
+
+    Recorded in a dedicated metadata field the model cannot forge through
+    prose, so recall can be gated on origin trust:
+
+    - ``TRUSTED``: operator/first-party content (default, backward compatible).
+    - ``UNTRUSTED``: third-party channel input (e.g. a gateway bot ingesting a
+      Telegram/Discord/Slack group message). By default this is not recalled as
+      trusted context and is kept out of long-term promotion by gateway callers.
+    - ``SYSTEM``: framework-generated content.
+
+    Ordering (via :meth:`rank`) is ``untrusted < trusted < system`` so a
+    ``min_trust`` recall filter can drop lower-trust records. An *absent* trust
+    field ranks as ``TRUSTED`` (legacy compatibility) while a *present but
+    unrecognised* value ranks as ``UNTRUSTED`` so malformed/forged provenance
+    fails closed rather than crossing a trusted boundary.
+    """
+
+    TRUSTED = "trusted"
+    UNTRUSTED = "untrusted"
+    SYSTEM = "system"
+
+    @classmethod
+    def rank(cls, value: "MemoryTrust | str | None") -> int:
+        """Return an ordinal for trust comparison (higher == more trusted).
+
+        An absent value (``None``) is treated as ``TRUSTED`` so legacy,
+        unstamped records keep their historical behaviour. A *present but
+        unrecognised* value (e.g. a misspelled or forged ``"trust"`` label) is
+        ranked as ``UNTRUSTED`` — the lowest rank — so malformed provenance
+        fails closed instead of silently crossing a trusted boundary.
+        """
+        order = {cls.UNTRUSTED: 0, cls.TRUSTED: 1, cls.SYSTEM: 2}
+        if value is None:
+            return order[cls.TRUSTED]
+        try:
+            return order[cls(value)]
+        except ValueError:
+            return order[cls.UNTRUSTED]
 
 
 @runtime_checkable
@@ -61,7 +110,10 @@ class MemoryProtocol(Protocol):
         Args:
             text: The content to store
             metadata: Optional metadata dictionary
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``trust`` (:class:`MemoryTrust`) and
+                ``origin`` (str) keyword, recording provenance in a metadata
+                field the model cannot forge through prose.
             
         Returns:
             An identifier for the stored content
@@ -80,7 +132,9 @@ class MemoryProtocol(Protocol):
         Args:
             query: The search query
             limit: Maximum number of results
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``min_trust`` (:class:`MemoryTrust`)
+                keyword that filters out records below the given trust level.
             
         Returns:
             List of matching memory entries
@@ -99,7 +153,10 @@ class MemoryProtocol(Protocol):
         Args:
             text: The content to store
             metadata: Optional metadata dictionary
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``trust`` (:class:`MemoryTrust`) and
+                ``origin`` (str) keyword, recording provenance in a metadata
+                field the model cannot forge through prose.
             
         Returns:
             An identifier for the stored content
@@ -118,7 +175,9 @@ class MemoryProtocol(Protocol):
         Args:
             query: The search query
             limit: Maximum number of results
-            **kwargs: Additional backend-specific parameters
+            **kwargs: Additional backend-specific parameters. Implementations
+                SHOULD honour an optional ``min_trust`` (:class:`MemoryTrust`)
+                keyword that filters out records below the given trust level.
             
         Returns:
             List of matching memory entries
@@ -503,7 +562,95 @@ class AgentMemoryLifecycleProtocol(Protocol):
 
 
 
+@runtime_checkable
+class MemoryConsolidationProtocol(Protocol):
+    """
+    Protocol for a scheduled, off-hot-path memory consolidation pass.
+
+    Long-running agents capture memories inline during a turn; over time the
+    store accretes near-duplicate, never-merged, never-pruned entries, which
+    degrades recall precision and grows context/token cost. A consolidation
+    pass runs on a schedule (never on the reply path) to:
+
+    - merge / deduplicate near-duplicate memories,
+    - promote durable, high-value facts into a curated tier,
+    - prune stale / low-importance entries,
+
+    all under a deterministic gate and a **maximum-loss guard** so a bad
+    rewrite cannot catastrophically wipe existing memory.
+
+    Core defines only this contract; the heavy implementation (an LLM
+    consolidation turn) and its scheduling live in a lifecycle plugin
+    (``PraisonAI-Plugins``), keeping core protocol-only and lightweight.
+
+    Implementations MUST refuse any rewrite that would drop more than
+    ``max_loss_fraction`` of existing entries, returning a
+    ``ConsolidationResult`` with ``rejected=True`` and leaving the store
+    untouched.
+
+    Example:
+        ```python
+        from praisonaiagents.memory import ConsolidationResult
+
+        class MyConsolidator:
+            def consolidate(self, memory, *, max_loss_fraction=0.25):
+                before = memory.get_all_memories()
+                # ... merge/promote/prune to produce `after`, tracking how many
+                # ORIGINAL entries survive via `retained` ...
+                result = ConsolidationResult(
+                    entries_before=len(before),
+                    entries_after=len(after),
+                    retained_originals=retained,
+                )
+                if result.exceeds_loss(max_loss_fraction):
+                    result.rejected = True
+                    result.reason = "loss guard tripped"
+                    return result  # leave store untouched
+                # ... apply the rewrite concurrency-safely ...
+                return result
+        ```
+    """
+
+    def consolidate(
+        self,
+        memory: "MemoryProtocol",
+        *,
+        max_loss_fraction: float = 0.25,
+    ) -> "ConsolidationResult":
+        """Run a consolidation pass over ``memory``.
+
+        Args:
+            memory: The memory store to consolidate.
+            max_loss_fraction: Maximum fraction of existing *original* entries a
+                single pass is allowed to remove (measured via
+                ``ConsolidationResult.retained_originals`` where available, so a
+                destructive equal-size rewrite still trips the guard). Must be a
+                finite value in ``[0.0, 1.0]``. A rewrite that would exceed this
+                is rejected and the store is left untouched.
+
+        Returns:
+            A ``ConsolidationResult`` describing what the pass did (or why it
+            was rejected).
+        """
+        ...
+
+
+@runtime_checkable
+class AsyncMemoryConsolidationProtocol(Protocol):
+    """Async variant of :class:`MemoryConsolidationProtocol`."""
+
+    async def aconsolidate(
+        self,
+        memory: "MemoryProtocol",
+        *,
+        max_loss_fraction: float = 0.25,
+    ) -> "ConsolidationResult":
+        """Async version of :meth:`MemoryConsolidationProtocol.consolidate`."""
+        ...
+
+
 __all__ = [
+    'MemoryTrust',
     'MemoryProtocol',
     'ResettableMemoryProtocol',
     'DeletableMemoryProtocol',
@@ -512,5 +659,7 @@ __all__ = [
     'EntityMemoryProtocol',
     'AgentMemoryProtocol',
     'AgentMemoryLifecycleProtocol',
+    'MemoryConsolidationProtocol',
+    'AsyncMemoryConsolidationProtocol',
 ]
 

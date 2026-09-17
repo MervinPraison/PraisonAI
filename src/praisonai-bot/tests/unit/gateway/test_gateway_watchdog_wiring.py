@@ -125,6 +125,64 @@ def test_disarm_after_configure_is_safe():
     assert gw._watchdog.armed is False
 
 
+# ── Shutdown-phase deadline watchdog wiring (#5079) ──
+
+
+def test_shutdown_deadline_helpers_safe_without_watchdog():
+    gw = _make_gateway()
+    # No watchdog configured: arm/cancel are no-ops and must not raise.
+    gw._arm_shutdown_deadline(1.0)
+    gw._cancel_shutdown_deadline()
+    assert gw._watchdog is None
+
+
+def test_configure_watchdog_forwards_shutdown_grace():
+    gw = _make_gateway()
+    gw._configure_watchdog({"enabled": True, "shutdown_grace": 12})
+    assert gw._watchdog is not None
+    assert gw._watchdog.policy.shutdown_grace_s == 12.0
+
+
+def test_resolve_shutdown_grace_uses_policy_default():
+    gw = _make_gateway()
+    gw._configure_watchdog({"enabled": True})
+    # Unset override falls back to the policy default (5s).
+    assert gw._resolve_shutdown_grace(None) == 5.0
+    # Explicit Python override wins over the policy value.
+    assert gw._resolve_shutdown_grace(3.5) == 3.5
+    # Negative clamps to zero.
+    assert gw._resolve_shutdown_grace(-2) == 0.0
+
+
+def test_resolve_shutdown_grace_without_watchdog_defaults():
+    gw = _make_gateway()
+    assert gw._resolve_shutdown_grace(None) == 5.0
+    assert gw._resolve_shutdown_grace(7) == 7.0
+
+
+def test_resolve_shutdown_grace_rejects_non_finite_override():
+    """NaN/inf overrides would make arm_deadline silently no-op; fall back to
+    the policy default so the backstop is never quietly disabled (#5079)."""
+    gw = _make_gateway()
+    gw._configure_watchdog({"enabled": True, "shutdown_grace": 8})
+    assert gw._resolve_shutdown_grace(float("nan")) == 8.0
+    assert gw._resolve_shutdown_grace(float("inf")) == 8.0
+    assert gw._resolve_shutdown_grace(float("-inf")) == 8.0
+    # Non-numeric override also falls back rather than raising.
+    assert gw._resolve_shutdown_grace("not-a-number") == 8.0
+
+
+def test_arm_and_cancel_shutdown_deadline_lifecycle():
+    gw = _make_gateway()
+    gw._configure_watchdog({"enabled": True})
+    gw._arm_shutdown_deadline(1.0)
+    assert gw._watchdog.deadline_armed is True
+    gw._cancel_shutdown_deadline()
+    assert gw._watchdog.deadline_armed is False
+    # A clean stop cancels before expiry, so no self-exit ever fires.
+    assert gw._watchdog.deadline_expired is False
+
+
 # ── Active Typer CLI surface (#3410) ──
 # Guards against the flags being defined only on the legacy argparse parser
 # while the real ``praisonai gateway start`` entrypoint silently drops them.

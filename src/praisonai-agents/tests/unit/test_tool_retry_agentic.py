@@ -7,11 +7,20 @@ import time
 from unittest.mock import patch
 
 from praisonaiagents import Agent, tool
+from praisonaiagents.config import ToolConfig
 from praisonaiagents.tools.retry import RetryPolicy
 
 
+@pytest.mark.live
 class TestRetryPolicyAgentic:
-    """Real agentic tests where the agent calls LLM and uses retrying tools."""
+    """Real agentic tests where the agent calls LLM and uses retrying tools.
+
+    These genuinely call the model (AGENTS.md 9.4) but live under tests/unit,
+    so running the unit suite issued live API calls. Gated with the repo's
+    ``live`` marker (tests/conftest.py) so ``PRAISONAI_LIVE_TESTS=1`` is the
+    single explicit opt-in — a key merely being present no longer routes real
+    billable requests through the default unit run.
+    """
     
     def test_agent_with_flaky_tool_real_llm(self):
         """
@@ -48,7 +57,7 @@ class TestRetryPolicyAgentic:
             name="research_assistant",
             instructions="You are a helpful research assistant. When asked to search for information, use the flaky_web_search tool. Be concise in your response.",
             tools=[flaky_web_search],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         # Mock time.sleep to speed up test
@@ -89,7 +98,7 @@ class TestRetryPolicyAgentic:
             name="data_analyst", 
             instructions="You are a data analyst. If you cannot access the database, explain what happened and suggest alternatives. Keep it brief.",
             tools=[restricted_database_query],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         # ✅ REAL agent call with actual LLM interaction
@@ -141,7 +150,7 @@ class TestRetryPolicyAgentic:
             name="api_client",
             instructions="You help users get information. Try the primary_api first. If it fails completely, you can try fallback_api. Be brief.",
             tools=[primary_api, fallback_api],
-            tool_retry_policy=agent_retry_policy
+            tool_config=ToolConfig(retry_policy=agent_retry_policy)
         )
         
         with patch('time.sleep'):
@@ -185,7 +194,7 @@ class TestRetryPolicyAgentic:
             name="weather_assistant",
             instructions="You provide weather information using the async_weather_api tool. Keep responses concise.",
             tools=[async_weather_api],
-            tool_retry_policy=retry_policy
+            tool_config=ToolConfig(retry_policy=retry_policy)
         )
         
         with patch('time.sleep'), patch('asyncio.sleep'):

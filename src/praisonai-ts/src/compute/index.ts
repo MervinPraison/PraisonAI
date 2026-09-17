@@ -10,7 +10,7 @@
 import { ComputeError, type ComputeProvider } from './types';
 import { LocalCompute } from './local';
 import { DockerCompute } from './docker';
-import { ComputeToolPlace } from './tool-place';
+import { ComputeToolPlace, registerComputeToolPlaces } from './tool-place';
 import { registerToolPlace } from '../agent/features/placement';
 
 export * from './types';
@@ -37,6 +37,11 @@ const registry = new Map<string, Factory>([
 export function registerComputeProvider(name: string, factory: Factory): void {
   const key = name.toLowerCase();
   registry.set(key, factory);
+  // A provider is only useful through `toolsRunOn` if it is also a place the
+  // agent can select. Registering here but not there is the gap that let
+  // `resolveComputeProvider('e2b')` succeed while `new Agent({ toolsRunOn: 'e2b' })`
+  // threw "not a known place" -- so mirror the registration into the placement
+  // registry, on the same lazy factory.
   registerToolPlace(key, () => new ComputeToolPlace(factory()));
 }
 
@@ -73,5 +78,4 @@ export function resolveComputeProvider(target: string | ComputeProvider | undefi
 
 // Populate the toolsRunOn registry by the act of having providers, rather than
 // by a caller remembering a setup step.
-import { registerComputeToolPlaces } from './tool-place';
 registerComputeToolPlaces();

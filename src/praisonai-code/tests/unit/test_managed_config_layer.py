@@ -14,6 +14,12 @@ import json
 
 from praisonai_code.cli.configuration.resolver import ConfigResolver
 
+# Every test here resolves config, so none of them may see the
+# developer's exported MODEL_NAME/OPENAI_MODEL_NAME et al.
+import pytest
+
+pytestmark = pytest.mark.usefixtures("isolated_config_env")
+
 
 def _write_managed_dir(base, body: str):
     d = base / "managed"

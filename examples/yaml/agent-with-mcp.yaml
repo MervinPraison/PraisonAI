@@ -27,11 +27,10 @@ mcp:
       enabled: true
     
     time:
-      # Time and date utilities
-      command: npx
+      # Time and date utilities (published Python MCP server via uvx)
+      command: uvx
       args:
-        - "-y" 
-        - "@modelcontextprotocol/server-time"
+        - "mcp-server-time"
       env: {}
       enabled: true
 

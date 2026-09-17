@@ -210,9 +210,19 @@ class TestEventBus:
         assert received[0].type == EventType.AGENT_STARTED.value
     
     def test_event_history(self):
-        """Test event history tracking."""
+        """Test event history tracking.
+
+        A subscriber is registered first: #2066 added a fast path that skips
+        the history append entirely when nothing is listening, so publishing to
+        a bare bus records nothing. These three history tests predate that
+        change and were never updated, so they had been red since June --
+        asserting a contract the code deliberately stopped honouring.
+        See test_history_is_not_recorded_without_a_subscriber below, which pins
+        the behaviour that replaced it.
+        """
         bus = EventBus()
-        
+        bus.subscribe(lambda e: None)   # catch-all: event_types defaults to None
+
         bus.publish("event.1", {})
         bus.publish("event.2", {})
         bus.publish("event.3", {})
@@ -226,7 +236,8 @@ class TestEventBus:
     def test_event_history_with_filter(self):
         """Test filtered event history."""
         bus = EventBus()
-        
+        bus.subscribe(lambda e: None)   # catch-all: event_types defaults to None
+
         bus.publish("type.a", {})
         bus.publish("type.b", {})
         bus.publish("type.a", {})
@@ -238,7 +249,8 @@ class TestEventBus:
     def test_event_history_limit(self):
         """Test event history limit."""
         bus = EventBus()
-        
+        bus.subscribe(lambda e: None)   # catch-all: event_types defaults to None
+
         for i in range(10):
             bus.publish(f"event.{i}", {})
         
@@ -247,6 +259,37 @@ class TestEventBus:
         assert len(history) == 5
         assert history[0].type == "event.5"
     
+    def test_history_is_not_recorded_without_a_subscriber(self):
+        """The contract that replaced the three tests above (#2066).
+
+        The fast path skips the lock, Event construction and the history append
+        when nothing is listening, because memory and sub-agent lifecycle
+        publishes were paying uuid4 + lock + append on every call with no
+        subscribers.
+
+        Stated here as its own test rather than left implicit, because the file
+        previously asserted both this and its opposite -- three tests expecting
+        history from a bare bus, two pinning that there is none -- which cannot
+        both hold, and left the suite red for three months while looking like
+        flake.
+        """
+        bus = EventBus()
+
+        bus.publish("event.1", {})
+        bus.publish("event.2", {})
+
+        assert bus.get_history() == []
+
+    def test_a_subscriber_added_later_does_not_backfill_history(self):
+        """Only events published *while* subscribed are recorded."""
+        bus = EventBus()
+
+        bus.publish("before", {})
+        bus.subscribe(lambda e: None)   # catch-all: event_types defaults to None
+        bus.publish("after", {})
+
+        assert [e.type for e in bus.get_history()] == ["after"]
+
     def test_clear_history(self):
         """Test clearing event history."""
         bus = EventBus()

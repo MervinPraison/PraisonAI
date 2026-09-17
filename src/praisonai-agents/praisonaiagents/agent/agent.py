@@ -23,9 +23,12 @@ from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState, DualLock
-# NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
-# (Issue #2644). It is kept in the MRO for backward compatibility during the
-# deprecation cycle and will be removed afterwards.
+# NOTE: UnifiedExecutionMixin's *public* methods are deprecated and unused by
+# any production path (Issue #2644); it is kept in the MRO for backward
+# compatibility during the deprecation cycle and will be removed afterwards.
+# The one live helper it used to own (_run_async_in_sync_context) has been
+# relocated to async_safety.run_async_in_sync_context, so dropping this mixin
+# from the MRO is a true no-op.
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
@@ -879,6 +882,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "stream": (
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
+                ),
+                "tool_retry_policy": (
+                    "tool retry moved into tool_config=; use "
+                    "tool_config=ToolConfig(retry_policy=RetryPolicy(...))."
+                ),
+                "tool_timeout": (
+                    "tool timeout moved into tool_config=; use "
+                    "tool_config=ToolConfig(timeout=...)."
                 ),
             }
             _hint = "".join(
@@ -2288,10 +2299,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # was sent to OpenAI under a model name that was really a repr -- the
         # opposite of what passing your own model means. Duck-typed on
         # ``get_response`` so any conforming backend works, not just ``LLM``.
+        # Detection must match what the tool loop actually invokes: the custom
+        # path calls ``llm_instance.get_response(**llm_kwargs)`` (and the async
+        # ``get_response_async``) with PraisonAI-internal kwargs -- tools,
+        # tool_choice, seed, cancel_token, steering_drain, and more. The
+        # ``chat``/``achat`` (LLMProviderProtocol) and
+        # ``chat_completion``/``achat_completion`` (UnifiedLLMProtocol) surfaces
+        # take a different signature and are NOT wired into that loop, so a
+        # backend exposing only those would be adopted here and then raise
+        # ``AttributeError`` on the first turn. Adopt only the surface the
+        # executor can drive; a translation adapter for the other protocols
+        # would be a heavy, unused implementation rather than a fix.
+        _MODEL_BACKEND_METHODS = ("get_response", "get_response_async")
         _is_model_instance = (
             llm is not None
             and not isinstance(llm, (str, dict))
-            and callable(getattr(llm, "get_response", None))
+            and any(callable(getattr(llm, m, None)) for m in _MODEL_BACKEND_METHODS)
         )
         if _is_model_instance:
             self._llm_instance = llm
@@ -2544,7 +2567,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                         self.tools.extend(get_ast_grep_tools())
                     except ImportError:
                         pass  # No default tools available
-        
+
+        # Merge tools contributed by enabled PluginType.TOOL plugins so a plugin's
+        # get_tools() output is actually callable by this agent. Existing tools win
+        # on a name collision (reported, not silently shadowed).
+        self._merge_plugin_tools()
+
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
@@ -7958,6 +7986,41 @@ Answer:"""
                 elif hasattr(self.memory, 'close_connections'):
                     self.memory.close_connections()
             
+            # LLM client cleanup - release live client pools asynchronously.
+            # Mirror close()'s targets but never touch the ``llm_instance``
+            # property (it would lazily *create* a client just to close it);
+            # only tear down an already-materialised ``_llm_instance``.
+            try:
+                llm_instance = getattr(self, '_llm_instance', None)
+                if llm_instance is not None:
+                    aclose = getattr(llm_instance, 'aclose', None)
+                    if aclose is not None:
+                        try:
+                            if asyncio.iscoroutinefunction(aclose):
+                                await aclose()
+                            else:
+                                aclose()
+                        except Exception:
+                            close = getattr(llm_instance, 'close', None)
+                            if callable(close):
+                                close()
+                    else:
+                        close = getattr(llm_instance, 'close', None)
+                        if callable(close):
+                            close()
+
+                openai_client = getattr(self, '_Agent__openai_client', None)
+                if openai_client is not None and hasattr(openai_client, 'close'):
+                    openai_client.close()
+
+                llm = getattr(self, 'llm', None)
+                if llm and not isinstance(llm, str):
+                    llm_client = getattr(llm, '_client', None)
+                    if llm_client and hasattr(llm_client, 'close'):
+                        llm_client.close()
+            except Exception as e:
+                logger.warning(f"LLM client cleanup failed: {e}")
+
             # Close MCP clients passed via tools=[MCP(...)]
             # (mirrors remove_mcp_server()'s best-effort shutdown)
             if isinstance(self.tools, list):

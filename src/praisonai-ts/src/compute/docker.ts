@@ -125,6 +125,9 @@ export class DockerCompute implements ComputeProvider {
     // instance errored and throws rather than resolving as success.
     const result = await this.runOnHost(`docker rm -f ${shellQuote(instanceId)}`, 60);
     if (result.exitCode !== 0) {
+      // A failed removal that reports success leaves the container -- and its
+      // processes -- running while `getStatus` claims 'stopped'. Mark the error
+      // and raise, so a caller relying on the sandbox being gone learns it is not.
       instance.status = 'error';
       throw new ComputeError(
         `Could not remove container ${instanceId}: ` +

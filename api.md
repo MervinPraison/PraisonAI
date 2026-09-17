@@ -195,6 +195,7 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definition</a>(name: str) -> Optional[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definitions</a>(permission_resolver: Optional[Callable[[str], bool]] = None) -> List[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_trust_level</a>(name: str) -> Optional[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None, ttl_seconds: Optional[float] = None) -> List[Union[BaseTool, Callable]]</code>
@@ -271,14 +272,14 @@ Methods:
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_user_memory</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search</a>(query: str, user_id: Optional[str] = None, agent_id: Optional[str] = None, run_id: Optional[str] = None, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_entity</a>(query: str, limit: int = 5) -> List[Dict[str, Any]]</code>
-* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_long_term</a>(query: str, limit: int = 5, relevance_cutoff: float = 0.0, min_quality: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]</code>
-* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_short_term</a>(query: str, limit: int = 5, min_quality: float = 0.0, relevance_cutoff: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_long_term</a>(query: str, limit: int = 5, relevance_cutoff: float = 0.0, min_quality: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, min_trust = None, **kwargs) -> List[Dict[str, Any]]</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_short_term</a>(query: str, limit: int = 5, min_quality: float = 0.0, relevance_cutoff: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, min_trust = None, **kwargs) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_user_memory</a>(user_id: str, query: str, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_with_quality</a>(query: str, min_quality: float = 0.0, memory_type: Literal['short', 'long'] = 'long', limit: int = 5) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_entity</a>(name: str, type_: str, desc: str, relations: str)</code>
-* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_long_term</a>(text: str, metadata: Dict[str, Any] = None, completeness: float = None, relevance: float = None, clarity: float = None, accuracy: float = None, weights: Dict[str, float] = None, evaluator_quality: float = None)</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_long_term</a>(text: str, metadata: Dict[str, Any] = None, completeness: float = None, relevance: float = None, clarity: float = None, accuracy: float = None, weights: Dict[str, float] = None, evaluator_quality: float = None, trust = None, origin: Optional[str] = None)</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_quality</a>(text: str, quality_score: float, task_id: Optional[str] = None, iteration: Optional[int] = None, metrics: Optional[Dict[str, float]] = None, memory_type: Literal['short', 'long'] = 'long') -> None</code>
-* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_short_term</a>(text: str, metadata: Dict[str, Any] = None, completeness: float = None, relevance: float = None, clarity: float = None, accuracy: float = None, weights: Dict[str, float] = None, evaluator_quality: float = None)</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_short_term</a>(text: str, metadata: Dict[str, Any] = None, completeness: float = None, relevance: float = None, clarity: float = None, accuracy: float = None, weights: Dict[str, float] = None, evaluator_quality: float = None, trust = None, origin: Optional[str] = None)</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">store_user_memory</a>(user_id: str, text: str, extra: Dict[str, Any] = None)</code>
 * <code title="class MemoryConfig">MemoryConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 
@@ -713,9 +714,11 @@ Methods:
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">reasoning</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">run</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False, stream: bool = None) -> Dict[str, Any]</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">start</a>(input: str = '', **kwargs) -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">state</a>()</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">stream</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_mermaid</a>() -> str</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">validate_variables</a>() -> None</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">where_does_it_run</a>() -> str</code>
@@ -749,7 +752,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_spawned_agents</a>() -> List[SpawnedSubAgent]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
-* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id, tasks = None)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_status</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_todo_markdown</a>() -> str</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_token_usage_summary</a>() -> Dict[str, Any]</code>
@@ -946,6 +949,7 @@ export type { JitteredBackoffOptions, RetryBackoffConfigOptions } from "./agent/
 export { RouterAgent, createRouter, routeConditions } from "./agent/router";
 export { AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
 export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, TerminalReason } from "./agent/run-outcome";
+export { reviewTaskOutput } from "./agent/task-review";
 export { // Agent loop
   createAgentLoop, // DevTools
   enableDevTools, // MCP

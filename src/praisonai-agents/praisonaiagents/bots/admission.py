@@ -18,7 +18,7 @@ recorded ``reason_code``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import FrozenSet, Iterable, Optional
 
 # Machine-readable reason codes. Kept as module constants so callers can record
 # and compare them without re-typing string literals (which is exactly how the
@@ -45,6 +45,56 @@ _GROUP_POLICIES = frozenset(
 
 # Chat types treated as one-to-one (no group policy applies).
 _DIRECT_CHAT_TYPES = frozenset({"dm", "private", "direct", "im"})
+
+# Implicit-mention signal names an adapter can report and an operator can
+# enable per channel. Kept as constants so config/YAML and adapters agree on
+# the spelling without re-typing string literals.
+IMPLICIT_REPLY = "reply"
+IMPLICIT_QUOTE = "quote"
+IMPLICIT_THREAD = "thread"
+
+# Safe default: a direct reply to the bot counts as addressing it, but quoting
+# or merely sharing a thread does not (those are noisier signals an operator
+# opts into). Matches the "replying to the bot is the most common group
+# interaction" intent of Issue #5029 without opening the gate wider by default.
+DEFAULT_IMPLICIT_MENTIONS: FrozenSet[str] = frozenset({IMPLICIT_REPLY})
+
+
+@dataclass(frozen=True)
+class MentionFacts:
+    """Structured facts about *how* the bot was addressed in a message.
+
+    A bare ``is_mention: bool`` cannot express *why* the bot is considered
+    addressed, so a reply/quote/thread relationship to the bot is invisible to
+    the admission decision. This carries the signals an adapter can observe
+    from the platform payload so ``mention_only`` groups can treat a reply to
+    the bot as an implicit mention (Issue #5029).
+
+    Attributes:
+        explicit: The bot's ``@username`` is present in the message text.
+        reply_to_bot: The message is a reply to a previous bot message.
+        quoted_bot: The message quotes/forwards a previous bot message.
+        thread_participant: The message is in a thread the bot participates in.
+    """
+
+    explicit: bool = False
+    reply_to_bot: bool = False
+    quoted_bot: bool = False
+    thread_participant: bool = False
+
+    def is_addressed(self, implicit_mentions: Iterable[str]) -> bool:
+        """Whether these facts count as addressing the bot.
+
+        ``explicit`` always counts; the implicit signals count only when their
+        name is present in ``implicit_mentions`` (operator-configurable).
+        """
+        enabled = frozenset(implicit_mentions or ())
+        return (
+            self.explicit
+            or (self.reply_to_bot and IMPLICIT_REPLY in enabled)
+            or (self.quoted_bot and IMPLICIT_QUOTE in enabled)
+            or (self.thread_participant and IMPLICIT_THREAD in enabled)
+        )
 
 
 @dataclass(frozen=True)
@@ -86,6 +136,8 @@ def resolve_ingress_admission(
     chat_type: Optional[str],
     sender_id: Optional[str],
     is_mention: bool = False,
+    mention: Optional[MentionFacts] = None,
+    implicit_mentions: Optional[Iterable[str]] = None,
     is_command: bool = False,
     allowlist: Optional[Iterable[str]] = None,
     blocklist: Optional[Iterable[str]] = None,
@@ -126,7 +178,21 @@ def resolve_ingress_admission(
             ``"channel"``, ``"supergroup"``). Anything not in the direct set is
             treated as a group for policy purposes.
         sender_id: Stable sender identifier used for allow/block-list checks.
-        is_mention: Whether the bot was mentioned/@-addressed in the message.
+        is_mention: Back-compat shim for whether the bot was explicitly
+            @-mentioned. Prefer ``mention`` (a :class:`MentionFacts`) which also
+            carries reply/quote/thread signals; ``is_mention=True`` is treated
+            as ``MentionFacts(explicit=True)`` when ``mention`` is not given.
+        mention: Structured :class:`MentionFacts` describing *how* the bot was
+            addressed (explicit @-mention and/or reply/quote/thread to the bot).
+            Under ``mention_only`` / ``observe`` an enabled implicit signal
+            (see ``implicit_mentions``) admits the message just like an explicit
+            mention, so replying to the bot is answered without re-typing
+            ``@bot`` (Issue #5029). Overrides ``is_mention`` when provided.
+        implicit_mentions: Which implicit signals count as addressing the bot
+            (any of ``"reply"`` / ``"quote"`` / ``"thread"``). Defaults to
+            :data:`DEFAULT_IMPLICIT_MENTIONS` (``{"reply"}``) — a safe default
+            where a reply to the bot is answered but quotes/threads are not
+            unless explicitly enabled.
         is_command: Whether the message is a bot command (always allowed under
             ``mention_only`` / ``command_only`` / ``observe``).
         allowlist: Optional collection of allowed sender ids to *enforce*.
@@ -147,6 +213,16 @@ def resolve_ingress_admission(
         An :class:`IngressDecision` with the verdict, a machine-readable
         ``reason_code``, the deciding ``gate`` and the ``observe`` flag.
     """
+    # Resolve the effective "is the bot addressed?" from structured facts. When
+    # ``mention`` is not supplied, fall back to the ``is_mention`` boolean shim
+    # (treated as an explicit @-mention) so existing callers are unaffected.
+    facts = mention if mention is not None else MentionFacts(explicit=is_mention)
+    enabled_implicit = (
+        implicit_mentions if implicit_mentions is not None
+        else DEFAULT_IMPLICIT_MENTIONS
+    )
+    addressed = facts.is_addressed(enabled_implicit)
+
     # 1. Block-list wins over everything: an explicitly blocked sender never
     #    reaches an agent run regardless of allowlist membership.
     if _contains(blocklist, sender_id):
@@ -195,7 +271,7 @@ def resolve_ingress_admission(
         )
 
     if policy in ("mention_only", "observe"):
-        if is_mention or is_command:
+        if addressed or is_command:
             return IngressDecision(
                 admit=True, reason_code=REASON_ALLOWED, gate=GATE_GROUP_POLICY
             )

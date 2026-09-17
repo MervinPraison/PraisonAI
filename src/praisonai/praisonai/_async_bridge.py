@@ -9,11 +9,17 @@ import asyncio
 import atexit
 import contextlib
 import contextvars
+import enum
+import inspect
+import logging
 import os
 import threading
+import weakref
 import concurrent.futures
 from concurrent.futures import CancelledError as FutureCancelledError, Future
-from typing import Awaitable, Iterator, Optional, TypeVar
+from typing import Any, Awaitable, Iterator, Optional, TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -467,3 +473,72 @@ async def arun_sync_or_offload(
     except (asyncio.TimeoutError, asyncio.CancelledError):
         fut.cancel()
         raise
+
+
+class DispatchKind(str, enum.Enum):
+    """How a sync caller consumes the result of a (possibly async) store op.
+
+    Making read-vs-write intent explicit at the *call site* removes the need for
+    a name-string allow-list (the old ``_READ_OPS`` frozenset) that silently
+    dropped a new read-shaped method's return value under a running loop.
+    """
+
+    READ = "read"    #: caller consumes the returned value (never fire-and-forget)
+    WRITE = "write"  #: caller only cares that it eventually completes
+
+
+def dispatch_maybe_awaitable(
+    value: Any,
+    *,
+    kind: DispatchKind,
+    tracker: "weakref.WeakSet | None" = None,
+    tracker_lock: "threading.Lock | None" = None,
+    op_name: str = "op",
+) -> Any:
+    """Single owner of "a sync call may return a coroutine; run it correctly".
+
+    This consolidates the submit/track/callback scaffolding that lifecycle hooks
+    would otherwise hand-roll per op. Behaviour:
+
+    - **Not awaitable**: returned as-is.
+    - **No running loop**: block on the shared bridge via :func:`run_sync`.
+    - **Running loop + READ**: route through :func:`run_sync_or_offload`, which
+      returns the value on a sync path and fails loudly inside a loop instead of
+      corrupting a read-modify-write with a silent ``None``.
+    - **Running loop + WRITE**: submit to the active bridge as tracked
+      fire-and-forget (uuid-keyed store writes are idempotent, so completing them
+      slightly later is safe), attach a warning done-callback, and return
+      ``None``.
+
+    Args:
+        value: The result of calling the store method (may be a coroutine).
+        kind: :class:`DispatchKind.READ` or :class:`DispatchKind.WRITE`.
+        tracker: Optional ``WeakSet`` of in-flight futures so a ``close()`` path
+            can flush them; only used on the running-loop WRITE branch.
+        tracker_lock: Lock guarding ``tracker``.
+        op_name: Human-readable op name for log/thread naming.
+    """
+    if not inspect.isawaitable(value):
+        return value
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run_sync(value)
+
+    if kind is DispatchKind.READ:
+        return run_sync_or_offload(value, thread_name=f"praisonai-db-read-{op_name}")
+
+    fut = current_bridge().submit(value)
+    if tracker is not None and tracker_lock is not None:
+        with tracker_lock:
+            tracker.add(fut)
+
+    def _on_done(f, name=op_name):
+        try:
+            f.result()
+        except Exception:
+            logger.warning("Deferred %s failed", name, exc_info=True)
+
+    fut.add_done_callback(_on_done)
+    return None

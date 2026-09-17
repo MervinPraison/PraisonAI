@@ -224,7 +224,7 @@ class TestMCPHandler:
         handler = MCPHandler()
         
         for cmd_str in [
-            "npx -y @modelcontextprotocol/server-time",
+            "npx -y @modelcontextprotocol/server-filesystem /tmp",
             "python -m mcp_server",
             "uvx some-mcp-server",
             "node server.js",

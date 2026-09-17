@@ -88,13 +88,11 @@
   ],
   "surfaces": {
     "AgentTeam.__init__": [
-      "autonomy",
       "caching",
       "guardrails",
       "knowledge",
       "learn",
       "reflection",
-      "toolsRunOn",
       "web"
     ],
     "Task.__init__": [
@@ -104,5 +102,5 @@
       "web"
     ]
   },
-  "total": 12
+  "total": 10
 }

@@ -253,9 +253,31 @@ class RuntimeResolver:
             )
             
         except ValueError as e:
-            # Enhance error message with available runtimes
-            from .registry import list_available_runtimes
-            available = [entry.runtime_id for entry in list_available_runtimes()]
+            # Enhance error message with available runtimes.
+            #
+            # This imported `list_available_runtimes`, which the registry does
+            # not define -- it exports `list_runtimes()`, returning ids. So the
+            # branch raised ImportError instead of the message it exists to
+            # produce, and it runs precisely when the user has typo'd a runtime
+            # id: the one moment the list of valid ones is worth having.
+            #
+            # Only the registry's unknown-id signal deserves this treatment.
+            # `resolve_runtime()` both looks up the id and *calls the factory*;
+            # a factory raising ValueError (bad config, construction failure)
+            # after a valid id was found is a different, actionable problem.
+            # Rewriting that as "Unknown runtime ID" would hide the real cause,
+            # so anything that is not the registry's "Unknown runtime:" message
+            # is re-raised untouched.
+            if not str(e).startswith("Unknown runtime:"):
+                raise
+            #
+            # Best-effort: if the listing itself fails, the original ValueError
+            # is still better than an error about error handling.
+            try:
+                from .registry import list_runtimes
+                available = list_runtimes()
+            except Exception:  # noqa: BLE001 - never mask the real failure
+                raise ValueError(f"Unknown runtime ID: {config.runtime}. {e}") from e
             raise ValueError(
                 f"Unknown runtime ID: {config.runtime}. Available runtimes: {available}. "
                 f"Original error: {e}"

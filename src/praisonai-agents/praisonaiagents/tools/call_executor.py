@@ -38,6 +38,12 @@ def _probe_on_progress(execute_tool_fn: Callable) -> bool:
         return False
 
 
+def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
+    if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
+        return {"_durable_iteration_index": index}
+    return {}
+
+
 _ON_PROGRESS_CACHE: "weakref.WeakKeyDictionary[Callable, bool]" = weakref.WeakKeyDictionary()
 
 
@@ -328,11 +334,10 @@ def _run_tool_body(
         call_kwargs = {}
         if supports_progress:
             call_kwargs["on_progress"] = _emit
-        if (
-            tool_call.iteration_index is not None
-            and getattr(execute_tool_fn, "_accepts_durable_iteration", False)
-        ):
-            call_kwargs["_durable_iteration_index"] = tool_call.iteration_index
+        if tool_call.iteration_index is not None:
+            call_kwargs.update(
+                _durable_iteration_kwargs(execute_tool_fn, tool_call.iteration_index)
+            )
         raw = execute_tool_fn(
             tool_call.function_name,
             tool_call.arguments,

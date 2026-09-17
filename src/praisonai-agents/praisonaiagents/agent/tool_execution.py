@@ -54,7 +54,8 @@ class BackoffPolicy:
         # Cap the base delay to prevent excessively long waits
         base = min(base, max_delay)
         jitter_amount = random.uniform(0, jitter * base)
-        return base + jitter_amount
+        # Re-clamp after jitter so max_delay is a hard ceiling
+        return min(base + jitter_amount, max_delay)
 
 
 # Cap on encoded image bytes injected back into the conversation to avoid
@@ -379,6 +380,77 @@ class ToolExecutionMixin:
         from ..tools.resolver import resolve_tools_list
 
         return resolve_tools_list(tools)
+
+    def _merge_plugin_tools(self):
+        """Merge tools contributed by enabled ``PluginType.TOOL`` plugins.
+
+        Plugins expose tools via ``get_tools()``. Those tools are only callable
+        by an agent if they are added to ``self.tools``; without this merge they
+        are collected by ``PluginManager.get_all_tools()`` yet reach no agent.
+
+        ``get_all_tools()`` already filters to individually-enabled plugins, so
+        this does NOT gate on the package-wide ``plugins.enable()`` flag: the
+        plugin docs state tools work WITHOUT calling ``enable()`` (only
+        background hook/metric plugins need it). Registering a tool plugin marks
+        it enabled in the manager, which is sufficient here.
+
+        Existing agent tools take precedence on a name collision (the clash is
+        logged rather than silently shadowing the agent's own tool). Callable
+        tools are wired directly; metadata-only dict descriptors that carry no
+        executable implementation are skipped with a warning rather than
+        appended as un-callable entries.
+        """
+        try:
+            from ..plugins.manager import get_plugin_manager
+            plugin_tools = get_plugin_manager().get_all_tools()
+        except Exception as exc:  # never let plugin wiring break agent init
+            logging.getLogger(__name__).debug("Plugin tool merge skipped: %s", exc)
+            return
+
+        if not plugin_tools:
+            return
+
+        def _tool_name(t):
+            if isinstance(t, dict):
+                fn = t.get('function')
+                if isinstance(fn, dict) and fn.get('name'):
+                    return fn['name']
+                return t.get('name')
+            return getattr(t, 'name', getattr(t, '__name__', None))
+
+        existing = {
+            name for name in (_tool_name(t) for t in self.tools) if name
+        }
+        added = []
+        for fn in plugin_tools:
+            # Only callables (or OpenAI-schema dicts paired with a callable)
+            # are executable by an agent. A bare ``{"name": ...}`` descriptor
+            # has no implementation, so appending it would advertise a tool the
+            # agent can never invoke — skip it visibly instead.
+            if not callable(fn) and not (
+                isinstance(fn, dict) and callable(fn.get('function'))
+            ):
+                logging.getLogger(__name__).warning(
+                    "Plugin tool %r skipped: not callable / no executable "
+                    "implementation.", _tool_name(fn) or fn
+                )
+                continue
+            name = _tool_name(fn)
+            if name and name in existing:
+                logging.getLogger(__name__).warning(
+                    "Plugin tool '%s' skipped: an agent tool with the same name "
+                    "already exists (existing tool wins).", name
+                )
+                continue
+            self.tools.append(fn)
+            if name:
+                existing.add(name)
+            added.append(name or str(fn))
+
+        if added:
+            logging.getLogger(__name__).debug(
+                "Merged %d plugin tool(s) into agent: %s", len(added), added
+            )
 
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
@@ -3051,9 +3123,11 @@ class ToolExecutionMixin:
                 # sync tool-calling path we must await it, otherwise a bare
                 # un-awaited coroutine is handed to the model as the tool result
                 # and the tool body never runs (silent data loss).
+                from .async_safety import run_async_in_sync_context
+
                 def _resolve_result(value):
                     if inspect.iscoroutine(value):
-                        return self._run_async_in_sync_context(value)
+                        return run_async_in_sync_context(value)
                     return value
 
                 # BaseTool instances (plugin system) - call run() method
