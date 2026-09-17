@@ -114,6 +114,12 @@ _PROBES: dict[str, Callable[[], bool]] = {
 }
 
 def is_available(name: str) -> bool:
+    """Return whether an optional framework is importable, memoising the answer.
+
+    The result is cached in a process-global memo, so tests that stub
+    ``importlib.util.find_spec`` / ``importlib.metadata.distribution`` must call
+    :func:`invalidate` to drop the memo before the real answer is expected again.
+    """
     if name not in _PROBES:
         raise ValueError(f"unknown framework name: {name!r}")
     cached = _cache.get(name)
