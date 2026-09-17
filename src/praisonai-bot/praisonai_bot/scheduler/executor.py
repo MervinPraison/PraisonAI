@@ -97,6 +97,22 @@ class JobResult:
     audit_path: Optional[str] = None
 
 
+@dataclass
+class _IncidentRecord:
+    """Minimal ``RunRecord``-shaped view fed to the core ``IncidentTracker``.
+
+    The tracker reads only ``status``/``error``/``job_id``/``job_name``/
+    ``timestamp`` (via ``getattr``); this adapts a :class:`JobResult` + job to
+    that shape without depending on the core ``RunRecord`` model.
+    """
+
+    status: str
+    error: Optional[str]
+    job_id: str
+    job_name: str
+    timestamp: float
+
+
 class ScheduledAgentExecutor:
     """Bridges ScheduleRunner + agent resolution for any consumer.
 
@@ -195,6 +211,12 @@ class ScheduledAgentExecutor:
         for job in due_jobs:
             try:
                 result = await self._execute_one(job)
+                # A success closes any open incident and emits a single
+                # recovery note. Failures are latched inside ``_execute_one``'s
+                # ``_maybe_deliver_failure``; a success is observed here — the
+                # one choke point every successful run flows through.
+                if getattr(result, "status", None) == "succeeded":
+                    await self._maybe_deliver_recovery(job, result)
             finally:
                 if atomic_claim:
                     # Release the lease so it does not linger until expiry.
@@ -1468,6 +1490,107 @@ class ScheduledAgentExecutor:
         result = await sender(delivery, text)
         return result is not False
 
+    def _incident_tracker(self) -> Optional[Any]:
+        """Lazily build the shared core incident brain from the run policy.
+
+        Returns ``None`` when there is no policy — the stateless behaviour of
+        today. The tracker holds no per-job state itself (that round-trips
+        through the existing :class:`JobStateStoreProtocol`), so one instance
+        per executor is reused across all jobs.
+        """
+        if self._run_policy is None:
+            return None
+        tracker = getattr(self, "_incident_tracker_obj", None)
+        if tracker is None:
+            from praisonaiagents.scheduler import IncidentTracker
+
+            after = getattr(self._run_policy, "alert_after_failures", 1)
+            tracker = IncidentTracker(after_failures=after)
+            self._incident_tracker_obj = tracker
+        return tracker
+
+    def _observe_incident(
+        self, job: "ScheduleJob", result: JobResult,
+    ) -> Optional[Any]:
+        """Fold one run outcome into the job's incident state via the tracker.
+
+        Loads the per-job incident scratchpad from the existing state store,
+        feeds a lightweight record (``status``/``error``/``job_id``/
+        ``job_name``/``timestamp``) to the core :class:`IncidentTracker`, and
+        persists any change back under the ``incident``/``consecutive`` keys of
+        the same scratchpad. Returns the :class:`Incident` when an operator
+        alert (or recovery note) is due, else ``None``.
+
+        No-op returning ``None`` when there is no policy or no state store — the
+        tracker needs durable state to latch, so without it we fall back to the
+        prior stateless behaviour (the caller then delivers as before).
+        """
+        store = self._state_store()
+        tracker = self._incident_tracker()
+        if tracker is None or store is None:
+            return None
+        prior = self._get_job_state(job)
+        # The tracker mutates only the ``incident``/``consecutive`` keys of the
+        # dict passed in; hand it those so it round-trips through the same
+        # per-job scratchpad without disturbing any agent/gate watermark.
+        state = {
+            k: prior[k] for k in ("incident", "consecutive") if k in prior
+        }
+        record = _IncidentRecord(
+            status=result.status,
+            error=result.error,
+            job_id=getattr(job, "id", "") or "",
+            job_name=getattr(job, "name", "") or "",
+            timestamp=time.time(),
+        )
+        try:
+            incident = tracker.observe(record, state)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Incident tracking failed for job '%s': %s", job.id, e)
+            return None
+        # Rebuild the persisted scratchpad from prior, replacing the incident
+        # keys with the tracker's post-observation view (``incident`` may have
+        # been popped on a recovery, so drop it when absent). One-shot jobs are
+        # already gone from the store, so skip the write for them.
+        if getattr(job, "delete_after_run", False):
+            return incident
+        merged = {k: v for k, v in prior.items() if k not in ("incident", "consecutive")}
+        merged.update(state)
+        if merged != prior:
+            try:
+                store.set_state(job.id, merged)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "Could not persist incident state for job '%s': %s",
+                    job.id, e,
+                )
+        return incident
+
+    async def _maybe_deliver_recovery(
+        self, job: "ScheduleJob", result: JobResult,
+    ) -> None:
+        """On a success that closes an open incident, send one recovery note.
+
+        No-op unless failure delivery is enabled (the recovery note is the
+        mirror of the failure alert) and a job delivery target exists.
+        """
+        if self._run_policy is None or not self._run_policy.deliver_on_failure:
+            return
+        incident = self._observe_incident(job, result)
+        if incident is None or getattr(incident, "state", None) != "resolved":
+            return
+        delivery = getattr(job, "delivery", None)
+        if not delivery or not self._can_deliver(delivery):
+            return
+        summary = f"✅ Scheduled job '{getattr(job, 'name', job.id)}' recovered."
+        try:
+            await self._dispatch_delivery(delivery, summary)
+            logger.info("Delivered recovery note for job '%s'", job.id)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(
+                "Recovery-note delivery failed for job '%s': %s", job.id, e,
+            )
+
     async def _maybe_deliver_failure(
         self, job: "ScheduleJob", result: JobResult,
     ) -> None:
@@ -1478,12 +1601,27 @@ class ScheduledAgentExecutor:
         is marked ``delivered`` (the payload arrived, so run history and
         delivery monitoring stay accurate); a non-arriving summary records a
         ``delivery_error`` separately from the execution ``error``.
+
+        The failure is folded through the core :class:`IncidentTracker` (when a
+        state store is available): a distinct error alerts **once** and repeats
+        of the same error stay silent until it changes or recovers, so an
+        hourly job with an expired token no longer re-sends the identical
+        summary every tick (alert fatigue). Without a state store the tracker
+        cannot latch, so it falls back to the prior send-on-every-failure path.
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
         delivery = getattr(job, "delivery", None)
         if not delivery or not self._can_deliver(delivery):
             return
+        # Latch through the incident brain when durable state is available;
+        # deliver only when a fresh alert is due. When no state store backs the
+        # executor, ``_observe_incident`` returns ``None`` and we fall through
+        # to the prior stateless send so failure alerting still works.
+        if self._state_store() is not None:
+            incident = self._observe_incident(job, result)
+            if incident is None or getattr(incident, "state", None) != "alerted":
+                return
         summary = (
             f"⚠️ Scheduled job '{getattr(job, 'name', job.id)}' failed: "
             f"{result.error or 'unknown error'}"

@@ -83,6 +83,13 @@ class RunPolicy:
             injection patterns before it reaches the model.
         deliver_on_failure: On failure, deliver a compact failure summary to
             the job's delivery target (fail-closed delivery).
+        alert_after_failures: When ``deliver_on_failure`` is on, only alert
+            after this many *consecutive* failures of the same error signature
+            (default 1 = alert on the first failure). This latches the failure
+            summary through the core :class:`IncidentTracker` so a broken job
+            alerts **once** per distinct error and sends a single recovery note
+            on the next success, instead of re-sending the identical summary on
+            every failing tick (alert fatigue). Values below 1 are treated as 1.
         audit_dir: Directory where full run output is persisted regardless of
             delivery outcome.  ``None`` disables the durable output audit.
         scanner: Optional callable ``(prompt: str) -> PromptScanResult`` that
@@ -95,6 +102,7 @@ class RunPolicy:
     )
     scan_assembled_prompt: bool = True
     deliver_on_failure: bool = True
+    alert_after_failures: int = 1
     audit_dir: Optional[str] = None
     scanner: Optional[Any] = None
 
