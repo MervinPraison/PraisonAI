@@ -23,9 +23,12 @@ from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState, DualLock
-# NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
-# (Issue #2644). It is kept in the MRO for backward compatibility during the
-# deprecation cycle and will be removed afterwards.
+# NOTE: UnifiedExecutionMixin's *public* methods are deprecated and unused by
+# any production path (Issue #2644); it is kept in the MRO for backward
+# compatibility during the deprecation cycle and will be removed afterwards.
+# The one live helper it used to own (_run_async_in_sync_context) has been
+# relocated to async_safety.run_async_in_sync_context, so dropping this mixin
+# from the MRO is a true no-op.
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
@@ -880,6 +883,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
                 ),
+                "tool_retry_policy": (
+                    "tool retry moved into tool_config=; use "
+                    "tool_config=ToolConfig(retry_policy=RetryPolicy(...))."
+                ),
+                "tool_timeout": (
+                    "tool timeout moved into tool_config=; use "
+                    "tool_config=ToolConfig(timeout=...)."
+                ),
             }
             _hint = "".join(
                 f"\n  {name}: {_HINTS[name]}" for name in sorted(_unknown) if name in _HINTS
@@ -1362,7 +1373,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 _hooks_list = _hooks_config
             elif isinstance(_hooks_config, HooksConfig):
                 step_callback = _hooks_config.on_step
-                _hooks_list = _hooks_config.middleware or []
+                _hooks_list = list(_hooks_config.middleware or [])
+                # Route on_step / on_tool_call onto the SAME middleware chain
+                # that already powers ``hooks=[...]`` (MiddlewareManager). Both
+                # keys used to be stored-and-never-called, so the TypeError that
+                # advertises them ("Valid keys: on_step, on_tool_call,
+                # middleware") promised behaviour that did not exist.
+                if _hooks_config.on_step is not None or _hooks_config.on_tool_call is not None:
+                    from ..hooks.middleware import as_step_hook, as_tool_call_hook
+                    if _hooks_config.on_step is not None:
+                        _hooks_list.append(as_step_hook(_hooks_config.on_step))
+                    if _hooks_config.on_tool_call is not None:
+                        _hooks_list.append(as_tool_call_hook(_hooks_config.on_tool_call))
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve SKILLS param - FAST PATH
@@ -2277,10 +2299,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # was sent to OpenAI under a model name that was really a repr -- the
         # opposite of what passing your own model means. Duck-typed on
         # ``get_response`` so any conforming backend works, not just ``LLM``.
+        # Detection must match what the tool loop actually invokes: the custom
+        # path calls ``llm_instance.get_response(**llm_kwargs)`` (and the async
+        # ``get_response_async``) with PraisonAI-internal kwargs -- tools,
+        # tool_choice, seed, cancel_token, steering_drain, and more. The
+        # ``chat``/``achat`` (LLMProviderProtocol) and
+        # ``chat_completion``/``achat_completion`` (UnifiedLLMProtocol) surfaces
+        # take a different signature and are NOT wired into that loop, so a
+        # backend exposing only those would be adopted here and then raise
+        # ``AttributeError`` on the first turn. Adopt only the surface the
+        # executor can drive; a translation adapter for the other protocols
+        # would be a heavy, unused implementation rather than a fix.
+        _MODEL_BACKEND_METHODS = ("get_response", "get_response_async")
         _is_model_instance = (
             llm is not None
             and not isinstance(llm, (str, dict))
-            and callable(getattr(llm, "get_response", None))
+            and any(callable(getattr(llm, m, None)) for m in _MODEL_BACKEND_METHODS)
         )
         if _is_model_instance:
             self._llm_instance = llm
@@ -2533,7 +2567,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                         self.tools.extend(get_ast_grep_tools())
                     except ImportError:
                         pass  # No default tools available
-        
+
+        # Merge tools contributed by enabled PluginType.TOOL plugins so a plugin's
+        # get_tools() output is actually callable by this agent. Existing tools win
+        # on a name collision (reported, not silently shadowed).
+        self._merge_plugin_tools()
+
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
@@ -2570,6 +2609,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Store ExecutionConfig for context compaction policy access
         self.execution = _exec_config
+
+        # ExecutionConfig(code_execution=True) actually grants the capability.
+        # Before this, the flag only set ``self.allow_code_execution`` and no
+        # code tool was ever produced, so the knob was accepted and ignored.
+        #
+        # The tool is named ``execute_code``, which is registered "critical" in
+        # approval/registry.py, so it is approval-gated under every preset but
+        # ``"full"`` — the privilege-escalation problem that got the old
+        # ``sandbox=``-injects-tools behaviour reverted does not apply here, and
+        # unlike ``sandbox=`` this is an explicit opt-in by the caller.
+        if allow_code_execution:
+            self._attach_code_execution_tools(code_execution_mode, _exec_config)
         # Async-safe chat_history with dual-lock protection
         self.__chat_history_state = AsyncSafeState([])
         
@@ -4030,6 +4081,62 @@ Summary:"""
             return f"Agent {self._agent_index}"
         return "Agent"
     
+    def _attach_code_execution_tools(self, code_execution_mode: str, exec_config: Any) -> None:
+        """Give the model a code-execution tool for ``code_execution=True``.
+
+        ``code_mode`` is a real switch, not a label:
+
+        * ``"safe"``  -> subprocess isolation, no tool access from the code.
+        * ``"unsafe"`` -> same process, restricted builtins, and the
+          ``code_tools_allow`` allow-list injected as callable tool proxies.
+
+        Both expose one tool named ``execute_code``, which the approval registry
+        classes as "critical", so it stays gated under every preset but "full".
+        """
+        from ..tools.python_tools import build_code_execution_tools
+
+        code_tools = bool(getattr(exec_config, "code_tools", False))
+        allowed = list(getattr(exec_config, "code_tools_allow", None) or [])
+        if code_tools and code_execution_mode != "unsafe":
+            import warnings
+            warnings.warn(
+                "ExecutionConfig(code_tools=True) needs code_mode='unsafe': in "
+                "'safe' mode the code runs in a separate process and cannot "
+                "reach the agent's tools, so code_tools_allow is ignored.",
+                UserWarning,
+                stacklevel=3,
+            )
+            code_tools = False
+
+        # In unsafe mode the allow-list must resolve against ONLY the tools this
+        # agent was granted, never the process-global registry (which can hold
+        # plugin/entry-point tools the agent was never given). Build a private
+        # registry from self.tools and pass it down so code-mode inherits the
+        # agent's exact tool boundary.
+        scoped_registry = None
+        if code_tools and code_execution_mode == "unsafe":
+            from ..tools.registry import ToolRegistry
+            scoped_registry = ToolRegistry()
+            for t in (self.tools or []):
+                if callable(t) or hasattr(t, "name"):
+                    try:
+                        scoped_registry.register(t)
+                    except Exception:
+                        pass
+
+        # An unknown code_mode raises out of here rather than silently
+        # producing nothing, which is the failure this whole change is about.
+        new_tools = build_code_execution_tools(
+            code_mode=code_execution_mode,
+            allowed_tools=allowed if code_tools else [],
+            registry=scoped_registry,
+        )
+
+        existing = {getattr(t, "__name__", None) for t in (self.tools or [])}
+        self.tools = list(self.tools or []) + [
+            t for t in new_tools if getattr(t, "__name__", None) not in existing
+        ]
+
     def _init_autonomy(self, autonomy: Any, verification_hooks: Optional[List[Any]] = None) -> None:
         """Initialize autonomy features (agent-centric escalation/doom-loop).
         
@@ -7879,6 +7986,41 @@ Answer:"""
                 elif hasattr(self.memory, 'close_connections'):
                     self.memory.close_connections()
             
+            # LLM client cleanup - release live client pools asynchronously.
+            # Mirror close()'s targets but never touch the ``llm_instance``
+            # property (it would lazily *create* a client just to close it);
+            # only tear down an already-materialised ``_llm_instance``.
+            try:
+                llm_instance = getattr(self, '_llm_instance', None)
+                if llm_instance is not None:
+                    aclose = getattr(llm_instance, 'aclose', None)
+                    if aclose is not None:
+                        try:
+                            if asyncio.iscoroutinefunction(aclose):
+                                await aclose()
+                            else:
+                                aclose()
+                        except Exception:
+                            close = getattr(llm_instance, 'close', None)
+                            if callable(close):
+                                close()
+                    else:
+                        close = getattr(llm_instance, 'close', None)
+                        if callable(close):
+                            close()
+
+                openai_client = getattr(self, '_Agent__openai_client', None)
+                if openai_client is not None and hasattr(openai_client, 'close'):
+                    openai_client.close()
+
+                llm = getattr(self, 'llm', None)
+                if llm and not isinstance(llm, str):
+                    llm_client = getattr(llm, '_client', None)
+                    if llm_client and hasattr(llm_client, 'close'):
+                        llm_client.close()
+            except Exception as e:
+                logger.warning(f"LLM client cleanup failed: {e}")
+
             # Close MCP clients passed via tools=[MCP(...)]
             # (mirrors remove_mcp_server()'s best-effort shutdown)
             if isinstance(self.tools, list):

@@ -134,106 +134,119 @@ const clientPool = new Map<string, MCPClient>();
  * ```
  */
 export async function createMCP(config: MCPConfig): Promise<MCPClient> {
-  // Try to use AI SDK MCP client (optional dependency)
-  try {
-    // @ts-ignore - Optional dependency
-    const mcpModule = await import('@ai-sdk/mcp');
-    
-    const transport = createTransport(config.transport);
-    const client = await mcpModule.createMCPClient({
-      transport,
-      name: config.name,
-      version: config.version,
-      onUncaughtError: config.onUncaughtError,
-    });
-
-    return {
-      tools: async () => {
-        const toolSet = await client.tools();
-        return toolSet as Record<string, MCPTool>;
-      },
-      listResources: async () => {
-        const result = await client.listResources();
-        return result.resources || [];
-      },
-      readResource: async (uri: string) => {
-        const result = await client.readResource({ uri });
-        return result.contents?.[0] || { uri };
-      },
-      listPrompts: async () => {
-        const result = await client.listPrompts();
-        return result.prompts || [];
-      },
-      getPrompt: async (name: string, args?: Record<string, string>) => {
-        const result = await client.getPrompt({ name, arguments: args });
-        return result as MCPPromptResult;
-      },
-      close: async () => {
-        await client.close();
-      },
-    };
-  } catch (error: any) {
-    // Fall back to native implementation
-    return createNativeMCPClient(config);
-  }
+  // Previously this awaited `import('@ai-sdk/mcp')` -- a package that is not a
+  // dependency, is not installed, and does not exist on npm (the `ai` package
+  // exports no MCP symbol either). Every call therefore threw ERR_MODULE_NOT_FOUND
+  // and landed in a `catch` that returned an empty client, so a caller pointed at
+  // a broken server got `tools: {}` and no error, indistinguishable from a server
+  // that genuinely offers nothing.
+  //
+  // `@modelcontextprotocol/sdk` is already a hard dependency of this package, so
+  // the connection is made with that directly and connection failures propagate.
+  return createNativeMCPClient(config);
 }
 
 /**
- * Create transport configuration for AI SDK MCP.
+ * Native MCP client implementation, backed by `@modelcontextprotocol/sdk`.
+ *
+ * Connects for real. If the server cannot be reached -- a missing stdio binary,
+ * an unreachable URL, a protocol handshake failure -- the underlying error is
+ * thrown rather than being turned into an empty tool set.
  */
-function createTransport(config: MCPTransportConfig): any {
+async function createNativeMCPClient(config: MCPConfig): Promise<MCPClient> {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const transport = await createNativeTransport(config.transport);
+
+  const client = new Client({
+    name: config.name ?? 'praisonai-ts-mcp',
+    version: config.version ?? '1.0.0',
+  });
+
+  // No try/catch: a failure to connect is a real failure and must surface.
+  await client.connect(transport);
+
+  const wrapTool = (tool: any): MCPTool => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    execute: async (args: any) => client.callTool({ name: tool.name, arguments: args }),
+  });
+
+  return {
+    tools: async () => {
+      const { tools: list } = await client.listTools();
+      const out: Record<string, MCPTool> = {};
+      for (const tool of list ?? []) {
+        out[tool.name] = wrapTool(tool);
+      }
+      return out;
+    },
+    listResources: async () => {
+      const result = await client.listResources();
+      return (result.resources ?? []) as MCPResource[];
+    },
+    readResource: async (uri: string) => {
+      const result = await client.readResource({ uri });
+      return (result.contents?.[0] ?? { uri }) as MCPResourceContent;
+    },
+    listPrompts: async () => {
+      const result = await client.listPrompts();
+      return (result.prompts ?? []) as MCPPrompt[];
+    },
+    getPrompt: async (name: string, args?: Record<string, string>) => {
+      const result = await client.getPrompt({ name, arguments: args ?? {} });
+      return result as unknown as MCPPromptResult;
+    },
+    close: async () => {
+      await client.close();
+    },
+  };
+}
+
+/**
+ * Build a `@modelcontextprotocol/sdk` transport for a PraisonAI transport config.
+ */
+async function createNativeTransport(config: MCPTransportConfig): Promise<any> {
   switch (config.type) {
-    case 'stdio':
-      return {
-        type: 'stdio',
+    case 'stdio': {
+      const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+      return new StdioClientTransport({
         command: config.command,
-        args: config.args,
-        env: config.env,
-      };
-    case 'sse':
-      return {
-        type: 'sse',
-        url: config.url,
-        headers: config.headers,
-        authProvider: config.authProvider,
-      };
-    case 'http':
-      return {
-        type: 'http',
-        url: config.url,
-        headers: config.headers,
-        authProvider: config.authProvider,
-      };
-    case 'websocket':
-      return {
-        type: 'websocket',
-        url: config.url,
-        headers: config.headers,
-      };
+        args: config.args ?? [],
+        env: config.env
+          ? { ...(process.env as Record<string, string>), ...config.env }
+          : undefined,
+      });
+    }
+    case 'sse': {
+      const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
+      // `authProvider` is forwarded to the SDK so OAuth-protected servers can
+      // obtain and refresh credentials; dropping it here made every such
+      // connection fail. Cast: our narrow OAuthClientProvider is a structural
+      // subset of the SDK's, which is all the SDK reads from it.
+      return new SSEClientTransport(new URL(config.url), {
+        requestInit: config.headers ? { headers: config.headers } : undefined,
+        authProvider: config.authProvider as any,
+      });
+    }
+    case 'http': {
+      const { StreamableHTTPClientTransport } = await import(
+        '@modelcontextprotocol/sdk/client/streamableHttp.js'
+      );
+      return new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: config.headers ? { headers: config.headers } : undefined,
+        authProvider: config.authProvider as any,
+      });
+    }
+    case 'websocket': {
+      const { WebSocketClientTransport } = await import(
+        '@modelcontextprotocol/sdk/client/websocket.js'
+      );
+      return new WebSocketClientTransport(new URL(config.url));
+    }
     default:
       throw new Error(`Unknown transport type: ${(config as any).type}`);
   }
-}
-
-/**
- * Native MCP client implementation (fallback).
- */
-async function createNativeMCPClient(config: MCPConfig): Promise<MCPClient> {
-  // This is a simplified native implementation
-  // In production, this would use the @modelcontextprotocol/sdk directly
-  
-  const tools: Record<string, MCPTool> = {};
-  const resources: MCPResource[] = [];
-  const prompts: MCPPrompt[] = [];
-
-  return {
-    tools: async () => tools,
-    listResources: async () => resources,
-    readResource: async (uri: string) => ({ uri }),
-    listPrompts: async () => prompts,
-    getPrompt: async (name: string) => ({ messages: [] }),
-    close: async () => {},
-  };
 }
 
 /**

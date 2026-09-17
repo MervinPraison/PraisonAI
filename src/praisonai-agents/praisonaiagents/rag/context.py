@@ -59,8 +59,14 @@ def _extract_metadata_value(
     """
     value = metadata.get(key)
     if value is None:
-        return _extract_value(item, key, default)
-    return value
+        # getattr's default only fires when the ATTRIBUTE IS ABSENT. Result
+        # models declare these fields with a None default (SearchResultItem
+        # has `source = None`), so the attribute exists and None came back --
+        # defeating the fallback and handing callers None where they asked for
+        # "". Treat a None value as absent, which is what "with fallback to
+        # default" means.
+        value = _extract_value(item, key, None)
+    return default if value is None else value
 
 
 def _chunk_hash(text: str, source: Optional[str] = None) -> str:

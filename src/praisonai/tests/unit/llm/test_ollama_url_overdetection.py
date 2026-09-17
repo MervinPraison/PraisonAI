@@ -15,11 +15,20 @@ mistral, deepseek) can, and must keep working.
 Constructed state only: no network, no server.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from praisonaiagents.llm.llm import LLM
 
 LOCAL_URL = "http://localhost:11434/v1"
+
+
+@pytest.fixture(autouse=True)
+def skip_litellm_configure():
+    """LLM init configures litellm; keep these tests offline."""
+    with patch.object(LLM, "_configure_logging", return_value=None):
+        yield
 
 
 @pytest.fixture(autouse=True)

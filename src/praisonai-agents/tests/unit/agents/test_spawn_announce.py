@@ -21,7 +21,8 @@ class TestSpawnAnnounceProtocol:
 
     def test_protocol_compliance(self):
         """Test that AgentTeam properly implements SpawnAnnounceProtocol."""
-        team = AgentTeam(agents=[], name="protocol_test")
+        seed = Agent(name="seed", instructions="seed agent", llm="gpt-4o-mini")
+        team = AgentTeam(agents=[seed], name="protocol_test")
         
         # Check if AgentTeam implements the protocol
         assert isinstance(team, SpawnAnnounceProtocol), "AgentTeam must implement SpawnAnnounceProtocol"
@@ -47,10 +48,18 @@ class TestSpawnAnnouncePattern:
     @pytest.fixture
     def agent_team(self):
         """Create a test AgentTeam."""
+        # A seed agent is required: AgentTeam rejects a team with neither an
+        # agent nor a handler-only task, because something has to run in order
+        # to spawn anything. The list under test is get_spawned_agents(), which
+        # is still empty on a new team -- that is what these tests assert.
+        seed = Agent(name="seed", instructions="seed agent", llm="gpt-4o-mini")
         return AgentTeam(
-            agents=[],  # Empty agents list - will spawn sub-agents dynamically
+            agents=[seed],
             name="spawn_announce_test",
-            process="parallel"
+            # Not "parallel": that value was removed. Parallel fan-out is now
+            # async_execution=True on individual Tasks. These tests exercise the
+            # spawn/announce protocol, not the process strategy.
+            process="sequential"
         )
 
     @pytest.fixture
@@ -96,6 +105,7 @@ class TestSpawnAnnouncePattern:
         
         return [research_task, writing_task, analysis_task]
 
+    @pytest.mark.live
     def test_spawn_announce_pattern_real_llm(self, agent_team, test_agents, test_tasks):
         """
         REAL AGENTIC TEST: Test spawn-announce pattern with actual LLM execution.

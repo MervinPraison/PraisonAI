@@ -16,6 +16,7 @@ from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
 from .due import is_due as _is_due, resolve_schedule_timezone
+from .hook_emit import emit_schedule_add, emit_schedule_remove
 
 logger = get_logger(__name__)
 
@@ -72,6 +73,9 @@ class ConfigYamlScheduleStore:
                 raise ValueError(f"Job '{job.id}' already exists")
             self._jobs[job.id] = job
             self._save()
+        # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
+        # to deadlock the cross-process file lock by calling back in.
+        emit_schedule_add(job)
 
     def get(self, job_id: str) -> Optional[ScheduleJob]:
         with self._lock:
@@ -131,15 +135,18 @@ class ConfigYamlScheduleStore:
             self._save()
 
     def remove(self, job_id: str) -> bool:
+        removed = None
         with self._lock, self._file_lock():
             self._reload_locked()
             if job_id in self._jobs:
-                del self._jobs[job_id]
+                removed = self._jobs.pop(job_id)
                 # Drop any per-job scratchpad so a deleted job leaves no state.
                 self._job_state.pop(job_id, None)
                 self._save()
-                return True
+        if removed is None:
             return False
+        emit_schedule_remove(removed)
+        return True
 
     def remove_by_name(self, name: str, principal: Optional[str] = None) -> bool:
         """Remove a job by name, optionally scoped to ``principal``.
@@ -149,17 +156,21 @@ class ConfigYamlScheduleStore:
         automation by guessing its name. ``None`` (the default) preserves the
         pre-scoping global removal.
         """
+        removed = None
         with self._lock, self._file_lock():
             self._reload_locked()
             for jid, job in list(self._jobs.items()):
                 if job.name == name:
                     if principal is not None and job.principal != principal:
                         continue
-                    del self._jobs[jid]
+                    removed = self._jobs.pop(jid)
                     self._job_state.pop(jid, None)
                     self._save()
-                    return True
+                    break
+        if removed is None:
             return False
+        emit_schedule_remove(removed)
+        return True
 
     # ── atomic claim / lease ──────────────────────────────────────────
 
@@ -187,6 +198,10 @@ class ConfigYamlScheduleStore:
         not see the job in their returned list.
         """
         claimed: List[ScheduleJob] = []
+        # One-shots auto-deleted by this claim. Emitted after the lock below;
+        # a later ``remove(job.id)`` by the runner is then a no-op, so a spent
+        # one-shot yields exactly one SCHEDULE_REMOVE.
+        auto_removed: List[ScheduleJob] = []
         with self._lock, self._file_lock():
             # Re-read from disk so we observe cross-process claims/leases.
             self._reload_locked()
@@ -210,7 +225,7 @@ class ConfigYamlScheduleStore:
                 changed = True
                 if job.delete_after_run:
                     # One-shot: remove now so no competitor re-claims it.
-                    del self._jobs[job.id]
+                    auto_removed.append(self._jobs.pop(job.id))
                     self._job_state.pop(job.id, None)
             if changed:
                 if not self._save():
@@ -221,7 +236,10 @@ class ConfigYamlScheduleStore:
                     # fires a duplicate. Drop the claim so it is retried cleanly.
                     for job in claimed:
                         self._held_leases.pop(job.id, None)
+                    # The deletion was never persisted — do not announce it.
                     return []
+        for job in auto_removed:
+            emit_schedule_remove(job)
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:

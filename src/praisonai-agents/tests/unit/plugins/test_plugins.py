@@ -55,19 +55,35 @@ class TestPluginHook:
         assert PluginHook.ON_RETRY.value == "on_retry"
     
     def test_tool_result_persist_hook(self):
-        """Test tool_result_persist hook (moltbot parity)."""
-        assert PluginHook.TOOL_RESULT_PERSIST.value == "tool_result_persist"
+        """TOOL_RESULT_PERSIST is an alias of the live AFTER_TOOL event.
+
+        AFTER_TOOL already receives the tool result before it is persisted and
+        its in-place rewrite of ``tool_output`` is what gets stored, so a
+        separate member could only ever be a dead slot that swallowed hooks.
+        """
+        assert PluginHook.TOOL_RESULT_PERSIST is PluginHook.AFTER_TOOL
     
+    def test_message_lifecycle_aliases(self):
+        """BEFORE_/AFTER_MESSAGE are the live inbound/outbound events.
+
+        ``Plugin.before_message`` / ``Plugin.after_message`` have always routed
+        to MESSAGE_RECEIVED / MESSAGE_SENDING, so the identically named enum
+        members must resolve to the same events rather than to dead slots.
+        """
+        assert PluginHook.BEFORE_MESSAGE is PluginHook.MESSAGE_RECEIVED
+        assert PluginHook.AFTER_MESSAGE is PluginHook.MESSAGE_SENDING
+
     def test_claude_code_parity_hooks(self):
-        """Test Claude Code parity hooks (new additions)."""
-        # USER_PROMPT_SUBMIT - when user submits a prompt
-        assert PluginHook.USER_PROMPT_SUBMIT.value == "user_prompt_submit"
-        # NOTIFICATION - when notification is sent
-        assert PluginHook.NOTIFICATION.value == "notification"
-        # SUBAGENT_STOP - when subagent completes
+        """Only the parity hook with a real emission site survives.
+
+        SUBAGENT_STOP is emitted by ``tools/subagent_tool.py``.
+        USER_PROMPT_SUBMIT / NOTIFICATION / SETUP had no emission site anywhere
+        and were removed, so reaching for one now fails loudly instead of
+        registering a hook that silently never fires.
+        """
         assert PluginHook.SUBAGENT_STOP.value == "subagent_stop"
-        # SETUP - on initialization/maintenance
-        assert PluginHook.SETUP.value == "setup"
+        for removed in ("USER_PROMPT_SUBMIT", "NOTIFICATION", "SETUP"):
+            assert not hasattr(PluginHook, removed)
 
 
 class TestPluginInfo:
@@ -278,7 +294,72 @@ class TestPluginManager:
         
         assert len(tools) == 1
         assert tools[0]["name"] == "custom_tool"
-    
+
+    def test_plugin_tools_wired_into_agent(self):
+        """An enabled PluginType.TOOL plugin's tool must reach the agent.
+
+        Regression for the silent-failure where get_tools() output was
+        collected by get_all_tools() but never merged into any agent. Crucially
+        this does NOT flip the package-wide ``plugins.enable()`` flag: the docs
+        state tools work WITHOUT calling enable(), so a merely-registered tool
+        plugin must still reach the agent.
+        """
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents import Agent
+
+        def random_number() -> int:
+            """Returns a random number"""
+            return 42
+
+        class BasicToolPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name="basic_tools")
+
+            def get_tools(self):
+                return [random_number]
+
+        manager = get_plugin_manager()
+        manager.register(BasicToolPlugin())
+
+        try:
+            # No plugins.enable() call — registration alone must suffice.
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            names = [getattr(t, "__name__", str(t)) for t in agent.tools]
+            assert "random_number" in names
+
+            # Collision: agent's own tool wins, no duplicate.
+            agent2 = Agent(
+                instructions="test", llm="gpt-4o-mini", tools=[random_number]
+            )
+            names2 = [getattr(t, "__name__", str(t)) for t in agent2.tools]
+            assert names2.count("random_number") == 1
+        finally:
+            manager.unregister("basic_tools")
+
+    def test_plugin_metadata_only_dict_tool_skipped(self):
+        """A metadata-only ``{"name": ...}`` descriptor with no executable
+        implementation must be skipped rather than advertised as a callable
+        tool the agent could never invoke."""
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents import Agent
+
+        class MetaOnlyPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name="meta_only")
+
+            def get_tools(self):
+                return [{"name": "phantom_tool"}]
+
+        manager = get_plugin_manager()
+        manager.register(MetaOnlyPlugin())
+        try:
+            agent = Agent(instructions="test", llm="gpt-4o-mini")
+            assert {"name": "phantom_tool"} not in agent.tools
+        finally:
+            manager.unregister("meta_only")
+
     def test_shutdown(self):
         """Test shutting down all plugins."""
         manager = PluginManager()

@@ -28,12 +28,18 @@ export { AudioAgent, createAudioAgent } from './audio';
 export type { AudioAgentConfig, AudioConfig, SpeakOptions, TranscribeOptions, SpeakResult, TranscribeResult, AudioProvider } from './audio';
 
 // CodeAgent - Code generation, execution, review, refactoring (Python parity)
-export { CodeAgent, createCodeAgent } from './code';
-export type { CodeConfig, CodeAgentConfig, CodeExecutionResult } from './code';
+export { CodeAgent, createCodeAgent, createSubprocessExecutor } from './code';
+export type {
+  CodeConfig,
+  CodeAgentConfig,
+  CodeExecutionResult,
+  CodeExecutor,
+  CodeExecutorContext,
+} from './code';
 
 // OCRAgent - Optical Character Recognition (Python parity)
 export { OCRAgent, createOCRAgent } from './ocr';
-export type { OCRConfig, OCRAgentConfig, OCRResult, OCRPage } from './ocr';
+export type { OCRConfig, OCRAgentConfig, OCRResult, OCRPage, OCRExtractor, OCRExtractRequest } from './ocr';
 
 // VisionAgent - Image analysis (Python parity)
 export { VisionAgent, createVisionAgent } from './vision';

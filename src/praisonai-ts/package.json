@@ -60,7 +60,8 @@
     "example:arxiv": "ts-node examples/tools/arxiv-tools.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild": "npm run clean",
-    "check:webview": "node scripts/webview-gate.mjs"
+    "check:webview": "node scripts/webview-gate.mjs",
+    "check:examples": "tsc -p tsconfig.examples.json"
   },
   "keywords": [
     "ai",

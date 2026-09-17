@@ -11,6 +11,14 @@ import { isAISDKAvailable, getPreferredBackend } from './backend-resolver';
 export interface EmbeddingOptions {
   /** Model to use for embeddings (default: text-embedding-3-small) */
   model?: string;
+  /**
+   * Requested output dimensions. Forwarded to the provider (OpenAI
+   * `dimensions`, AI SDK `providerOptions.openai.dimensions`) for models that
+   * support truncation. Omit to use the model default; passing a value an
+   * unsupported model ignores is the provider's error to raise, not something
+   * this layer silently drops.
+   */
+  dimensions?: number;
   /** Provider to use (default: openai) */
   provider?: string;
   /** Maximum retries (default: 2) */
@@ -163,6 +171,7 @@ async function embedWithAISDK(
     maxRetries: options.maxRetries ?? 2,
     abortSignal: options.abortSignal,
     headers: options.headers,
+    ...providerDimensionsOption(provider, options.dimensions),
   });
   
   return {
@@ -193,6 +202,7 @@ async function embedManyWithAISDK(
     maxRetries: options.maxRetries ?? 2,
     abortSignal: options.abortSignal,
     headers: options.headers,
+    ...providerDimensionsOption(provider, options.dimensions),
   });
   
   return {
@@ -212,6 +222,25 @@ const AI_SDK_EMBEDDING_PROVIDERS: Record<string, string> = {
   gemini: 'google',
   cohere: 'cohere',
 };
+
+/**
+ * Build the AI SDK `providerOptions` fragment that carries a requested
+ * embedding dimension, or `{}` when none was requested. Only providers whose
+ * models support dimension truncation (currently OpenAI) receive it; for the
+ * rest the request is left off so the provider uses its native size.
+ */
+function providerDimensionsOption(
+  provider: string,
+  dimensions?: number
+): { providerOptions?: Record<string, Record<string, unknown>> } {
+  if (dimensions === undefined) {
+    return {};
+  }
+  if (provider === 'openai') {
+    return { providerOptions: { openai: { dimensions } } };
+  }
+  return {};
+}
 
 /**
  * Get AI SDK embedding model for a provider.
@@ -296,6 +325,7 @@ async function embedWithNative(
   const response = await client.embeddings.create({
     model: modelId,
     input: text,
+    ...(options.dimensions !== undefined ? { dimensions: options.dimensions } : {}),
   });
   
   return {
@@ -321,6 +351,7 @@ async function embedManyWithNative(
   const response = await client.embeddings.create({
     model: modelId,
     input: texts,
+    ...(options.dimensions !== undefined ? { dimensions: options.dimensions } : {}),
   });
   
   // Sort by index to ensure correct order

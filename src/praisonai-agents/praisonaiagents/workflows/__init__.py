@@ -22,6 +22,7 @@ from .workflows import (
     Parallel,
     Loop,
     Repeat,
+    Discussion,
     Include,
     If,
     
@@ -85,6 +86,7 @@ __all__ = [
     "Parallel",
     "Loop",
     "Repeat",
+    "Discussion",
     "Include",
     "If",
     "route",

@@ -10,6 +10,7 @@ Architecture:
 - SlashCommandParser: Parses user input for slash commands
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 from enum import Enum
@@ -469,13 +470,44 @@ def cmd_settings(context: CommandContext, args: str) -> Dict[str, Any]:
 
 
 def cmd_map(context: CommandContext, args: str) -> Dict[str, Any]:
-    """Show repository map."""
+    """Show repository map.
+
+    Previously printed "Generating repository map..." and returned without
+    generating one, while ``repo_map.RepoMap`` -- 860 lines of working
+    tree-sitter symbol extraction and PageRank-style ranking -- sat unreferenced
+    behind a ``# This will be implemented with RepoMap feature`` comment.
+
+    Kept as an *operator* command (an at-a-glance overview of an unfamiliar
+    repo), deliberately not re-exposed as an agent context-stuffing strategy:
+    the agent already has grep/glob/ast_grep_search, which is where the field
+    landed.
+    """
     from rich.console import Console
     console = Console()
-    
-    console.print("[cyan]Generating repository map...[/cyan]")
-    # This will be implemented with RepoMap feature
-    return {"type": "map"}
+
+    root = args.strip() or context.config.get("workspace") or os.getcwd()
+
+    console.print(f"[cyan]Generating repository map for {root}...[/cyan]")
+    try:
+        from .repo_map import RepoMapHandler
+    except ImportError as exc:
+        console.print(f"[red]Repository map unavailable: {exc}[/red]")
+        return {"type": "map", "success": False, "error": str(exc)}
+
+    try:
+        handler = RepoMapHandler()
+        handler.initialize(root=root)
+        map_str = handler.get_map()
+    except Exception as exc:  # noqa: BLE001 - surface, never swallow
+        console.print(f"[red]Repository map failed: {exc}[/red]")
+        return {"type": "map", "success": False, "error": str(exc)}
+
+    if not map_str.strip():
+        console.print("[yellow]No indexable source files found.[/yellow]")
+        return {"type": "map", "success": True, "map": "", "root": root}
+
+    console.print(map_str)
+    return {"type": "map", "success": True, "map": map_str, "root": root}
 
 
 # ============================================================================

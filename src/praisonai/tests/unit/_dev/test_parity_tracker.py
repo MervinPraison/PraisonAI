@@ -720,6 +720,119 @@ _LAZY_IMPORTS = {
             assert "| `CodeAgent` | ✅ | ✅ | high | ✅ exported |" in md
             assert "(1 exported, 0 stub, 0 missing)" in md
 
+    def test_marked_stub_body_is_tagged_stub_not_done(self):
+        """A real (non-shim) export whose body carries a stub marker is STUB.
+
+        This is the case the ``./parity`` prefix rule cannot see: that directory
+        was deleted in #4755, so before the marker scan every unimplemented body
+        in the shipping source scored ``DONE`` and ``stubCount`` was structurally
+        pinned at 0.
+        """
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('OCRAgent'),
+                ts_index="export { OCRAgent } from './agent/ocr';",
+                ts_files={
+                    'agent/ocr.ts': (
+                        "export class OCRAgent {\n"
+                        "  async extract(source: string) {\n"
+                        "    // Placeholder implementation - real one would call the OCR API\n"
+                        "    return { text: `[OCR extraction from ${source}]` };\n"
+                        "  }\n"
+                        "}\n"
+                    ),
+                },
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            row = all_rows(tracker)['OCRAgent']
+
+            assert row['typescript'] is True
+            assert row['status'] == 'STUB'
+            assert row['tsSource'] == 'stub-marker'
+            assert tracker['summary']['stubCount'] == 1
+
+            md = ParityTrackerGenerator(root).generate_markdown()
+            assert "| ⚠️ stub exported |" in md
+
+    def test_explicit_parity_stub_comment_is_honoured(self):
+        """``@parity-stub`` in the doc comment marks an export without a phrase match."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('discover_skills'),
+                ts_index="export { discoverSkills } from './skills';",
+                ts_files={
+                    'skills.ts': (
+                        "/** @parity-stub not wired to the registry yet */\n"
+                        "export function discoverSkills(): string[] {\n"
+                        "  return [];\n"
+                        "}\n"
+                    ),
+                },
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            assert all_rows(tracker)['discover_skills']['status'] == 'STUB'
+            assert tracker['summary']['stubCount'] == 1
+
+    def test_marker_scan_control_real_body_is_done(self):
+        """Control: an unmarked body is DONE, and a second real declaration clears a marked one."""
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('OCRAgent'),
+                ts_index="export { OCRAgent } from './agent/ocr';",
+                ts_files={
+                    'agent/ocr.ts': (
+                        "export class OCRAgent {\n"
+                        "  async extract(source: string) {\n"
+                        "    return await this.backend.read(source);\n"
+                        "  }\n"
+                        "}\n"
+                    ),
+                },
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            row = all_rows(tracker)['OCRAgent']
+            assert row['status'] == 'DONE'
+            assert 'tsSource' not in row
+            assert tracker['summary']['stubCount'] == 0
+
+    def test_marker_scan_does_not_flag_incidental_random_use(self):
+        """A class that uses Math.random for ids is not a stub.
+
+        Guards the scan against the over-broad rule it would be tempting to
+        write: a body scan for ``Math.random`` alone flags every id generator in
+        the SDK, which would make the STUB signal useless.
+        """
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent'),
+                ts_index="export { Agent } from './agent/simple';",
+                ts_files={
+                    'agent/simple.ts': (
+                        "export class Agent {\n"
+                        "  name: string;\n"
+                        "  constructor() {\n"
+                        "    this.name = `Agent_${Math.random().toString(36).slice(2)}`;\n"
+                        "  }\n"
+                        "}\n"
+                    ),
+                },
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            assert all_rows(tracker)['Agent']['status'] == 'DONE'
+            assert tracker['summary']['stubCount'] == 0
+
     def test_markdown_states_it_measures_names_not_behaviour(self):
         """Markdown must disclose it measures exported names, not behaviour.
 

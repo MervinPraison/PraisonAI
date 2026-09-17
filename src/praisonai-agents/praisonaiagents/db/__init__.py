@@ -33,6 +33,7 @@ Alternative (explicit backend, passed via memory=):
 from .protocol import (
     DbAdapter,
     AsyncDbAdapter,
+    ToolTurnDbAdapterProtocol,
     DbMessage,
     DbToolCall,
     DbRun,
@@ -111,6 +112,7 @@ _sys.modules[__name__].__class__ = _CallableDbModule
 __all__ = [
     "DbAdapter",
     "AsyncDbAdapter",
+    "ToolTurnDbAdapterProtocol",
     "DbMessage",
     "DbToolCall",
     "DbRun",

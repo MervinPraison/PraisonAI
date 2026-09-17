@@ -30,8 +30,32 @@ def _python_executable() -> str:
 
 
 def _startup_folder() -> str:
-    """Get the Windows startup folder path."""
+    """Get the Windows startup folder path.
+
+    ``APPDATA`` is read from the environment directly rather than relying on
+    ``os.path.expandvars``, which only expands ``%VAR%`` syntax on Windows.
+    The expandvars form is kept as the fallback so behaviour on Windows with
+    APPDATA set is unchanged.
+    """
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return os.path.join(
+            appdata, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
+        )
     return os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
+
+
+def _startup_folder_is_usable(folder: str) -> bool:
+    """True only when the ``%VAR%`` placeholders actually expanded.
+
+    ``os.path.expandvars`` expands ``%VAR%`` only on Windows, and even there
+    leaves the text untouched when the variable is unset. Writing to the
+    unexpanded string creates a directory literally named ``%APPDATA%``
+    relative to the current directory -- inside the repository when tests run
+    there -- and that path is invalid on Windows, so committing it breaks
+    checkout for everyone.
+    """
+    return "%" not in folder
 
 
 def _startup_script_path() -> str:
@@ -69,6 +93,14 @@ def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
     single, well-formed quoting level and is reused for both install paths.
     """
     startup_folder = _startup_folder()
+    if not _startup_folder_is_usable(startup_folder):
+        # Guarded before the write: this path creates the wrapper script first
+        # and only then calls schtasks, so off Windows it would leave a literal
+        # "%APPDATA%\..." directory behind before failing.
+        raise RuntimeError(
+            "startup folder path still contains an unexpanded variable "
+            f"({startup_folder!r}); refusing to create it."
+        )
     os.makedirs(startup_folder, exist_ok=True)
     script_path = _startup_script_path()
     with open(script_path, "w") as f:
@@ -103,6 +135,15 @@ def _create_startup_folder_entry(config_path: str) -> Dict[str, Any]:
     """Create a startup folder entry as fallback."""
     try:
         startup_folder = _startup_folder()
+        if not _startup_folder_is_usable(startup_folder):
+            return {
+                "ok": False,
+                "error": (
+                    "startup folder path still contains an unexpanded variable "
+                    f"({startup_folder!r}); refusing to create it. This happens "
+                    "off Windows, or when APPDATA is unset."
+                ),
+            }
         os.makedirs(startup_folder, exist_ok=True)
         
         script_content = _generate_startup_script(config_path)
@@ -140,6 +181,10 @@ def install(config_path: str = "bot.yaml", **kwargs: Any) -> Dict[str, Any]:
     }
 
 
+class _SkipStartupRemoval(Exception):
+    """Internal: startup-script removal is not applicable here."""
+
+
 def uninstall() -> Dict[str, Any]:
     """Uninstall the Windows service/startup item."""
     results = []
@@ -161,6 +206,11 @@ def uninstall() -> Dict[str, Any]:
     
     # Try to remove startup script
     try:
+        if not _startup_folder_is_usable(_startup_folder()):
+            results.append(
+                "Startup script location unresolved (unexpanded variable); skipped"
+            )
+            raise _SkipStartupRemoval
         script_path = _startup_script_path()
         if os.path.exists(script_path):
             os.remove(script_path)

@@ -117,3 +117,45 @@ python -c "import praisonai_code; print(praisonai_code.__version__)"
 
 **PyPI:** Published as `praisonai-code` after `praisonaiagents` in the
 three-package release order (see `pypi-release.yml`).
+
+## Shell execution (`PRAISON_SHELL`)
+
+`execute_command` runs argv directly (`shell=False`) as a prompt-injection
+defence. Shell operators — `&&`, `||`, `|`, `>`, `>>`, `;`, `` ` ``, `$(` — are
+therefore **not** interpreted, and a command containing one is refused rather
+than run with the operator silently dropped. (Dropping it and returning exit 0
+gives the model nothing to correct on; a redirect that creates no file must not
+report success.)
+
+| `PRAISON_SHELL` | Behaviour |
+|---|---|
+| unset / `off` (default) | Shell syntax is refused with an explanation. Plain commands run as before. |
+| `sandboxed` | A real `/bin/sh -c` runs inside OS-native containment — Seatbelt (`sandbox-exec`) on macOS, bubblewrap on Linux — restricted to the workspace plus the temp dir, network denied. |
+| `unsafe` | A real `/bin/sh -c` with no containment. Opt-in only; never used as a fallback. |
+
+`sandboxed` mode **measures** enforcement before trusting it: it runs a probe
+child that tries to write outside the writable set, and refuses to run at all
+if that write succeeds. It never degrades quietly to an uncontained shell.
+Approval is unchanged — the real-shell path is gated by the same
+`require_approval(risk_level="critical")` guard, under the same
+`execute_command` tool identity.
+
+## Session commands
+
+| Command | Does |
+|---|---|
+| `/compact [strategy]` | Compact the conversation context (frees tokens). Runs automatically at a turn boundary when the session nears the model's budget. |
+| `/compact-display` (`/dense`) | Toggle compact *output* rendering — the old meaning of `/compact`. |
+| `/map [path]` | Ranked repository map (tree-sitter symbol extraction). |
+| `/git-status`, `/git-diff`, `/git-log [n]`, `/git-commit [msg]`, `/git-undo` | Git from inside the session. `/git-commit` generates a message from the staged diff when none is given. |
+
+MCP servers declared under `mcp.servers` in project config are loaded into the
+code session's tool set. Disable with `PRAISON_TOOLS_DISABLE=mcp`.
+
+**Trust gate.** Project-declared **local (stdio)** MCP servers spawn a
+subprocess on the host, so a cloned repository could run a repo-controlled
+script the moment the session opens. They are therefore **not** started
+automatically: set `PRAISONAI_MCP_TRUST=1` to allow the current workspace to
+start its local MCP subprocesses. Remote (URL) servers spawn no local process
+and are unaffected. Config is resolved from the selected `--workspace`, not the
+process working directory.

@@ -223,6 +223,26 @@ assert(
   ], null, '2026-06-27T09:55:00Z') === null
 );
 
+// merge-only must not use a short time window — fresh Opus APPROVE after assess wins on HEAD.
+assert(
+  'merge path finds APPROVE on HEAD without minCreatedAt window',
+  mg.findMergeGateVerdict(
+    [{ body: 'MERGE_GATE_VERDICT: APPROVE', created_at: '2026-06-12T10:00:00Z' }],
+    null,
+    '2026-06-12T09:00:00Z',
+    { excludeAutomatedFallback: true }
+  ) === 'APPROVE'
+);
+assert(
+  '25min minCreatedAt excludes older APPROVE (scan/dispatch paths only)',
+  mg.findMergeGateVerdict(
+    [{ body: 'MERGE_GATE_VERDICT: APPROVE', created_at: '2026-06-12T08:00:00Z' }],
+    '2026-06-12T09:30:00Z',
+    '2026-06-12T07:00:00Z',
+    { excludeAutomatedFallback: true }
+  ) === null
+);
+
 const finalWithFinished = [
   { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
   { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:05:00Z' },

@@ -62,6 +62,10 @@ export type AgentTeamProcess = 'sequential' | 'parallel' | 'workflow' | 'hierarc
  * then this set keeps the constructor from warning about behaviour that exists.
  */
 const HONOURED_HERE: ReadonlySet<string> = new Set([
+  // Honoured: propagated to members that declared none of their own.
+  'autonomy',
+  // Honoured: one shared place is handed to every member (see below).
+  'toolsRunOn',
   'memory', 'context', 'hooks', 'planning', 'execution', 'runOn', 'managerLlm',
 ]);
 
@@ -81,8 +85,6 @@ const TEAM_OPTION_NOTES: Readonly<Record<string, string>> = {
   reflection: 'Python does not apply it at the team level either; pass reflection to individual Agent(...) instances.',
   caching: 'Python does not apply it at the team level either; pass caching to individual Agent(...) instances.',
   learn: 'Python does not apply it at the team level either; pass learn to individual Agent(...) instances.',
-  autonomy: 'Python propagates it to members that have none of their own; TypeScript Agents have no autonomy to propagate to yet.',
-  toolsRunOn: 'It needs one shared sandbox for the whole team; TypeScript has no compute providers yet, so every tool would still run on the host.',
 };
 
 /**
@@ -323,6 +325,8 @@ export class AgentTeam {
   readonly learn?: unknown;
   /** Python parity: tools_run_on. */
   readonly toolsRunOn?: unknown;
+  /** The one place every member's tools share, when the team set toolsRunOn. */
+  private _sharedToolPlace?: unknown;
   /** Python parity: run_on. Always undefined: a team refuses the option (see the config docs). */
   readonly runOn?: unknown;
 
@@ -444,6 +448,38 @@ export class AgentTeam {
     // Output preset: "silent" / "verbose" override the verbose default.
     const printResults = resolveOutputPreset(config.output, 'AgentTeam');
     if (printResults !== undefined) this.verbose = printResults;
+
+    // Python's AgentTeam propagates autonomy to members that have none of
+    // their own. TypeScript Agents DO have autonomy (agent/features/autonomy.ts
+    // -- levels, presets, approval integration), so the old note saying they
+    // had none to propagate to was simply stale.
+    if (config.autonomy !== undefined && config.autonomy !== null && config.autonomy !== false) {
+      const { resolveAutonomy } = require('./features/autonomy');
+      const shared = resolveAutonomy(config.autonomy as never);
+      if (shared) {
+        for (const agent of this.agents) {
+          (agent as any).adoptAutonomy?.(shared);
+        }
+      }
+    }
+
+    // A team-wide `toolsRunOn` is ONE place shared by every member: the note
+    // this replaces said it "needs one shared sandbox for the whole team", and
+    // that is exactly what a single ToolPlace instance gives. Members that
+    // declared their own toolsRunOn keep it.
+    if (config.toolsRunOn !== undefined && config.toolsRunOn !== null && config.toolsRunOn !== false) {
+      const { resolvePlacement } = require('./features/placement');
+      const shared = resolvePlacement({
+        owner: 'AgentTeam',
+        toolsRunOn: config.toolsRunOn,
+      }).toolPlace;
+      if (shared) {
+        this._sharedToolPlace = shared;
+        for (const agent of this.agents) {
+          (agent as any).adoptToolPlace?.(shared);
+        }
+      }
+    }
 
     // Accepted for signature parity but not yet honoured on the team surface.
     // The ledger in utils/parity-notice.ts is the single list; see it for why.
@@ -813,6 +849,19 @@ export class AgentTeam {
    * constructed agent is assigned back onto the task.
    */
   private agentFor(entry: TeamTask, index: number): Agent {
+    const chosen = this.resolveAgentFor(entry, index);
+    // A team-wide toolsRunOn is ONE place shared by EVERY member -- including
+    // an agent that lives on a task or is built from `agentConfig`, which never
+    // passes through `config.agents` at construction. adoptToolPlace is a no-op
+    // for an agent that already has a place (its own toolsRunOn or the one it
+    // adopted earlier), so this both fills the gap and stays idempotent.
+    if (this._sharedToolPlace) {
+      (chosen as any).adoptToolPlace?.(this._sharedToolPlace);
+    }
+    return chosen;
+  }
+
+  private resolveAgentFor(entry: TeamTask, index: number): Agent {
     if (entry.assignedAgent) return entry.assignedAgent;
     const fallback = entry.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
     if (!entry.task) return fallback;

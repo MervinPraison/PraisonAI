@@ -1,4 +1,5 @@
 import os
+import tempfile
 import logging
 from praisonaiagents._logging import get_logger
 from datetime import datetime
@@ -49,6 +50,9 @@ class CustomMemory:
 
 # MongoDBMemory has been moved to adapters/mongodb_adapter.py
 # This maintains backward compatibility while following protocol-driven architecture
+
+from .cloud import is_cloud_source, fetch_cloud_source  # noqa: E402
+
 
 class Knowledge:
     def __init__(self, config=None, verbose=None):
@@ -469,14 +473,21 @@ class Knowledge:
                 f"{type(self.memory).__name__} does not support delete_all()"
             )
 
-    def reset(self):
-        """Reset all memories."""
+    def reset(self) -> bool:
+        """Reset all memories.
+
+        Returns:
+            True if the backend actually reset, False if it has no ``reset``
+            and the call was a no-op. Callers that report this operation to a
+            user must not claim success on a False return: nothing was erased.
+        """
         if hasattr(self.memory, "reset"):
             self.memory.reset()
-        else:
-            logger.warning(
-                f"{type(self.memory).__name__} does not support reset(); no-op"
-            )
+            return True
+        logger.warning(
+            f"{type(self.memory).__name__} does not support reset(); no-op"
+        )
+        return False
 
     def normalize_content(self, content):
         """Normalize content for consistent storage."""
@@ -495,6 +506,7 @@ class Knowledge:
         if isinstance(file_path, (list, tuple)):
             results = []
             errors = []
+            failed_chunks = 0
             for path in file_path:
                 result = self._process_single_input(path, user_id, agent_id, run_id, metadata)
                 results.extend(result.get('results', []))
@@ -502,7 +514,9 @@ class Knowledge:
                 # embed) must survive aggregation; otherwise a list input hides
                 # them behind the old success-shaped response.
                 errors.extend(result.get('errors', []))
-            return {'results': results, 'relations': [], 'errors': errors}
+                failed_chunks += result.get('failed_chunks', 0)
+            return {'results': results, 'relations': [], 'errors': errors,
+                    'failed_chunks': failed_chunks}
         
         return self._process_single_input(file_path, user_id, agent_id, run_id, metadata)
 
@@ -526,6 +540,31 @@ class Knowledge:
                     all_extensions.append(exts)
             all_extensions = tuple(all_extensions)
 
+            # Cloud object storage (s3://, gs://, az://, Azure blob URL).
+            # Checked BEFORE the http branch, because an Azure blob URL is https
+            # and would otherwise be handed to the web fetcher. The object is
+            # downloaded to a local temp file and then read by the SAME readers
+            # as any local file, so PDF/DOCX parsing is not reimplemented per
+            # provider.
+            if isinstance(input_path, str) and is_cloud_source(input_path):
+                self._log(f"Fetching cloud source: {input_path}")
+                # Download into a TemporaryDirectory so the fetched document is
+                # removed after indexing rather than accumulating on disk.
+                with tempfile.TemporaryDirectory(prefix="praisonai-kb-") as tmp_dir:
+                    local_path = fetch_cloud_source(input_path, dest_dir=tmp_dir)
+                    # Persist the ORIGINAL uri in the stored chunk metadata, not
+                    # the temp filename -- a temp path is meaningless in a
+                    # citation, and two objects with the same basename would
+                    # otherwise be indistinguishable.
+                    cloud_metadata = dict(metadata or {})
+                    cloud_metadata['source'] = input_path
+                    result = self._process_single_input(
+                        local_path, user_id, agent_id, run_id, cloud_metadata
+                    )
+                if isinstance(result, dict):
+                    result['source'] = input_path
+                return result
+
             # Check if input is URL
             if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
                 self._log(f"Processing URL: {input_path}")
@@ -541,6 +580,7 @@ class Knowledge:
                 # believed the knowledge base was populated. Collect them and
                 # hand them back.
                 all_errors = []
+                dir_failed_chunks = 0
                 
                 # Walk through directory and process all supported files
                 for root, dirs, files in os.walk(input_path):
@@ -553,6 +593,7 @@ class Knowledge:
                                     file_path, user_id, agent_id, run_id, metadata
                                 )
                                 all_results.extend(result.get('results', []))
+                                dir_failed_chunks += result.get('failed_chunks', 0)
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
                                 all_errors.append({'file': file_path, 'error': str(e)})
@@ -587,7 +628,8 @@ class Knowledge:
                     else:
                         logger.warning(f"No supported files found in directory: {input_path}")
                 
-                return {'results': all_results, 'relations': [], 'errors': all_errors}
+                return {'results': all_results, 'relations': [], 'errors': all_errors,
+                        'failed_chunks': dir_failed_chunks}
 
             # Check if input ends with any supported extension
             is_supported_file = any(input_path.lower().endswith(ext) 
@@ -736,7 +778,18 @@ class Knowledge:
             self._emit_knowledge_event("add", source=input_path, chunk_count=len(memories), 
                                        metadata=metadata, agent_id=agent_id)
             
-            return {'results': all_results, 'relations': []}
+            # A *partial* loss -- some chunks landed, some were swallowed -- is
+            # not caught by the all-or-nothing raise above, yet it still means
+            # the document is incompletely indexed. Report the count so the
+            # directory walk and index() can record it in ``errors`` (and flip
+            # ``success``) rather than accepting a half-indexed file as whole.
+            partial_failed = failed_chunks if (0 < failed_chunks < attempted) else 0
+            return {
+                'results': all_results,
+                'relations': [],
+                'failed_chunks': partial_failed,
+                'attempted_chunks': attempted,
+            }
 
         except Exception as e:
             logger.error(f"Error processing input {input_path}: {str(e)}", exc_info=True)
@@ -932,6 +985,16 @@ class Knowledge:
                             new_memory_ids.append(entry['id'])
                         elif isinstance(entry, str):
                             new_memory_ids.append(entry)
+
+                    # A file that stored only some of its chunks is indexed but
+                    # incomplete; record it so ``success`` reflects the loss.
+                    failed_chunks = add_result.get('failed_chunks', 0)
+                    if failed_chunks:
+                        attempted_chunks = add_result.get('attempted_chunks', 0)
+                        result.errors.append(
+                            f"{filepath}: {failed_chunks} of {attempted_chunks} "
+                            f"chunk(s) failed to index"
+                        )
                 
                 # Mark as indexed (with memory IDs for future stale-chunk
                 # cleanup). Any old IDs that failed to delete are retained so the
@@ -958,6 +1021,17 @@ class Knowledge:
             indexed_at=datetime.now().isoformat(),
         )
         
+        # ``success`` was never assigned, so it kept the dataclass default of
+        # True no matter what happened: a run where every file failed to embed
+        # still returned success=True with files_indexed=0 and each failure
+        # sitting in ``errors``, and a caller doing ``if result.success`` went on
+        # believing the corpus was indexed.
+        #
+        # A partial failure counts. Losing one file out of ten from a knowledge
+        # base is precisely the kind of loss that should not be silent, and the
+        # caller still has ``errors`` and ``total_files`` for the detail.
+        result.success = not result.errors
+
         # Store corpus stats for later retrieval
         self._corpus_stats = result.corpus_stats
         

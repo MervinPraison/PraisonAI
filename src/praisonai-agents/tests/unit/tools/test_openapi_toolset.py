@@ -300,3 +300,113 @@ class TestCredentialedRequestsStayOnOrigin:
         request = op.build_request(id="42", q="x")
         assert request["url"] == "https://api.example.com/v1/pets/42"
         assert request["params"] == {"q": "x"}
+
+
+class TestBodySchemasWithoutTopLevelProperties:
+    """A body schema need not declare `properties` at the top level.
+
+    Filtering arguments against the declared properties stops framework
+    metadata and model hallucinations reaching a strict API. But reading only
+    ``schema["properties"]`` finds nothing for two legal and common shapes --
+    a free-form object, and a schema composed with allOf/oneOf/anyOf -- and an
+    empty allow-set filtered out *every* argument. Those operations advertised
+    no body arguments at all and then POSTed an empty body: accepted,
+    discarded, reported as success.
+
+    allOf is the standard way real specs say "this object, plus those fields",
+    so this covered a large share of real-world POST/PUT operations.
+    """
+
+    @staticmethod
+    def _tool(schema):
+        return OpenAPIToolset(spec_dict={
+            "openapi": "3.0.0",
+            "servers": [{"url": "https://api.example.com"}],
+            "paths": {"/pets": {"post": {
+                "operationId": "createPet",
+                "requestBody": {"content": {"application/json": {"schema": schema}}},
+            }}},
+        }).get_tools()[0]
+
+    @pytest.mark.parametrize("schema", [
+        {"type": "object"},
+        {"type": "object", "additionalProperties": True},
+    ], ids=["bare-object", "additionalProperties"])
+    def test_a_free_form_body_still_sends_its_arguments(self, schema):
+        assert self._tool(schema).build_request(name="Rex")["json"] == {"name": "Rex"}
+
+    def test_a_free_form_body_still_excludes_framework_keys(self):
+        """The filter's actual purpose must survive the free-form path."""
+        request = self._tool({"type": "object"}).build_request(
+            name="Rex", idempotency_key="abc-123")
+        assert request["json"] == {"name": "Rex"}
+
+    def test_an_allof_schemas_properties_are_advertised_and_sent(self):
+        tool = self._tool({"allOf": [
+            {"type": "object", "properties": {"name": {"type": "string"}},
+             "required": ["name"]},
+            {"type": "object", "properties": {"age": {"type": "integer"}}},
+        ]})
+        assert set(tool.input_schema["properties"]) >= {"name", "age"}
+        assert tool.input_schema["required"] == ["name"]
+        assert tool.build_request(name="Rex", age=3)["json"] == {"name": "Rex", "age": 3}
+
+    def test_a_oneof_schema_advertises_the_union(self):
+        tool = self._tool({"oneOf": [
+            {"type": "object", "properties": {"name": {"type": "string"}}},
+            {"type": "object", "properties": {"tag": {"type": "string"}}},
+        ]})
+        assert set(tool.input_schema["properties"]) >= {"name", "tag"}
+        assert tool.build_request(name="Rex")["json"] == {"name": "Rex"}
+
+    def test_a_oneof_branch_requirement_is_not_required_of_the_request(self):
+        """A field required by only one branch is not required overall."""
+        tool = self._tool({"oneOf": [
+            {"type": "object", "properties": {"name": {"type": "string"}},
+             "required": ["name"]},
+            {"type": "object", "properties": {"tag": {"type": "string"}}},
+        ]})
+        assert "name" not in tool.input_schema.get("required", [])
+
+    def test_a_nested_allof_is_flattened(self):
+        tool = self._tool({"allOf": [
+            {"allOf": [{"type": "object", "properties": {"deep": {"type": "string"}}}]},
+        ]})
+        assert "deep" in tool.input_schema["properties"]
+        assert tool.build_request(deep="v")["json"] == {"deep": "v"}
+
+    def test_a_declared_schema_still_filters_undeclared_keys(self):
+        """The regression guard: declaring properties must still restrict."""
+        tool = self._tool({"type": "object",
+                           "properties": {"name": {"type": "string"}}})
+        assert tool.build_request(name="Rex", hallucinated="x")["json"] == {"name": "Rex"}
+
+    def test_a_closed_empty_schema_forbids_all_keys(self):
+        """additionalProperties:false with no properties is closed, not free-form.
+
+        A free-form body forwards its arguments; a closed empty object permits
+        only an empty object, so model-supplied keys must be dropped rather
+        than sent to a strict API that would reject them.
+        """
+        tool = self._tool({"type": "object", "additionalProperties": False})
+        assert "json" not in tool.build_request(hallucinated="x")
+
+    def test_a_closed_allof_branch_closes_the_whole_body(self):
+        """A closed constraint composed via allOf closes the whole body."""
+        tool = self._tool({"allOf": [
+            {"type": "object", "properties": {"name": {"type": "string"}}},
+            {"type": "object", "additionalProperties": False},
+        ]})
+        assert tool.build_request(name="Rex", hallucinated="x")["json"] == {"name": "Rex"}
+
+    def test_a_self_referential_composition_does_not_hang(self):
+        toolset = OpenAPIToolset(spec_dict={
+            "openapi": "3.0.0",
+            "servers": [{"url": "https://api.example.com"}],
+            "components": {"schemas": {"Node": {
+                "allOf": [{"type": "object",
+                           "properties": {"child": {"$ref": "#/components/schemas/Node"}}}]}}},
+            "paths": {"/n": {"post": {"operationId": "mk", "requestBody": {"content": {
+                "application/json": {"schema": {"$ref": "#/components/schemas/Node"}}}}}}},
+        })
+        assert "child" in toolset.get_tools()[0].input_schema["properties"]

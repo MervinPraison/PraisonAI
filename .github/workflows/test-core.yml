@@ -96,11 +96,15 @@ jobs:
             # `praisonai bot slack` unstartable shipped unnoticed. Named
             # explicitly rather than adding the whole top-level directory, which
             # carries suites with pre-existing env-dependent failures.
+            # tests/unit/kanban/ was likewise collected by no workflow, which
+            # is how six declared KANBAN_TASK_* hook events shipped with no
+            # emitter at all.
             paths: >-
               tests/unit/bots/
               tests/unit/gateway/
               tests/unit/cli/
               tests/unit/daemon/
+              tests/unit/kanban/
               tests/unit/test_bots_cli.py
             extra_ignore: ""
             pythonpath: >-

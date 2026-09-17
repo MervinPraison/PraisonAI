@@ -5,7 +5,6 @@ Provides feature flags and configuration options that can be controlled
 via environment variables for performance tuning and behavior control.
 
 Environment Variables:
-    PRAISONAI_LAZY_IMPORTS: Enable lazy imports (default: true)
     PRAISONAI_TELEMETRY_ENABLED: Enable telemetry (default: false, opt-in)
     PRAISONAI_TELEMETRY_DISABLED: Disable telemetry (takes precedence)
     DO_NOT_TRACK: Standard opt-out flag (takes precedence)
@@ -27,13 +26,6 @@ def _str_to_bool(value: Optional[str], default: bool = False) -> bool:
 
 # Feature Flags
 # -------------
-
-# Lazy imports: When True (default), heavy dependencies like litellm are
-# only imported when actually needed, reducing import time significantly.
-LAZY_IMPORTS = _str_to_bool(
-    os.environ.get('PRAISONAI_LAZY_IMPORTS'), 
-    default=True
-)
 
 # Telemetry: Opt-in by default (False). Users must explicitly enable.
 # Precedence (highest to lowest):
@@ -107,7 +99,3 @@ def _get_plugins_list() -> list:
         return []
     # Parse comma-separated list
     return [p.strip() for p in env_value.split(',') if p.strip()]
-
-
-PLUGINS_ENABLED = _get_plugins_enabled()
-PLUGINS_LIST = _get_plugins_list()

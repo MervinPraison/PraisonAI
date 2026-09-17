@@ -169,7 +169,14 @@ class KanbanDispatcher:
             return event_name
 
     def _fire_hook_event(self, event_type: str, task_data: Dict[str, Any]):
-        """Fire kanban hook events (when available)."""
+        """Fire a kanban hook event (when the hooks package is available).
+
+        Reserved for transitions the *store* cannot announce for itself.
+        Everything that goes through ``create_task``/``claim_task``/
+        ``move_task``/``record_failure`` is emitted by the store, which is the
+        chokepoint every writer shares; firing it here as well would deliver
+        each transition twice to the same subscriber.
+        """
         try:
             # Try to import and fire hook events from praisonaiagents
             from praisonaiagents.hooks import fire_hook
@@ -266,13 +273,8 @@ class KanbanDispatcher:
                     # reclaim loop can detect a crashed/killed worker.
                     self._record_worker_pid(store, task.id)
 
-                    # Fire claimed hook event
-                    self._fire_hook_event('KANBAN_TASK_CLAIMED', {
-                        'task_id': task.id,
-                        'worker_id': self.worker_id,
-                        'run_id': run_id,
-                        'task': task.to_dict()
-                    })
+                    # KANBAN_TASK_CLAIMED is emitted by store.claim_task()
+                    # above, which is the transition that actually won the CAS.
                 except Exception as post_spawn_err:
                     # Never release the claim for an already-running worker.
                     logger.error(
@@ -407,10 +409,10 @@ class KanbanDispatcher:
 
         for task_id in reclaimed or []:
             logger.warning(f"Reclaimed stale kanban task {task_id} back to 'ready'")
-            self._fire_hook_event('KANBAN_TASK_RECLAIMED', {
-                'task_id': task_id,
-                'worker_id': self.worker_id,
-            })
+            # The running -> ready transition is announced as
+            # KANBAN_TASK_MOVED (reclaimed=True) by the store itself;
+            # 'KANBAN_TASK_RECLAIMED' was never a HookEvent member and so
+            # reached no subscriber.
 
     _SAFE_TASK_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -675,11 +677,8 @@ class KanbanDispatcher:
                     store, run_id, 'blocked',
                     error=f"merge conflict in: {files}",
                 )
-            self._fire_hook_event('KANBAN_TASK_BLOCKED', {
-                'task_id': task_id,
-                'worker_id': self.worker_id,
-                'conflicted_files': files,
-            })
+            # KANBAN_TASK_BLOCKED is emitted by the move_task('blocked')
+            # above; the conflicted files are recorded on the task comment.
             logger.warning(f"Task {task_id} blocked: merge conflict in {files}")
             return True
 
@@ -882,16 +881,10 @@ class KanbanDispatcher:
                             f"Task completed successfully\n\nOutput:\n{stdout_data[:500]}"
                         )
                         
-                        # Fire completion hook
-                        task = store.get_task(task_id)
-                        self._fire_hook_event('KANBAN_TASK_COMPLETED', {
-                            'task_id': task_id,
-                            'worker_id': self.worker_id,
-                            'return_code': return_code,
-                            'run_id': run_id,
-                            'task': task.to_dict() if task else {}
-                        })
-                        
+                        # KANBAN_TASK_DONE is emitted by the move_task('done')
+                        # above. ('KANBAN_TASK_COMPLETED' was never a HookEvent
+                        # member, so this site reached no subscriber.)
+
                         logger.info(f"Task {task_id} completed successfully")
                     else:
                         # Failed - close run as failed, count it, circuit-break.
@@ -944,18 +937,10 @@ class KanbanDispatcher:
                                 f"auto-releasing for retry.\n\nOutput:\n{stdout_data[:500]}"
                             )
                         
-                        # Fire failure hook
-                        task = store.get_task(task_id)
-                        self._fire_hook_event('KANBAN_TASK_FAILED', {
-                            'task_id': task_id,
-                            'worker_id': self.worker_id,
-                            'return_code': return_code,
-                            'error': stdout_data[:500],
-                            'run_id': run_id,
-                            'circuit_broken': circuit_broken,
-                            'task': task.to_dict() if task else {}
-                        })
-                        
+                        # KANBAN_TASK_FAILED is emitted by store.record_failure()
+                        # above (with the attempt counter and circuit-breaker
+                        # state); the exit code travels in its ``error``.
+
                         logger.warning(
                             f"Task {task_id} failed with code {return_code} "
                             f"(circuit_broken={circuit_broken})"

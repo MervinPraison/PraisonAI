@@ -27,9 +27,13 @@ def test_policy_routing_logic():
     )
     
     # Mock the dependency modules
-    with patch('praisonaiagents.context.adapters.get_model_limit') as mock_limit, \
-         patch('praisonaiagents.context.adapters.ContextBudgeter') as mock_budgeter, \
-         patch('praisonaiagents.context.adapters.estimate_messages_tokens') as mock_tokens:
+    # adapters.py imports get_model_limit inside the function from
+    # .budgeter, so there is no adapters.get_model_limit to patch -- the
+    # decorator raised AttributeError before the body ran. Patch the
+    # defining module.
+    with patch('praisonaiagents.context.budgeter.get_model_limit') as mock_limit, \
+         patch('praisonaiagents.context.budgeter.ContextBudgeter') as mock_budgeter, \
+         patch('praisonaiagents.context.tokens.estimate_messages_tokens') as mock_tokens:
         
         # Setup mocks
         mock_limit.return_value = 4000
@@ -92,9 +96,9 @@ def test_policy_with_large_tool_outputs():
         {"role": "tool", "content": "x" * 2000, "tool_call_id": "call_123"}  # Large tool output
     ]
     
-    with patch('praisonaiagents.context.adapters.get_model_limit', return_value=4000), \
-         patch('praisonaiagents.context.adapters.ContextBudgeter') as mock_budgeter, \
-         patch('praisonaiagents.context.adapters.estimate_messages_tokens', return_value=3200):
+    with patch('praisonaiagents.context.budgeter.get_model_limit', return_value=4000), \
+         patch('praisonaiagents.context.budgeter.ContextBudgeter') as mock_budgeter, \
+         patch('praisonaiagents.context.tokens.estimate_messages_tokens', return_value=3200):
         
         mock_budgeter_instance = MagicMock()
         mock_budgeter_instance.usable = 3600
@@ -209,21 +213,28 @@ def test_model_specific_overrides():
         }
     )
     
-    with patch('praisonaiagents.context.adapters.get_model_limit', return_value=8000), \
-         patch('praisonaiagents.context.adapters.ContextBudgeter') as mock_budgeter, \
-         patch('praisonaiagents.context.adapters.estimate_messages_tokens', return_value=7000):
+    # Utilization is current_tokens / budgeter.usable, not / the model limit.
+    # This mocked 7000 tokens against usable=7200 and called it "87.5%" -- that
+    # is 7000/8000, the model limit. The real ratio was 97%, over the 0.92
+    # override, so the route was compact_then_truncate and the test failed on
+    # an arithmetic slip rather than a behaviour change. 6480/7200 is 90%:
+    # above the 0.85 default, below the 0.92 gpt-4 override, which is exactly
+    # the case this test exists to cover.
+    with patch('praisonaiagents.context.budgeter.get_model_limit', return_value=8000), \
+         patch('praisonaiagents.context.budgeter.ContextBudgeter') as mock_budgeter, \
+         patch('praisonaiagents.context.tokens.estimate_messages_tokens', return_value=6480):
         
         mock_budgeter_instance = MagicMock()
         mock_budgeter_instance.usable = 7200
         mock_budgeter.return_value = mock_budgeter_instance
         
-        # Test with gpt-4 (87.5% utilization - would trigger default but not override)
+        # Test with gpt-4 (90% utilization - would trigger default but not override)
         result = policy.compute_context_budget(
             messages=[{"role": "user", "content": "test"}],
             model="gpt-4"
         )
         
-        # 87.5% < 92% (gpt-4 override), so should fit
+        # 90% < 92% (gpt-4 override), so should fit
         assert result.route == CompactionRoute.FITS
         assert result.details["effective_trigger"] == 0.92
 

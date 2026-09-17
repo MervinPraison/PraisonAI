@@ -93,19 +93,29 @@ class PraisonAIRuntime:
                     'runtime': self.runtime_id
                 }
                 
-                # Check if result is empty (might indicate API key issue)
+                # An empty response always carries an error. This reported one
+                # only when OPENAI_API_KEY was unset, so every other cause of an
+                # empty turn -- a model the key cannot access, quota, a provider
+                # error swallowed upstream -- returned content="" with
+                # error=None, and the caller could not tell "the model answered
+                # nothing" from "the call never happened".
                 if not result:
-                    # Check for common API key issues
                     import os
                     if not os.environ.get('OPENAI_API_KEY'):
-                        return RuntimeResult(
-                            content="",
-                            metadata=metadata,
-                            error="OPENAI_API_KEY environment variable is required"
+                        error = "OPENAI_API_KEY environment variable is required"
+                    else:
+                        error = (
+                            "the runtime produced no content; the model returned "
+                            "an empty response or the call failed upstream"
                         )
-                
+                    return RuntimeResult(
+                        content="",
+                        metadata=metadata,
+                        error=error,
+                    )
+
                 return RuntimeResult(
-                    content=str(result) if result else "",
+                    content=str(result),
                     metadata=metadata
                 )
             

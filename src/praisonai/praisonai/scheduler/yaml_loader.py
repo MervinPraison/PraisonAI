@@ -83,8 +83,11 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     
     agent_config['task'] = task
     
-    # Get framework (default to praisonai)
-    agent_config['framework'] = config.get('framework', 'praisonai')
+    # Get framework (registry is the single source of truth for the default)
+    from ..framework_adapters.registry import get_default_registry
+    agent_config['framework'] = get_default_registry().resolve_or_default(
+        config.get('framework')
+    )
     
     # Extract schedule configuration (optional)
     schedule_section = config.get('schedule', {})

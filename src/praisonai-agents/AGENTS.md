@@ -514,7 +514,7 @@ agent = Agent(
     name="assistant",
     llm="gpt-4o-mini",
     memory=MemoryConfig(provider="chroma", use_long_term=True),
-    hooks=HooksConfig(before_tool=[my_validator]),
+    hooks=HooksConfig(on_tool_call=my_tool_logger, middleware=[my_validator]),
     guardrail=my_guardrail
 )
 ```

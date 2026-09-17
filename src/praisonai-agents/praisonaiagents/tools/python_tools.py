@@ -289,14 +289,19 @@ def safe_execute():
         
         # Execute user code (use safe_globals as both globals AND locals
         # so function defs can see each other)
-        compiled_code = compile(user_code, '<string>', 'exec')
+        # Split off a trailing expression statement BEFORE executing so it runs
+        # exactly once; exec-then-re-eval ran `print(x)` (and any trailing call)
+        # twice.
+        _last_expr = None
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            _last_expr = tree.body.pop()
+        compiled_code = compile(tree, '<string>', 'exec')
         exec(compiled_code, safe_globals)
         
         # Try to get result from last expression
-        tree = ast.parse(user_code)
-        if tree.body and isinstance(tree.body[-1], ast.Expr):
+        if _last_expr is not None:
             result = eval(
-                compile(ast.Expression(tree.body[-1].value), '<string>', 'eval'),
+                compile(ast.Expression(_last_expr.value), '<string>', 'eval'),
                 safe_globals
             )
         
@@ -641,24 +646,29 @@ def _execute_code_direct(
         stderr_buffer = io.StringIO()
 
         try:
-            # Compile code with restricted mode
-            compiled_code = compile(code, '<string>', 'exec')
+            # Split off a trailing expression statement BEFORE executing, so
+            # it is evaluated exactly once. Executing the whole module and then
+            # re-eval'ing the last expression ran it twice: `print(x)` printed
+            # twice, and in code mode a trailing `my_tool(...)` called the tool
+            # twice (doubling its side effects).
+            import ast
+            tree = ast.parse(code)
+            last_expr = None
+            if tree.body and isinstance(tree.body[-1], ast.Expr):
+                last_expr = tree.body.pop()
+            compiled_code = compile(tree, '<string>', 'exec')
+            compiled_expr = (
+                compile(ast.Expression(last_expr.value), '<string>', 'eval')
+                if last_expr is not None else None
+            )
 
             # Execute with output capture
             with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
                 exec(compiled_code, globals_dict, locals_dict)
-
-                # Get last expression value if any
-                import ast
-                tree = ast.parse(code)
-                if tree.body and isinstance(tree.body[-1], ast.Expr):
-                    result = eval(
-                        compile(ast.Expression(tree.body[-1].value), '<string>', 'eval'),
-                        globals_dict,
-                        locals_dict
-                    )
-                else:
-                    result = None
+                result = (
+                    eval(compiled_expr, globals_dict, locals_dict)
+                    if compiled_expr is not None else None
+                )
 
             # Get output
             stdout = stdout_buffer.getvalue()
@@ -963,6 +973,111 @@ class PythonTools:
 
 # Lazy accessors for optional-dep tools (PythonTools requires black/pylint/autopep8)
 # execute_code is already a standalone function above — always available.
+
+# ──────────────────────────────────────────────────────────────────────
+# Agent-facing code-execution tool factory
+# ──────────────────────────────────────────────────────────────────────
+
+def _build_unsafe_execute_code(
+    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None
+):
+    """Build the in-process ``execute_code`` tool for ``code_mode="unsafe"``.
+
+    ``registry`` scopes which tools the allow-list can resolve. The agent passes
+    a registry built from its own granted tools so code-mode cannot reach a
+    globally-registered tool (e.g. a plugin entry-point tool) the agent was
+    never given; omitting it falls back to the global registry.
+    """
+
+    @require_approval(risk_level="critical")
+    def execute_code(code: str) -> Dict[str, Any]:
+        """Execute Python code in this process and return its output.
+
+        Runs with restricted builtins but WITHOUT process isolation, and the
+        agent's allow-listed tools are callable from the code by bare name.
+
+        Args:
+            code: Python code to execute.
+
+        Returns:
+            Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
+        """
+        return execute_code_with_tools(
+            code, allowed_tools=allowed_tools, timeout=timeout, registry=registry
+        )
+
+    return execute_code
+
+
+def build_code_execution_tools(
+    code_mode: str = "safe",
+    allowed_tools: Optional[List[str]] = None,
+    timeout: int = 30,
+    registry: Optional[Any] = None,
+) -> List[Any]:
+    """Return the code-execution tools for ``ExecutionConfig(code_execution=True)``.
+
+    This is the production entry point that makes the ``code_execution`` flag
+    real. Both modes expose a single tool literally named ``execute_code``, which
+    is registered "critical" in :mod:`praisonaiagents.approval.registry`, so the
+    tool the model gains is approval-gated by every preset except ``"full"``.
+
+    ``code_mode`` decides what that tool actually does, so the security-shaped
+    knob is not decorative:
+
+    * ``"safe"`` (default) — subprocess isolation with resource limits and a
+      clean environment (``execute_code(..., sandbox_mode="sandbox")``). Tools
+      are NOT reachable from the code: they live in the parent process.
+    * ``"unsafe"`` — same-process execution with restricted builtins, no
+      isolation, and the ``allowed_tools`` allow-list injected as callable
+      proxies (each proxy call still passes the approval gate). Because the code
+      runs in this process, ``timeout`` is NOT enforced in unsafe mode — a
+      runaway loop can block the worker. This is why unsafe mode is opt-in and
+      approval-gated "critical"; use ``"safe"`` (subprocess) when the timeout
+      must be a hard guarantee.
+
+    Args:
+        code_mode: ``"safe"`` or ``"unsafe"``.
+        allowed_tools: Tool names callable from code; only honoured in
+            ``"unsafe"`` mode. Empty/None exposes no tools.
+        timeout: Per-execution timeout in seconds.
+
+    Returns:
+        A one-element list holding the ``execute_code`` tool.
+    """
+    if code_mode not in ("safe", "unsafe"):
+        raise ValueError(
+            f"Unknown code_mode {code_mode!r}; expected 'safe' or 'unsafe'."
+        )
+    if code_mode == "unsafe":
+        return [
+            _build_unsafe_execute_code(
+                list(allowed_tools or []), timeout=timeout, registry=registry
+            )
+        ]
+
+    # Safe mode: bind the configured timeout to the tool the model sees, so a
+    # model call that passes only ``code`` still gets the caller's timeout
+    # rather than execute_code's 30s default. The default timeout returns the
+    # module-level tool unchanged so its identity is preserved for callers.
+    if timeout == 30:
+        return [execute_code]
+
+    def execute_code_timed(code: str) -> Dict[str, Any]:
+        """Execute Python code in an isolated subprocess and return its output.
+
+        Args:
+            code: Python code to execute.
+
+        Returns:
+            Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
+        """
+        return execute_code(code, timeout=timeout)
+
+    execute_code_timed.__name__ = "execute_code"
+    return [execute_code_timed]
+
+
 def _get_python_tools():
     """Lazy-init PythonTools (requires black/pylint/autopep8)."""
     global _python_tools_instance

@@ -462,3 +462,154 @@ def list_hooks_for_api() -> List[Dict]:
         for h in hooks:
             flat.append({"event": event, "source": "sdk", **h})
     return flat
+
+
+# ---------------------------------------------------------------------------
+# Event emission (the counterpart to add_hook)
+# ---------------------------------------------------------------------------
+
+# Strong references to in-flight fire-and-forget emissions so the event loop
+# does not garbage-collect a pending task mid-flight.
+_PENDING_HOOK_TASKS: set = set()
+
+# Events whose payload maps onto a richer HookInput subclass. Anything not
+# listed here is delivered as a plain HookInput with the payload in ``extra``.
+_EVENT_INPUT_CLASSES: Dict[HookEvent, tuple] = {
+    HookEvent.KANBAN_TASK_CREATED: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.KANBAN_TASK_CLAIMED: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.KANBAN_TASK_MOVED: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.KANBAN_TASK_DONE: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.KANBAN_TASK_BLOCKED: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.KANBAN_TASK_FAILED: ("praisonaiagents.hooks.types", "KanbanHookInput"),
+    HookEvent.JOB_COMPLETED: ("praisonaiagents.hooks.events", "JobCompletedInput"),
+}
+
+
+def resolve_hook_event(event: Union[str, HookEvent]) -> Optional[HookEvent]:
+    """Resolve an event id to a :class:`HookEvent`, or ``None`` if unknown.
+
+    Accepts the enum itself, its canonical value (``"kanban_task_moved"``) and
+    its member name (``"KANBAN_TASK_MOVED"``). Emitting call sites historically
+    used the member name, so both spellings must reach the same subscribers.
+    """
+    if isinstance(event, HookEvent):
+        return event
+    if not isinstance(event, str):
+        return None
+    try:
+        return HookEvent(event)
+    except ValueError:
+        pass
+    try:
+        return HookEvent[event]
+    except KeyError:
+        return None
+
+
+def _build_hook_input(event: HookEvent, data: Optional[Dict]) -> HookInput:
+    """Build the HookInput for ``event`` from a plain payload dict.
+
+    Keys matching a field on the event's input dataclass are set directly; the
+    rest are carried in ``extra`` so nothing a caller supplies is dropped.
+    """
+    import dataclasses
+    import importlib
+    import os
+    import time
+
+    payload = dict(data or {})
+
+    cls = HookInput
+    spec = _EVENT_INPUT_CLASSES.get(event)
+    if spec is not None:
+        try:
+            cls = getattr(importlib.import_module(spec[0]), spec[1])
+        except Exception:  # pragma: no cover - defensive
+            cls = HookInput
+
+    base = {
+        "session_id": str(payload.pop("session_id", "") or ""),
+        "cwd": str(payload.pop("cwd", "") or os.getcwd()),
+        "event_name": event.value,
+        "timestamp": str(payload.pop("timestamp", "") or time.time()),
+        "agent_name": payload.pop("agent_name", None),
+    }
+    payload.pop("event_name", None)
+
+    reserved = set(base) | {"extra"}
+    specific = {
+        f.name: payload.pop(f.name)
+        for f in dataclasses.fields(cls)
+        if f.name not in reserved and f.name in payload
+    }
+    return cls(**base, **specific, extra=payload)
+
+
+def fire_hook(
+    event: Union[str, HookEvent],
+    data: Optional[Dict] = None,
+    *,
+    target: Optional[str] = None,
+    registry: Optional[HookRegistry] = None,
+) -> List:
+    """Emit a lifecycle event to every hook registered for it.
+
+    The emitting counterpart to :func:`add_hook`. Runtime components call this
+    at a real state transition (a kanban task created, a background job
+    finishing) so plugins subscribed to that :class:`HookEvent` actually hear
+    about it.
+
+    Best-effort by contract: an unknown event id, a malformed payload or a
+    raising subscriber is logged and swallowed — emitting an observability
+    event must never break the operation that produced it.
+
+    Args:
+        event: ``HookEvent``, its canonical value, or its member name.
+        data: Payload; recognised keys populate the event's input dataclass and
+            the remainder is carried through in ``extra``.
+        target: Optional matcher target (e.g. a tool name).
+        registry: Registry to emit on; defaults to the process-wide registry.
+
+    Returns:
+        The hook execution results, or ``[]`` when there are no subscribers or
+        the emission was scheduled on a already-running event loop.
+    """
+    resolved = resolve_hook_event(event)
+    if resolved is None:
+        logger.debug("fire_hook: unknown event id %r; nothing emitted", event)
+        return []
+
+    reg = registry if registry is not None else get_default_registry()
+    hooks = reg.get_hooks(resolved, target)
+    if not hooks:
+        # Fast path: no subscribers, so build no payload and start no loop.
+        return []
+
+    try:
+        input_data = _build_hook_input(resolved, data)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("fire_hook: could not build input for %s: %s", resolved, e)
+        return []
+
+    import asyncio
+
+    from .runner import HookRunner
+
+    runner = HookRunner(reg)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    try:
+        if loop is not None and loop.is_running():
+            # execute_sync() refuses to block a running loop, so schedule the
+            # coroutine fire-and-forget and keep a strong reference to it.
+            task = loop.create_task(runner.execute(resolved, input_data, target, _hooks=hooks))
+            _PENDING_HOOK_TASKS.add(task)
+            task.add_done_callback(_PENDING_HOOK_TASKS.discard)
+            return []
+        return runner.execute_sync(resolved, input_data, target)
+    except Exception as e:  # noqa: BLE001 - emission must never raise to callers
+        logger.debug("fire_hook: emitting %s failed (non-fatal): %s", resolved, e)
+        return []

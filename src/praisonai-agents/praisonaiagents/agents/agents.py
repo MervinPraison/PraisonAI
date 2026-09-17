@@ -838,7 +838,76 @@ class AgentTeam(SpawnAnnounceProtocol):
         The class was renamed from `AgentManager` to `AgentTeam` in v1.0.
         `AgentManager` and `Agents` remain as silent aliases for backward compatibility.
     """
-    
+
+    @staticmethod
+    def _adapt_single_agent_execution_config(execution, multi_agent_cls):
+        """Accept the single-agent ``ExecutionConfig`` on a team, loudly.
+
+        ``ExecutionConfig`` is exported at the package top level;
+        ``MultiAgentExecutionConfig`` is not, so ``AgentTeam(execution=
+        ExecutionConfig(max_iter=99))`` is an easy and natural mistake. It used
+        to be resolved against the wrong class and silently discarded whole.
+
+        Shared fields are carried over (``max_iter``; ``max_retry_limit`` ->
+        ``max_retries``) and a ``UserWarning`` names the right class and lists
+        any settings that have no team-level counterpart. A shared field is only
+        carried when the caller actually changed it, so the team keeps its own
+        defaults for anything left untouched (``ExecutionConfig.max_retry_limit``
+        defaults to 2, but the team default ``max_retries`` is 5 — an
+        ``ExecutionConfig(max_iter=99)`` must not silently drop team retries).
+        """
+        if execution is None or multi_agent_cls is None:
+            return execution
+        if isinstance(execution, multi_agent_cls):
+            return execution
+        try:
+            from ..config.feature_configs import ExecutionConfig
+        except ImportError:
+            return execution
+        if not isinstance(execution, ExecutionConfig):
+            return execution
+
+        import warnings
+        from dataclasses import fields as _dc_fields
+
+        defaults = ExecutionConfig()
+        shared = {"max_iter", "max_retry_limit"}
+
+        def _is_set(name):
+            # A user object with an exotic __eq__ must not blow up the warning
+            # path; treat an uncomparable value as explicitly set.
+            try:
+                return getattr(execution, name) != getattr(defaults, name)
+            except Exception:
+                return True
+
+        # Only carry a shared field when the caller changed it; otherwise let
+        # the team config keep its own (different) default.
+        carried = {}
+        if _is_set("max_iter"):
+            carried["max_iter"] = execution.max_iter
+        if _is_set("max_retry_limit"):
+            carried["max_retries"] = execution.max_retry_limit
+
+        dropped = sorted(
+            f.name for f in _dc_fields(execution)
+            if f.name not in shared and _is_set(f.name)
+        )
+        message = (
+            "AgentTeam(execution=...) expects MultiAgentExecutionConfig, not the "
+            "single-agent ExecutionConfig. max_iter and max_retry_limit were "
+            "carried over; pass MultiAgentExecutionConfig(max_iter=..., "
+            "max_retries=...) at the team level and ExecutionConfig(...) to the "
+            "individual Agent(...) instances."
+        )
+        if dropped:
+            message += (
+                " These settings have no team-level counterpart and were "
+                f"ignored: {', '.join(dropped)}."
+            )
+        warnings.warn(message, UserWarning, stacklevel=3)
+        return multi_agent_cls(**carried)
+
     def __init__(
         self,
         agents,
@@ -988,6 +1057,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Resolve EXECUTION param using canonical resolver
         # Supports: None, str preset, list [preset, overrides], Config, dict
         # ─────────────────────────────────────────────────────────────────────
+        # The top-level-exported ``ExecutionConfig`` is the *single-agent* class;
+        # this container's own class is ``MultiAgentExecutionConfig``. Passing
+        # the exported one used to be resolved against the wrong class and
+        # dropped whole - including ``max_iter``, which both classes define -
+        # with no error and no warning. Adapt the shared fields and say so.
+        execution = self._adapt_single_agent_execution_config(
+            execution, MultiAgentExecutionConfig
+        )
         _exec_config = resolve(
             value=execution,
             param_name="execution",
@@ -2070,12 +2147,21 @@ class AgentTeam(SpawnAnnounceProtocol):
                         task.context = []
                     task.context.append(content)
 
-        await self.arun_all_tasks()
-        
+        if self.planning:
+            await self._arun_with_planning()
+        else:
+            await self.arun_all_tasks()
+
+        # When planning ran, results live in the executed plan-step tasks
+        # (self.tasks is restored to the user's original set for reuse).
+        result_tasks = getattr(self, "_plan_tasks", None) if self.planning else None
+        if not result_tasks:
+            result_tasks = self.tasks
+
         # Get results
         results = {
-            "task_status": self.get_all_tasks_status(),
-            "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
+            "task_status": {tid: getattr(t, "status", "not started") for tid, t in result_tasks.items()},
+            "task_results": {task_id: self.get_task_result(task_id, result_tasks) for task_id in result_tasks}
         }
         
         # By default, return only the final agent's response
@@ -2084,11 +2170,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             # the synthetic manager_task never masks the real final result);
             # otherwise fall back to the last task in insertion order.
             last_task_id = getattr(self, "_last_real_task_id", None)
-            if last_task_id is None:
-                task_ids = list(self.tasks.keys())
+            if last_task_id is None or last_task_id not in result_tasks:
+                task_ids = list(result_tasks.keys())
                 last_task_id = task_ids[-1] if task_ids else None
             if last_task_id is not None:
-                last_result = self.get_task_result(last_task_id)
+                last_result = self.get_task_result(last_task_id, result_tasks)
                 if last_result:
                     return last_result.raw
                     
@@ -2274,9 +2360,10 @@ class AgentTeam(SpawnAnnounceProtocol):
     def get_all_tasks_status(self):
         return {task_id: self.tasks[task_id].status for task_id in self.tasks}
 
-    def get_task_result(self, task_id):
-        if task_id in self.tasks:
-            return self.tasks[task_id].result
+    def get_task_result(self, task_id, tasks=None):
+        source = tasks if tasks is not None else self.tasks
+        if task_id in source:
+            return source[task_id].result
         return None
 
     def get_task_details(self, task_id):
@@ -2521,10 +2608,16 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logging.debug(f"Unexpected error in token metrics display: {e}")
         
+        # When planning ran, results live in the executed plan-step tasks
+        # (self.tasks is restored to the user's original set for reuse).
+        result_tasks = getattr(self, "_plan_tasks", None) if self.planning else None
+        if not result_tasks:
+            result_tasks = self.tasks
+
         # Get results
         results = {
-            "task_status": self.get_all_tasks_status(),
-            "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
+            "task_status": {tid: getattr(t, "status", "not started") for tid, t in result_tasks.items()},
+            "task_results": {task_id: self.get_task_result(task_id, result_tasks) for task_id in result_tasks}
         }
         
         # By default, return only the final agent's response
@@ -2533,11 +2626,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             # the synthetic manager_task never masks the real final result);
             # otherwise fall back to the last task in insertion order.
             last_task_id = getattr(self, "_last_real_task_id", None)
-            if last_task_id is None:
-                task_ids = list(self.tasks.keys())
+            if last_task_id is None or last_task_id not in result_tasks:
+                task_ids = list(result_tasks.keys())
                 last_task_id = task_ids[-1] if task_ids else None
             if last_task_id is not None:
-                last_result = self.get_task_result(last_task_id)
+                last_result = self.get_task_result(last_task_id, result_tasks)
                 if last_result:
                     return last_result.raw
                     
@@ -2833,7 +2926,152 @@ class AgentTeam(SpawnAnnounceProtocol):
             "state": state_copy,
             "agents": [agent.display_name for agent in self.agents],
             "process": self.process,
+            # Task status and outputs, so a resumed team can SKIP work it has
+            # already done. Without these the payload carried only the shared
+            # _state dict, and a team that died on task 9 of 12 restarted from
+            # task 1 -- re-paying for eight completed tasks. The snapshot helper
+            # already existed for in-memory batch resets; this makes it durable.
+            "tasks": self._serialisable_task_state(),
+            # Task keys are POSITIONAL (0, 1, 2...), so a checkpoint from a
+            # different team would restore by index and put task 3's output on a
+            # different task 3 -- a resume that looks successful and is wrong.
+            # The YAML workflow path already guards this with a definition
+            # fingerprint; this is the same idea for a team.
+            "tasks_fingerprint": self._task_set_fingerprint(),
         }
+
+    def _task_set_fingerprint(self) -> str:
+        """Identify this team's task SET, so a checkpoint cannot cross teams.
+
+        Covers the fields that change what a task actually *does* -- its name,
+        full description, the agent that runs it, and its expected output. A
+        truncated description or a name-only fingerprint would let a materially
+        changed task keep the same fingerprint, so a restore would mark the
+        changed task completed and skip the new work.
+        """
+        import hashlib
+        parts = []
+        for task_id in sorted(self.tasks, key=lambda k: str(k)):
+            task = self.tasks[task_id]
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
+            parts.append("|".join([
+                str(task_id),
+                str(getattr(task, "name", "") or ""),
+                str(getattr(task, "description", "") or ""),
+                str(agent_name),
+                str(getattr(task, "expected_output", "") or ""),
+            ]))
+        blob = "\n".join(parts)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _json_safe(value: Any, fallback: Any = None) -> Any:
+        """Return ``value`` if it survives a JSON round-trip, else ``fallback``.
+
+        A nested ``datetime``/``set``/``bytes``/custom object inside a dict or
+        list result reaches the JSON encoder and fails the durable write, losing
+        the WHOLE checkpoint rather than one field. Probing each field here keeps
+        the rest of the checkpoint intact when one field is not portable.
+        """
+        try:
+            json.dumps(value)
+            return value
+        except (TypeError, ValueError):
+            return fallback
+
+    def _serialisable_task_state(self) -> Dict[str, Any]:
+        """``_snapshot_task_state`` reduced to what survives JSON.
+
+        A task result may be a TaskOutput object; only its text is portable, and
+        a half-serialised object that fails to write would lose the whole
+        checkpoint rather than one field. Nested non-JSON values inside a dict or
+        list result, or inside task variables, are dropped the same way.
+        """
+        snapshot = {}
+        for task_id, state in self._snapshot_task_state().items():
+            result = state.get("result")
+            if result is not None and not isinstance(result, (str, int, float, bool, dict, list)):
+                result = getattr(result, "raw", None) or str(result)
+            # A dict/list result may still carry a nested non-JSON value; fall
+            # back to its string form rather than forfeiting the checkpoint.
+            if isinstance(result, (dict, list)):
+                result = self._json_safe(result, fallback=str(result))
+            variables = state.get("variables")
+            if not isinstance(variables, dict):
+                variables = {}
+            variables = self._json_safe(variables, fallback={})
+            snapshot[str(task_id)] = {
+                "status": state.get("status"),
+                "result": result,
+                "retry_count": state.get("retry_count"),
+                "variables": variables,
+            }
+        return snapshot
+
+    def _restore_serialised_task_state(self, snapshot: Dict[str, Any]) -> int:
+        """Re-apply a persisted task snapshot. Returns how many tasks matched.
+
+        Tasks absent from this team are skipped rather than invented: a
+        checkpoint from a DIFFERENT team definition must not silently
+        half-restore, which would look like a resume and behave like a fresh run.
+        """
+        restored = 0
+        for task_id, state in (snapshot or {}).items():
+            task = self.tasks.get(task_id)
+            if task is None:
+                for key, candidate in self.tasks.items():
+                    if str(key) == str(task_id):
+                        task = candidate
+                        break
+            if task is None:
+                continue
+            task.status = state.get("status") or getattr(task, "status", "not started")
+            if state.get("result") is not None:
+                # The checkpoint reduced a TaskOutput to text; a remaining task
+                # that consumes this predecessor through workflow dependencies or
+                # task.context reads result.raw (see process.py). Restoring a bare
+                # string would raise AttributeError there, so rebuild a minimal
+                # TaskOutput carrying the text instead.
+                task.result = self._result_from_serialised(task, state["result"])
+            if state.get("retry_count") is not None:
+                task.retry_count = state["retry_count"]
+            if state.get("variables"):
+                task.variables = state["variables"]
+            restored += 1
+        return restored
+
+    @staticmethod
+    def _result_from_serialised(task: Any, value: Any) -> Any:
+        """Rebuild a ``TaskOutput`` from a checkpointed result string.
+
+        Consumers of a completed task read ``task.result.raw`` (dependency
+        context, routing decisions). A restored plain string has no ``.raw``, so
+        wrap it in a minimal ``TaskOutput`` preserving the text. A non-string
+        (already a structured/portable value) is returned unchanged so nothing is
+        lost. If ``TaskOutput`` cannot be constructed, fall back to the raw value
+        rather than failing the whole restore.
+        """
+        if not isinstance(value, str):
+            return value
+        try:
+            from ..main import TaskOutput
+        except Exception:
+            try:
+                from ..output.models import TaskOutput
+            except Exception:
+                return value
+        try:
+            agent = getattr(task, "agent", None)
+            agent_name = getattr(agent, "name", None) or getattr(agent, "display_name", None) or ""
+            return TaskOutput(
+                description=str(getattr(task, "description", "") or ""),
+                raw=value,
+                agent=str(agent_name),
+                output_format="RAW",
+            )
+        except Exception:
+            return value
 
     def save_session_state(self, session_id: str, include_memory: bool = True) -> bool:
         """Persist team session state for deterministic resume (Issue #3635).
@@ -2903,6 +3141,24 @@ class AgentTeam(SpawnAnnounceProtocol):
                 if isinstance(state_data, dict) and "state" in state_data:
                     with self._state_lock:
                         self._state.update(state_data["state"])
+                    # Completed tasks come back with their status and output, so
+                    # the process layer's "skip anything already completed" logic
+                    # sees them as done instead of re-running them.
+                    saved_fp = state_data.get("tasks_fingerprint")
+                    if saved_fp and saved_fp != self._task_set_fingerprint():
+                        # Shared state is still restored -- it is keyed by name
+                        # and safe -- but task outputs are NOT, because matching
+                        # them by position across a changed task set would skip
+                        # the wrong work.
+                        logging.warning(
+                            "Team session %s was saved against a different task set; "
+                            "shared state restored but task outputs were not, so no "
+                            "task will be wrongly skipped. Re-run from the start, or "
+                            "resume with the team definition that saved it.",
+                            session_id,
+                        )
+                        return True
+                    self._restore_serialised_task_state(state_data.get("tasks") or {})
                     return True
         except Exception as e:
             logger.debug(f"Durable team session restore failed for {session_id}: {e}")
@@ -3623,6 +3879,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         console.print("\n[bold blue]📋 PLANNING PHASE[/bold blue]")
         console.print("[dim]Creating implementation plan...[/dim]\n")
         
+        # Reset any plan tasks from a previous run so result collection never
+        # reads stale executed tasks after a fallback/rejected plan.
+        self._plan_tasks = None
+
         # Build request from tasks
         task_descriptions = [task.description for task in self.tasks.values()]
         request = " AND ".join(task_descriptions)
@@ -3632,6 +3892,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if not plan:
             console.print("[yellow]⚠️ Planning failed, falling back to normal execution[/yellow]")
             self.run_all_tasks()
+            self._plan_tasks = self.tasks
             return
         
         # Display the plan
@@ -3646,6 +3907,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             approved = self._request_approval_sync(plan)
             if not approved:
                 console.print("[red]❌ Plan rejected. Aborting execution.[/red]")
+                self._plan_tasks = self.tasks
                 return
         else:
             plan.approve()
@@ -3680,75 +3942,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # Step 4: Create proper Task objects from plan steps
         console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
-        
-        # Map agent names to agent instances
-        agent_map = {agent.display_name: agent for agent in self.agents}
-        
-        # Store original tasks and create new tasks from plan
+
+        # Store original tasks and build plan-step tasks via the shared helper
+        # so start() and astart() always construct identical plan tasks.
         original_tasks = self.tasks.copy()
-        self.tasks = {}
-        with self._task_id_lock:
-            self.task_id_counter = 0
-        
-        # Create Task objects from plan steps
-        plan_tasks = []
-        step_to_task = {}  # Map step_id to task for context chaining
-        
-        for i, step in enumerate(plan.steps):
-            # Get the appropriate agent
-            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
-            
-            if not agent:
-                console.print(f"[yellow]⚠️ No agent found for '{step.agent}', using first available[/yellow]")
-                agent = self.agents[0] if self.agents else None
-            
-            if not agent:
-                console.print(f"[red]❌ No agents available for step: {step.description}[/red]")
-                continue
-            
-            # Build context from dependencies (previous task results)
-            context = []
-            for dep_id in step.dependencies:
-                # Convert step_X format to actual step index
-                if dep_id.startswith("step_"):
-                    try:
-                        dep_index = int(dep_id.split("_")[1])
-                        if dep_index < len(plan_tasks):
-                            context.append(plan_tasks[dep_index])
-                    except (ValueError, IndexError):
-                        pass
-                elif dep_id in step_to_task:
-                    context.append(step_to_task[dep_id])
-            
-            # Find matching original task for additional config (memory, callbacks, etc.)
-            original_task = None
-            for orig_task in original_tasks.values():
-                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
-                    original_task = orig_task
-                    break
-            
-            # Create Task with full features from original task if available
-            task = Task(
-                description=step.description,
-                expected_output=f"Complete: {step.description}",
-                agent=agent,
-                name=f"Plan Step {i + 1}",
-                tools=agent.tools if agent.tools else [],
-                context=context if context else None,
-                # Inherit from original task if available
-                memory=original_task.memory if original_task else None,
-                on_task_complete=original_task.callback if original_task else None,
-                guardrails=original_task.guardrail if original_task else None,
-                max_retries=original_task.max_retries if original_task else 3,
-                output_json=original_task.output_json if original_task else None,
-                output_pydantic=original_task.output_pydantic if original_task else None,
-                config=original_task.config if original_task else {}
-            )
-            
-            # Add task to our task list
-            task_id = self.add_task(task)
-            plan_tasks.append(task)
-            step_to_task[step.id] = task
+        self._build_plan_tasks(plan, original_tasks)
         
         # Step 5: Execute tasks using the proper Task execution system
         for i, (task_id, task) in enumerate(self.tasks.items()):
@@ -3792,6 +3990,134 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # Keep plan-step tasks/results under _plan_tasks for introspection,
         # then restore the user's original task set as the canonical self.tasks.
+        self._plan_tasks = self.tasks
+        self.tasks = original_tasks
+        with self._task_id_lock:
+            self.task_id_counter = (
+                max(original_tasks.keys()) + 1 if original_tasks else 0
+            )
+
+    def _build_plan_tasks(self, plan, original_tasks):
+        """Create Task objects from plan steps (shared by sync/async planning).
+
+        Replaces ``self.tasks`` with plan-step tasks and returns the list of
+        created tasks. ``original_tasks`` is used to inherit per-task config
+        (memory, callbacks, guardrails, structured output).
+        """
+        from ..task import Task
+
+        agent_map = {agent.display_name: agent for agent in self.agents}
+        self.tasks = {}
+        with self._task_id_lock:
+            self.task_id_counter = 0
+
+        plan_tasks = []
+        step_to_task = {}
+        for i, step in enumerate(plan.steps):
+            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
+            if not agent:
+                agent = self.agents[0] if self.agents else None
+            if not agent:
+                logger.error(f"No agents available for step: {step.description}")
+                continue
+
+            context = []
+            for dep_id in step.dependencies:
+                if dep_id.startswith("step_"):
+                    try:
+                        dep_index = int(dep_id.split("_")[1])
+                        if dep_index < len(plan_tasks):
+                            context.append(plan_tasks[dep_index])
+                    except (ValueError, IndexError):
+                        pass
+                elif dep_id in step_to_task:
+                    context.append(step_to_task[dep_id])
+
+            original_task = None
+            for orig_task in original_tasks.values():
+                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
+                    original_task = orig_task
+                    break
+
+            task = Task(
+                description=step.description,
+                expected_output=f"Complete: {step.description}",
+                agent=agent,
+                name=f"Plan Step {i + 1}",
+                tools=agent.tools if agent.tools else [],
+                context=context if context else None,
+                memory=original_task.memory if original_task else None,
+                on_task_complete=original_task.callback if original_task else None,
+                guardrails=original_task.guardrail if original_task else None,
+                max_retries=original_task.max_retries if original_task else 3,
+                output_json=original_task.output_json if original_task else None,
+                output_pydantic=original_task.output_pydantic if original_task else None,
+                config=original_task.config if original_task else {}
+            )
+            self.add_task(task)
+            plan_tasks.append(task)
+            step_to_task[step.id] = task
+        return plan_tasks
+
+    async def _arun_with_planning(self):
+        """Async counterpart of ``_run_with_planning`` for the ``astart()`` path.
+
+        Mirrors the sync planning flow (create plan → approval gate → todo list
+        → execute plan-step tasks) minus the Rich console output, which is
+        display-only and not required for async/headless entry points.
+        """
+        # Reset any plan tasks from a previous run so result collection never
+        # reads stale executed tasks after a fallback/rejected plan.
+        self._plan_tasks = None
+        task_descriptions = [task.description for task in self.tasks.values()]
+        request = " AND ".join(task_descriptions)
+
+        plan = await self._create_plan(request=request)
+        if not plan:
+            logger.warning("Planning failed, falling back to normal execution")
+            await self.arun_all_tasks()
+            self._plan_tasks = self.tasks
+            return
+
+        if not self.auto_approve_plan:
+            approved = await self._request_approval(plan)
+            if not approved:
+                logger.info("Plan rejected. Aborting execution.")
+                self._plan_tasks = self.tasks
+                return
+        else:
+            plan.approve()
+
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+
+        try:
+            from ..trace.protocol import get_default_emitter, ActionEvent
+            import time as _time
+            emitter = get_default_emitter()
+            if emitter and emitter.enabled:
+                emitter.emit(ActionEvent(
+                    event_type="plan_created",
+                    timestamp=_time.time(),
+                    agent_name="PlanningAgent",
+                    metadata={"plan": self._todo_list.to_markdown()}
+                ))
+        except Exception:
+            pass
+
+        original_tasks = self.tasks.copy()
+        self._build_plan_tasks(plan, original_tasks)
+
+        for i, (task_id, task) in enumerate(list(self.tasks.items())):
+            if i < len(self._todo_list.items):
+                self._todo_list.start(self._todo_list.items[i].id)
+            try:
+                await self.arun_task(task_id)
+                if task.status == "completed" and i < len(self._todo_list.items):
+                    self._todo_list.complete(self._todo_list.items[i].id)
+            except Exception as e:
+                logger.error(f"Error executing plan task {task_id}: {e}")
+
         self._plan_tasks = self.tasks
         self.tasks = original_tasks
         with self._task_id_lock:

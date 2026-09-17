@@ -37,15 +37,16 @@ class TestHookEvent:
     """Tests for HookEvent enum - Claude Code parity."""
     
     def test_claude_code_parity_events(self):
-        """Test Claude Code parity hook events."""
-        # USER_PROMPT_SUBMIT - when user submits a prompt
-        assert HookEvent.USER_PROMPT_SUBMIT.value == "user_prompt_submit"
-        # NOTIFICATION - when notification is sent
-        assert HookEvent.NOTIFICATION.value == "notification"
-        # SUBAGENT_STOP - when subagent completes
+        """Only parity events with a real emission site are declared.
+
+        SUBAGENT_STOP is emitted from ``tools/subagent_tool.py`` when a spawned
+        subagent reaches a terminal state. USER_PROMPT_SUBMIT, NOTIFICATION and
+        SETUP were aspirational names nothing ever emitted; they were removed so
+        registering on one raises instead of silently doing nothing.
+        """
         assert HookEvent.SUBAGENT_STOP.value == "subagent_stop"
-        # SETUP - on initialization/maintenance
-        assert HookEvent.SETUP.value == "setup"
+        for removed in ("USER_PROMPT_SUBMIT", "NOTIFICATION", "SETUP"):
+            assert not hasattr(HookEvent, removed)
     
     def test_existing_events_unchanged(self):
         """Verify existing events are unchanged (backward compatibility)."""

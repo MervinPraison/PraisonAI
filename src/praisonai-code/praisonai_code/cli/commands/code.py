@@ -794,7 +794,7 @@ def _run_print_code(
     try:
         workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
         merged_tools = _get_headless_code_tools(
-            groups=["acp", "edit", "search", "lsp"],
+            groups=["acp", "edit", "search", "lsp", "mcp"],
             workspace=workspace,
         )
         # Merge --tools-resolved callables and a --agent profile's named tools

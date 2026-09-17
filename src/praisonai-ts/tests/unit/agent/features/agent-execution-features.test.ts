@@ -183,7 +183,9 @@ describe('Agent: toolsRunOn', () => {
   });
 
   it('rejects an unregistered place at construction rather than running tools locally', () => {
-    expect(() => new Agent({ instructions: 'x', ...quiet, toolsRunOn: 'docker' }))
+    // 'docker' used to be unregistered and was the example here; it is a real
+    // place now (compute providers), so this uses a name that genuinely is not.
+    expect(() => new Agent({ instructions: 'x', ...quiet, toolsRunOn: 'e2b' }))
       .toThrow(/not a known place/);
   });
 });

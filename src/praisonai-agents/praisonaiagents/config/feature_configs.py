@@ -1372,10 +1372,14 @@ class HooksConfig:
             middleware=[my_middleware],
         ))
     """
-    # Step callback
+    # Step callback: invoked once per agent step (one model call) with the
+    # ``ModelResponse`` for that step. Routed onto the ``after_model``
+    # middleware slot; the return value is ignored.
     on_step: Optional[Callable] = None
     
-    # Tool call callback
+    # Tool call callback: invoked before every tool the agent executes with the
+    # ``ToolRequest`` (``.tool_name`` / ``.arguments``). Routed onto the
+    # ``before_tool`` middleware slot; the return value is ignored.
     on_tool_call: Optional[Callable] = None
     
     # Middleware list

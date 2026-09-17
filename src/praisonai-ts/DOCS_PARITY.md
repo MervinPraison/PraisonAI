@@ -19,12 +19,12 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 2980 |
+| ✅ Agent | 109 | 7 | 3041 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
-| ✅ Approval | 18 | 1 | 281 |
+| ✅ Approval | 18 | 1 | 290 |
 | ✅ Audio | 8 | 1 | 162 |
 | ✅ Auto Generation | 16 | 3 | 618 |
-| ✅ Autonomy | 5 | 1 | 168 |
+| ✅ Autonomy | 5 | 1 | 218 |
 | ✅ Bots | 14 | 1 | 184 |
 | ✅ Budget | 2 | 1 | 197 |
 | ✅ CLI | 14 | 1 | 159 |
@@ -33,14 +33,14 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Chat | 4 | 1 | 100 |
 | ✅ Chunking | 3 | 2 | 298 |
 | ✅ Citations | 3 | 1 | 156 |
-| ✅ Code Execution | 9 | 4 | 464 |
+| ✅ Code Execution | 11 | 5 | 687 |
 | ✅ Conditions | 1 | 1 | 372 |
 | ✅ Configuration | 5 | 1 | 272 |
 | ✅ Context Management | 36 | 2 | 345 |
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 17 | 2 | 483 |
 | ✅ Display | 22 | 1 | 342 |
-| ✅ Embeddings | 13 | 3 | 898 |
+| ✅ Embeddings | 13 | 3 | 946 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 6 | 1 | 184 |
@@ -48,7 +48,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Files | 15 | 1 | 151 |
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
-| ✅ Guardrails | 15 | 3 | 744 |
+| ✅ Guardrails | 17 | 3 | 744 |
 | ✅ Handoffs | 16 | 1 | 420 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
@@ -56,16 +56,16 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Knowledge | 37 | 2 | 352 |
 | ✅ LLM | 29 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 241 |
-| ✅ MCP | 21 | 4 | 870 |
+| ✅ MCP | 21 | 4 | 927 |
 | ✅ Memory | 24 | 4 | 840 |
 | ✅ Middleware | 2 | 1 | 162 |
-| ✅ OCR | 5 | 1 | 162 |
+| ✅ OCR | 7 | 1 | 253 |
 | ✅ Observability | 12 | 28 | 2470 |
 | ✅ Optimizer | 2 | 1 | 162 |
-| ✅ Output | 3 | 1 | 220 |
+| ✅ Output | 4 | 1 | 220 |
 | ✅ Parallel Execution | 12 | 2 | 256 |
 | ✅ Planning | 11 | 2 | 529 |
-| ✅ Plugins | 9 | 2 | 724 |
+| ✅ Plugins | 9 | 2 | 749 |
 | ✅ Prompts | 4 | 2 | 262 |
 | ✅ Providers | 26 | 116 | 8149 |
 | ✅ PubSub | 1 | 1 | 149 |
@@ -75,18 +75,18 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Reflection | 3 | 1 | 151 |
 | ✅ Retrieval | 5 | 1 | 150 |
 | ✅ Routing | 1 | 1 | 252 |
-| ✅ Sandbox | 8 | 2 | 222 |
+| ✅ Sandbox | 8 | 2 | 226 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 19 | 2 | 437 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
-| ✅ Tasks | 8 | 1 | 300 |
+| ✅ Tasks | 8 | 1 | 320 |
 | ✅ Teams | 1 | 1 | 200 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 53 | 18 | 3754 |
+| ✅ Tools | 60 | 18 | 3754 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |

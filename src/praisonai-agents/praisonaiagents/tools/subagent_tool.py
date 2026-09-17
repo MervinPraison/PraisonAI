@@ -6,11 +6,65 @@ enabling hierarchical task delegation and multi-agent coordination.
 """
 
 import threading
+import time as _time
 from praisonaiagents._logging import get_logger
 from praisonaiagents.session.provenance import wrap_inter_agent
 from typing import Any, Callable, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+
+def _emit_subagent_stop(
+    result: Dict[str, Any],
+    task: str,
+    agent_name: Optional[str],
+    effective_llm: Optional[str],
+    effective_permission_mode: Optional[str],
+    depth: int,
+    duration_ms: float,
+) -> None:
+    """Best-effort emit of SUBAGENT_STOP when a subagent reaches a terminal state.
+
+    Called from the single completion chokepoint in ``_run_subagent`` so it
+    covers every path (sync, background, resolver-routed, factory, simulation
+    and failure). Fully guarded and skipped when nothing is listening: an
+    observability hook must never turn a completed sub-task into an error.
+    """
+    try:
+        import os
+        from datetime import datetime, timezone
+
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent
+
+        registry = get_default_registry()
+        if not registry.has_hooks(HookEvent.SUBAGENT_STOP):
+            return
+
+        from praisonaiagents.hooks.events import SubagentStopInput
+        from praisonaiagents.hooks.runner import HookRunner
+
+        HookRunner(registry).execute_sync(
+            HookEvent.SUBAGENT_STOP,
+            SubagentStopInput(
+                session_id="subagent",
+                cwd=os.getcwd(),
+                event_name=HookEvent.SUBAGENT_STOP.value,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent_name=result.get("agent_name") or agent_name or "subagent",
+                task=task,
+                success=bool(result.get("success")),
+                output=result.get("output"),
+                error=result.get("error"),
+                llm=effective_llm,
+                permission_mode=effective_permission_mode,
+                depth=depth,
+                duration_ms=duration_ms,
+            ),
+        )
+    except Exception:  # pragma: no cover - observability must never break a subagent
+        logger.debug("SUBAGENT_STOP hook failed", exc_info=True)
+
 
 def create_subagent_tool(
     agent_factory: Optional[Callable[..., Any]] = None,
@@ -89,6 +143,43 @@ def create_subagent_tool(
         )
 
     def _run_subagent(
+        task: str,
+        agent_name: Optional[str],
+        context: Optional[str],
+        tools: Optional[List[str]],
+        effective_llm: Optional[str],
+        effective_permission_mode: Optional[str],
+        parent_depth: int = 0,
+    ) -> Dict[str, Any]:
+        """Execute the subagent and emit SUBAGENT_STOP on every terminal path.
+
+        This is the single completion chokepoint for both synchronous spawns
+        and ``background=True`` jobs, so emitting here (rather than in
+        ``spawn_subagent``) means the hook fires exactly once per subagent
+        regardless of how it was launched, including on failure.
+        """
+        started = _time.monotonic()
+        result = _execute_subagent(
+            task=task,
+            agent_name=agent_name,
+            context=context,
+            tools=tools,
+            effective_llm=effective_llm,
+            effective_permission_mode=effective_permission_mode,
+            parent_depth=parent_depth,
+        )
+        _emit_subagent_stop(
+            result,
+            task=task,
+            agent_name=agent_name,
+            effective_llm=effective_llm,
+            effective_permission_mode=effective_permission_mode,
+            depth=parent_depth + 1,
+            duration_ms=(_time.monotonic() - started) * 1000.0,
+        )
+        return result
+
+    def _execute_subagent(
         task: str,
         agent_name: Optional[str],
         context: Optional[str],

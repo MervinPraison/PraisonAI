@@ -88,7 +88,12 @@ def serve_tool_call(
     subject to the same policy as an in-process one — never a weaker path.
     """
     allowed_set = frozenset(allowed)
-    resolved_registry = registry or get_registry()
+    # ``registry is not None`` (not truthiness): an empty ToolRegistry is a
+    # meaningful, deliberate boundary ("this agent granted no tools"), and
+    # ToolRegistry is falsy when empty (__len__), so ``registry or ...`` would
+    # silently fall back to the process-global registry and leak un-granted
+    # tools into code mode.
+    resolved_registry = registry if registry is not None else get_registry()
     if name not in allowed_set:
         raise PermissionError(f"tool '{name}' is not allowed from code")
     tool = resolved_registry.get(name)
@@ -232,7 +237,9 @@ class ToolProxy:
         registry: Optional[ToolRegistry] = None,
     ) -> None:
         allowed_set = frozenset(allowed)
-        resolved_registry = registry or get_registry()
+        # ``is not None`` so an explicitly-passed empty (agent-scoped) registry
+        # is honoured rather than falling back to the global one.
+        resolved_registry = registry if registry is not None else get_registry()
 
         def _getter(name: str) -> Callable[..., Any]:
             return _make_proxy(name, allowed_set, resolved_registry)
@@ -280,7 +287,9 @@ def build_tool_namespace(
     ``tools.fetch(...)`` form via :class:`ToolProxy`.
     """
     allowed_set = frozenset(allowed)
-    resolved_registry = registry or get_registry()
+    # ``is not None`` so an explicitly-passed empty (agent-scoped) registry is
+    # honoured rather than falling back to the global one.
+    resolved_registry = registry if registry is not None else get_registry()
     namespace: Dict[str, Callable[..., Any]] = {}
     for name in sorted(allowed_set):
         try:

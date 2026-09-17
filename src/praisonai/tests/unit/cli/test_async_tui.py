@@ -376,18 +376,34 @@ class TestNewSlashCommands:
         assert result is True
         assert "100" in tui.messages[0].content
     
-    def test_compact_command(self):
-        """Test /compact command toggles compact mode."""
+    def test_compact_display_command(self):
+        """/compact-display toggles compact *output* mode.
+
+        This used to be what /compact did. /compact now means what it means in
+        every other coding agent -- compact the conversation context -- and the
+        display toggle moved here (alias /dense).
+        """
         from praisonai.cli.interactive.async_tui import AsyncTUI
-        
+
         tui = AsyncTUI()
         assert tui.config.compact_mode is False
-        
-        result = tui._handle_command("/compact")
+
+        result = tui._handle_command("/compact-display")
         assert result is True
         assert tui.config.compact_mode is True
-        
-        result = tui._handle_command("/compact")
+
+        result = tui._handle_command("/dense")
+        assert result is True
+        assert tui.config.compact_mode is False
+
+    def test_compact_command_does_not_touch_the_display_flag(self):
+        """/compact must not silently toggle rendering."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+
+        tui = AsyncTUI()
+        assert tui.config.compact_mode is False
+
+        assert tui._handle_command("/compact") is True
         assert tui.config.compact_mode is False
     
     def test_multiline_command(self):

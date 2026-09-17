@@ -6,6 +6,7 @@ and other implementations (TypeScript, Rust).
 """
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -31,10 +32,118 @@ TS_ALIAS_MAPPING: Dict[str, str] = {}
 # TypeScript provider lives here are reported as STUB rather than DONE, because
 # that module exists to satisfy this tracker's name matching, not to implement
 # behaviour.
+#
+# NOTE: ``src/praisonai-ts/src/parity/`` was deleted in #4755, so this rule alone
+# can no longer match anything in the real tree -- ``stubCount`` was 0 because
+# nothing *could* be counted, not because nothing was a stub. The rule is kept
+# for the shim's semantics (and its fixtures); the marker scan below is what
+# actually finds stubs in the shipping source.
 TS_STUB_SOURCE_PREFIX = './parity'
+
+# Markers that identify a TypeScript export as a stub: an export that exists and
+# type-checks but does not do what its name says. ``@parity-stub`` is the
+# explicit opt-in; the rest are the phrasings this codebase has actually used
+# when leaving a body unimplemented.
+#
+# Deliberately narrow. A body scan for something like ``Math.random`` alone would
+# flag every class that generates an id, so anything added here must be a phrase
+# that only appears when the author is saying "this is not implemented".
+TS_STUB_MARKERS: Tuple[str, ...] = (
+    '@parity-stub',
+    'placeholder implementation',
+    'no-op placeholder',
+    'requires api integration',
+    'placeholder for directory loading',
+    'for now, return a mock',
+    'for now, we return a placeholder',
+    'not safe for production',
+)
+
+# Top-level exported declarations whose bodies are scanned for the markers above.
+_TS_DECL = re.compile(
+    r'^export\s+(?:declare\s+)?(?:default\s+)?'
+    r'(?:abstract\s+)?(?:async\s+)?'
+    r'(?:class|function|const|let|var)\s+'
+    r'([A-Za-z_$][\w$]*)',
+    re.MULTILINE,
+)
 
 # Status ordering used when rendering markdown (missing first, stubs next).
 _STATUS_ORDER = {'TODO': 0, 'STUB': 1, 'DONE': 2}
+
+
+def _ts_declaration_block(content: str, start: int) -> str:
+    """Return the source of the declaration beginning at ``start``.
+
+    Brace-matched from the declaration's first ``{``; a declaration with no body
+    (``export const X = 1;``) yields the rest of its statement. Naive about
+    braces inside strings, which only risks over-reading -- a wider block can
+    only add markers, and the markers are phrases no working code contains.
+    """
+    brace = content.find('{', start)
+    semi = content.find(';', start)
+    if brace == -1 or (semi != -1 and semi < brace):
+        return content[start:semi if semi != -1 else len(content)]
+
+    depth = 0
+    for i in range(brace, len(content)):
+        if content[i] == '{':
+            depth += 1
+        elif content[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return content[start:i + 1]
+    return content[start:]
+
+
+def _ts_leading_comment(content: str, start: int) -> str:
+    """Return the comment block immediately preceding ``start``, if any.
+
+    Lets ``@parity-stub`` be written in the doc comment above an export rather
+    than buried in its body.
+    """
+    head = content[:start].rstrip()
+    if head.endswith('*/'):
+        opened = head.rfind('/*')
+        return head[opened:] if opened != -1 else ''
+    lines = []
+    for line in reversed(head.splitlines()):
+        if line.strip().startswith('//'):
+            lines.append(line)
+        else:
+            break
+    return '\n'.join(lines)
+
+
+def find_ts_stub_exports(ts_src_dir: Path) -> Dict[str, bool]:
+    """Map every top-level TypeScript export name to "every site is a stub".
+
+    Walks the real source tree rather than the barrel graph, because the barrel
+    records where a name is re-exported from, not where it is declared. A name
+    declared in two places is a stub only if *all* of its declarations are, so a
+    real implementation anywhere clears it.
+    """
+    sites: Dict[str, List[bool]] = {}
+    if not ts_src_dir.is_dir():
+        return {}
+
+    for path in sorted(ts_src_dir.rglob('*.ts')):
+        if path.name.endswith('.d.ts') or 'node_modules' in path.parts:
+            continue
+        try:
+            content = path.read_text(encoding='utf-8')
+        except (IOError, UnicodeDecodeError):
+            continue
+
+        for match in _TS_DECL.finditer(content):
+            name = match.group(1)
+            block = _ts_leading_comment(content, match.start())
+            block += _ts_declaration_block(content, match.start())
+            lowered = block.lower()
+            is_stub = any(marker in lowered for marker in TS_STUB_MARKERS)
+            sites.setdefault(name, []).append(is_stub)
+
+    return {name: all(flags) for name, flags in sites.items() if flags}
 
 
 def _escape_md(text: str) -> str:
@@ -162,6 +271,10 @@ class ParityTrackerGenerator:
 
         self.python_extractor = PythonFeatureExtractor(self.repo_root)
         self.ts_extractor = TypeScriptFeatureExtractor(self.repo_root)
+        # Names whose every TypeScript declaration carries a stub marker.
+        self.ts_stub_exports = find_ts_stub_exports(
+            self.repo_root / "src" / "praisonai-ts" / "src"
+        )
         self.rust_extractor = RustFeatureExtractor(self.repo_root)
 
         # Output paths
@@ -328,14 +441,21 @@ class ParityTrackerGenerator:
 
             if ts_name is not None:
                 providers = ts_by_name[ts_name]
-                only_stub = all(
+                # Two independent stub signals: the name's only provider is the
+                # parity shim module, or every declaration of it in the source
+                # tree carries a stub marker (see TS_STUB_MARKERS).
+                shim_only = all(
                     p.source_file.startswith(TS_STUB_SOURCE_PREFIX) for p in providers
                 )
+                marked_stub = self.ts_stub_exports.get(ts_name, False)
+                only_stub = shim_only or marked_stub
                 row['status'] = 'STUB' if only_stub else 'DONE'
                 if ts_name != name:
                     row['tsName'] = ts_name
-                if only_stub:
+                if shim_only:
                     row['tsSource'] = TS_STUB_SOURCE_PREFIX
+                elif marked_stub:
+                    row['tsSource'] = 'stub-marker'
 
             rows.append(row)
 

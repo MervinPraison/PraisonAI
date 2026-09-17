@@ -92,7 +92,7 @@ def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
 
 
 @patch('praisonai_bot.daemon.windows.subprocess.run')
-def test_windows_scheduled_task_command_is_well_formed(mock_run):
+def test_windows_scheduled_task_command_is_well_formed(mock_run, tmp_path, monkeypatch):
     """Test Windows scheduled task command format is valid.
 
     The task action (/TR) points at the generated ``.cmd`` wrapper rather than
@@ -101,6 +101,11 @@ def test_windows_scheduled_task_command_is_well_formed(mock_run):
     wrapper itself owns the ``--config`` invocation and the exit-78 mapping.
     """
     mock_run.return_value = MagicMock(stdout="ok")
+
+    # Point APPDATA at a temp dir: this test drives the real write path, and
+    # without this it created a literal "%APPDATA%\..." directory in the repo
+    # (an invalid path on Windows, which broke actions/checkout once committed).
+    monkeypatch.setenv("APPDATA", str(tmp_path))
 
     from praisonai_bot.daemon.windows import (
         _create_scheduled_task,
