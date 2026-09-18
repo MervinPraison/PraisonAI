@@ -44,7 +44,42 @@ class FileLock:
         self.lock_path = Path(str(path) + ".lock")
         self.timeout = timeout
         self._fd = None
-    
+        self._heartbeat_stop: Optional[threading.Event] = None
+        self._heartbeat_thread: Optional[threading.Thread] = None
+
+    def _start_heartbeat(self) -> None:
+        """Refresh the lock file's mtime while the lock is held.
+
+        Staleness is judged by the lock *file's* age (see ``__enter__``), but a
+        legitimately long critical section would otherwise let the file age past
+        ``timeout`` and be reclaimed out from under its live holder — admitting
+        two writers into the read-modify-write save. A live holder therefore
+        keeps its lock "fresh" by touching the mtime well within ``timeout``;
+        only a crashed holder (heartbeat gone) ages out and is reclaimed.
+        """
+        self._heartbeat_stop = threading.Event()
+        interval = max(self.timeout / 3.0, 0.001)
+
+        def _beat() -> None:
+            while not self._heartbeat_stop.wait(interval):
+                try:
+                    os.utime(self.lock_path, None)
+                except OSError:
+                    # Lock file gone (released/reclaimed); stop heartbeating.
+                    break
+
+        self._heartbeat_thread = threading.Thread(target=_beat, daemon=True)
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        """Stop the mtime-refresh heartbeat thread if running."""
+        if self._heartbeat_stop is not None:
+            self._heartbeat_stop.set()
+        if self._heartbeat_thread is not None:
+            self._heartbeat_thread.join(timeout=1.0)
+        self._heartbeat_stop = None
+        self._heartbeat_thread = None
+
     def __enter__(self):
         """Acquire the lock."""
         import time
@@ -59,12 +94,14 @@ class FileLock:
                 break
             except FileExistsError:
                 # Staleness is judged by the lock *file's* own age, not by how
-                # long this waiter has been queued. A lock legitimately held for
-                # longer than one waiter's patience must NOT be busted out from
-                # under its live holder (that lets two writers into the critical
-                # section and corrupts the read-modify-write save). Only a truly
+                # long this waiter has been queued. A live holder refreshes the
+                # mtime via a heartbeat (see _start_heartbeat), so a lock held
+                # for a legitimately long critical section stays fresh and is
+                # NOT busted out from under its holder (which would let two
+                # writers corrupt the read-modify-write save). Only a truly
                 # abandoned lock — its file older than ``timeout`` because the
-                # holder crashed without running __exit__ — is reclaimed.
+                # holder crashed without running __exit__ or heartbeating — is
+                # reclaimed.
                 try:
                     age = time.time() - self.lock_path.stat().st_mtime
                 except OSError:
@@ -79,10 +116,12 @@ class FileLock:
                     continue
                 time.sleep(0.01)
 
+        self._start_heartbeat()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Release the lock."""
+        self._stop_heartbeat()
         if self._fd is not None:
             try:
                 os.close(self._fd)

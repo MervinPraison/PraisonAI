@@ -1005,7 +1005,13 @@ class MCP:
             registered = set()
             self._registered_server_names = registered
         with type(self)._active_server_names_lock:
-            for name in filter(None, (prefix, sanitized)):
+            # Dedupe the raw/sanitized pair (they are equal for already-safe
+            # names like "docs" or "fs") and skip any name this instance already
+            # owns, so shutdown()'s one-decrement-per-registered-name stays
+            # symmetric and repeated with_tool_prefix() calls leave no residue.
+            for name in {prefix, sanitized}:
+                if not name or name in registered:
+                    continue
                 type(self)._active_server_names[name] = (
                     type(self)._active_server_names.get(name, 0) + 1
                 )

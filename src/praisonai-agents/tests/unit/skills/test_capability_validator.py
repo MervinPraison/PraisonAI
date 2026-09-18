@@ -330,6 +330,84 @@ class TestCapabilityValidator:
         assert data["has_critical_missing"] == True
 
 
+class TestMCPRegistryLifecycle:
+    """Regression tests for the MCP active-server refcount registry (issue #5135).
+
+    The registry backs STRICT capability validation, so a disconnected server
+    must disappear from ``list_active_server_names()`` once every owning MCP
+    instance has shut down — including the common case where the raw server
+    name is already a safe prefix (``prefix == sanitized``).
+    """
+
+    def _make_mcp(self):
+        """Build a bare MCP instance without opening a real connection."""
+        from praisonaiagents.mcp.mcp import MCP
+        inst = object.__new__(MCP)
+        inst._tools = []
+        inst._tool_prefix = None
+        return inst
+
+    def _reset_registry(self):
+        from praisonaiagents.mcp.mcp import MCP
+        with MCP._active_server_names_lock:
+            MCP._active_server_names.clear()
+
+    def test_safe_name_released_after_shutdown(self):
+        """An already-safe prefix (fs) must not leave a residual refcount."""
+        from praisonaiagents.mcp.mcp import MCP
+        self._reset_registry()
+        mcp = self._make_mcp()
+        mcp.with_tool_prefix("fs")  # prefix == sanitized == "fs"
+        assert "fs" in MCP.list_active_server_names()
+        assert MCP._active_server_names["fs"] == 1
+
+        mcp.shutdown()
+        assert "fs" not in MCP.list_active_server_names()
+
+    def test_repeated_with_tool_prefix_no_residue(self):
+        """Repeated with_tool_prefix() on one instance releases fully."""
+        from praisonaiagents.mcp.mcp import MCP
+        self._reset_registry()
+        mcp = self._make_mcp()
+        mcp.with_tool_prefix("docs")
+        mcp.with_tool_prefix("docs")
+        mcp.with_tool_prefix("docs")
+        assert MCP._active_server_names["docs"] == 1
+
+        mcp.shutdown()
+        assert "docs" not in MCP.list_active_server_names()
+
+    def test_name_stays_active_until_all_instances_shutdown(self):
+        """Two instances sharing a name: released only after both shut down."""
+        from praisonaiagents.mcp.mcp import MCP
+        self._reset_registry()
+        a = self._make_mcp()
+        b = self._make_mcp()
+        a.with_tool_prefix("shared")
+        b.with_tool_prefix("shared")
+        assert MCP._active_server_names["shared"] == 2
+
+        a.shutdown()
+        assert "shared" in MCP.list_active_server_names()
+        b.shutdown()
+        assert "shared" not in MCP.list_active_server_names()
+
+    def test_double_shutdown_is_idempotent(self):
+        """A second shutdown() must not underflow another holder's count."""
+        from praisonaiagents.mcp.mcp import MCP
+        self._reset_registry()
+        a = self._make_mcp()
+        b = self._make_mcp()
+        a.with_tool_prefix("srv")
+        b.with_tool_prefix("srv")
+
+        a.shutdown()
+        a.shutdown()  # idempotent — must not decrement b's hold
+        assert MCP._active_server_names.get("srv") == 1
+        b.shutdown()
+        assert "srv" not in MCP.list_active_server_names()
+
+
 class TestIntegration:
     """Integration tests for the full capability validation system."""
     
