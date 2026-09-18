@@ -266,7 +266,67 @@ class TestConstraintViolation:
         assert result.success is False
 
 
-class TestRunUntilDelegation:
+class TestAsyncGoalGate:
+    """Coverage for the non-blocking, cancellation-safe async goal gate (#5135)."""
+
+    def test_async_gate_inactive_returns_none(self):
+        import asyncio
+        agent = _make_agent()
+        # No active goal state → gate is a no-op.
+        assert getattr(agent, "_goal_state", None) is None
+        assert asyncio.run(agent._goal_gate_async("resp")) is None
+
+    def test_async_gate_offloads_and_returns_verdict(self):
+        import asyncio
+        agent = _make_agent()
+        state = GoalState(goal="g", max_turns=5)
+        state.status = "active"
+        agent._goal_state = state
+        with patch("praisonaiagents.goal.loop.judge_goal",
+                   return_value=("done", "goal met")):
+            outcome = asyncio.run(agent._goal_gate_async("final response"))
+        assert outcome == ("done", "goal met")
+        # The off-thread gate applied its mutations to the shared state.
+        assert state.status == "done"
+        assert state.last_verdict == "done"
+
+    def test_async_gate_cancellation_joins_worker(self):
+        """Cancelling the awaiting task must let the in-flight gate finish.
+
+        The gate mutates shared goal state; an orphaned worker running after
+        teardown could corrupt a newer run. We assert that on cancellation the
+        worker's mutation still completes (status flips) before propagation.
+        """
+        import asyncio
+        import threading
+
+        agent = _make_agent()
+        state = GoalState(goal="g", max_turns=5)
+        state.status = "active"
+        agent._goal_state = state
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_judge(*a, **k):
+            started.set()
+            release.wait(2.0)  # simulate a slow blocking judge call
+            return ("done", "eventually met")
+
+        async def scenario():
+            with patch("praisonaiagents.goal.loop.judge_goal",
+                       side_effect=slow_judge):
+                task = asyncio.ensure_future(agent._goal_gate_async("resp"))
+                await asyncio.to_thread(started.wait, 2.0)
+                task.cancel()          # request cancellation mid-gate
+                release.set()          # let the worker finish its mutation
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())
+        # Worker completed its state mutation despite cancellation.
+        assert state.status == "done"
+
     def test_run_until_with_goal_delegates(self):
         agent = _make_agent()
         with patch.object(agent, "chat", side_effect=_unique_chat()), \

@@ -193,6 +193,41 @@ class GoalLoopMixin:
         self._persist_goal_state()
         return "continue", reason
 
+    async def _goal_gate_async(self, response: str) -> Optional[Tuple[str, str]]:
+        """Async counterpart of :meth:`_goal_gate`.
+
+        Both the configured verification hooks (which may shell out) and the
+        completion judge's ``litellm.completion(...)`` call are blocking I/O, so
+        the whole gate is offloaded to a worker thread. Mirrors
+        ``_verification_gate_async``'s existing pattern for the same reason: a
+        slow judge/hook must never stall the event loop shared by other
+        concurrent agents.
+
+        Cancellation safety: the gate mutates shared goal state
+        (``_goal_state``, verdict counters, journal, persisted metadata). A bare
+        ``asyncio.to_thread`` worker keeps running after the awaiting coroutine
+        is cancelled, so its late writes could race with ``run_goal_async``'s
+        teardown (which nulls ``_goal_state``) or a subsequent run reusing the
+        same agent. We therefore join the worker before propagating the
+        cancellation, guaranteeing the gate finishes against the goal state it
+        started on and no orphaned thread mutates a newer run.
+        """
+        state = getattr(self, "_goal_state", None)
+        if state is None or state.status != "active":
+            return None
+        import asyncio
+        task = asyncio.ensure_future(asyncio.to_thread(self._goal_gate, response))
+        try:
+            return await task
+        except asyncio.CancelledError:
+            # Let the in-flight gate finish so its state mutations complete
+            # before run_goal_async's finally clears _goal_state, then re-raise.
+            try:
+                await asyncio.shield(task)
+            except Exception:
+                pass
+            raise
+
     # -- public API ------------------------------------------------------------
 
     def _resume_or_new_goal_state(
