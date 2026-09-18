@@ -57,10 +57,16 @@ class KnowledgeSupervisor:
         with self._lock:
             cfg = self._load_config()
             paths = cfg.get("paths") or []
+            indexed_at = cfg.get("indexed_at")
+            # Readiness follows the persisted index marker, not the in-memory
+            # agent: after an engine restart the agent is rebuilt lazily on the
+            # first query, so keying off it alone reported a saved index as
+            # unindexed until the user queried or reindexed.
             return {
                 "paths": paths,
-                "indexed_at": cfg.get("indexed_at"),
-                "ready": self._agent is not None and bool(paths),
+                "indexed_at": indexed_at,
+                "ready": bool(paths) and (self._agent is not None or bool(indexed_at)),
+                "loaded": self._agent is not None,
                 "error": self._last_error,
             }
 

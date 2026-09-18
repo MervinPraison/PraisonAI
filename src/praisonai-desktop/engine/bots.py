@@ -223,6 +223,7 @@ class BotSupervisor:
         self._lock = threading.RLock()
         self._channels: list[dict] = []
         self._gateway = _ProcessHandle("gateway", self.gateway_log)
+        self._gateway_port = 8765
         self._bots: dict[str, _ProcessHandle] = {}
         self.root.mkdir(parents=True, exist_ok=True)
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -258,7 +259,20 @@ class BotSupervisor:
     def _channel_status(self, ch: dict) -> dict:
         handle = self._bots.get(ch["id"])
         running = handle.alive() if handle else False
-        state = RUNNING if running else ch.get("state", STOPPED)
+        if running:
+            state = RUNNING
+        elif handle is not None:
+            # A handle exists but the process is no longer alive: the bot was
+            # started this session and has since exited. Report the real state
+            # (error if it failed, otherwise stopped) instead of the persisted
+            # "running", so the UI can offer Start again rather than showing a
+            # dead bot as live forever.
+            state = ERROR if handle.error else STOPPED
+            if ch.get("state") != state:
+                ch["state"] = state
+                self._save_channels()
+        else:
+            state = ch.get("state", STOPPED)
         out = dict(ch)
         out["state"] = state
         out["pid"] = handle.proc.pid if running and handle and handle.proc else None
@@ -513,7 +527,7 @@ class BotSupervisor:
             return {
                 "state": RUNNING if alive else STOPPED,
                 "pid": self._gateway.proc.pid if alive and self._gateway.proc else None,
-                "port": 8765,
+                "port": self._gateway_port,
                 "config_path": str(self.gateway_config),
                 "log_tail": list(self._gateway.log_lines)[-80:],
                 "channels_configured": len(self._channels),
@@ -541,6 +555,7 @@ class BotSupervisor:
                         raise ValueError("DISCORD_BOT_TOKEN is not set in ~/.praisonai/.env")
             if self._gateway.alive():
                 return self.gateway_status()
+            self._gateway_port = port
             self._write_gateway_yaml(port)
             argv = [
                 self.python,

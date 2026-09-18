@@ -366,6 +366,8 @@ body.view-video #video{display:block}
 .imgpreview{max-width:min(100%,42rem);border-radius:10px;border:1px solid var(--rule);margin-top:1rem;display:block}
 .mediagrid{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
 .mediagrid img,.mediagrid video{max-width:10rem;max-height:10rem;object-fit:cover;border-radius:6px;border:1px solid var(--rule)}
+.onboardBack{position:fixed;inset:0;z-index:40;display:flex;align-items:center;
+  justify-content:center;padding:1rem;background:rgba(0,0,0,.45);overflow:auto}
 .onboard{max-width:28rem;margin:1rem auto;padding:1rem 1.2rem;border:1px solid var(--rule);
   border-radius:.65rem;background:var(--panel);text-align:left}
 .onboard h3{margin:0 0 .5rem;font-size:1rem}
@@ -1054,11 +1056,14 @@ window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 
 const { invoke } = window.__TAURI__.core;
 /** Start the engine as soon as the shell loads, before the rest of boot(). */
-const engineBootPromise=invoke('engine_status');
+let engineBootPromise=invoke('engine_status');
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
 status.textContent='starting engine…'; status.className='s-boot';
 let PORT=null, engineBlocked=true, atBottom=true, activeRun=null, activeReader=null;
+// Set when the user acts before first-run onboarding has finished loading, so
+// the wizard does not render on top of the screen they deliberately opened.
+let onboardingSuppressed=false;
 /** Set by Regenerate for exactly one submit, then cleared. */
 let regenerateOf=null;
 // The renderer honours these directly -- everything in here was previously
@@ -1638,9 +1643,16 @@ function gate(){
 
 async function boot(){
 try{ globalThis.__PRAISONAI_DESKTOP_VERSION__=await window.__TAURI__.app.getVersion(); }catch{}
-let st=await engineBootPromise.catch(()=>null);
+// The prefetched status is only valid for the first boot. A boot() re-run
+// after provisioning must read fresh status, or it reuses the stale "failed"
+// result and never sees the engine that setup just made runnable.
+let st=engineBootPromise?await engineBootPromise.catch(()=>null):null;
+engineBootPromise=null;
 if(!st||!st.state) st=await invoke('engine_status');
-for(let attempt=0; attempt<3 && st.state!=='ready' && !needsSetup(st); attempt++){
+// Only re-poll while the engine is still coming up. A terminal 'failed'
+// state (or one that setup would repair) must fall straight through to its
+// banner rather than spinning here for ~7.5s first.
+for(let attempt=0; attempt<3 && st.state!=='ready' && st.state!=='failed' && !needsSetup(st); attempt++){
   status.textContent='starting engine…';
   await new Promise(r=>setTimeout(r,2500));
   st=await invoke('engine_status');
@@ -1794,8 +1806,10 @@ async function maybeOnboarding(){
     ob=await (await fetch(`http://127.0.0.1:${PORT}/onboarding`)).json();
   }catch{ return; }
   if(ob.complete) return;
-  thread.classList.remove('empty');
-  turns.innerHTML='';
+  // A deliberate user action during the fetch above (New chat, opening a
+  // conversation) means the wizard would land on top of what they started.
+  // Honour that: don't slam onboarding over a screen they just chose.
+  if(onboardingSuppressed) return;
   const w=document.createElement('div');
   w.className='onboard';
   const envHints=ob.env_hints||{};
@@ -1823,7 +1837,12 @@ async function maybeOnboarding(){
     +'<div class="row"><button type="button" class="tbtn" id="obDone">Finish setup</button>'
     +'<button type="button" class="ghost" id="obSkip">Skip for now</button></div></div>'
     +'<p class="meta" id="obMsg"></p>';
-  turns.appendChild(w); syncEmpty();
+  // The wizard is a modal, not a chat turn, and it must not borrow the shared
+  // settings/search overlay either (that would leave that dialog's focus and
+  // Escape wiring in a half-open state). It owns a dedicated backdrop so the
+  // transcript area and the settings overlay both stay untouched.
+  const back=document.createElement('div'); back.className='onboardBack';
+  back.appendChild(w); document.body.appendChild(back);
   const showStep=n=>{
     w.querySelector('#obStepNum').textContent=String(n);
     w.querySelector('#obPane1').hidden=n!==1;
@@ -1832,7 +1851,7 @@ async function maybeOnboarding(){
   };
   const finish=async()=>{
     try{ await fetch(`http://127.0.0.1:${PORT}/onboarding/complete`,{method:'POST'}); }catch{}
-    w.remove(); syncEmpty();
+    back.remove();
   };
   w.querySelector('#obSkip').onclick=finish;
   w.querySelector('#obDone').onclick=finish;
@@ -2116,6 +2135,7 @@ stopBtn.addEventListener('click',async()=>{
 });
 
 newChat.addEventListener('click',()=>{
+  onboardingSuppressed=true;
   chatId=rid(); turns.innerHTML=''; syncEmpty(); box.focus(); refreshChats();
 });
 

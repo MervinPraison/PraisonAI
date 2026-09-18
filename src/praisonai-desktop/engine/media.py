@@ -77,6 +77,10 @@ class MediaSupervisor:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            # DNS/connection/timeout/decode failures must surface as a structured
+            # generation error, not escape and drop the local API connection.
+            raise RuntimeError(f"image request failed: {exc}") from exc
 
         item = (payload.get("data") or [{}])[0]
         url = item.get("url")
@@ -84,13 +88,16 @@ class MediaSupervisor:
         file_id = f"img_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         local_path = self.out / "images" / f"{file_id}.png"
 
-        if b64:
-            local_path.write_bytes(base64.b64decode(b64))
-        elif url:
-            with urllib.request.urlopen(url, timeout=120) as img:
-                local_path.write_bytes(img.read())
-        else:
-            raise RuntimeError("image API returned no url or b64_json")
+        try:
+            if b64:
+                local_path.write_bytes(base64.b64decode(b64))
+            elif url:
+                with urllib.request.urlopen(url, timeout=120) as img:
+                    local_path.write_bytes(img.read())
+            else:
+                raise RuntimeError("image API returned no url or b64_json")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"image download failed: {exc}") from exc
 
         raw = local_path.read_bytes()
         data_url = "data:image/png;base64," + base64.b64encode(raw).decode()
@@ -133,6 +140,8 @@ class MediaSupervisor:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            raise RuntimeError(f"video request failed: {exc}") from exc
 
         output = pred.get("output")
         if isinstance(output, list):
@@ -142,8 +151,11 @@ class MediaSupervisor:
 
         file_id = f"vid_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         local_path = self.out / "videos" / f"{file_id}.mp4"
-        with urllib.request.urlopen(str(output), timeout=300) as vid:
-            local_path.write_bytes(vid.read())
+        try:
+            with urllib.request.urlopen(str(output), timeout=300) as vid:
+                local_path.write_bytes(vid.read())
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"video download failed: {exc}") from exc
 
         return {
             "id": file_id,
