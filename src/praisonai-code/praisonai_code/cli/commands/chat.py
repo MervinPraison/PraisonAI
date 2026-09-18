@@ -332,6 +332,11 @@ def chat_main(
         context=context,
         execution=execution,
         caching=caching,
+        # --tools/--toolset restrict the interactive session's callable set via
+        # the same ToolResolver path `run`/YAML/Python use, so `chat --tools X`
+        # is a genuine restriction rather than a silently-dropped flag (#5140).
+        tools=tools,
+        toolset=toolset,
     )
     
     tui = AsyncTUI(config=tui_config)
@@ -431,31 +436,24 @@ def _run_profiled_chat(
 # Options `chat` declares but never passes to the runtime. The high-value
 # capability options (--knowledge/--guardrails/--web/--reflection/--planning/
 # --context/--execution/--caching) are now threaded onto the AsyncTUIConfig and
-# reach the same Agent params `run`/YAML/Python use (issue #4890), so they are no
+# reach the same Agent params `run`/YAML/Python use (issue #4890), and
+# --tools/--toolset now restrict the interactive session's callable set through
+# the same ToolResolver path `run`/YAML/Python use (issue #5140), so they are no
 # longer listed here. What remains is genuinely unwired: --hooks needs a hooks
-# loader that does not exist, and the presentational options (--ui-backend,
-# --no-color, --theme) are not honoured by the async TUI. Saying so is one line,
-# and stops the CLI making a promise it does not keep.
+# loader that does not exist, --output needs a machine-readable interactive
+# transcript renderer the async TUI does not have, --user-id has no live
+# consumer while interactive memory itself is still unwired, and the
+# presentational options (--ui-backend, --no-color, --theme) are not honoured by
+# the async TUI renderer. Saying so is one line, and stops the CLI making a
+# promise it does not keep.
 # test_every_listed_option_really_is_unread pins this list against the body so it
 # cannot rot once an option is genuinely wired, and
 # test_every_dropped_option_really_is_listed pins the other direction.
-#
-# The four below the blank line were dropped just as silently but were never
-# declared: they are the ones whose values `_run_legacy_terminal_chat` consumes
-# -- a function this module defines and never calls -- which is why they read as
-# wired to a grep and are not.
 _UNWIRED_CHAT_OPTIONS = {
     "hooks": "--hooks",
     "ui_backend": "--ui-backend",
     "no_color": "--no-color",
     "theme": "--theme",
-    # These were declared and dropped without any warning at all -- the table
-    # only covered the four above, so it was a subset of the real gap.
-    # `--continue`, `--no-acp`, `--no-lsp` and `--file` are now genuinely wired;
-    # these remain unimplemented and say so rather than being accepted in
-    # silence.
-    "tools": "--tools",
-    "toolset": "--toolset",
     "user_id": "--user-id",
     "output": "--output",
 }
