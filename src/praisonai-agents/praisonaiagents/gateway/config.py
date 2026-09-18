@@ -297,6 +297,74 @@ class SupportsHotReload(Protocol):
         ...
 
 
+# ---------------------------------------------------------------------------
+# Candidate reload validation + rollback contract (Issue #5144)
+# ---------------------------------------------------------------------------
+#
+# ``classify_reload``/``ReloadScope`` decide *what* a config change touches; a
+# structural (``FULL``) change makes the runtime tear the live channels down
+# and bring the new config up. A config that passes the schema but fails at
+# *runtime* (unreachable model, an adapter that throws on load, bad wiring) is
+# not caught before that cutover, and there is no rollback — a single bad edit
+# can take a healthy always-on gateway offline.
+#
+# This is the small, canonical contract that makes a reload an *atomic,
+# validated cutover*: build/boot the candidate runtime in isolation and run the
+# existing readiness/turn pre-flight *before* the live one is withdrawn; only
+# swap when the candidate is proven healthy, otherwise keep the old config
+# serving. Core owns only the *shape* (a report + a protocol, no heavy
+# imports); the wrapper/bot gateway performs the concrete build+pre-flight.
+
+
+@dataclass
+class CandidateReport:
+    """Outcome of validating a candidate config *before* cutover.
+
+    Produced by :meth:`ReloadValidationProtocol.validate_candidate`: the
+    gateway builds/boots the candidate runtime in isolation (or a pre-flight)
+    and reports whether it is healthy enough to swap in. When ``ok`` is False
+    the live config keeps serving and the failures feed
+    :class:`~praisonaiagents.gateway.protocols.ReloadStatus.error` / ``health()``.
+
+    Attributes:
+        ok: Whether the candidate built and passed pre-flight — only then may
+            the live runtime be drained and the candidate swapped in.
+        failures: Human-readable reasons the candidate was rejected (empty when
+            ``ok``); joined into the reload ``error`` an operator sees.
+        candidate: Optional opaque handle to the already-built candidate runtime
+            the wrapper activates on success. Left untyped so core carries no
+            heavy runtime import; ``None`` when the runtime validates in place.
+    """
+
+    ok: bool
+    failures: "List[str]" = field(default_factory=list)
+    candidate: Optional[Any] = None
+
+
+@runtime_checkable
+class ReloadValidationProtocol(Protocol):
+    """Protocol a gateway implements for atomic, validated config cutover.
+
+    The invariant: **never drain the live runtime until**
+    :meth:`validate_candidate` **returns a report with** ``ok=True``. Owning
+    this contract in core keeps the "never cut over to an unvalidated
+    candidate" guarantee canonical so every gateway build honours it, rather
+    than being re-implemented per entry point (SIGHUP, ``gateway reload``,
+    ``gateway restart``).
+    """
+
+    async def validate_candidate(
+        self, new_config: Mapping[str, Any]
+    ) -> CandidateReport:
+        """Build/boot the candidate from ``new_config`` and pre-flight it.
+
+        Must not stop or mutate the live runtime; on any failure return a
+        report with ``ok=False`` and the reason(s) so the caller keeps the
+        previous config serving.
+        """
+        ...
+
+
 @dataclass
 class SessionConfig:
     """Configuration for gateway sessions.

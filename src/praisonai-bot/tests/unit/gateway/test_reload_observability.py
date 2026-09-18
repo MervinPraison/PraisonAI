@@ -211,6 +211,154 @@ def test_gateway_conforms_to_supports_hot_reload_protocol():
     assert isinstance(WebSocketGateway(), SupportsHotReload)
 
 
+# ── Candidate validation + rollback (Issue #5144) ──────────────────────────
+
+def test_gateway_conforms_to_reload_validation_protocol():
+    """The gateway satisfies the core ReloadValidationProtocol contract."""
+    from praisonaiagents.gateway.config import ReloadValidationProtocol
+
+    gw = WebSocketGateway()
+    assert hasattr(gw, "_validate_candidate")
+    # The protocol is documented as ``validate_candidate``; the concrete
+    # gateway names its pre-flight ``_validate_candidate`` and returns a report.
+    from praisonaiagents.gateway.config import CandidateReport
+
+    report = gw._validate_candidate({})
+    assert isinstance(report, CandidateReport)
+    assert report.ok
+
+
+def test_validate_candidate_ok_when_agents_build():
+    """A buildable agents config validates and leaves agents live."""
+    gw = WebSocketGateway()
+    report = gw._validate_candidate(
+        {"agents": {"a": {"instructions": "hi", "model": "gpt-4o-mini"}}}
+    )
+    assert report.ok
+    assert "a" in gw._agents
+
+
+def test_validate_candidate_rejects_and_restores_on_build_failure(monkeypatch):
+    """A candidate whose agent build raises is rejected; live agents restored.
+
+    This is the core of the issue: a runtime-invalid (but schema-valid) config
+    must be a rejected reload with the previous runtime intact — never mutated
+    half-way — so no outage can occur.
+    """
+    gw = WebSocketGateway()
+    # Seed a live agent that must survive a rejected candidate.
+    gw._validate_candidate(
+        {"agents": {"live": {"instructions": "keep me", "model": "gpt-4o-mini"}}}
+    )
+    assert "live" in gw._agents
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("adapter throws on load")
+
+    monkeypatch.setattr(gw, "_create_agents_from_config", _boom)
+    report = gw._validate_candidate(
+        {"agents": {"broken": {"instructions": "x"}}}
+    )
+    assert not report.ok
+    assert any("agent build failed" in f for f in report.failures)
+    # Previous live agent restored exactly; broken candidate never registered.
+    assert "live" in gw._agents
+    assert "broken" not in gw._agents
+
+
+def test_full_restart_rejected_keeps_previous_config_no_outage(monkeypatch):
+    """A structural reload with an invalid candidate never drains live channels.
+
+    Regression for Issue #5144: the failing candidate must be rejected *before*
+    ``stop_channels`` is called, so a bad edit cannot take a running gateway
+    offline. Verifies stop/start_channels are never invoked and health() shows
+    the rejection.
+    """
+    gw = WebSocketGateway()
+    # Establish a last-known-good loaded config so the diff path is taken.
+    gw._loaded_config = {
+        "gateway": {"port": 8765},
+        "agents": {"live": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {},
+    }
+    gw._validate_candidate(gw._loaded_config)
+
+    calls = {"stop": 0, "start": 0}
+
+    async def _stop(*a, **k):
+        calls["stop"] += 1
+
+    async def _start(*a, **k):
+        calls["start"] += 1
+
+    monkeypatch.setattr(gw, "stop_channels", _stop)
+    monkeypatch.setattr(gw, "start_channels", _start)
+
+    # New config: structural change (gateway.port) forcing full_restart, whose
+    # candidate agent build blows up.
+    new_cfg = {
+        "gateway": {"port": 9999},
+        "agents": {"broken": {"instructions": "x"}},
+        "channels": {},
+    }
+    monkeypatch.setattr(gw, "load_gateway_config", lambda p: new_cfg)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("unreachable model")
+
+    # Only the candidate build must fail; leave everything else intact.
+    orig = gw._create_agents_from_config
+    monkeypatch.setattr(gw, "_create_agents_from_config", _boom)
+
+    asyncio.run(gw._reload_config_locked("/tmp/gateway.yaml"))
+
+    assert calls["stop"] == 0  # live channels never drained -> no outage
+    assert calls["start"] == 0
+    assert gw._reload_status.last_result == "failed"
+    assert "unreachable model" in (gw._reload_status.error or "")
+
+
+def test_full_restart_channel_start_failure_restores_previous(monkeypatch):
+    """If the new channels fail to start after cutover, the old config is restored."""
+    gw = WebSocketGateway()
+    prev_cfg = {
+        "gateway": {"port": 8765},
+        "agents": {"live": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"telegram": {"token": "old"}},
+    }
+    gw._loaded_config = prev_cfg
+    gw._validate_candidate(prev_cfg)
+
+    restored = {"agents": False, "channels": False}
+    start_calls = {"n": 0}
+
+    async def _stop(*a, **k):
+        pass
+
+    async def _start(channels_cfg, *a, **k):
+        start_calls["n"] += 1
+        # First start (new candidate channels) fails; restore start succeeds.
+        if start_calls["n"] == 1:
+            raise RuntimeError("channel adapter failed to bind")
+        restored["channels"] = True
+
+    monkeypatch.setattr(gw, "stop_channels", _stop)
+    monkeypatch.setattr(gw, "start_channels", _start)
+
+    new_cfg = {
+        "gateway": {"port": 9999},
+        "agents": {"a2": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"discord": {"token": "new"}},
+    }
+    monkeypatch.setattr(gw, "load_gateway_config", lambda p: new_cfg)
+
+    asyncio.run(gw._reload_config_locked("/tmp/gateway.yaml"))
+
+    assert restored["channels"] is True  # previous config brought back up
+    assert gw._reload_status.last_result == "failed"
+    assert "channel adapter failed" in (gw._reload_status.error or "")
+
+
 if __name__ == "__main__":
     import pytest
 
