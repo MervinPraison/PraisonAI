@@ -214,32 +214,48 @@ def test_gateway_conforms_to_supports_hot_reload_protocol():
 # ── Candidate validation + rollback (Issue #5144) ──────────────────────────
 
 def test_gateway_conforms_to_reload_validation_protocol():
-    """The gateway satisfies the core ReloadValidationProtocol contract."""
-    from praisonaiagents.gateway.config import ReloadValidationProtocol
+    """The gateway satisfies the core ReloadValidationProtocol contract.
+
+    greptile #2: the exported protocol requires a public async
+    ``validate_candidate``; the gateway must actually implement it (not only a
+    private sync pre-flight), so ``isinstance`` holds and consumers following
+    the public contract can await it.
+    """
+    from praisonaiagents.gateway.config import (
+        CandidateReport,
+        ReloadValidationProtocol,
+    )
 
     gw = WebSocketGateway()
-    assert hasattr(gw, "_validate_candidate")
-    # The protocol is documented as ``validate_candidate``; the concrete
-    # gateway names its pre-flight ``_validate_candidate`` and returns a report.
-    from praisonaiagents.gateway.config import CandidateReport
+    assert isinstance(gw, ReloadValidationProtocol)
 
-    report = gw._validate_candidate({})
+    report = asyncio.run(gw.validate_candidate({}))
     assert isinstance(report, CandidateReport)
     assert report.ok
 
 
-def test_validate_candidate_ok_when_agents_build():
-    """A buildable agents config validates and leaves agents live."""
+def test_validate_candidate_ok_stages_without_activating():
+    """A buildable agents config validates but does NOT go live yet.
+
+    greptile #1: validation must not mutate the live registry — the candidate
+    is only activated after ingress is quiesced. The built candidate is carried
+    on the report and can be activated explicitly.
+    """
     gw = WebSocketGateway()
     report = gw._validate_candidate(
         {"agents": {"a": {"instructions": "hi", "model": "gpt-4o-mini"}}}
     )
     assert report.ok
+    # Not live yet — no cutover happened during validation.
+    assert "a" not in gw._agents
+    assert "a" in report.candidate["agents"]
+    # Explicit activation installs it live.
+    gw._activate_candidate(report.candidate)
     assert "a" in gw._agents
 
 
-def test_validate_candidate_rejects_and_restores_on_build_failure(monkeypatch):
-    """A candidate whose agent build raises is rejected; live agents restored.
+def test_validate_candidate_rejects_and_leaves_live_intact(monkeypatch):
+    """A candidate whose agent build raises is rejected; live agents intact.
 
     This is the core of the issue: a runtime-invalid (but schema-valid) config
     must be a rejected reload with the previous runtime intact — never mutated
@@ -247,9 +263,10 @@ def test_validate_candidate_rejects_and_restores_on_build_failure(monkeypatch):
     """
     gw = WebSocketGateway()
     # Seed a live agent that must survive a rejected candidate.
-    gw._validate_candidate(
+    ok = gw._validate_candidate(
         {"agents": {"live": {"instructions": "keep me", "model": "gpt-4o-mini"}}}
     )
+    gw._activate_candidate(ok.candidate)
     assert "live" in gw._agents
 
     def _boom(*args, **kwargs):
@@ -261,7 +278,7 @@ def test_validate_candidate_rejects_and_restores_on_build_failure(monkeypatch):
     )
     assert not report.ok
     assert any("agent build failed" in f for f in report.failures)
-    # Previous live agent restored exactly; broken candidate never registered.
+    # Previous live agent intact; broken candidate never registered.
     assert "live" in gw._agents
     assert "broken" not in gw._agents
 
@@ -357,6 +374,108 @@ def test_full_restart_channel_start_failure_restores_previous(monkeypatch):
     assert restored["channels"] is True  # previous config brought back up
     assert gw._reload_status.last_result == "failed"
     assert "channel adapter failed" in (gw._reload_status.error or "")
+
+
+def test_full_restart_candidate_not_live_until_after_drain(monkeypatch):
+    """greptile #1: the candidate agents must not be live until after drain.
+
+    During a full restart the candidate is proven first, but it must only be
+    installed into the live registry *after* ``stop_channels`` has quiesced
+    ingress — never while the previous channels are still accepting turns.
+    """
+    gw = WebSocketGateway()
+    prev_cfg = {
+        "gateway": {"port": 8765},
+        "agents": {"old": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"telegram": {"token": "old"}},
+    }
+    gw._loaded_config = prev_cfg
+    # Seed the live registry with the previous agent (as a real boot would).
+    gw._activate_candidate(gw._validate_candidate(prev_cfg).candidate)
+    assert "old" in gw._agents
+
+    order = []
+
+    async def _stop(*a, **k):
+        # At drain time the candidate must NOT be live yet — the previous
+        # agent must still be serving in-flight turns.
+        order.append("stop")
+        assert "new" not in gw._agents
+        assert "old" in gw._agents
+
+    async def _start(channels_cfg, *a, **k):
+        # Only after the cutover should the candidate be live.
+        order.append("start")
+        assert "new" in gw._agents
+        gw._channel_bots["discord"] = object()
+
+    monkeypatch.setattr(gw, "stop_channels", _stop)
+    monkeypatch.setattr(gw, "start_channels", _start)
+
+    new_cfg = {
+        "gateway": {"port": 9999},
+        "agents": {"new": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"discord": {"token": "new"}},
+    }
+    monkeypatch.setattr(gw, "load_gateway_config", lambda p: new_cfg)
+
+    asyncio.run(gw._reload_config_locked("/tmp/gateway.yaml"))
+
+    assert order == ["stop", "start"]  # drain happened before cutover+start
+    assert "new" in gw._agents
+    assert gw._reload_status.last_result == "ok"
+
+
+def test_full_restart_all_channels_degraded_restores_previous(monkeypatch):
+    """greptile #3: if every replacement channel is degraded, roll back.
+
+    ``start_channels`` swallows per-channel failures (marks them degraded and
+    skips) rather than raising, so a wholly-broken replacement set returns
+    normally with no live channel. The cutover must detect the empty live set
+    and restore the previous config instead of committing an ``ok`` reload.
+    """
+    gw = WebSocketGateway()
+    prev_cfg = {
+        "gateway": {"port": 8765},
+        "agents": {"live": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"telegram": {"token": "old"}},
+    }
+    gw._loaded_config = prev_cfg
+    gw._activate_candidate(gw._validate_candidate(prev_cfg).candidate)
+
+    start_calls = {"n": 0}
+    restored = {"channels": False}
+
+    async def _stop(*a, **k):
+        gw._channel_bots.clear()
+
+    async def _start(channels_cfg, *a, **k):
+        start_calls["n"] += 1
+        if start_calls["n"] == 1:
+            # New candidate channels all fail credential/adapter checks: no
+            # bot is registered, they are marked degraded — no exception.
+            for name in channels_cfg:
+                gw._degraded_channels[name] = "credential unavailable"
+        else:
+            # Restore of the previous config succeeds with a live bot.
+            gw._channel_bots["telegram"] = object()
+            restored["channels"] = True
+
+    monkeypatch.setattr(gw, "stop_channels", _stop)
+    monkeypatch.setattr(gw, "start_channels", _start)
+
+    new_cfg = {
+        "gateway": {"port": 9999},
+        "agents": {"a2": {"instructions": "ok", "model": "gpt-4o-mini"}},
+        "channels": {"discord": {"token": ""}},
+    }
+    monkeypatch.setattr(gw, "load_gateway_config", lambda p: new_cfg)
+
+    asyncio.run(gw._reload_config_locked("/tmp/gateway.yaml"))
+
+    assert restored["channels"] is True  # previous config brought back up
+    assert gw._reload_status.last_result == "failed"
+    assert "all channels failed" in (gw._reload_status.error or "")
 
 
 if __name__ == "__main__":
