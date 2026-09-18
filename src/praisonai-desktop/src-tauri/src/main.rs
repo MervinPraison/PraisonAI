@@ -15,6 +15,7 @@ use std::time::Duration;
 use praisonai_desktop_core::adopt::Decision;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use praisonai_desktop_core::platform::Platform;
+use praisonai_desktop_core::lockfile::{parse, LockState};
 use praisonai_desktop_core::reclaim::{kill_pid, no_console, reclaim};
 use praisonai_desktop_core::engine_paths::{
     app_bundle, data_dir, python_candidates, resolve_engine, RealFs as PathFs,
@@ -322,6 +323,23 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
     Ok(py.display().to_string())
 }
 
+/// Stop the shell-held engine and any adopted lockfile process, then spawn fresh.
+#[tauri::command]
+fn restart_engine(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> EngineStatus {
+    if let Some(mut engine) = state.engine.lock().unwrap().take() {
+        engine.shutdown();
+    }
+    if let Some(dir) = user_data_dir() {
+        let lock_path = dir.join("engine.lock");
+        let contents = std::fs::read_to_string(&lock_path).ok();
+        if let LockState::Present(lock) = parse(contents.as_deref()) {
+            kill_pid(lock.pid);
+        }
+        let _ = std::fs::remove_file(lock_path);
+    }
+    engine_status(app, state)
+}
+
 #[tauri::command]
 fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> EngineStatus {
     if let Some(engine) = state.engine.lock().unwrap().as_ref() {
@@ -619,7 +637,7 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![engine_status, provision_engine])
+        .invoke_handler(tauri::generate_handler![engine_status, restart_engine, provision_engine])
         .build(tauri::generate_context!())
         .expect("error while building the PraisonAI desktop shell")
         .run(|app, event| {

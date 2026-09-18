@@ -1,2 +1,4 @@
 src-tauri/target/
 frontend/node_modules/
+**/knowledge.db
+engine/media-output/
