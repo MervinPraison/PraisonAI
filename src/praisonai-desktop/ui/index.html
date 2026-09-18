@@ -366,8 +366,11 @@ body.view-video #video{display:block}
 .imgpreview{max-width:min(100%,42rem);border-radius:10px;border:1px solid var(--rule);margin-top:1rem;display:block}
 .mediagrid{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
 .mediagrid img,.mediagrid video{max-width:10rem;max-height:10rem;object-fit:cover;border-radius:6px;border:1px solid var(--rule)}
-.onboard{max-width:28rem;margin:1rem auto;padding:1rem 1.2rem;border:1px solid var(--rule);
-  border-radius:.65rem;background:var(--panel);text-align:left}
+.onboard-back{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;
+  display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.onboard{max-width:28rem;width:min(28rem,100%);padding:1rem 1.2rem;border:1px solid var(--rule);
+  border-radius:.65rem;background:var(--panel);text-align:left;
+  box-shadow:0 18px 48px rgba(0,0,0,.45);max-height:90vh;overflow:auto}
 .onboard h3{margin:0 0 .5rem;font-size:1rem}
 .onboard p{margin:0 0 .8rem;font-size:.82rem;color:var(--soft);line-height:1.5}
 .onboard input{width:100%;margin:.35rem 0 .6rem}
@@ -1053,8 +1056,12 @@ function searchSettings(query, get) {
 window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 
 const { invoke } = window.__TAURI__.core;
-/** Start the engine as soon as the shell loads, before the rest of boot(). */
-const engineBootPromise=invoke('engine_status');
+/**
+ * Start the engine as soon as the shell loads, before the rest of boot().
+ * Consumed exactly once: boot() clears it so a re-boot after provisioning
+ * reads fresh status rather than the stale pre-provision failure.
+ */
+let engineBootPromise=invoke('engine_status');
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
 status.textContent='starting engine…'; status.className='s-boot';
@@ -1638,9 +1645,13 @@ function gate(){
 
 async function boot(){
 try{ globalThis.__PRAISONAI_DESKTOP_VERSION__=await window.__TAURI__.app.getVersion(); }catch{}
-let st=await engineBootPromise.catch(()=>null);
+let st=engineBootPromise ? await engineBootPromise.catch(()=>null) : null;
+engineBootPromise=null;
 if(!st||!st.state) st=await invoke('engine_status');
-for(let attempt=0; attempt<3 && st.state!=='ready' && !needsSetup(st); attempt++){
+// Only poll while the engine is still coming up. A terminal 'failed' state is
+// the shell's final word -- retrying it just spins for 7.5s and buries the
+// failure banner behind a stale "starting engine…", so stop on it at once.
+for(let attempt=0; attempt<3 && st.state!=='ready' && st.state!=='failed' && !needsSetup(st); attempt++){
   status.textContent='starting engine…';
   await new Promise(r=>setTimeout(r,2500));
   st=await invoke('engine_status');
@@ -1794,10 +1805,12 @@ async function maybeOnboarding(){
     ob=await (await fetch(`http://127.0.0.1:${PORT}/onboarding`)).json();
   }catch{ return; }
   if(ob.complete) return;
-  thread.classList.remove('empty');
-  turns.innerHTML='';
+  // Render in its own modal backdrop, not #turns: the transcript belongs to the
+  // chat and shipped UI tests assert on it, so a wizard dropped in there breaks
+  // New-chat and would count as a stray turn.
+  const back=document.createElement('div'); back.className='onboard-back';
   const w=document.createElement('div');
-  w.className='onboard';
+  w.className='onboard'; w.setAttribute('role','dialog'); w.setAttribute('aria-modal','true');
   const envHints=ob.env_hints||{};
   w.innerHTML='<h3>Welcome to PraisonAI Desktop</h3>'
     +'<p class="obStepLbl">Step <span id="obStepNum">1</span> of 3</p>'
@@ -1823,7 +1836,7 @@ async function maybeOnboarding(){
     +'<div class="row"><button type="button" class="tbtn" id="obDone">Finish setup</button>'
     +'<button type="button" class="ghost" id="obSkip">Skip for now</button></div></div>'
     +'<p class="meta" id="obMsg"></p>';
-  turns.appendChild(w); syncEmpty();
+  back.appendChild(w); document.body.appendChild(back);
   const showStep=n=>{
     w.querySelector('#obStepNum').textContent=String(n);
     w.querySelector('#obPane1').hidden=n!==1;
@@ -1832,7 +1845,7 @@ async function maybeOnboarding(){
   };
   const finish=async()=>{
     try{ await fetch(`http://127.0.0.1:${PORT}/onboarding/complete`,{method:'POST'}); }catch{}
-    w.remove(); syncEmpty();
+    back.remove(); syncEmpty();
   };
   w.querySelector('#obSkip').onclick=finish;
   w.querySelector('#obDone').onclick=finish;
