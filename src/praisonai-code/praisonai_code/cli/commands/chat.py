@@ -241,6 +241,11 @@ def chat_main(
             model=resolved_model,
             verbose=verbose,
             profile_deep=profile_deep,
+            # Honour --tools/--toolset in profiled single-prompt mode too, so the
+            # restriction is not silently dropped on this early-return path
+            # (#5140). Resolved through the same ToolResolver path as the TUI.
+            tools=tools,
+            toolset=toolset,
         )
         return
     
@@ -360,6 +365,8 @@ def _run_profiled_chat(
     model: Optional[str] = None,
     verbose: bool = False,
     profile_deep: bool = False,
+    tools: Optional[str] = None,
+    toolset: Optional[str] = None,
 ):
     """Run chat with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -393,7 +400,22 @@ def _run_profiled_chat(
     }
     if model:
         agent_config["llm"] = model
-    
+
+    # Honour --tools/--toolset in profiled mode using the same resolver the TUI
+    # uses, so a restriction supplied with --profile is not silently dropped
+    # (#5140). Resolved through a throwaway AsyncTUIConfig to reuse one code path.
+    if tools or toolset:
+        from praisonai_code.cli.interactive.async_tui import (
+            AsyncTUIConfig,
+            _resolve_restricted_tools,
+        )
+
+        restricted = _resolve_restricted_tools(
+            AsyncTUIConfig(tools=tools, toolset=toolset)
+        )
+        if restricted is not None:
+            agent_config["tools"] = restricted
+
     agent = Agent(**agent_config)
     profiler.mark_init_end()
     

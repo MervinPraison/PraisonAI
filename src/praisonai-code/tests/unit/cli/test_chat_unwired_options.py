@@ -411,3 +411,60 @@ class TestWiredToolOptions:
             async_tui.AsyncTUIConfig(tools="does_not_exist")
         )
         assert result == []
+
+    def test_tools_py_file_path_is_loaded_not_treated_as_a_name(
+        self, tmp_path, monkeypatch
+    ):
+        """`chat --tools ./tools.py` must load the file's callables.
+
+        Regression: the resolver previously comma-split every --tools item and
+        sent it through name resolution, so a documented ``tools.py`` path
+        resolved to nothing instead of the file's functions (Qodo/Greptile P1).
+        """
+        from praisonai_code.cli.interactive import async_tui
+
+        tools_file = tmp_path / "my_tools.py"
+        tools_file.write_text(
+            "def my_custom_tool(x: str) -> str:\n"
+            "    '''A custom tool.'''\n"
+            "    return x\n"
+        )
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+
+        resolved = async_tui._resolve_restricted_tools(
+            async_tui.AsyncTUIConfig(tools=str(tools_file))
+        )
+        assert resolved is not None
+        names = [getattr(t, "__name__", getattr(t, "name", "")) for t in resolved]
+        assert "my_custom_tool" in names
+
+    def test_profiled_chat_receives_the_tool_restriction(self, monkeypatch):
+        """`chat "..." --profile --tools X` must restrict the profiled Agent.
+
+        Regression: single-prompt profiling returned before the AsyncTUIConfig
+        was built, so --tools/--toolset were silently dropped on that path
+        (Qodo/Greptile). They must now reach _run_profiled_chat.
+        """
+        captured = {}
+
+        def _fake_profiled(prompt, model=None, verbose=False,
+                           profile_deep=False, tools=None, toolset=None):
+            captured["tools"] = tools
+            captured["toolset"] = toolset
+
+        monkeypatch.setattr(chat_module, "_run_profiled_chat", _fake_profiled)
+        monkeypatch.setattr(
+            "praisonai_code.llm.credentials.ensure_configured_or_onboard",
+            lambda model=None, interactive=True: model,
+        )
+
+        app = typer.Typer()
+        app.command()(chat_module.chat_main)
+        result = CliRunner().invoke(
+            app,
+            ["Summarise", "--profile", "--tools", "internet_search",
+             "--toolset", "web"],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured.get("tools") == "internet_search"
+        assert captured.get("toolset") == "web"

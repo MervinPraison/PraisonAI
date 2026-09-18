@@ -26,6 +26,24 @@ class _Backend:
         return self.request_approval_sync(request)
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_approval_backend():
+    """Keep this file's ``set_backend`` calls from escaping it.
+
+    Every test here installs a ``_Backend`` on the PROCESS-GLOBAL approval
+    registry via ``set_backend`` but never cleared it, so the last backend
+    leaked into later files -- e.g. ``tests/unit/skills/test_approval_scoping.py``
+    asserts ``registry._global_backend is None`` and failed when this file ran
+    first. Snapshot and restore the global backend around each test.
+    """
+    registry = get_approval_registry()
+    saved = registry._global_backend
+    try:
+        yield
+    finally:
+        registry._global_backend = saved
+
+
 @pytest.fixture
 def team():
     return AgentTeam(agents=[Agent(name="a", instructions="x", llm="gpt-4o")])

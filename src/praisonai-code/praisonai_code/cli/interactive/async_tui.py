@@ -252,12 +252,15 @@ def _resolve_restricted_tools(config: "AsyncTUIConfig") -> Optional[list]:
     so ``chat --tools web_search`` restricts an interactive session to the same
     callables it would get from ``run --tools web_search`` (issue #5140).
 
-    ``config.tools`` is a comma-separated list of tool names (or a ``tools.py``
-    path); ``config.toolset`` is a comma-separated list of named toolset groups.
-    Returns ``None`` when neither is supplied, so the caller falls back to the
-    default interactive tool groups unchanged. When at least one is supplied the
-    resolved callables REPLACE the defaults, making the flag a real restriction.
+    ``config.tools`` is a comma-separated list of tool names and/or ``tools.py``
+    file paths; ``config.toolset`` is a comma-separated list of named toolset
+    groups. Returns ``None`` when neither is supplied, so the caller falls back
+    to the default interactive tool groups unchanged. When at least one is
+    supplied the resolved callables REPLACE the defaults, making the flag a real
+    restriction.
     """
+    import os as _os
+
     tools_arg = getattr(config, "tools", None)
     toolset_arg = getattr(config, "toolset", None)
     if not tools_arg and not toolset_arg:
@@ -266,20 +269,43 @@ def _resolve_restricted_tools(config: "AsyncTUIConfig") -> Optional[list]:
     from praisonai_code.tool_resolver import ToolResolver
 
     resolver = ToolResolver()
-    tool_names = [
-        t.strip() for t in str(tools_arg).split(",") if t.strip()
-    ] if tools_arg else None
+
+    # Split ``--tools`` items into file paths and plain names. File paths (``.py``
+    # or an existing path) are loaded through ``load_functions_from_module`` so
+    # the documented ``chat --tools ./tools.py`` form works exactly as it does
+    # for ``run`` instead of resolving to nothing.
+    file_callables: list = []
+    plain_names: list = []
+    if tools_arg:
+        for item in (t.strip() for t in str(tools_arg).split(",")):
+            if not item:
+                continue
+            if item.endswith(".py") or _os.path.exists(item):
+                module_fns = resolver.load_functions_from_module(item)
+                if module_fns:
+                    file_callables.extend(module_fns.values())
+                elif not _os.path.exists(item):
+                    # A ``.py`` name that isn't on disk: fall back to name
+                    # resolution (strip the suffix) so "internet_search.py"
+                    # resolves as the named tool "internet_search".
+                    plain_names.append(item[:-3] if item.endswith(".py") else item)
+            else:
+                plain_names.append(item)
+
     toolset_names = [
         t.strip() for t in str(toolset_arg).split(",") if t.strip()
     ] if toolset_arg else None
 
     resolved = resolver.resolve_tools_and_toolsets(
-        tool_names=tool_names, toolset_names=toolset_names
+        tool_names=plain_names or None, toolset_names=toolset_names
     )
+    # File-loaded callables prepend the resolver-resolved names/toolsets so the
+    # combined restriction reaches the interactive agent.
+    combined = file_callables + list(resolved)
     # An explicit restriction that resolves to nothing must still restrict: an
     # empty list is returned (not None) so the session does not silently fall
     # back to the full default toolset the user asked to narrow.
-    return resolved
+    return combined
 
 
 class _LogCapture(logging.Handler):

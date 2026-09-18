@@ -117,7 +117,7 @@ def test_profiled_chat_still_receives_the_attachment(tmp_path, tui, monkeypatch)
     """
     captured = {}
 
-    def _fake_profiled(prompt, model=None, verbose=False, profile_deep=False):
+    def _fake_profiled(prompt, model=None, verbose=False, profile_deep=False, **kwargs):
         captured["prompt"] = prompt
 
     monkeypatch.setattr(chat_module, "_run_profiled_chat", _fake_profiled)
