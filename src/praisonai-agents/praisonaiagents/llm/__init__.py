@@ -87,6 +87,10 @@ def __getattr__(name):
             from .model_capabilities import supports_streaming_with_tools
             _lazy_cache[name] = supports_streaming_with_tools
             return supports_streaming_with_tools
+        elif name == "max_output_tokens":
+            from .model_capabilities import max_output_tokens
+            _lazy_cache[name] = max_output_tokens
+            return max_output_tokens
         elif name == "ModelRouter":
             from .model_router import ModelRouter
             _lazy_cache[name] = ModelRouter
@@ -243,6 +247,7 @@ __all__ = [
     "process_stream_chunks",
     "supports_structured_outputs",
     "supports_streaming_with_tools",
+    "max_output_tokens",
     "ModelRouter",
     "ModelProfile",
     "TaskComplexity",

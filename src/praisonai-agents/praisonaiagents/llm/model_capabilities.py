@@ -38,6 +38,27 @@ def _base_model_name(model_name: str) -> str:
     return name
 
 
+def _coerce_output_token_limit(value) -> int | None:
+    """Return a positive integer output ceiling, or ``None`` when invalid."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    # ``int`` truncates fractional metadata (for example, ``8192.5``), which
+    # would turn an invalid ceiling into an apparently authoritative limit.
+    # Keep numeric strings such as ``"8192"`` compatible with LiteLLM's
+    # metadata while rejecting non-integral numeric values before conversion.
+    if not isinstance(value, str):
+        try:
+            if value != coerced:
+                return None
+        except Exception:
+            return None
+    return coerced if coerced > 0 else None
+
+
 def _fallback_supports_structured_outputs(model_name: str) -> bool:
     """Static heuristic used only when litellm is unavailable.
 
@@ -577,8 +598,8 @@ def max_output_tokens(model_name: str):
         try:
             info = litellm.get_model_info(model=model_name)
             if info:
-                out = info.get("max_output_tokens")
-                if out:
+                out = _coerce_output_token_limit(info.get("max_output_tokens"))
+                if out is not None:
                     return out
         except Exception:
             pass
@@ -594,7 +615,7 @@ def max_output_tokens(model_name: str):
             if info is None and "/" in model_name:
                 info = model_cost.get(model_name.split("/")[-1].lower())
             if info:
-                return info.get("max_output_tokens")
+                return _coerce_output_token_limit(info.get("max_output_tokens"))
     except Exception:
         pass
 
