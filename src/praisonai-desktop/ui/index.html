@@ -350,13 +350,30 @@ button.stop{background:var(--bad)}
    Same tokens as chat, same centred column. A training view that invented its
    own palette would read as a bolted-on second app, which is exactly what it
    must not be: it is the same product doing a different job. */
-#train,#channels,#gateway{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
-#train.on,#channels.on,#gateway.on{display:block}
+#train,#channels,#gateway,#knowledge,#images,#video{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
+#train.on,#channels.on,#gateway.on,#knowledge.on,#images.on,#video.on{display:block}
 body.training #thread,body.training #f{display:none}
-body.view-channels #thread,body.view-channels #f,body.view-channels #train,body.view-channels #gateway{display:none}
+body.view-channels #thread,body.view-channels #f,body.view-channels #train,body.view-channels #gateway,body.view-channels #knowledge,body.view-channels #images,body.view-channels #video{display:none}
 body.view-channels #channels{display:block}
-body.view-gateway #thread,body.view-gateway #f,body.view-gateway #train,body.view-gateway #channels{display:none}
+body.view-gateway #thread,body.view-gateway #f,body.view-gateway #train,body.view-gateway #channels,body.view-gateway #knowledge,body.view-gateway #images,body.view-gateway #video{display:none}
 body.view-gateway #gateway{display:block}
+body.view-knowledge #thread,body.view-knowledge #f,body.view-knowledge #train,body.view-knowledge #channels,body.view-knowledge #gateway,body.view-knowledge #images,body.view-knowledge #video{display:none}
+body.view-knowledge #knowledge{display:block}
+body.view-images #thread,body.view-images #f,body.view-images #train,body.view-images #channels,body.view-images #gateway,body.view-images #knowledge,body.view-images #video{display:none}
+body.view-images #images{display:block}
+body.view-video #thread,body.view-video #f,body.view-video #train,body.view-video #channels,body.view-video #gateway,body.view-video #knowledge,body.view-video #images{display:none}
+body.view-video #video{display:block}
+.imgpreview{max-width:min(100%,42rem);border-radius:10px;border:1px solid var(--rule);margin-top:1rem;display:block}
+.mediagrid{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
+.mediagrid img,.mediagrid video{max-width:10rem;max-height:10rem;object-fit:cover;border-radius:6px;border:1px solid var(--rule)}
+.onboard{max-width:28rem;margin:1rem auto;padding:1rem 1.2rem;border:1px solid var(--rule);
+  border-radius:.65rem;background:var(--panel);text-align:left}
+.onboard h3{margin:0 0 .5rem;font-size:1rem}
+.onboard p{margin:0 0 .8rem;font-size:.82rem;color:var(--soft);line-height:1.5}
+.onboard input{width:100%;margin:.35rem 0 .6rem}
+.onboard .obStepLbl{font-size:.72rem;color:var(--soft);margin:0 0 .6rem}
+.onboard .obenv{margin:.4rem 0 .8rem;padding-left:1.1rem;font-size:.78rem;color:var(--soft)}
+.onboard code{font-size:.76rem;color:var(--accent)}
 .chlist{display:flex;flex-direction:column;gap:.5rem;margin:.6rem 0}
 .chrow{display:flex;align-items:center;gap:.6rem;padding:.55rem .65rem;border:1px solid var(--rule);
   border-radius:.45rem;background:var(--panel)}
@@ -454,6 +471,12 @@ body.view-gateway #gateway{display:block}
               aria-controls="channels"><span class="ic" aria-hidden="true">◎</span>Channels</button>
       <button class="navbtn" id="viewGateway" type="button" role="tab" aria-selected="false"
               aria-controls="gateway"><span class="ic" aria-hidden="true">⬡</span>Gateway</button>
+      <button class="navbtn" id="viewKnowledge" type="button" role="tab" aria-selected="false"
+              aria-controls="knowledge"><span class="ic" aria-hidden="true">▣</span>Knowledge</button>
+      <button class="navbtn" id="viewImages" type="button" role="tab" aria-selected="false"
+              aria-controls="images"><span class="ic" aria-hidden="true">◻</span>Images</button>
+      <button class="navbtn" id="viewVideo" type="button" role="tab" aria-selected="false"
+              aria-controls="video"><span class="ic" aria-hidden="true">▷</span>Video</button>
     </div>
     <div class="sidetop">
       <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k" data-chord="N"></span></button>
@@ -483,6 +506,8 @@ body.view-gateway #gateway{display:block}
             aria-label="Attach a file">+</button>
     <button class="ctool on" id="toolsBtn" type="button" title="Tools enabled"
             aria-pressed="true">⚒ Tools</button>
+    <button class="ctool" id="knowledgeBtn" type="button" title="Use indexed knowledge"
+            aria-pressed="false">▣ Knowledge</button>
     <span class="grow"></span>
     <button id="send" disabled title="Send" aria-label="Send message">↑</button>
     <button id="stop" class="stop is-hidden" type="button">Stop</button>
@@ -630,7 +655,7 @@ body.view-gateway #gateway{display:block}
       <div class="inner">
         <div class="trainhd">
           <h2>Channels</h2>
-          <p>Connect Telegram and Slack bots. Tokens use env: refs from ~/.praisonai/.env</p>
+          <p>Telegram, Slack, and Discord. Tokens use env: refs from ~/.praisonai/.env</p>
         </div>
         <form id="chAddForm" class="tcard">
           <div class="tgrid">
@@ -639,6 +664,7 @@ body.view-gateway #gateway{display:block}
               <select id="chPlatform" name="platform">
                 <option value="telegram">Telegram</option>
                 <option value="slack">Slack</option>
+                <option value="discord">Discord</option>
               </select>
             </div>
             <div class="tf">
@@ -662,6 +688,81 @@ body.view-gateway #gateway{display:block}
         <div class="tcard">
           <div class="sectlbl">Your channels</div>
           <div id="chList" class="chlist"></div>
+          <div class="sectlbl">Channel log</div>
+          <pre class="chlog" id="chLog">Select a channel and click “View log”.</pre>
+        </div>
+      </div>
+    </section>
+    <section id="knowledge" role="tabpanel" aria-labelledby="viewKnowledge" aria-label="Knowledge">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Knowledge (RAG)</h2>
+          <p>Index a folder of documents, then enable “Use knowledge” in chat.</p>
+        </div>
+        <div class="tcard">
+          <div class="tf">
+            <label for="knPaths">Folder paths (one per line)</label>
+            <textarea id="knPaths" rows="3" placeholder="C:\Users\you\Documents\my-docs"></textarea>
+          </div>
+          <div class="trow">
+            <button class="tbtn" id="knSave" type="button">Save folders</button>
+            <button class="tbtn" id="knIndex" type="button">Build index</button>
+            <button class="tbtn ghost" id="knTest" type="button">Test retrieval</button>
+          </div>
+          <p class="meta" id="knStatus">Not configured</p>
+          <pre class="chlog" id="knSnippet" hidden></pre>
+          <p class="tnote" id="knError" role="alert"></p>
+        </div>
+      </div>
+    </section>
+    <section id="images" role="tabpanel" aria-labelledby="viewImages" aria-label="Image generation">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Image generation</h2>
+          <p>Create images with DALL·E (OpenAI API key in Settings or ~/.praisonai/.env).</p>
+        </div>
+        <div class="tcard">
+          <div class="tf">
+            <label for="imgPrompt">Prompt</label>
+            <textarea id="imgPrompt" rows="3" placeholder="A watercolor lighthouse at sunset"></textarea>
+          </div>
+          <div class="tgrid">
+            <div class="tf">
+              <label for="imgModel">Model</label>
+              <select id="imgModel"><option value="dall-e-3" selected>dall-e-3</option>
+                <option value="dall-e-2">dall-e-2</option></select>
+            </div>
+            <div class="tf">
+              <label for="imgSize">Size</label>
+              <select id="imgSize"><option value="1024x1024" selected>1024×1024</option>
+                <option value="1792x1024">1792×1024</option><option value="1024x1792">1024×1792</option></select>
+            </div>
+          </div>
+          <div class="trow">
+            <button class="tbtn" id="imgGen" type="button">Generate image</button>
+          </div>
+          <p class="tnote" id="imgError" role="alert"></p>
+          <img class="imgpreview" id="imgPreview" alt="" hidden/>
+          <div class="mediagrid" id="imgRecent"></div>
+        </div>
+      </div>
+    </section>
+    <section id="video" role="tabpanel" aria-labelledby="viewVideo" aria-label="Video generation">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Video generation</h2>
+          <p id="vidHint">Optional: set REPLICATE_API_TOKEN in ~/.praisonai/.env (Replicate minimax/video-01).</p>
+        </div>
+        <div class="tcard">
+          <div class="tf">
+            <label for="vidPrompt">Prompt</label>
+            <textarea id="vidPrompt" rows="3" placeholder="A drone shot over coastal cliffs at golden hour"></textarea>
+          </div>
+          <div class="trow">
+            <button class="tbtn" id="vidGen" type="button">Generate video</button>
+          </div>
+          <p class="tnote" id="vidError" role="alert"></p>
+          <video class="imgpreview" id="vidPreview" controls hidden></video>
         </div>
       </div>
     </section>
@@ -669,7 +770,7 @@ body.view-gateway #gateway{display:block}
       <div class="inner">
         <div class="trainhd">
           <h2>Multi-bot gateway</h2>
-          <p>Run Telegram + Slack together on port 8765. Stop individual bots first.</p>
+          <p>Run Telegram, Slack, and Discord together on port 8765. Stop individual bots first.</p>
         </div>
         <div class="tcard">
           <div class="trow">
@@ -907,6 +1008,10 @@ const SETTINGS = [
   { key: "logs_link", section: "about", label: "Engine log",
     control: { kind: "action", verb: "Open" }, action: "logs" },
 
+  { key: "engine_restart", section: "about", label: "Restart engine",
+    description: "Loads new engine code after an update. Chat may pause briefly.",
+    control: { kind: "action", verb: "Restart" }, action: "engine_restart" },
+
   { key: "check_now", section: "about", label: "Check for updates",
     control: { kind: "action", verb: "Check" }, action: "update" },
 
@@ -948,8 +1053,11 @@ function searchSettings(query, get) {
 window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 
 const { invoke } = window.__TAURI__.core;
+/** Start the engine as soon as the shell loads, before the rest of boot(). */
+const engineBootPromise=invoke('engine_status');
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
+status.textContent='starting engine…'; status.className='s-boot';
 let PORT=null, engineBlocked=true, atBottom=true, activeRun=null, activeReader=null;
 /** Set by Regenerate for exactly one submit, then cleared. */
 let regenerateOf=null;
@@ -1117,6 +1225,7 @@ const hero=document.getElementById('hero');
 // out of sync with whether the transcript actually has content.
 const syncEmpty=()=>thread.classList.toggle('empty', turns.children.length===0);
 let toolsOn=true;
+let knowledgeOn=false;
 // Messages typed while a turn is running. All three reference apps allow this;
 // blocking the composer mid-run makes a user wait to record a thought they
 // already had. Queued prompts send in order as each turn settles.
@@ -1529,7 +1638,13 @@ function gate(){
 
 async function boot(){
 try{ globalThis.__PRAISONAI_DESKTOP_VERSION__=await window.__TAURI__.app.getVersion(); }catch{}
-const st=await invoke('engine_status');
+let st=await engineBootPromise.catch(()=>null);
+if(!st||!st.state) st=await invoke('engine_status');
+for(let attempt=0; attempt<3 && st.state!=='ready' && !needsSetup(st); attempt++){
+  status.textContent='starting engine…';
+  await new Promise(r=>setTimeout(r,2500));
+  st=await invoke('engine_status');
+}
 engineBlocked=st.state!=='ready';
 if(engineBlocked) showView('chat',{persist:false});
 if(st.state==='ready'){
@@ -1550,6 +1665,7 @@ if(st.state==='ready'){
   applyTheme(CFG.theme);
   applyPrefs(CFG);
   if(CFG.check_updates!==false) checkUpdates();
+  await maybeOnboarding();
 }else if(needsSetup(st)){
   // A clean machine has nothing to run the engine with. Offering to build it
   // is the difference between a product and an error message: "No usable
@@ -1669,6 +1785,184 @@ function firstRun(st){
     }finally{ if(un) un(); }
   };
 }
+
+/** First-run wizard: API key → Knowledge → Channels (skippable). */
+async function maybeOnboarding(){
+  if(!PORT) return;
+  let ob;
+  try{
+    ob=await (await fetch(`http://127.0.0.1:${PORT}/onboarding`)).json();
+  }catch{ return; }
+  if(ob.complete) return;
+  thread.classList.remove('empty');
+  turns.innerHTML='';
+  const w=document.createElement('div');
+  w.className='onboard';
+  const envHints=ob.env_hints||{};
+  w.innerHTML='<h3>Welcome to PraisonAI Desktop</h3>'
+    +'<p class="obStepLbl">Step <span id="obStepNum">1</span> of 3</p>'
+    +'<div id="obPane1">'
+    +'<p>Connect the engine with an OpenAI key (or set '
+    +'<code>OPENAI_API_KEY</code> in ~/.praisonai/.env).</p>'
+    +(ob.api_key_set?'<p class="meta">✓ API key detected from settings or environment.</p>':'')
+    +'<label>API key</label><input type="password" id="obKey" autocomplete="off" placeholder="sk-…"/>'
+    +'<div class="row"><button type="button" class="tbtn" id="obTest">Test “Hi”</button>'
+    +'<button type="button" class="ghost" id="obTo2">Next</button></div></div>'
+    +'<div id="obPane2" hidden><p>Optional: index a folder for RAG. Use the '
+    +'<strong>Knowledge</strong> tab later, or set a path now.</p>'
+    +'<label>Folder path</label><input type="text" id="obKnPath" '
+    +'placeholder="C:\\Users\\you\\Documents\\docs"/>'
+    +'<div class="row"><button type="button" class="tbtn" id="obKnSave">Save &amp; build index</button>'
+    +'<button type="button" class="ghost" id="obTo3">Skip</button></div></div>'
+    +'<div id="obPane3" hidden><p><strong>Channels</strong> support Telegram, Slack, and Discord. '
+    +'Put tokens in ~/.praisonai/.env:</p><ul class="obenv">'
+    +`<li>${envHints.telegram||'TELEGRAM_BOT_TOKEN'}</li>`
+    +`<li>${envHints.slack_bot||'SLACK_BOT_TOKEN'} + ${envHints.slack_app||'SLACK_APP_TOKEN'}</li>`
+    +`<li>${envHints.discord||'DISCORD_BOT_TOKEN'}</li></ul>`
+    +'<p class="meta">Then open the Channels tab, add bots, and use Gateway to run them together.</p>'
+    +'<div class="row"><button type="button" class="tbtn" id="obDone">Finish setup</button>'
+    +'<button type="button" class="ghost" id="obSkip">Skip for now</button></div></div>'
+    +'<p class="meta" id="obMsg"></p>';
+  turns.appendChild(w); syncEmpty();
+  const showStep=n=>{
+    w.querySelector('#obStepNum').textContent=String(n);
+    w.querySelector('#obPane1').hidden=n!==1;
+    w.querySelector('#obPane2').hidden=n!==2;
+    w.querySelector('#obPane3').hidden=n!==3;
+  };
+  const finish=async()=>{
+    try{ await fetch(`http://127.0.0.1:${PORT}/onboarding/complete`,{method:'POST'}); }catch{}
+    w.remove(); syncEmpty();
+  };
+  w.querySelector('#obSkip').onclick=finish;
+  w.querySelector('#obDone').onclick=finish;
+  w.querySelector('#obTo2').onclick=()=>showStep(2);
+  w.querySelector('#obTo3').onclick=()=>showStep(3);
+  w.querySelector('#obKnSave').onclick=async()=>{
+    const msg=w.querySelector('#obMsg');
+    const path=w.querySelector('#obKnPath').value.trim();
+    if(!path){ showStep(3); return; }
+    msg.textContent='Indexing…';
+    try{
+      await fetch(`http://127.0.0.1:${PORT}/knowledge/configure`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({paths:[path]})});
+      const r=await fetch(`http://127.0.0.1:${PORT}/knowledge/reindex`,{method:'POST'});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||j.ok===false){ msg.textContent=j.error||'Index failed'; return; }
+      msg.textContent='Knowledge index ready.';
+      showStep(3);
+    }catch{ msg.textContent='Engine unreachable'; }
+  };
+  w.querySelector('#obTest').onclick=async()=>{
+    const key=w.querySelector('#obKey').value.trim();
+    const msg=w.querySelector('#obMsg');
+    msg.textContent='';
+    try{
+      if(key){
+        await fetch(`http://127.0.0.1:${PORT}/settings`,{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({api_key:key})});
+      }
+      const r=await fetch(`http://127.0.0.1:${PORT}/onboarding/test`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({prompt:'Hi'})});
+      const j=await r.json();
+      if(!r.ok||!j.ok){ msg.textContent=j.error||'Test failed'; msg.className='tnote'; return; }
+      msg.textContent='Bot replied: '+String(j.reply||'').slice(0,120);
+      showStep(2);
+    }catch{ msg.textContent='Engine unreachable'; }
+  };
+  if(ob.api_key_set&&!ob.knowledge_ready) showStep(2);
+  else if(ob.api_key_set&&ob.knowledge_ready&&ob.channels_count===0) showStep(3);
+}
+
+const knPaths=document.getElementById('knPaths'),
+      knStatus=document.getElementById('knStatus'),
+      knError=document.getElementById('knError'),
+      knSnippet=document.getElementById('knSnippet'),
+      knTest=document.getElementById('knTest');
+
+async function refreshKnowledge(){
+  if(!PORT) return;
+  knError.textContent='';
+  try{
+    const st=await (await fetch(`http://127.0.0.1:${PORT}/knowledge/status`)).json();
+    if(st.paths&&st.paths.length) knPaths.value=st.paths.join('\n');
+    knStatus.textContent=st.ready
+      ?`Indexed ${st.paths.length} folder(s) · ${st.indexed_at?new Date(st.indexed_at*1000).toLocaleString():''}`
+      :`${st.paths.length||0} folder(s) configured · not indexed`;
+    if(st.error) knError.textContent=st.error;
+  }catch{ knError.textContent='Could not load knowledge status'; }
+}
+
+const knSaveBtn=document.getElementById('knSave'),
+      knIndexBtn=document.getElementById('knIndex');
+
+document.getElementById('knSave').addEventListener('click',async()=>{
+  if(!PORT){ knError.textContent='Engine not ready'; return; }
+  knError.textContent='';
+  const paths=knPaths.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!paths.length){ knError.textContent='Add at least one folder path (must exist on disk)'; return; }
+  knSaveBtn.disabled=true;
+  const prev=knSaveBtn.textContent;
+  knSaveBtn.textContent='Saving…';
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/knowledge/configure`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false){
+      knError.textContent=j.error||`Save failed (${r.status})`;
+      if(r.status===403) knError.textContent+=' — restart the app so the engine reloads';
+      return;
+    }
+    toast('Knowledge folders saved');
+    await refreshKnowledge();
+  }catch{ knError.textContent='Engine unreachable — is it still running?'; }
+  finally{ knSaveBtn.disabled=false; knSaveBtn.textContent=prev; }
+});
+document.getElementById('knIndex').addEventListener('click',async()=>{
+  if(!PORT){ knError.textContent='Engine not ready'; return; }
+  knError.textContent='';
+  knIndexBtn.disabled=true;
+  const prev=knIndexBtn.textContent;
+  knIndexBtn.textContent='Building index…';
+  knStatus.textContent='Indexing documents (may take a minute)…';
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/knowledge/reindex`,{method:'POST'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false){
+      knError.textContent=j.error||`Index failed (${r.status})`;
+      if(/ModuleNotFoundError|praisonaiagents|knowledge/i.test(knError.textContent||'')){
+        knError.textContent+=' — try: pip install "praisonaiagents[knowledge]" in %APPDATA%\\PraisonAI\\venv';
+      }
+      return;
+    }
+    toast('Knowledge index ready');
+    await refreshKnowledge();
+  }catch{ knError.textContent='Engine unreachable — is it still running?'; }
+  finally{ knIndexBtn.disabled=false; knIndexBtn.textContent=prev; if(!knError.textContent) refreshKnowledge(); }
+});
+document.getElementById('knTest').addEventListener('click',async()=>{
+  if(!PORT){ knError.textContent='Engine not ready'; return; }
+  knError.textContent='';
+  if(knSnippet) knSnippet.hidden=true;
+  knTest.disabled=true;
+  try{
+    const q='What is the PraisonAI desktop E2E secret code?';
+    const r=await fetch(`http://127.0.0.1:${PORT}/knowledge/query`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:q})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false){ knError.textContent=j.error||'Query failed'; return; }
+    const ctx=String(j.context||'').trim();
+    if(!ctx){ knError.textContent='No text retrieved — build index or add more documents.'; return; }
+    if(knSnippet){ knSnippet.hidden=false; knSnippet.textContent=ctx.slice(0,1200); }
+    toast('Retrieval OK');
+  }catch{ knError.textContent='Engine unreachable'; }
+  finally{ knTest.disabled=false; }
+});
+
 const initialBoot=boot();
 
 document.getElementById('f').addEventListener('submit',async e=>{
@@ -1695,7 +1989,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
     // SSE straight from the webview to the engine. Nothing streams through IPC.
     const res=await fetch(`http://127.0.0.1:${PORT}/chat`,{
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:text,chat_id:chatId,session:chatId,run_id:runId,
-      attachments:sent,tools:toolsOn,regenerate_of:regen})});
+      attachments:sent,tools:toolsOn,use_knowledge:knowledgeOn,regenerate_of:regen})});
     const reader=res.body.getReader(); activeReader=reader;
     const dec=new TextDecoder();
     let buf='';
@@ -1874,6 +2168,18 @@ document.getElementById('toolsBtn').addEventListener('click',e=>{
   e.currentTarget.classList.toggle('on',toolsOn);
   e.currentTarget.setAttribute('aria-pressed',String(toolsOn));
   e.currentTarget.title = toolsOn ? 'Tools enabled' : 'Tools disabled for this turn';
+});
+document.getElementById('knowledgeBtn').addEventListener('click',e=>{
+  knowledgeOn=!knowledgeOn;
+  e.currentTarget.classList.toggle('on',knowledgeOn);
+  e.currentTarget.setAttribute('aria-pressed',String(knowledgeOn));
+  e.currentTarget.title = knowledgeOn ? 'Knowledge enabled for this turn' : 'Use indexed knowledge';
+  if(knowledgeOn&&toolsOn){
+    toolsOn=false;
+    const tb=document.getElementById('toolsBtn');
+    if(tb){ tb.classList.remove('on'); tb.setAttribute('aria-pressed','false');
+      tb.title='Tools disabled for this turn'; }
+  }
 });
 
 
@@ -2213,6 +2519,18 @@ async function runActionInner(def){
     overlay.classList.add('open');
   } else if(def.action==='logs'){
     closeOverlay(); document.getElementById('logsBtn').click();
+  } else if(def.action==='engine_restart'){
+    closeOverlay();
+    status.textContent='restarting engine…'; status.className='s-boot';
+    try{
+      const st=await invoke('restart_engine');
+      engineBlocked=st.state!=='ready';
+      if(st.state==='ready'){
+        PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
+        toast('Engine restarted');
+      }else if(needsSetup(st)){ firstRun(st); }
+      else{ failWithSetup(st); }
+    }catch(e){ toast('Could not restart engine'); }
   }
 }
 
@@ -2442,10 +2760,16 @@ box.addEventListener('keydown',e=>{
 const trainView=document.getElementById('train'),
       channelsView=document.getElementById('channels'),
       gatewayView=document.getElementById('gateway'),
+      knowledgeView=document.getElementById('knowledge'),
+      imagesView=document.getElementById('images'),
+      videoView=document.getElementById('video'),
+      viewImages=document.getElementById('viewImages'),
+      viewVideo=document.getElementById('viewVideo'),
       viewChat=document.getElementById('viewChat'),
       viewTrain=document.getElementById('viewTrain'),
       viewChannels=document.getElementById('viewChannels'),
       viewGateway=document.getElementById('viewGateway'),
+      viewKnowledge=document.getElementById('viewKnowledge'),
       trainForm=document.getElementById('trainForm'),
       tStart=document.getElementById('tStart'), tStop=document.getElementById('tStop'),
       tState=document.getElementById('tState'), tError=document.getElementById('tError'),
@@ -2478,19 +2802,26 @@ const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file h
 // ready, a requested Train view is forced to Chat so that UI stays visible;
 // the deliberate choice is still persisted, and the post-boot restore below
 // returns Train once the engine is up.
-const VIEW_TABS={chat:viewChat,train:viewTrain,channels:viewChannels,gateway:viewGateway};
+const VIEW_TABS={chat:viewChat,train:viewTrain,channels:viewChannels,gateway:viewGateway,
+  knowledge:viewKnowledge,images:viewImages,video:viewVideo};
 
 function showView(name,{persist=true}={}){
   const requested=name;
   if(name!=='chat' && engineBlocked) name='chat';
   const training=name==='train';
   document.body.classList.toggle('training',training);
-  document.body.classList.remove('view-channels','view-gateway');
+  document.body.classList.remove('view-channels','view-gateway','view-knowledge','view-images','view-video');
   if(name==='channels') document.body.classList.add('view-channels');
   if(name==='gateway') document.body.classList.add('view-gateway');
+  if(name==='knowledge') document.body.classList.add('view-knowledge');
+  if(name==='images') document.body.classList.add('view-images');
+  if(name==='video') document.body.classList.add('view-video');
   trainView.classList.toggle('on',training);
   channelsView.classList.toggle('on',name==='channels');
   gatewayView.classList.toggle('on',name==='gateway');
+  knowledgeView.classList.toggle('on',name==='knowledge');
+  imagesView.classList.toggle('on',name==='images');
+  videoView.classList.toggle('on',name==='video');
   for(const [v,btn] of Object.entries(VIEW_TABS)){
     const on=v===name;
     btn.setAttribute('aria-selected',String(on));
@@ -2500,11 +2831,17 @@ function showView(name,{persist=true}={}){
   if(training) refreshTraining();
   if(name==='channels') refreshChannels();
   if(name==='gateway') refreshGateway();
+  if(name==='knowledge') refreshKnowledge();
+  if(name==='images') refreshImages();
+  if(name==='video') refreshVideo();
 }
 viewChat.addEventListener('click',()=>showView('chat'));
 viewTrain.addEventListener('click',()=>showView('train'));
 viewChannels.addEventListener('click',()=>showView('channels'));
 viewGateway.addEventListener('click',()=>showView('gateway'));
+viewKnowledge.addEventListener('click',()=>showView('knowledge'));
+viewImages.addEventListener('click',()=>showView('images'));
+viewVideo.addEventListener('click',()=>showView('video'));
 
 function setTrainState(state){
   const live=state && !['done','failed','cancelled'].includes(state);
@@ -2776,14 +3113,27 @@ const chList=document.getElementById('chList'),
       gwStart=document.getElementById('gwStart'),
       gwStop=document.getElementById('gwStop'),
       gwError=document.getElementById('gwError'),
-      gwLog=document.getElementById('gwLog');
+      gwLog=document.getElementById('gwLog'),
+      chLog=document.getElementById('chLog');
+
+async function loadChannelLog(id){
+  if(!PORT||!chLog) return;
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/bots/logs?target=${encodeURIComponent(id)}`);
+    const j=await r.json();
+    chLog.textContent=(j.lines||[]).join('\n')||'(empty log)';
+  }catch{ chLog.textContent='Could not load log'; }
+}
 
 function syncChPlatform(){
-  const slack=chPlatform.value==='slack';
+  const plat=chPlatform.value;
+  const slack=plat==='slack';
   chAppTokenWrap.classList.toggle('is-hidden',!slack);
   const tok=chAddForm.querySelector('[name=token_ref]');
   if(!tok.value || tok.dataset.auto==='1'){
-    tok.value=slack?'env:SLACK_BOT_TOKEN':'env:TELEGRAM_BOT_TOKEN';
+    const ref=plat==='slack'?'env:SLACK_BOT_TOKEN'
+      :plat==='discord'?'env:DISCORD_BOT_TOKEN':'env:TELEGRAM_BOT_TOKEN';
+    tok.value=ref;
     tok.dataset.auto='1';
   }
 }
@@ -2794,11 +3144,20 @@ async function refreshChannels(){
   if(!PORT) return;
   chError.textContent='';
   try{
-    const {channels}=await (await fetch(`http://127.0.0.1:${PORT}/bots/channels`)).json();
+    const [chRes,gwRes]=await Promise.all([
+      fetch(`http://127.0.0.1:${PORT}/bots/channels`),
+      fetch(`http://127.0.0.1:${PORT}/bots/gateway`),
+    ]);
+    const {channels}=await chRes.json();
+    const gw=await gwRes.json().catch(()=>({state:'stopped'}));
+    const gatewayLive=gw.state==='running';
     chList.textContent='';
     if(!channels.length){
-      chList.innerHTML='<p class="meta">No channels yet. Add Telegram or Slack above.</p>';
+      chList.innerHTML='<p class="meta">No channels yet. Add Telegram, Slack, or Discord above.</p>';
       return;
+    }
+    if(gatewayLive){
+      chError.textContent='Gateway is running — stop it on the Gateway tab before starting an individual channel bot.';
     }
     channels.forEach(ch=>{
       const row=document.createElement('div');
@@ -2814,18 +3173,24 @@ async function refreshChannels(){
       meta.textContent=[ch.token_set?'token ok':'token missing',
         ch.platform==='slack'?(ch.app_token_set?'app ok':'app missing'):null]
         .filter(Boolean).join(' · ');
+      const logBtn=document.createElement('button');
+      logBtn.className='ghost tbtn';
+      logBtn.type='button';
+      logBtn.textContent='View log';
+      logBtn.onclick=()=>loadChannelLog(ch.id);
       const startBtn=document.createElement('button');
       startBtn.className='tbtn';
       startBtn.type='button';
       startBtn.textContent=ch.state==='running'?'Running':'Start';
-      startBtn.disabled=ch.state==='running';
+      startBtn.disabled=ch.state==='running'||gatewayLive;
+      startBtn.title=gatewayLive?'Stop Gateway first (one poller per token)':'Start this channel bot alone';
       startBtn.onclick=async()=>{
         chError.textContent='';
         startBtn.disabled=true;
         try{
           const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}/start`,{method:'POST'});
           const j=await r.json().catch(()=>({}));
-          if(!r.ok){ chError.textContent=j.error||`start failed (${r.status})`; return; }
+          if(!r.ok||j.ok===false){ chError.textContent=j.error||`start failed (${r.status})`; return; }
           refreshChannels();
         }catch(e){ chError.textContent='Engine unreachable — is it still running?'; }
         finally{ startBtn.disabled=ch.state==='running'; }
@@ -2851,7 +3216,7 @@ async function refreshChannels(){
       delBtn.type='button';
       delBtn.textContent='Delete';
       delBtn.onclick=async()=>{
-        if(ch.state==='running'){ chError.textContent='Stop the bot first'; return; }
+        if(ch.state==='running'){ chError.textContent='Stop the bot first, then Delete will work'; return; }
         chError.textContent='';
         try{
           const r=await fetch(`http://127.0.0.1:${PORT}/bots/channels/${ch.id}`,{method:'DELETE'});
@@ -2862,7 +3227,7 @@ async function refreshChannels(){
           refreshChannels();
         }catch(e){ chError.textContent='Engine unreachable — is it still running?'; }
       };
-      row.append(st,nm,meta,startBtn,stopBtn,delBtn);
+      row.append(st,nm,meta,logBtn,startBtn,stopBtn,delBtn);
       chList.appendChild(row);
     });
   }catch(e){ chError.textContent='Could not load channels'; }
@@ -2894,7 +3259,13 @@ async function refreshGateway(){
   if(!PORT) return;
   gwError.textContent='';
   try{
-    const g=await (await fetch(`http://127.0.0.1:${PORT}/bots/gateway`)).json();
+    const [gwRes,chRes]=await Promise.all([
+      fetch(`http://127.0.0.1:${PORT}/bots/gateway`),
+      fetch(`http://127.0.0.1:${PORT}/bots/channels`),
+    ]);
+    const g=await gwRes.json();
+    const {channels}=await chRes.json().catch(()=>({channels:[]}));
+    const anyChannelRunning=(channels||[]).some(c=>c.state==='running');
     const live=g.state==='running';
     gwState.textContent=g.state;
     gwState.className='pill '+(live?'run':'');
@@ -2902,6 +3273,10 @@ async function refreshGateway(){
       `${g.channels_configured} channel(s) configured`;
     gwStart.hidden=live;
     gwStop.hidden=!live;
+    if(!live&&anyChannelRunning){
+      gwError.textContent='A channel bot is running — click Stop on the Channels tab, then Start gateway here.';
+    }
+    gwStart.disabled=live||anyChannelRunning;
     if(g.log_tail&&g.log_tail.length){
       gwLog.hidden=false;
       gwLog.textContent=g.log_tail.join('\n');
@@ -2917,7 +3292,7 @@ gwStart.addEventListener('click',async()=>{
     const r=await fetch(`http://127.0.0.1:${PORT}/bots/gateway/start`,{
       method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok) gwError.textContent=j.error||`start failed (${r.status})`;
+    if(!r.ok||j.ok===false) gwError.textContent=j.error||`start failed (${r.status})`;
   }catch(e){ gwError.textContent='Engine unreachable — is it still running?'; }
   finally{ gwStart.disabled=false; refreshGateway(); }
 });
@@ -2934,11 +3309,82 @@ gwStop.addEventListener('click',async()=>{
   finally{ gwStop.disabled=false; refreshGateway(); }
 });
 
+/* --- images & video ---------------------------------------------------- */
+const imgPrompt=document.getElementById('imgPrompt'),
+      imgModel=document.getElementById('imgModel'),
+      imgSize=document.getElementById('imgSize'),
+      imgGen=document.getElementById('imgGen'),
+      imgError=document.getElementById('imgError'),
+      imgPreview=document.getElementById('imgPreview'),
+      imgRecent=document.getElementById('imgRecent'),
+      vidPrompt=document.getElementById('vidPrompt'),
+      vidGen=document.getElementById('vidGen'),
+      vidError=document.getElementById('vidError'),
+      vidPreview=document.getElementById('vidPreview'),
+      vidHint=document.getElementById('vidHint');
+
+async function refreshImages(){
+  if(!PORT) return;
+  imgError.textContent='';
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/media/recent?kind=image`);
+    const j=await r.json();
+    imgRecent.textContent='';
+    (j.items||[]).forEach(it=>{
+      const sp=document.createElement('span');
+      sp.className='meta'; sp.textContent=it.name;
+      sp.title=it.path;
+      imgRecent.appendChild(sp);
+    });
+  }catch{}
+}
+async function refreshVideo(){
+  if(!PORT) return;
+  vidError.textContent='';
+  try{
+    const c=await (await fetch(`http://127.0.0.1:${PORT}/media/capabilities`)).json();
+    if(!c.video&&vidHint) vidHint.textContent=c.video_hint||vidHint.textContent;
+  }catch{}
+}
+imgGen.addEventListener('click',async()=>{
+  if(!PORT){ imgError.textContent='Engine not ready'; return; }
+  const prompt=imgPrompt.value.trim();
+  if(!prompt){ imgError.textContent='Enter a prompt'; return; }
+  imgError.textContent=''; imgGen.disabled=true;
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/media/image`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt,model:imgModel.value,size:imgSize.value})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false){ imgError.textContent=j.error||'Generation failed'; return; }
+    if(j.data_url){ imgPreview.hidden=false; imgPreview.src=j.data_url; }
+    toast('Image saved to '+ (j.path||'media folder'));
+    refreshImages();
+  }catch{ imgError.textContent='Engine unreachable'; }
+  finally{ imgGen.disabled=false; }
+});
+vidGen.addEventListener('click',async()=>{
+  if(!PORT){ vidError.textContent='Engine not ready'; return; }
+  const prompt=vidPrompt.value.trim();
+  if(!prompt){ vidError.textContent='Enter a prompt'; return; }
+  vidError.textContent=''; vidGen.disabled=true; vidGen.textContent='Generating…';
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/media/video`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false){ vidError.textContent=j.error||'Generation failed'; return; }
+    if(j.url){ vidPreview.hidden=false; vidPreview.src=j.url; }
+    toast('Video saved to '+ (j.path||'media folder'));
+  }catch{ vidError.textContent='Engine unreachable'; }
+  finally{ vidGen.disabled=false; vidGen.textContent='Generate video'; }
+});
+
 function restoreView(){
   let saved='chat';
   try{
     const v=localStorage.getItem('view');
-    if(v&&['train','channels','gateway'].includes(v)) saved=v;
+    if(v&&['train','channels','gateway','knowledge','images','video'].includes(v)) saved=v;
   }catch(e){}
   showView(saved);
 }

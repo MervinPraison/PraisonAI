@@ -10,13 +10,14 @@ import collections
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
 import time
 import uuid
 
-SUPPORTED_PLATFORMS = frozenset({"telegram", "slack"})
+SUPPORTED_PLATFORMS = frozenset({"telegram", "slack", "discord"})
 MAX_LOG_LINES = 400
 RUNNING = "running"
 STOPPED = "stopped"
@@ -28,11 +29,44 @@ def _quiet_spawn_kwargs() -> dict:
     return {"creationflags": flags} if flags else {}
 
 
+def _praison_env_path() -> pathlib.Path:
+    return pathlib.Path.home() / ".praisonai" / ".env"
+
+
+def resolve_praison_python(fallback: str | None = None) -> str:
+    """Return the PraisonAI venv interpreter for gateway/bot subprocesses.
+
+    The desktop engine often runs under a bare ``uv`` python while PraisonAI and
+    its channel deps (``python-telegram-bot``, etc.) live in
+    ``%APPDATA%\\PraisonAI\\venv``. Spawning with ``sys.executable`` then starts
+    a second, broken gateway beside the venv one.
+    """
+    candidates: list[pathlib.Path] = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        candidates.append(
+            pathlib.Path(appdata) / "PraisonAI" / "venv" / "Scripts" / "python.exe"
+        )
+    candidates.append(pathlib.Path.home() / ".praisonai" / "venv" / "bin" / "python")
+    candidates.append(pathlib.Path.home() / ".praisonai" / "venv" / "Scripts" / "python.exe")
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    return fallback or sys.executable
+
+
+def _is_credential_env_key(key: str) -> bool:
+    return key.endswith(("_TOKEN", "_API_KEY", "_KEY"))
+
+
 def load_dotenv_file(path: pathlib.Path) -> None:
     """Load KEY=VALUE lines into os.environ.
 
     Fills missing keys and replaces empty inherited placeholders (common when
     the desktop shell exports ``TELEGRAM_BOT_TOKEN=`` without a value).
+
+    Credential keys from ``~/.praisonai/.env`` always win over stale values
+    inherited from the desktop parent process.
     """
     if not path.is_file():
         return
@@ -40,6 +74,7 @@ def load_dotenv_file(path: pathlib.Path) -> None:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return
+    force_credentials = path.resolve() == _praison_env_path().resolve()
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -48,7 +83,9 @@ def load_dotenv_file(path: pathlib.Path) -> None:
         key, value = key.strip(), value.strip().strip('"').strip("'")
         if not key:
             continue
-        if key not in os.environ or not str(os.environ.get(key) or "").strip():
+        if force_credentials and _is_credential_env_key(key):
+            os.environ[key] = value
+        elif key not in os.environ or not str(os.environ.get(key) or "").strip():
             os.environ[key] = value
 
 
@@ -58,6 +95,15 @@ def resolve_token_ref(ref: str) -> str:
     if ref.startswith("env:"):
         return os.environ.get(ref[4:].strip(), "")
     return ref
+
+
+def _yaml_token(key: str, token_ref: str) -> str:
+    """YAML token line: write the resolved secret when available."""
+    resolved = resolve_token_ref(token_ref)
+    if resolved:
+        return f"{key}: {json.dumps(resolved)}"
+    var = token_ref[4:].strip() if token_ref.startswith("env:") else (token_ref or "TOKEN")
+    return f'{key}: "${{{var}}}"'
 
 
 def _default_agent_block(model: str = "gpt-4o-mini") -> dict:
@@ -165,7 +211,7 @@ class BotSupervisor:
 
     def __init__(self, home: pathlib.Path, python: str, *, model: str = "gpt-4o-mini"):
         self.home = home
-        self.python = python
+        self.python = resolve_praison_python(python)
         self.model = model
         self.root = home / "bots"
         self.config_dir = self.root / "configs"
@@ -282,8 +328,16 @@ class BotSupervisor:
     def _build_env(self) -> dict[str, str]:
         # Re-read ~/.praisonai/.env on every spawn so gateway/bot subprocesses
         # see tokens even when the engine inherited empty env placeholders.
-        load_dotenv_file(pathlib.Path.home() / ".praisonai" / ".env")
-        return dict(os.environ)
+        dotenv = pathlib.Path.home() / ".praisonai" / ".env"
+        load_dotenv_file(dotenv)
+        env = dict(os.environ)
+        # Empty inherited placeholders block praisonai gateway from loading
+        # ~/.praisonai/.env (it skips keys already in os.environ).
+        for key in list(env):
+            if key.endswith(("_TOKEN", "_API_KEY", "_KEY")) and not str(env.get(key) or "").strip():
+                env.pop(key, None)
+        env["PRAISONAI_ENV_FILE"] = str(dotenv)
+        return env
 
     def _write_bot_yaml(self, ch: dict) -> pathlib.Path:
         platform = ch["platform"]
@@ -294,7 +348,7 @@ class BotSupervisor:
             raise ValueError(f"token not set ({var or 'missing'})")
         lines = [
             f"platform: {platform}",
-            f'token: "${{{token_ref[4:].strip() if token_ref.startswith("env:") else "TOKEN"}}}"',
+            _yaml_token("token", token_ref),
             f"unknown_user_policy: {ch.get('unknown_user_policy') or 'allow'}",
             "agent:",
             f"  name: \"{ _default_agent_block(self.model)['name'] }\"",
@@ -306,7 +360,7 @@ class BotSupervisor:
             var = app_ref[4:].strip() if app_ref.startswith("env:") else "SLACK_APP_TOKEN"
             if not resolve_token_ref(app_ref):
                 raise ValueError(f"app token not set ({var})")
-            lines.insert(3, f'app_token: "${{{var}}}"')
+            lines.insert(3, _yaml_token("app_token", app_ref))
         path = self.config_dir / f"{ch['id']}.yaml"
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path
@@ -346,7 +400,16 @@ class BotSupervisor:
             self._save_channels()
             return self._channel_status(ch)
 
+    def _default_token_ref(self, ch: dict) -> str:
+        plat = ch.get("platform") or ""
+        if plat == "slack":
+            return ch.get("token_ref") or "env:SLACK_BOT_TOKEN"
+        if plat == "discord":
+            return ch.get("token_ref") or "env:DISCORD_BOT_TOKEN"
+        return ch.get("token_ref") or "env:TELEGRAM_BOT_TOKEN"
+
     def _write_gateway_yaml(self, port: int = 8765) -> None:
+        load_dotenv_file(pathlib.Path.home() / ".praisonai" / ".env")
         agents = {
             "default": _default_agent_block(self.model),
         }
@@ -354,20 +417,27 @@ class BotSupervisor:
         for ch in self._channels:
             plat = ch["platform"]
             if plat == "telegram":
+                ref = self._default_token_ref(ch)
                 channels_block["telegram"] = {
-                    "token": f"${{{(ch.get('token_ref') or 'env:TELEGRAM_BOT_TOKEN')[4:].strip() if (ch.get('token_ref') or '').startswith('env:') else 'TELEGRAM_BOT_TOKEN'}}}",
+                    "token": resolve_token_ref(ref) or ref,
                     "unknown_user_policy": ch.get("unknown_user_policy") or "allow",
                     "routing": {"dm": "default", "default": "default"},
                 }
             elif plat == "slack":
-                token_var = (ch.get("token_ref") or "env:SLACK_BOT_TOKEN")
-                app_var = (ch.get("app_token_ref") or "env:SLACK_APP_TOKEN")
-                t_name = token_var[4:].strip() if token_var.startswith("env:") else "SLACK_BOT_TOKEN"
-                a_name = app_var[4:].strip() if app_var.startswith("env:") else "SLACK_APP_TOKEN"
+                token_ref = ch.get("token_ref") or "env:SLACK_BOT_TOKEN"
+                app_ref = ch.get("app_token_ref") or "env:SLACK_APP_TOKEN"
                 channels_block["slack"] = {
-                    "token": f"${{{t_name}}}",
-                    "app_token": f"${{{a_name}}}",
+                    "token": resolve_token_ref(token_ref) or token_ref,
+                    "app_token": resolve_token_ref(app_ref) or app_ref,
+                    "unknown_user_policy": ch.get("unknown_user_policy") or "allow",
                     "routing": {"dm": "default", "channel": "default", "default": "default"},
+                }
+            elif plat == "discord":
+                token_ref = ch.get("token_ref") or "env:DISCORD_BOT_TOKEN"
+                channels_block["discord"] = {
+                    "token": resolve_token_ref(token_ref) or token_ref,
+                    "unknown_user_policy": ch.get("unknown_user_policy") or "allow",
+                    "routing": {"dm": "default", "default": "default"},
                 }
         text = (
             "# Generated by PraisonAI Desktop\n"
@@ -389,8 +459,53 @@ class BotSupervisor:
                     for sk, sv in v.items():
                         text += f"      {sk}: \"{sv}\"\n"
                 else:
-                    text += f"    {k}: \"{v}\"\n"
+                    text += f"    {k}: {json.dumps(str(v))}\n"
         self.gateway_config.write_text(text, encoding="utf-8")
+
+    def _patch_gateway_unknown_user_policies(self) -> None:
+        """Re-apply allow policies after PraisonAI migrates gateway.yaml on start."""
+        path = self.gateway_config
+        if not path.is_file():
+            return
+        text = path.read_text(encoding="utf-8")
+        changed = False
+        for ch in self._channels:
+            plat = ch["platform"]
+            policy = ch.get("unknown_user_policy") or "allow"
+            pat = rf"(  {re.escape(plat)}:\n(?:    .+\n)*?)(?=  \w+:|config_version:|\Z)"
+            match = re.search(pat, text)
+            if not match:
+                continue
+            block = match.group(1)
+            if "unknown_user_policy:" in block:
+                new_block = re.sub(
+                    r"unknown_user_policy:\s*\S+",
+                    f"unknown_user_policy: {policy}",
+                    block,
+                )
+            else:
+                lines = block.splitlines(keepends=True)
+                insert_at = 1
+                for i, line in enumerate(lines[1:], 1):
+                    if line.strip().startswith(("token:", "app_token:")):
+                        insert_at = i + 1
+                lines.insert(insert_at, f"    unknown_user_policy: {policy}\n")
+                new_block = "".join(lines)
+            if new_block != block:
+                text = text[: match.start(1)] + new_block + text[match.end(1) :]
+                changed = True
+        if changed:
+            path.write_text(text, encoding="utf-8")
+
+    def _deferred_patch_gateway_policies(self) -> None:
+        def _run() -> None:
+            time.sleep(4)
+            with self._lock:
+                if not self._gateway.alive():
+                    return
+                self._patch_gateway_unknown_user_policies()
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def gateway_status(self) -> dict:
         with self._lock:
@@ -406,6 +521,7 @@ class BotSupervisor:
 
     def start_gateway(self, port: int = 8765) -> dict:
         with self._lock:
+            load_dotenv_file(pathlib.Path.home() / ".praisonai" / ".env")
             for ch in self._channels:
                 handle = self._bots.get(ch["id"])
                 if handle and handle.alive():
@@ -413,13 +529,16 @@ class BotSupervisor:
             if not self._channels:
                 raise ValueError("add at least one channel before starting the gateway")
             for ch in self._channels:
-                if ch["platform"] == "telegram" and not resolve_token_ref(ch.get("token_ref") or ""):
-                    raise ValueError("TELEGRAM_BOT_TOKEN is not set")
+                if ch["platform"] == "telegram" and not resolve_token_ref(self._default_token_ref(ch)):
+                    raise ValueError("TELEGRAM_BOT_TOKEN is not set in ~/.praisonai/.env")
                 if ch["platform"] == "slack":
-                    if not resolve_token_ref(ch.get("token_ref") or ""):
-                        raise ValueError("SLACK_BOT_TOKEN is not set")
+                    if not resolve_token_ref(self._default_token_ref(ch)):
+                        raise ValueError("SLACK_BOT_TOKEN is not set in ~/.praisonai/.env")
                     if not resolve_token_ref(ch.get("app_token_ref") or "env:SLACK_APP_TOKEN"):
-                        raise ValueError("SLACK_APP_TOKEN is not set")
+                        raise ValueError("SLACK_APP_TOKEN is not set in ~/.praisonai/.env")
+                if ch["platform"] == "discord":
+                    if not resolve_token_ref(self._default_token_ref(ch)):
+                        raise ValueError("DISCORD_BOT_TOKEN is not set in ~/.praisonai/.env")
             if self._gateway.alive():
                 return self.gateway_status()
             self._write_gateway_yaml(port)
@@ -431,11 +550,15 @@ class BotSupervisor:
                 "start",
                 "--config",
                 str(self.gateway_config),
+                # Desktop loads tokens from ~/.praisonai/.env; preflight often
+                # false-fails when the shell inherited empty TOKEN= placeholders.
+                "--no-preflight",
             ]
             self._gateway.start(argv, self._build_env(), self.root)
             if not self._gateway.alive():
                 err = self._gateway.error or "gateway failed to start"
                 raise RuntimeError(err)
+            self._deferred_patch_gateway_policies()
             return self.gateway_status()
 
     def stop_gateway(self) -> dict:

@@ -48,7 +48,7 @@ class OriginPredicate(unittest.TestCase):
 
     def test_the_webview_origin_is_allowed_on_every_platform(self):
         for origin in ("tauri://localhost", "http://tauri.localhost",
-                       "https://tauri.localhost"):
+                       "https://tauri.localhost", "https://asset.localhost"):
             self.assertTrue(server.origin_allowed(origin), origin)
 
     def test_localhost_dev_server_is_allowed(self):

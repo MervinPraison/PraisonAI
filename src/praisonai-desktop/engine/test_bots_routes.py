@@ -99,6 +99,22 @@ class BotsRouteTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("state", body)
 
+    def test_add_discord_channel(self):
+        os.environ["DISCORD_BOT_TOKEN"] = "MT" + "x" * 20 + ".Y" + "z" * 30
+        code, body = self.engine.request(
+            "/bots/channels",
+            {
+                "platform": "discord",
+                "name": "Discord Test",
+                "token_ref": "env:DISCORD_BOT_TOKEN",
+                "unknown_user_policy": "allow",
+            },
+        )
+        self.assertIn(code, (200, 201))
+        self.assertTrue(body.get("ok", True))
+        ch = body.get("channel") or body
+        self.assertEqual(ch.get("platform"), "discord")
+
 
 if __name__ == "__main__":
     unittest.main()
