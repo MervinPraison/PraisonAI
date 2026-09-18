@@ -136,3 +136,43 @@ def test_auto_title_failure_degrades_silently(project, monkeypatch):
     store = get_project_session_store()
     data = store.get_session("sess-fail")
     assert data.metadata.get("title") is None
+
+
+def test_run_command_invokes_auto_title(project, monkeypatch):
+    """`run`'s post-run boundary must invoke the auto-title hook.
+
+    Guards the command wiring itself: if `_record_session_usage` stops calling
+    `maybe_auto_title_session` (or passes the wrong id), this fails even though
+    the helper-level tests still pass.
+    """
+    from praisonai_code.cli.commands import run as run_cmd
+    from praisonai_code.cli.state import project_sessions
+
+    called = {}
+
+    monkeypatch.setattr(
+        project_sessions, "accumulate_session_usage",
+        lambda session_id, model=None: {"total_tokens": 0},
+    )
+    monkeypatch.setattr(
+        project_sessions, "maybe_auto_title_session",
+        lambda session_id, *a, **k: called.setdefault("session_id", session_id),
+    )
+
+    run_cmd._record_session_usage("sess-run", model="gpt-4o-mini", output=None)
+    assert called.get("session_id") == "sess-run"
+
+
+def test_code_command_wires_auto_title(project):
+    """`code`'s headless post-run boundary references the auto-title hook.
+
+    `_run_print_code` is heavy to drive end-to-end, so assert statically that
+    the post-run block imports and calls `maybe_auto_title_session` on the
+    resolved session. This fails if the wiring is removed from `code.py`.
+    """
+    import inspect
+    from praisonai_code.cli.commands import code as code_cmd
+
+    src = inspect.getsource(code_cmd._run_print_code)
+    assert "maybe_auto_title_session" in src
+    assert "maybe_auto_title_session(resolved_session)" in src

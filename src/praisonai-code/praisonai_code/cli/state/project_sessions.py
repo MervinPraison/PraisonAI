@@ -669,6 +669,16 @@ def maybe_auto_title_session(
                 title = pool.submit(asyncio.run, _run()).result()
 
         if title and title.strip():
+            # Re-check under the freshest read: a manual `rename_session` from
+            # another process may have landed while the model request was in
+            # flight. Never clobber a user-chosen title with a generated one.
+            try:
+                latest = store.get_session(session_id)
+                latest_title = dict(getattr(latest, "metadata", {}) or {}).get("title")
+                if isinstance(latest_title, str) and latest_title.strip():
+                    return None
+            except Exception:
+                pass
             store.rename_session(session_id, title.strip())
             return title.strip()
     except Exception:
