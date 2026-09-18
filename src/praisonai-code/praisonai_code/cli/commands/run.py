@@ -2309,11 +2309,19 @@ def _record_session_usage(session_id, model, output) -> None:
         from ..state.project_sessions import (
             accumulate_session_usage,
             format_usage_footer,
+            maybe_auto_title_session,
         )
 
         usage = accumulate_session_usage(session_id, model=model)
     except Exception:
         return
+
+    # Auto-title the session from its first exchange when unnamed so
+    # `session list`/resume show meaningful names (Issue #5141). Best-effort.
+    try:
+        maybe_auto_title_session(session_id)
+    except Exception:
+        pass
 
     if not usage or not usage.get("total_tokens"):
         return

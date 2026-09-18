@@ -861,9 +861,14 @@ def _run_print_code(
 
     if resolved_session:
         try:
-            from ..state.project_sessions import accumulate_session_usage
+            from ..state.project_sessions import (
+                accumulate_session_usage,
+                maybe_auto_title_session,
+            )
 
             accumulate_session_usage(resolved_session, model=model)
+            # Auto-title from first exchange when unnamed (Issue #5141).
+            maybe_auto_title_session(resolved_session)
         except Exception:
             pass
 
