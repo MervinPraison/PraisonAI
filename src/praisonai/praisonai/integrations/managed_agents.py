@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable, Dict, Any, Optional, List, Union
 from enum import Enum
 
+from ._managed_base import ManagedBackendBase
+
 logger = logging.getLogger(__name__)
 
 
@@ -235,7 +237,7 @@ class ManagedConfig:
     vault_ids: List[str] = field(default_factory=list)
 
 
-class AnthropicManagedAgent:
+class AnthropicManagedAgent(ManagedBackendBase):
     """Anthropic Managed Agents backend for PraisonAI.
 
     Satisfies ``ManagedBackendProtocol`` (Core SDK).  All heavy SDK usage
@@ -783,48 +785,32 @@ class AnthropicManagedAgent:
                 emitter.agent_end(agent_name)
 
     # ------------------------------------------------------------------
-    # stream() — ManagedBackendProtocol
+    # stream() — ManagedBackendProtocol (via ManagedBackendBase)
     # ------------------------------------------------------------------
-    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
-        """Yield text chunks as the managed agent produces them."""
-        loop = asyncio.get_running_loop()
-        import queue
-        import threading
+    def _iter_events(self, session_id: str, prompt: str):
+        """Yield agent-message text chunks off the Anthropic SSE stream.
 
-        q: queue.Queue[Optional[str]] = queue.Queue()
-
-        def _producer():
-            try:
-                client = self._get_client()
-                session_id = self._ensure_session()
-                with client.beta.sessions.events.stream(session_id) as s:
-                    client.beta.sessions.events.send(
-                        session_id,
-                        events=[{
-                            "type": "user.message",
-                            "content": [{"type": "text", "text": prompt}],
-                        }],
-                    )
-                    for event in s:
-                        etype = getattr(event, "type", None)
-                        if etype == "agent.message":
-                            for block in getattr(event, "content", []):
-                                text = getattr(block, "text", None)
-                                if text:
-                                    q.put(text)
-                        elif etype == "session.status_idle":
-                            break
-            finally:
-                q.put(None)  # sentinel
-
-        thread = threading.Thread(target=_producer, daemon=True)
-        thread.start()
-
-        while True:
-            chunk = await loop.run_in_executor(None, q.get)
-            if chunk is None:
-                break
-            yield chunk
+        Runs on ``ManagedBackendBase.stream``'s producer thread, so the blocking
+        SDK stream context is fine here.
+        """
+        client = self._get_client()
+        with client.beta.sessions.events.stream(session_id) as s:
+            client.beta.sessions.events.send(
+                session_id,
+                events=[{
+                    "type": "user.message",
+                    "content": [{"type": "text", "text": prompt}],
+                }],
+            )
+            for event in s:
+                etype = getattr(event, "type", None)
+                if etype == "agent.message":
+                    for block in getattr(event, "content", []):
+                        text = getattr(block, "text", None)
+                        if text:
+                            yield text
+                elif etype == "session.status_idle":
+                    return
 
     # ------------------------------------------------------------------
     # Session management — ManagedBackendProtocol

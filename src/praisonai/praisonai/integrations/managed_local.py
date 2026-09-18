@@ -57,6 +57,7 @@ _DEFAULT_TOOLS = [
     "search_web",
 ]
 
+from ._managed_base import ManagedBackendBase
 from ._tool_aliases import TOOL_ALIAS_MAP
 
 
@@ -198,7 +199,7 @@ def _build_custom_tool_fn(
     return _custom_fn
 
 
-class LocalManagedAgent:
+class LocalManagedAgent(ManagedBackendBase):
     """Provider-agnostic local managed agent backend.
 
     Satisfies ``ManagedBackendProtocol`` (Core SDK).  Uses PraisonAI's own
@@ -756,9 +757,18 @@ class LocalManagedAgent:
         return self._inner_agent
 
     def _ensure_session(self) -> str:
-        """Create a session ID if not set."""
+        """Create a session ID if not set.
+
+        Creates the inner agent *before* persisting the session so ``agent_id``
+        and ``environment_id`` are populated in the first persisted snapshot.
+        The shared ``ManagedBackendBase.stream`` calls ``_ensure_session`` ahead
+        of ``_iter_events``; without this the local backend would persist an
+        orphaned session with null IDs, and a subsequent ``_ensure_agent``
+        failure would leave that incomplete state behind.
+        """
         if self._session_id:
             return self._session_id
+        self._ensure_agent()
         self._session_id = f"session_{uuid.uuid4().hex[:12]}"
         self._session_history.append({
             "id": self._session_id,
@@ -852,51 +862,30 @@ class LocalManagedAgent:
                 emitter.agent_end(agent_name)
 
     # ------------------------------------------------------------------
-    # stream() — ManagedBackendProtocol
+    # stream() — ManagedBackendProtocol (via ManagedBackendBase)
     # ------------------------------------------------------------------
-    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
-        """Yield text chunks as the agent produces them."""
-        import queue
-        import threading
+    def _iter_events(self, session_id: str, prompt: str):
+        """Yield text chunks from the local ``Agent.chat`` loop.
 
-        loop = asyncio.get_running_loop()
-        q: queue.Queue[Optional[str]] = queue.Queue()
+        Runs on ``ManagedBackendBase.stream``'s producer thread. Ensures the
+        inner agent exists and persists the user turn before streaming.
+        """
+        agent = self._ensure_agent()
+        self._persist_message("user", prompt)
+        gen = agent.chat(prompt, stream=True)
+        if hasattr(gen, '__iter__'):
+            for chunk in gen:
+                if chunk:
+                    yield str(chunk)
+        elif gen:
+            yield str(gen)
 
-        def _producer():
-            full = ""
-            try:
-                agent = self._ensure_agent()
-                self._ensure_session()
-                self._persist_message("user", prompt)
-                gen = agent.chat(prompt, stream=True)
-                if hasattr(gen, '__iter__'):
-                    for chunk in gen:
-                        if chunk:
-                            text = str(chunk)
-                            q.put(text)
-                            full += text
-                else:
-                    if gen:
-                        text = str(gen)
-                        q.put(text)
-                        full = text
-            except Exception as e:
-                logger.error("[local_managed] stream error: %s", e)
-            finally:
-                if full:
-                    self._persist_message("assistant", full)
-                self._sync_usage()
-                self._persist_state()
-                q.put(None)
-
-        thread = threading.Thread(target=_producer, daemon=True)
-        thread.start()
-
-        while True:
-            chunk = await loop.run_in_executor(None, q.get)
-            if chunk is None:
-                break
-            yield chunk
+    def _after_stream(self, full: str) -> None:
+        """Persist the assembled assistant turn + usage after streaming."""
+        if full:
+            self._persist_message("assistant", full)
+        self._sync_usage()
+        self._persist_state()
 
     # ------------------------------------------------------------------
     # Session management — ManagedBackendProtocol

@@ -15,9 +15,13 @@ themselves under the ``praisonai.managed_backends`` group.
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Type
 
 from .._registry import PluginRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _anthropic_loader() -> Type:
@@ -25,50 +29,20 @@ def _anthropic_loader() -> Type:
     return AnthropicManagedAgent
 
 
-def _compute_backed() -> dict:
-    """Every compute place, able to host a whole agent.
-
-    run_on= accepted two names while tools_run_on= accepted twelve, which was
-    an implementation detail leaking into the vocabulary: a place that can run
-    a command can run the agent loop, which is just one more command. There was
-    simply no backend written for the rest. One generic backend covers them
-    all rather than eleven near-identical ones.
-
-    `docker` keeps its specialised backend -- it can talk to the daemon
-    directly and skip a provisioning layer -- so it is not overridden here.
-    Places that cannot host a loop are excluded: `ssh` needs an object rather
-    than a name, and `local` would run the agent in your own shell, which is
-    what you already get by not passing run_on= at all.
-    """
-    from .compute_managed_agent import make_loader
-
-    try:
-        from praisonaiagents.managed._compute_bridge import available_providers
-
-        places = available_providers()
-    except Exception:
-        return {}
-
-    # `docker` used to be excluded here in favour of a bespoke backend that
-    # talked to the daemon directly. That backend named its containers in a
-    # shape DockerCompute's lookup did not recognise, so `praisonai managed ps`
-    # listed them and `praisonai managed stop` could not stop them. The generic
-    # path goes through DockerCompute, so reclaim works.
-    #
-    # Still excluded: `ssh` needs an object rather than a name; `local` would
-    # run the agent in your own shell, which is what you get by passing
-    # nothing; the local sandboxes isolate tools rather than host a runtime.
-    skip = {"ssh", "local", "native", "subprocess", "sandlock"}
-    return {name: make_loader(name) for name in places if name not in skip}
+# Compute places that cannot host a whole agent loop, so they are never
+# registered as managed backends: `ssh` needs an object rather than a name;
+# `local`/`native`/`subprocess` would run the agent in your own shell (which is
+# what you get by passing nothing); `sandlock` isolates tools rather than
+# hosting a runtime.
+_COMPUTE_SKIP = {"ssh", "local", "native", "subprocess", "sandlock"}
 
 
 _BUILTIN_BACKENDS = {
     "anthropic": _anthropic_loader,
-    # Self-hosted: the whole agent loop runs in a local container rather than a
-    # vendor's cloud. Registering it here is all that `run_on="docker"` needs --
-    # placement resolves run_on= against this registry, so the parameter, the
-    # repr, the explanation and the conflict checks all pick it up unchanged.
-    **_compute_backed(),
+    # Compute-backed loaders (docker + every other compute place able to host a
+    # whole agent loop) are registered lazily inside the registry -- see
+    # ``_ensure_compute_registered`` -- so a bare import of this module pays
+    # nothing: no entry-point walk, no core-SDK import, no closure minting.
 }
 
 
@@ -80,6 +54,74 @@ class ManagedBackendRegistry(PluginRegistry):
             entry_point_group="praisonai.managed_backends",
             builtins=_BUILTIN_BACKENDS,
         )
+        self._compute_registered = False
+        self._compute_lock = threading.Lock()
+
+    def _ensure_compute_registered(self) -> None:
+        """Discover compute-backed backends on first lookup, not at import.
+
+        ``run_on=`` accepted two names while ``tools_run_on=`` accepted twelve,
+        which was an implementation detail leaking into the vocabulary: a place
+        that can run a command can run the agent loop, which is just one more
+        command. One generic backend covers them all. `docker` used to be
+        excluded here in favour of a bespoke backend, but that named its
+        containers in a shape ``DockerCompute``'s lookup did not recognise, so
+        the generic path is used for reclaim.
+
+        The probe (an entry-point walk plus a core-SDK import) runs at most once
+        and only when a backend is actually requested by name.
+        """
+        if self._compute_registered:
+            return
+        with self._compute_lock:
+            if self._compute_registered:
+                return
+            try:
+                from .compute_managed_agent import make_loader
+                from praisonaiagents.managed._compute_bridge import (
+                    available_providers,
+                )
+
+                for name in available_providers():
+                    if name in _COMPUTE_SKIP or name in _BUILTIN_BACKENDS:
+                        continue
+                    # Never clobber a name an entry-point plugin already claimed.
+                    # A third-party ``praisonai.managed_backends`` plugin using a
+                    # compute-provider name (e.g. ``docker``, ``modal``, ``e2b``)
+                    # is loaded when the registry is constructed; the generic
+                    # compute loader must not replace it on first lookup. Use the
+                    # base membership check (``PluginRegistry.has``) rather than
+                    # our own overridden ``has``, which would re-enter
+                    # ``_ensure_compute_registered`` and deadlock on the
+                    # (non-reentrant) compute lock.
+                    if super().has(name):
+                        logger.debug(
+                            "compute provider %r already registered (entry-point "
+                            "plugin or builtin); keeping the existing backend",
+                            name,
+                        )
+                        continue
+                    self._add_loader(name, make_loader(name))
+            except Exception:
+                # A broken/absent compute plugin must not be silently invisible.
+                logger.debug(
+                    "compute backend discovery failed; falling back to the "
+                    "anthropic-only registry",
+                    exc_info=True,
+                )
+            self._compute_registered = True
+
+    def resolve(self, name: str) -> Type:
+        self._ensure_compute_registered()
+        return super().resolve(name)
+
+    def list_names(self) -> list[str]:
+        self._ensure_compute_registered()
+        return super().list_names()
+
+    def has(self, name: str) -> bool:
+        self._ensure_compute_registered()
+        return super().has(name)
 
 
 def get_backend_registry() -> "ManagedBackendRegistry":

@@ -100,6 +100,14 @@ def run(agent_file: str,
     """
     from .agents_generator import AgentsGenerator
 
+    # Wire the built-in readers/retrievers/rerankers into the core-SDK
+    # registries so YAML/CLI declarations (e.g. `retriever: fusion`,
+    # `reranker: llm`) resolve. Idempotent + thread-safe, and register-only-if-
+    # absent: a custom adapter already registered under a built-in name (e.g. a
+    # multi-tenant host's own `fusion`) is preserved, never overwritten.
+    from .adapters import register_default_adapters
+    register_default_adapters()
+
     adapter, config_list = _resolve_run_inputs(framework)
     _apply_model_override(config_list, kwargs)
     cli_config = _merge_cli_config(cli_config, kwargs)
@@ -133,6 +141,14 @@ async def arun(agent_file: str,
     import asyncio
 
     from .agents_generator import AgentsGenerator
+
+    # Wire the built-in readers/retrievers/rerankers into the core-SDK
+    # registries so YAML/CLI declarations resolve. Run off the event loop since
+    # registration performs lazy imports. Idempotent + thread-safe, and
+    # register-only-if-absent: a custom adapter already registered under a
+    # built-in name is preserved, never overwritten.
+    from .adapters import register_default_adapters
+    await asyncio.to_thread(register_default_adapters)
 
     # Resolve framework + build config_list off the caller's event loop so the
     # synchronous credential/config-file I/O does not block it. This is the

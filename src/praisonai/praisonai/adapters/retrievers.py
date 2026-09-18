@@ -595,13 +595,22 @@ def register_default_retrievers():
     from praisonaiagents.knowledge.retrieval import get_retriever_registry
     
     registry = get_retriever_registry()
-    
-    registry.register("basic", BasicRetriever)
-    registry.register("fusion", FusionRetriever)
-    registry.register("recursive", RecursiveRetriever)
-    registry.register("auto_merge", AutoMergeRetriever)
-    registry.register("hybrid", HybridRetriever)
-    
+
+    # Preserve any existing entry: an application (or a multi-tenant host) may
+    # have already registered a custom retriever under a built-in name. Wiring
+    # the wrapper defaults must never silently replace it, so register only
+    # names that are not already present.
+    existing = set(registry.list_retrievers())
+    for name, factory in (
+        ("basic", BasicRetriever),
+        ("fusion", FusionRetriever),
+        ("recursive", RecursiveRetriever),
+        ("auto_merge", AutoMergeRetriever),
+        ("hybrid", HybridRetriever),
+    ):
+        if name not in existing:
+            registry.register(name, factory)
+
     logger.debug("Registered default retrievers")
 
 
