@@ -324,18 +324,25 @@ def register_default_rerankers():
     from praisonaiagents.knowledge.rerankers import get_reranker_registry
     
     registry = get_reranker_registry()
-    
+
+    # Preserve any existing entry: an application (or a multi-tenant host) may
+    # have already registered a custom reranker under a built-in name. Wiring
+    # the wrapper defaults must never silently replace it, so register only
+    # names that are not already present.
+    existing = set(registry.list_rerankers())
+
     # LLM reranker is always available
-    registry.register("llm", LLMReranker)
-    
+    if "llm" not in existing:
+        registry.register("llm", LLMReranker)
+
     # Cross-encoder if available
-    if _check_sentence_transformers():
+    if "cross_encoder" not in existing and _check_sentence_transformers():
         registry.register("cross_encoder", CrossEncoderReranker)
-    
+
     # Cohere if available
-    if _check_cohere():
+    if "cohere" not in existing and _check_cohere():
         registry.register("cohere", CohereReranker)
-    
+
     logger.debug("Registered default rerankers")
 
 

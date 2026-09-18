@@ -85,6 +85,22 @@ class ManagedBackendRegistry(PluginRegistry):
                 for name in available_providers():
                     if name in _COMPUTE_SKIP or name in _BUILTIN_BACKENDS:
                         continue
+                    # Never clobber a name an entry-point plugin already claimed.
+                    # A third-party ``praisonai.managed_backends`` plugin using a
+                    # compute-provider name (e.g. ``docker``, ``modal``, ``e2b``)
+                    # is loaded when the registry is constructed; the generic
+                    # compute loader must not replace it on first lookup. Use the
+                    # base membership check (``PluginRegistry.has``) rather than
+                    # our own overridden ``has``, which would re-enter
+                    # ``_ensure_compute_registered`` and deadlock on the
+                    # (non-reentrant) compute lock.
+                    if super().has(name):
+                        logger.debug(
+                            "compute provider %r already registered (entry-point "
+                            "plugin or builtin); keeping the existing backend",
+                            name,
+                        )
+                        continue
                     self._add_loader(name, make_loader(name))
             except Exception:
                 # A broken/absent compute plugin must not be silently invisible.

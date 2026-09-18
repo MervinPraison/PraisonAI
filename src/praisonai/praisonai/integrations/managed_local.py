@@ -757,9 +757,18 @@ class LocalManagedAgent(ManagedBackendBase):
         return self._inner_agent
 
     def _ensure_session(self) -> str:
-        """Create a session ID if not set."""
+        """Create a session ID if not set.
+
+        Creates the inner agent *before* persisting the session so ``agent_id``
+        and ``environment_id`` are populated in the first persisted snapshot.
+        The shared ``ManagedBackendBase.stream`` calls ``_ensure_session`` ahead
+        of ``_iter_events``; without this the local backend would persist an
+        orphaned session with null IDs, and a subsequent ``_ensure_agent``
+        failure would leave that incomplete state behind.
+        """
         if self._session_id:
             return self._session_id
+        self._ensure_agent()
         self._session_id = f"session_{uuid.uuid4().hex[:12]}"
         self._session_history.append({
             "id": self._session_id,

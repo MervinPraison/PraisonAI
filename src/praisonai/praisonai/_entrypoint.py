@@ -102,9 +102,9 @@ def run(agent_file: str,
 
     # Wire the built-in readers/retrievers/rerankers into the core-SDK
     # registries so YAML/CLI declarations (e.g. `retriever: fusion`,
-    # `reranker: llm`) resolve. Idempotent + thread-safe; multi-tenant callers
-    # that inject a custom registry via AgentsGenerator(adapter_registry=...)
-    # can still opt out.
+    # `reranker: llm`) resolve. Idempotent + thread-safe, and register-only-if-
+    # absent: a custom adapter already registered under a built-in name (e.g. a
+    # multi-tenant host's own `fusion`) is preserved, never overwritten.
     from .adapters import register_default_adapters
     register_default_adapters()
 
@@ -144,8 +144,9 @@ async def arun(agent_file: str,
 
     # Wire the built-in readers/retrievers/rerankers into the core-SDK
     # registries so YAML/CLI declarations resolve. Run off the event loop since
-    # registration performs lazy imports. Idempotent + thread-safe; multi-tenant
-    # callers injecting a custom registry can still opt out.
+    # registration performs lazy imports. Idempotent + thread-safe, and
+    # register-only-if-absent: a custom adapter already registered under a
+    # built-in name is preserved, never overwritten.
     from .adapters import register_default_adapters
     await asyncio.to_thread(register_default_adapters)
 

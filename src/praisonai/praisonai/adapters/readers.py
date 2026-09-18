@@ -389,25 +389,35 @@ def register_default_readers():
     from praisonaiagents.knowledge.readers import get_reader_registry
     
     registry = get_reader_registry()
-    
+
+    # Preserve any existing entry: an application (or a multi-tenant host) may
+    # have already registered a custom reader under a built-in name. Wiring the
+    # wrapper defaults must never silently replace it, so register only names
+    # that are not already present.
+    existing = set(registry.list_readers())
+
+    def _register(name, factory, extensions=None):
+        if name not in existing:
+            registry.register(name, factory, extensions)
+
     # Register text reader
-    registry.register("text", TextReader, ["txt", "text", "log"])
-    
+    _register("text", TextReader, ["txt", "text", "log"])
+
     # Register markitdown reader
-    registry.register("markitdown", MarkItDownReader, MarkItDownReader.supported_extensions)
-    
+    _register("markitdown", MarkItDownReader, MarkItDownReader.supported_extensions)
+
     # Register directory reader
-    registry.register("directory", DirectoryReader)
-    
+    _register("directory", DirectoryReader)
+
     # Register glob reader
-    registry.register("glob", GlobReader)
-    
+    _register("glob", GlobReader)
+
     # Register URL reader
-    registry.register("url", URLReader)
-    
+    _register("url", URLReader)
+
     # Register auto reader
-    registry.register("auto", AutoReader)
-    
+    _register("auto", AutoReader)
+
     logger.debug("Registered default readers")
 
 
