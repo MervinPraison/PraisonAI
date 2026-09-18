@@ -108,6 +108,12 @@ class TestUnwiredChatOptions:
         assert "does not implement" in out
         assert "--theme" in out
 
+    def test_a_wired_tool_option_never_triggers_the_warning(self, monkeypatch):
+        """--tools/--toolset are now honoured, so they must stay silent (#5140)."""
+        out = _run(monkeypatch, "--tools", "internet_search",
+                   "--toolset", "web").output
+        assert "does not implement" not in out
+
     def test_only_the_supplied_ones_are_named(self, monkeypatch):
         out = _run(monkeypatch, "--theme", "dark").output
         assert "--theme" in out
@@ -330,3 +336,135 @@ class TestWiredCapabilityOptions:
         assert agent_config["knowledge"] == ["docs/", "notes.md"]
         assert agent_config["web"] == "a,b"
         assert agent_config["execution"] == "fast,slow"
+
+
+class TestWiredToolOptions:
+    """`chat --tools`/`--toolset` restrict the interactive session (issue #5140).
+
+    The flags must reach the AsyncTUIConfig and, via the same ToolResolver path
+    `run`/YAML/Python use, replace the default interactive tool groups so the
+    session is genuinely restricted -- not merely warned-about and ignored.
+    """
+
+    def test_supplied_tool_options_reach_the_tui_config(self, monkeypatch):
+        _StubTUI.last_config = None
+        _run(monkeypatch, "--tools", "internet_search", "--toolset", "web")
+        cfg = _StubTUI.last_config
+        assert cfg is not None
+        assert cfg.tools == "internet_search"
+        assert cfg.toolset == "web"
+
+    def test_unset_tool_options_stay_none(self, monkeypatch):
+        _StubTUI.last_config = None
+        _run(monkeypatch)
+        cfg = _StubTUI.last_config
+        assert cfg is not None
+        assert cfg.tools is None
+        assert cfg.toolset is None
+
+    def test_restriction_replaces_default_interactive_tools(self, monkeypatch):
+        """A supplied --tools value resolves through ToolResolver and REPLACES
+        the default interactive groups, so the callable set is truly narrowed."""
+        from praisonai_code.cli.interactive import async_tui
+
+        sentinel = lambda: None  # noqa: E731 - stand-in resolved tool
+        sentinel.__name__ = "sentinel_tool"
+
+        class _FakeResolver:
+            def __init__(self, *a, **k):
+                pass
+
+            def resolve_tools_and_toolsets(self, tool_names=None, toolset_names=None):
+                assert tool_names == ["sentinel_tool"]
+                return [sentinel]
+
+        monkeypatch.setattr(
+            "praisonai_code.tool_resolver.ToolResolver", _FakeResolver
+        )
+        cfg = async_tui.AsyncTUIConfig(tools="sentinel_tool")
+        tui = async_tui.AsyncTUI(config=cfg)
+        assert tui._load_tools() == [sentinel]
+
+    def test_no_restriction_falls_back_to_default_tools(self, monkeypatch):
+        """Without --tools/--toolset the resolver is never consulted and the
+        default interactive tool loading runs unchanged."""
+        from praisonai_code.cli.interactive import async_tui
+
+        assert async_tui._resolve_restricted_tools(async_tui.AsyncTUIConfig()) is None
+
+    def test_explicit_restriction_that_resolves_empty_still_restricts(self, monkeypatch):
+        """An explicit but unresolvable restriction yields an empty list, not a
+        silent fallback to the full default toolset."""
+        from praisonai_code.cli.interactive import async_tui
+
+        class _EmptyResolver:
+            def __init__(self, *a, **k):
+                pass
+
+            def resolve_tools_and_toolsets(self, tool_names=None, toolset_names=None):
+                return []
+
+        monkeypatch.setattr(
+            "praisonai_code.tool_resolver.ToolResolver", _EmptyResolver
+        )
+        result = async_tui._resolve_restricted_tools(
+            async_tui.AsyncTUIConfig(tools="does_not_exist")
+        )
+        assert result == []
+
+    def test_tools_py_file_path_is_loaded_not_treated_as_a_name(
+        self, tmp_path, monkeypatch
+    ):
+        """`chat --tools ./tools.py` must load the file's callables.
+
+        Regression: the resolver previously comma-split every --tools item and
+        sent it through name resolution, so a documented ``tools.py`` path
+        resolved to nothing instead of the file's functions (Qodo/Greptile P1).
+        """
+        from praisonai_code.cli.interactive import async_tui
+
+        tools_file = tmp_path / "my_tools.py"
+        tools_file.write_text(
+            "def my_custom_tool(x: str) -> str:\n"
+            "    '''A custom tool.'''\n"
+            "    return x\n"
+        )
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+
+        resolved = async_tui._resolve_restricted_tools(
+            async_tui.AsyncTUIConfig(tools=str(tools_file))
+        )
+        assert resolved is not None
+        names = [getattr(t, "__name__", getattr(t, "name", "")) for t in resolved]
+        assert "my_custom_tool" in names
+
+    def test_profiled_chat_receives_the_tool_restriction(self, monkeypatch):
+        """`chat "..." --profile --tools X` must restrict the profiled Agent.
+
+        Regression: single-prompt profiling returned before the AsyncTUIConfig
+        was built, so --tools/--toolset were silently dropped on that path
+        (Qodo/Greptile). They must now reach _run_profiled_chat.
+        """
+        captured = {}
+
+        def _fake_profiled(prompt, model=None, verbose=False,
+                           profile_deep=False, tools=None, toolset=None):
+            captured["tools"] = tools
+            captured["toolset"] = toolset
+
+        monkeypatch.setattr(chat_module, "_run_profiled_chat", _fake_profiled)
+        monkeypatch.setattr(
+            "praisonai_code.llm.credentials.ensure_configured_or_onboard",
+            lambda model=None, interactive=True: model,
+        )
+
+        app = typer.Typer()
+        app.command()(chat_module.chat_main)
+        result = CliRunner().invoke(
+            app,
+            ["Summarise", "--profile", "--tools", "internet_search",
+             "--toolset", "web"],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured.get("tools") == "internet_search"
+        assert captured.get("toolset") == "web"

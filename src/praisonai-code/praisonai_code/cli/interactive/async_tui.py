@@ -109,6 +109,14 @@ class AsyncTUIConfig:
     context: Optional[Any] = None
     execution: Optional[Any] = None
     caching: Optional[Any] = None
+    # --tools/--toolset restrict (or extend) the interactive session's callable
+    # set, resolved through the same ``ToolResolver`` path `run`/YAML/Python use
+    # so CLI == YAML == Python. When set, the resolved callables REPLACE the
+    # default interactive tool groups so `chat --tools X` is a genuine
+    # restriction, not merely an addition (issue #5140). Left None -> the
+    # default interactive tools load unchanged.
+    tools: Optional[Any] = None
+    toolset: Optional[Any] = None
 
 
 # ============================================================================
@@ -235,6 +243,69 @@ def _apply_capability_options(agent_config: dict, config: "AsyncTUIConfig") -> N
         if raw is None:
             continue
         agent_config[name] = _coerce_capability_value(raw, name)
+
+
+def _resolve_restricted_tools(config: "AsyncTUIConfig") -> Optional[list]:
+    """Resolve ``--tools``/``--toolset`` into the interactive session's toolset.
+
+    Reuses the exact ``ToolResolver`` resolution `run`/YAML/Python already use
+    so ``chat --tools web_search`` restricts an interactive session to the same
+    callables it would get from ``run --tools web_search`` (issue #5140).
+
+    ``config.tools`` is a comma-separated list of tool names and/or ``tools.py``
+    file paths; ``config.toolset`` is a comma-separated list of named toolset
+    groups. Returns ``None`` when neither is supplied, so the caller falls back
+    to the default interactive tool groups unchanged. When at least one is
+    supplied the resolved callables REPLACE the defaults, making the flag a real
+    restriction.
+    """
+    import os as _os
+
+    tools_arg = getattr(config, "tools", None)
+    toolset_arg = getattr(config, "toolset", None)
+    if not tools_arg and not toolset_arg:
+        return None
+
+    from praisonai_code.tool_resolver import ToolResolver
+
+    resolver = ToolResolver()
+
+    # Split ``--tools`` items into file paths and plain names. File paths (``.py``
+    # or an existing path) are loaded through ``load_functions_from_module`` so
+    # the documented ``chat --tools ./tools.py`` form works exactly as it does
+    # for ``run`` instead of resolving to nothing.
+    file_callables: list = []
+    plain_names: list = []
+    if tools_arg:
+        for item in (t.strip() for t in str(tools_arg).split(",")):
+            if not item:
+                continue
+            if item.endswith(".py") or _os.path.exists(item):
+                module_fns = resolver.load_functions_from_module(item)
+                if module_fns:
+                    file_callables.extend(module_fns.values())
+                elif not _os.path.exists(item):
+                    # A ``.py`` name that isn't on disk: fall back to name
+                    # resolution (strip the suffix) so "internet_search.py"
+                    # resolves as the named tool "internet_search".
+                    plain_names.append(item[:-3] if item.endswith(".py") else item)
+            else:
+                plain_names.append(item)
+
+    toolset_names = [
+        t.strip() for t in str(toolset_arg).split(",") if t.strip()
+    ] if toolset_arg else None
+
+    resolved = resolver.resolve_tools_and_toolsets(
+        tool_names=plain_names or None, toolset_names=toolset_names
+    )
+    # File-loaded callables prepend the resolver-resolved names/toolsets so the
+    # combined restriction reaches the interactive agent.
+    combined = file_callables + list(resolved)
+    # An explicit restriction that resolves to nothing must still restrict: an
+    # empty list is returned (not None) so the session does not silently fall
+    # back to the full default toolset the user asked to narrow.
+    return combined
 
 
 class _LogCapture(logging.Handler):
@@ -799,7 +870,19 @@ class AsyncTUI:
         """Load interactive tools for the agent."""
         tools = []
         logger.debug("Starting tool loading...")
-        
+
+        # --tools/--toolset restrict the interactive session to an explicit set,
+        # resolved through the same ToolResolver path `run`/YAML/Python use
+        # (issue #5140). When supplied, the resolved callables REPLACE the
+        # default interactive groups so the flag is a genuine restriction.
+        restricted = _resolve_restricted_tools(self.config)
+        if restricted is not None:
+            logger.debug(
+                "Restricting interactive tools to --tools/--toolset selection: %d tool(s)",
+                len(restricted),
+            )
+            return restricted
+
         # Load the requested interactive tool groups. ACP/LSP are on by default
         # but can be disabled (code --no-acp/--no-lsp) so an explicitly
         # restricted session never exposes the disabled capability.
