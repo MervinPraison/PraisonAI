@@ -193,6 +193,22 @@ class GoalLoopMixin:
         self._persist_goal_state()
         return "continue", reason
 
+    async def _goal_gate_async(self, response: str) -> Optional[Tuple[str, str]]:
+        """Async counterpart of :meth:`_goal_gate`.
+
+        Both the configured verification hooks (which may shell out) and the
+        completion judge's ``litellm.completion(...)`` call are blocking I/O, so
+        the whole gate is offloaded to a worker thread. Mirrors
+        ``_verification_gate_async``'s existing pattern for the same reason: a
+        slow judge/hook must never stall the event loop shared by other
+        concurrent agents.
+        """
+        state = getattr(self, "_goal_state", None)
+        if state is None or state.status != "active":
+            return None
+        import asyncio
+        return await asyncio.to_thread(self._goal_gate, response)
+
     # -- public API ------------------------------------------------------------
 
     def _resume_or_new_goal_state(

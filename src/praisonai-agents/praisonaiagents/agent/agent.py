@@ -5344,8 +5344,10 @@ Summary:"""
                 # ─────────────────────────────────────────────────────────────
                 # GOAL COMPLETION JUDGE (opt-in): independent acceptance-criteria
                 # gate. No-op when no goal loop is active (behaviour unchanged).
+                # Offloaded to a worker thread (blocking judge LLM call / hooks)
+                # so it never stalls the shared event loop.
                 # ─────────────────────────────────────────────────────────────
-                _goal_gate = self._goal_gate(response_str)
+                _goal_gate = await self._goal_gate_async(response_str)
                 if _goal_gate is not None:
                     _outcome, _reason = _goal_gate
                     if _outcome == "done":

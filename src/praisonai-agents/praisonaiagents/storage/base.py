@@ -48,8 +48,7 @@ class FileLock:
     def __enter__(self):
         """Acquire the lock."""
         import time
-        start = time.time()
-        
+
         while True:
             try:
                 # Try to create lock file exclusively
@@ -59,15 +58,27 @@ class FileLock:
                 )
                 break
             except FileExistsError:
-                if time.time() - start > self.timeout:
-                    # Force remove stale lock
+                # Staleness is judged by the lock *file's* own age, not by how
+                # long this waiter has been queued. A lock legitimately held for
+                # longer than one waiter's patience must NOT be busted out from
+                # under its live holder (that lets two writers into the critical
+                # section and corrupts the read-modify-write save). Only a truly
+                # abandoned lock — its file older than ``timeout`` because the
+                # holder crashed without running __exit__ — is reclaimed.
+                try:
+                    age = time.time() - self.lock_path.stat().st_mtime
+                except OSError:
+                    # Lock file vanished between the failed open and stat();
+                    # just retry the exclusive create.
+                    age = 0.0
+                if age > self.timeout:
                     try:
                         self.lock_path.unlink()
                     except Exception:
                         pass
                     continue
                 time.sleep(0.01)
-        
+
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):

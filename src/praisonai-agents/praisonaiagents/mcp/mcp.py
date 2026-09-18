@@ -319,8 +319,11 @@ class MCP:
     # Process-level registry of sanitized MCP server names that have been
     # namespaced via with_tool_prefix(), mirroring how tools/registry.py tracks
     # tool names. Lets skills' CapabilityValidator discover connected servers
-    # instead of always failing closed (issue #3307).
-    _active_server_names: set = set()
+    # instead of always failing closed (issue #3307). A per-name refcount (not a
+    # one-way set) so shutdown() can release names: a name stays discoverable
+    # only while at least one live instance registered it, otherwise a skill's
+    # STRICT server-gate would pass forever after the first-ever connection.
+    _active_server_names: dict = {}
     _active_server_names_lock = threading.Lock()
 
     # Default init/tool-call timeout (seconds). Used when the caller does not
@@ -340,7 +343,7 @@ class MCP:
     def list_active_server_names(cls) -> set:
         """Return the set of sanitized names of MCP servers namespaced this run."""
         with cls._active_server_names_lock:
-            return set(cls._active_server_names)
+            return {name for name, count in cls._active_server_names.items() if count > 0}
 
     @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
@@ -995,11 +998,18 @@ class MCP:
         # Record this server in the process-level registry so skills'
         # CapabilityValidator can discover it (issue #3307). Store both the
         # original name and its sanitized form so a skill requirement matches
-        # regardless of which spelling it declares.
+        # regardless of which spelling it declares. Bump a per-name refcount and
+        # remember what this instance added so shutdown() can release it once.
+        registered = getattr(self, "_registered_server_names", None)
+        if registered is None:
+            registered = set()
+            self._registered_server_names = registered
         with type(self)._active_server_names_lock:
-            if prefix:
-                type(self)._active_server_names.add(prefix)
-            type(self)._active_server_names.add(sanitized)
+            for name in filter(None, (prefix, sanitized)):
+                type(self)._active_server_names[name] = (
+                    type(self)._active_server_names.get(name, 0) + 1
+                )
+                registered.add(name)
 
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public
@@ -1296,7 +1306,23 @@ class MCP:
                     self.websocket_client.close()
             except Exception:
                 pass
-    
+
+        # Release exactly the server names this instance registered (issue
+        # #3307 follow-up): decrement each refcount once so the name stops
+        # being discoverable to skills' STRICT server-gate once no live
+        # instance holds it. Guarded so a second shutdown()/__del__ is a no-op.
+        if not getattr(self, "_server_names_released", False):
+            registered = getattr(self, "_registered_server_names", None)
+            if registered:
+                with type(self)._active_server_names_lock:
+                    for name in registered:
+                        count = type(self)._active_server_names.get(name, 0)
+                        if count <= 1:
+                            type(self)._active_server_names.pop(name, None)
+                        else:
+                            type(self)._active_server_names[name] = count - 1
+            self._server_names_released = True
+
     def __del__(self):
         """Clean up resources when the object is garbage collected.
         
