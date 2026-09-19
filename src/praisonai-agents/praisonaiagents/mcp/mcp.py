@@ -316,11 +316,12 @@ class MCP:
         ```
     """
 
-    # Process-level registry of sanitized MCP server names that have been
-    # namespaced via with_tool_prefix(), mirroring how tools/registry.py tracks
-    # tool names. Lets skills' CapabilityValidator discover connected servers
-    # instead of always failing closed (issue #3307).
-    _active_server_names: set = set()
+    # Process-level registry backing skills' CapabilityValidator discovery
+    # (issue #3307): name -> number of live MCP clients holding that name.
+    # Counted rather than collected, because two live clients may legitimately
+    # declare the same server name. A name is released, and stops satisfying a
+    # skill requirement, once the last client holding it lets go (issue #5135).
+    _active_server_names: dict = {}
     _active_server_names_lock = threading.Lock()
 
     # Default init/tool-call timeout (seconds). Used when the caller does not
@@ -338,9 +339,54 @@ class MCP:
 
     @classmethod
     def list_active_server_names(cls) -> set:
-        """Return the set of sanitized names of MCP servers namespaced this run."""
+        """Return the set of MCP server names currently registered this run."""
         with cls._active_server_names_lock:
             return set(cls._active_server_names)
+
+    @classmethod
+    def _adjust_server_name_counts(cls, names: tuple, delta: int) -> None:
+        """Add ``delta`` to each name's live count, dropping names reaching zero.
+
+        Must be called while holding :attr:`_active_server_names_lock`.
+        """
+        for name in names:
+            remaining = cls._active_server_names.get(name, 0) + delta
+            if remaining > 0:
+                cls._active_server_names[name] = remaining
+            else:
+                cls._active_server_names.pop(name, None)
+
+    def _adopt_registered_names(self, names: tuple) -> None:
+        """Make ``names`` this instance's registration, releasing any previous ones.
+
+        The release, the registration and the ownership update share one
+        critical section, so a concurrent :meth:`shutdown` cannot observe the
+        previous names after they have been handed over and release them twice.
+        """
+        with type(self)._active_server_names_lock:
+            previous = getattr(self, "_registered_server_names", None)
+            if previous == names:
+                return
+            if previous:
+                type(self)._adjust_server_name_counts(previous, -1)
+            if names:
+                type(self)._adjust_server_name_counts(names, 1)
+            self._registered_server_names = names or None
+
+    def _release_registered_names(self) -> None:
+        """Release this instance's registration, decrementing it exactly once.
+
+        Claiming the names and decrementing them share one critical section, so
+        concurrent lifecycle calls on the same instance (explicit
+        ``shutdown()``, context-manager exit, agent cleanup, ``__del__``) cannot
+        each consume a shared client's count.
+        """
+        with type(self)._active_server_names_lock:
+            names = getattr(self, "_registered_server_names", None)
+            if not names:
+                return
+            self._registered_server_names = None
+            type(self)._adjust_server_name_counts(names, -1)
 
     @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
@@ -431,6 +477,11 @@ class MCP:
         # Optional prefix applied to tool names to avoid cross-server collisions
         # when multiple MCP servers are loaded together (see load_mcp_tools).
         self._tool_prefix: Optional[str] = None
+
+        # Server names this instance added to the process-level registry via
+        # with_tool_prefix(). Released by shutdown() so the registry shrinks
+        # when a server goes away (issue #5135).
+        self._registered_server_names: Optional[tuple] = None
         
         # Check if this is a WebSocket URL (ws:// or wss://)
         if isinstance(command_or_string, str) and re.match(r'^wss?://', command_or_string):
@@ -990,16 +1041,24 @@ class MCP:
                 "underscore character."
             )
 
-        self._tool_prefix = sanitized
+        # Both spellings are registered so a skill requirement matches whichever
+        # it declares. dict.fromkeys collapses them when they are identical, so
+        # one shutdown releases both.
+        names = tuple(dict.fromkeys(n for n in (prefix, sanitized) if n))
 
-        # Record this server in the process-level registry so skills'
-        # CapabilityValidator can discover it (issue #3307). Store both the
-        # original name and its sanitized form so a skill requirement matches
-        # regardless of which spelling it declares.
-        with type(self)._active_server_names_lock:
-            if prefix:
-                type(self)._active_server_names.add(prefix)
-            type(self)._active_server_names.add(sanitized)
+        # Re-applying the same prefix *and* the same spellings is a no-op: the
+        # tools already carry the prefix and the names are already registered.
+        # The spellings are compared too, because a rename that sanitizes to the
+        # same prefix (``"my-server"`` -> ``"my server"``) still changes the
+        # original spelling a skill requirement may name.
+        if (getattr(self, "_tool_prefix", None) == sanitized
+                and getattr(self, "_registered_server_names", None) == names):
+            return self
+
+        # Adopting the new names releases the previous ones in the same critical
+        # section, so a concurrent shutdown cannot release them twice.
+        self._adopt_registered_names(names)
+        self._tool_prefix = sanitized
 
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public
@@ -1296,6 +1355,12 @@ class MCP:
                     self.websocket_client.close()
             except Exception:
                 pass
+
+        # Drop this server from the process-level registry now that its
+        # connections are gone, so skills' CapabilityValidator stops reporting
+        # it as available (issue #5135). Runs last so the registry only shrinks
+        # once the transports above have actually been torn down.
+        self._release_registered_names()
     
     def __del__(self):
         """Clean up resources when the object is garbage collected.

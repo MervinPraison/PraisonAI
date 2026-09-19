@@ -213,6 +213,9 @@ class CapabilityValidator:
         The MCP registry is populated dynamically as servers connect during a
         run, so this is read live (not cached) to avoid a stale snapshot that
         would keep rejecting servers registered after the first validation.
+        Names are released again when a client shuts down (issue #5135), so the
+        live read also observes removals instead of gating on a server that is
+        no longer connected.
         The read is a cheap set copy under a lock, so there is no hot-path cost.
         """
         try:
