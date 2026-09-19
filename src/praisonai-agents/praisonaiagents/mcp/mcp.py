@@ -316,14 +316,11 @@ class MCP:
         ```
     """
 
-    # Process-level registry of sanitized MCP server names that have been
-    # namespaced via with_tool_prefix(), mirroring how tools/registry.py tracks
-    # tool names. Lets skills' CapabilityValidator discover connected servers
-    # instead of always failing closed (issue #3307).
-    # name -> number of live MCP clients currently registering it. A name is
-    # reported by list_active_server_names() while its count is above zero and
-    # dropped once the last client holding it shuts down, so a disconnected
-    # server stops satisfying a skill requirement (issue #5135).
+    # Process-level registry backing skills' CapabilityValidator discovery
+    # (issue #3307): name -> number of live MCP clients holding that name.
+    # Counted rather than collected, because two live clients may legitimately
+    # declare the same server name. A name is released, and stops satisfying a
+    # skill requirement, once the last client holding it lets go (issue #5135).
     _active_server_names: dict = {}
     _active_server_names_lock = threading.Lock()
 
@@ -342,63 +339,54 @@ class MCP:
 
     @classmethod
     def list_active_server_names(cls) -> set:
-        """Return the set of sanitized names of MCP servers namespaced this run."""
-        # Registered names are counted, not just collected, so the public
-        # return type stays a plain set of currently-live names.
+        """Return the set of MCP server names currently registered this run."""
         with cls._active_server_names_lock:
             return set(cls._active_server_names)
 
     @classmethod
-    def _register_server_names(cls, *names: str) -> None:
-        """Increment the live-registration count for each server name.
+    def _adjust_server_name_counts(cls, names: tuple, delta: int) -> None:
+        """Add ``delta`` to each name's live count, dropping names reaching zero.
 
-        Called by :meth:`with_tool_prefix` so a name stays discoverable by
-        skills' ``CapabilityValidator`` for as long as at least one MCP client
-        is still holding it (issue #3307). Paired with
-        :meth:`_unregister_server_names`, which is invoked from
-        :meth:`shutdown` so the registry shrinks again (issue #5135).
+        Must be called while holding :attr:`_active_server_names_lock`.
         """
-        with cls._active_server_names_lock:
-            for name in names:
-                cls._active_server_names[name] = cls._active_server_names.get(name, 0) + 1
+        for name in names:
+            remaining = cls._active_server_names.get(name, 0) + delta
+            if remaining > 0:
+                cls._active_server_names[name] = remaining
+            else:
+                cls._active_server_names.pop(name, None)
 
-    @classmethod
-    def _unregister_server_names(cls, *names: str) -> None:
-        """Decrement the live-registration count for each server name.
+    def _adopt_registered_names(self, names: tuple) -> None:
+        """Make ``names`` this instance's registration, releasing any previous ones.
 
-        A name is dropped from the registry only once its count reaches zero,
-        so shutting down one of two clients that declared the same server name
-        does not hide the one still connected. Names that are not registered
-        are ignored, which keeps repeated shutdowns safe.
+        The release, the registration and the ownership update share one
+        critical section, so a concurrent :meth:`shutdown` cannot observe the
+        previous names after they have been handed over and release them twice.
         """
-        with cls._active_server_names_lock:
-            for name in names:
-                remaining = cls._active_server_names.get(name, 0) - 1
-                if remaining > 0:
-                    cls._active_server_names[name] = remaining
-                else:
-                    cls._active_server_names.pop(name, None)
+        with type(self)._active_server_names_lock:
+            previous = getattr(self, "_registered_server_names", None)
+            if previous == names:
+                return
+            if previous:
+                type(self)._adjust_server_name_counts(previous, -1)
+            if names:
+                type(self)._adjust_server_name_counts(names, 1)
+            self._registered_server_names = names or None
 
     def _release_registered_names(self) -> None:
-        """Drop this instance's registration from the process-level registry.
+        """Release this instance's registration, decrementing it exactly once.
 
-        Takes the instance's registered names before releasing them, so a
-        second :meth:`shutdown` — or a ``__del__`` during interpreter teardown
-        — is a no-op instead of a double decrement.
+        Claiming the names and decrementing them share one critical section, so
+        concurrent lifecycle calls on the same instance (explicit
+        ``shutdown()``, context-manager exit, agent cleanup, ``__del__``) cannot
+        each consume a shared client's count.
         """
-        names = getattr(self, "_registered_server_names", None)
-        if not names:
-            return
-
-        # Take the names before releasing them: shutdown() may run more than
-        # once (explicit call, context manager __exit__, __del__), and __del__
-        # can fire during interpreter teardown when the lock or the class
-        # attribute is already gone.
-        self._registered_server_names = None
-        try:
-            type(self)._unregister_server_names(*names)
-        except Exception:
-            pass  # Best effort cleanup, matching shutdown()'s own contract
+        with type(self)._active_server_names_lock:
+            names = getattr(self, "_registered_server_names", None)
+            if not names:
+                return
+            self._registered_server_names = None
+            type(self)._adjust_server_name_counts(names, -1)
 
     @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
@@ -1053,25 +1041,24 @@ class MCP:
                 "underscore character."
             )
 
-        # Re-applying the same prefix is a no-op: the tools already carry it and
-        # registering the names again would take two shutdowns to release them.
-        if getattr(self, "_tool_prefix", None) == sanitized:
+        # Both spellings are registered so a skill requirement matches whichever
+        # it declares. dict.fromkeys collapses them when they are identical, so
+        # one shutdown releases both.
+        names = tuple(dict.fromkeys(n for n in (prefix, sanitized) if n))
+
+        # Re-applying the same prefix *and* the same spellings is a no-op: the
+        # tools already carry the prefix and the names are already registered.
+        # The spellings are compared too, because a rename that sanitizes to the
+        # same prefix (``"my-server"`` -> ``"my server"``) still changes the
+        # original spelling a skill requirement may name.
+        if (getattr(self, "_tool_prefix", None) == sanitized
+                and getattr(self, "_registered_server_names", None) == names):
             return self
 
-        # A different prefix means the names registered for the previous one are
-        # no longer this instance's, so release them before adopting the new one.
-        self._release_registered_names()
-
+        # Adopting the new names releases the previous ones in the same critical
+        # section, so a concurrent shutdown cannot release them twice.
+        self._adopt_registered_names(names)
         self._tool_prefix = sanitized
-
-        # Record this server in the process-level registry so skills'
-        # CapabilityValidator can discover it (issue #3307). Store both the
-        # original name and its sanitized form so a skill requirement matches
-        # regardless of which spelling it declares. dict.fromkeys collapses the
-        # two when they are identical, so a single shutdown releases both.
-        names = tuple(dict.fromkeys(n for n in (prefix, sanitized) if n))
-        self._registered_server_names = names
-        type(self)._register_server_names(*names)
 
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public
