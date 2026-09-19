@@ -131,6 +131,19 @@ def test_reprefixing_releases_the_previous_name():
     assert MCP.list_active_server_names() == {"new"}
 
 
+def test_rename_sanitizing_to_the_same_prefix_refreshes_the_spelling():
+    """A rename that sanitizes to the same prefix still changes the original
+    spelling, which is what a skill requirement may name, so it must not be
+    skipped as a no-op."""
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = _make_mcp()
+    mcp.with_tool_prefix("my-server")
+    mcp.with_tool_prefix("my server")
+
+    assert MCP.list_active_server_names() == {"my server", "my_server"}
+
+
 def test_both_spellings_registered_and_released_together():
     """The original and sanitized spellings are both stored so a skill
     requirement matches either; one shutdown must release both."""
@@ -182,6 +195,59 @@ def test_concurrent_register_and_unregister_settle_at_zero():
         thread.join()
 
     assert errors == []
+    assert MCP.list_active_server_names() == set()
+
+
+def test_concurrent_shutdown_on_one_instance_releases_only_once():
+    """Concurrent lifecycle calls on the *same* instance must not each consume
+    the registration: exactly one caller may claim it. Otherwise a second
+    client sharing the name loses its count and disappears from the registry
+    while still connected."""
+    import sys
+
+    from praisonaiagents.mcp.mcp import MCP
+
+    survivor = _make_mcp()
+    survivor.with_tool_prefix("shared")
+
+    errors = []
+    previous_interval = sys.getswitchinterval()
+    try:
+        # The claim window is only a couple of bytecodes wide, so the default
+        # 5 ms GIL interval rarely interleaves it. Shrink it and repeat, checking
+        # the surviving client's count after every round: a set-valued check at
+        # the end would hide the drift, because a later round re-registers the name.
+        sys.setswitchinterval(1e-6)
+        for _ in range(50):
+            target = _make_mcp()
+            target.with_tool_prefix("shared")
+            assert MCP._active_server_names.get("shared") == 2
+
+            barrier = threading.Barrier(16)
+
+            def _shutdown(client=target):
+                try:
+                    barrier.wait()
+                    client.shutdown()
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=_shutdown) for _ in range(16)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            # Only one of the 16 callers may release the target's registration.
+            assert MCP._active_server_names.get("shared") == 1
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    assert errors == []
+    # The survivor still holds the name.
+    assert MCP.list_active_server_names() == {"shared"}
+
+    survivor.shutdown()
     assert MCP.list_active_server_names() == set()
 
 
