@@ -54,6 +54,11 @@ def record_ollama_tool_result(
     """Record an Ollama tool result exactly as returned by the callback."""
     if not function_name:
         return
+    # Some execution paths return a ToolResult-like object rather than the
+    # callback's raw payload.  Never expose its failure diagnostic as a
+    # successful same-turn value.
+    if getattr(tool_result, "error", None) is not None:
+        return
     # The agent executor represents failures as an ``error`` mapping (or a
     # one-item list containing one). Never feed that diagnostic back as a
     # successful value to a dependent call in the same turn.

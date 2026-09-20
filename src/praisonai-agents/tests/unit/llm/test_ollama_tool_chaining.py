@@ -53,6 +53,18 @@ def test_ollama_chaining_does_not_record_error_payloads():
     assert mapping == {}
 
 
+def test_ollama_chaining_does_not_record_error_objects():
+    llm = LLM.__new__(LLM)
+    llm._provider_adapter = None
+    mapping = {}
+
+    llm._record_ollama_tool_result(
+        mapping, "failed", SimpleNamespace(error="cancelled", result="ignored")
+    )
+
+    assert mapping == {}
+
+
 @pytest.mark.asyncio
 async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatch):
     class Response(SimpleNamespace):

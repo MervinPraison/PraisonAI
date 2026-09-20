@@ -158,3 +158,68 @@ def test_streaming_ollama_resolves_same_turn_tool_result_references(monkeypatch)
     assert len(seen_batches) == 2
     assert seen_batches[0][0].arguments == {}
     assert seen_batches[1][0].arguments == {"value": 3}
+
+
+def test_streaming_cancel_skips_follow_up_completion(monkeypatch):
+    llm = LLM.__new__(LLM)
+    llm.model = "gpt-4o"
+    llm.tool_timeout_ms = None
+    llm._build_messages = lambda **kwargs: ([], kwargs["prompt"])
+    llm._format_tools_for_litellm = lambda tools: [{"type": "function"}]
+    llm._supports_streaming_tools = lambda: True
+    llm._build_completion_params = lambda **kwargs: kwargs
+    llm._process_stream_delta = lambda *args, **kwargs: (
+        "",
+        [{"id": "call-1", "function": {"name": "lookup", "arguments": "{}"}}],
+    )
+    llm._is_ollama_provider = lambda: False
+    llm._serialize_tool_calls = lambda calls: calls
+    llm._extract_tool_call_info = lambda call, is_ollama: ("lookup", {}, "call-1")
+    llm._register_deferred_if_any = lambda result: None
+    llm._create_tool_message = lambda *args: {"role": "tool", "content": "ok"}
+
+    completion_calls = []
+
+    def completion(**kwargs):
+        completion_calls.append(kwargs)
+        if kwargs["stream"]:
+            delta = SimpleNamespace(content=None, tool_calls=[object()])
+            return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
+        raise AssertionError("cancelled stream must not request a follow-up")
+
+    llm._completion_with_retry = completion
+
+    class _CancelToken:
+        def is_set(self):
+            return True
+
+    class Executor:
+        def execute_batch(self, tool_calls, execute_tool_fn, timeout_ms=None,
+                          cancel_token=None):
+            return [
+                SimpleNamespace(
+                    error="cancelled",
+                    function_name="lookup",
+                    result={"error": "cancelled"},
+                    tool_call_id="call-1",
+                    is_ollama=False,
+                )
+            ]
+
+    monkeypatch.setattr(
+        llm_module,
+        "create_tool_call_executor",
+        lambda parallel=False: Executor(),
+    )
+
+    chunks = list(
+        llm.get_response_stream(
+            "question",
+            tools=[lambda: None],
+            execute_tool_fn=lambda *args: None,
+            cancel_token=_CancelToken(),
+        )
+    )
+
+    assert chunks == ["Task interrupted: user"]
+    assert [call["stream"] for call in completion_calls] == [True]

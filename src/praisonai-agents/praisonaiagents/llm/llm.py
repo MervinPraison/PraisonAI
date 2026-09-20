@@ -37,6 +37,27 @@ from ..tools.schema import build_tool_definition
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 
+def _ollama_tool_result_is_successful(tool_result: Any) -> bool:
+    """Return whether a raw Ollama callback result is safe to chain.
+
+    The sync executor exposes failures as ``ToolResult.error`` while direct
+    callbacks use an ``{"error": ...}`` payload.  Keep the guard at every
+    recording call site so custom provider adapters cannot accidentally turn a
+    failed first call into a value for a dependent call.
+    """
+    if getattr(tool_result, "error", None) is not None:
+        return False
+    if isinstance(tool_result, dict):
+        return "error" not in tool_result
+    if (
+        isinstance(tool_result, list)
+        and tool_result
+        and isinstance(tool_result[0], dict)
+    ):
+        return "error" not in tool_result[0]
+    return True
+
+
 def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
     if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
         return {"_durable_iteration_index": index}
@@ -3868,7 +3889,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
                             
                             # For Ollama, store the result for potential chaining
-                            if is_ollama:
+                            if is_ollama and _ollama_tool_result_is_successful(tool_result):
                                 self._record_ollama_tool_result(
                                     tool_result_mapping, function_name, tool_result
                                 )
@@ -4702,7 +4723,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # model can re-emit them (never dispatched with {}).
                         for _err_msg in parse_error_messages:
                             messages.append(_err_msg)
-                        
+
+                        # A cancellation may arrive while the tool batch is
+                        # running.  The executor returns promptly with
+                        # cancellation results, but must not trigger another
+                        # model request for a turn the caller has already
+                        # stopped (Issue #5073).
+                        if _stream_is_cancelled():
+                            reason = _stream_cancel_reason()
+                            logging.debug(
+                                "Streaming LLM cancelled before follow-up: %s",
+                                reason,
+                            )
+                            yield f"Task interrupted: {reason}"
+                            return
+                         
                         # Continue conversation after tool execution - get follow-up response
                         try:
                             follow_up_response = self._completion_with_retry(
@@ -4876,7 +4911,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.warning(
                                     f"Tool '{function_name}' failed: {tool_error}")
                                 tool_result = {"error": str(tool_error)}
-                            if is_ollama:
+                            if is_ollama and _ollama_tool_result_is_successful(tool_result):
                                 self._record_ollama_tool_result(
                                     ollama_tool_result_mapping,
                                     function_name,
@@ -5536,10 +5571,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 tool_call_id,
                                 iteration_count,
                             ))
-                            self._record_ollama_tool_result(
-                                ollama_tool_result_mapping, function_name,
-                                _batch_results[-1],
-                            )
+                            if _ollama_tool_result_is_successful(_batch_results[-1]):
+                                self._record_ollama_tool_result(
+                                    ollama_tool_result_mapping, function_name,
+                                    _batch_results[-1],
+                                )
                         else:
                             _dispatch_specs.append((function_name, arguments, tool_call_id))
 
@@ -5558,7 +5594,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
-                        if is_ollama:
+                        if is_ollama and _ollama_tool_result_is_successful(tool_result):
                             self._record_ollama_tool_result(
                                 ollama_tool_result_mapping, function_name, tool_result
                             )
