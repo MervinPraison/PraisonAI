@@ -1073,12 +1073,13 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                if not hasattr(self, '_tool_executor') or self._tool_executor is None:
-                                    self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                        max_workers=2, thread_name_prefix=f"tool-{self.name}"
-                                    )
-
-                                future = self._tool_executor.submit(ctx.run, execute_with_context)
+                                with self._tool_executor_lock.sync():
+                                    if not hasattr(self, '_tool_executor') or self._tool_executor is None:
+                                        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                                            max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                                        )
+                                    executor = self._tool_executor
+                                    future = executor.submit(ctx.run, execute_with_context)
                                 try:
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
@@ -1099,11 +1100,12 @@ class ToolExecutionMixin:
                                     # once the cap is reached we stop recycling and keep reusing
                                     # the existing pool so repeated timeouts can't exhaust process
                                     # resources with an unbounded number of leaked threads.
-                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                    if orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
-                                        self._tool_executor.shutdown(wait=False)
-                                        self._tool_executor = None
-                                        self._tool_executor_orphaned = orphaned + 1
+                                    with self._tool_executor_lock.sync():
+                                        orphaned = getattr(self, '_tool_executor_orphaned', 0)
+                                        if self._tool_executor is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
+                                            executor.shutdown(wait=False)
+                                            self._tool_executor = None
+                                            self._tool_executor_orphaned = orphaned + 1
                         else:
                             with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)

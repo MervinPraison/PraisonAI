@@ -3024,6 +3024,7 @@ Your Goal: {self.goal}
         # turns on the same Agent instance don't corrupt each other's buffer.
         self._turn_tools_used = []
         self._turn_tools_lock = DualLock()
+        self._tool_executor_lock = DualLock()
 
         # Database persistence (lazy - no imports until used)
         self._db = db
