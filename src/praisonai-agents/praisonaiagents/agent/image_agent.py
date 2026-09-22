@@ -181,7 +181,7 @@ class ImageAgent(Agent):
                 logging.error(error_msg)
                 raise
     async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
-        """Async wrapper for generate_image."""
+        """Offload the synchronous generation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.generate_image, prompt, **kwargs)
     
     # Aliases for consistency with other agents
@@ -303,7 +303,7 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Async version of edit()."""
+        """Offload the synchronous editing path to keep the event loop responsive."""
         return await asyncio.to_thread(self.edit, image, prompt, mask, n, size, **kwargs)
 
     def variation(
@@ -373,5 +373,5 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Async version of variation()."""
+        """Offload the synchronous variation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.variation, image, n, size, **kwargs)
