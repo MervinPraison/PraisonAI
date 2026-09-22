@@ -32,6 +32,13 @@ class TestAgentManagerRename:
         # Force reload to test module-level warnings
         # Back up existing modules to prevent test suite scope pollution
         import sys
+        import gc
+        # Flush any pending weakref finalizers (e.g. circuit-breaker/turn-owner
+        # cleanup registered by earlier tests) BEFORE swapping praisonaiagents out
+        # of sys.modules. Otherwise a finalizer can run against the freshly
+        # imported module's empty id-keyed registries and raise a spurious
+        # KeyError during reload.
+        gc.collect()
         _backup = {}
         modules_to_remove = [k for k in sys.modules.keys() if 'praisonaiagents' in k]
         for mod in modules_to_remove:
@@ -51,6 +58,10 @@ class TestAgentManagerRename:
                 agents_warnings = [x for x in deprecation_warnings if 'Agents' in str(x.message)]
                 assert len(agents_warnings) == 0, f"Agents should be silent alias in v4, got: {[str(x.message) for x in agents_warnings]}"
         finally:
+            # Flush finalizers created against the freshly imported module before
+            # restoring the backup, so they cannot fire against the restored
+            # registries and raise a spurious KeyError in a later test.
+            gc.collect()
             # Clean up what was created during the test
             _added = [k for k in sys.modules.keys() if 'praisonaiagents' in k and k not in _backup]
             for mod in _added:
