@@ -87,8 +87,32 @@ def is_due(
     ISO timestamp) and ``cron`` (5-field expression, requires optional
     ``croniter``). Disabled jobs are the caller's concern and are not filtered
     here.
+
+    A bounded recurring job carries an optional stop condition — a ``max_runs``
+    budget and/or an ``until`` end instant. Once either is met the job is no
+    longer due, so it never fires or delivers again before the claim path
+    retires it (see :meth:`ScheduleJob.should_retire`).
     """
     sched = job.schedule
+
+    # Bounded-run stop conditions short-circuit before any kind check so a
+    # spent job is neither due nor delivered (no final stale send).
+    max_runs = getattr(job, "max_runs", None)
+    run_count = getattr(job, "run_count", 0)
+    if max_runs is not None and run_count >= max_runs:
+        return False
+    until = getattr(job, "until", None)
+    if until is not None:
+        try:
+            until_ts = localize_wall_clock(
+                datetime.fromisoformat(until),
+                sched.tz or default_timezone,
+            ).timestamp()
+        except (ValueError, TypeError):
+            logger.warning("Invalid 'until' timestamp for job %s: %s", job.id, until)
+        else:
+            if now >= until_ts:
+                return False
 
     if sched.kind == "every":
         if sched.every_seconds is None:

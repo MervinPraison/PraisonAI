@@ -260,6 +260,15 @@ class ScheduleJob:
                         ``"isolated"`` creates a fresh agent turn.
         enabled: Toggle without deleting.
         delete_after_run: Auto-remove after first execution (one-shot).
+                          Sugar for ``max_runs=1``; either retires the job.
+        max_runs: Optional run-count bound for a recurring schedule — fire at
+                  most this many times, then auto-remove (generalises
+                  ``delete_after_run``). ``None`` (default) means unbounded.
+        run_count: Number of times the job has fired; incremented on each
+                   claim. Compared against ``max_runs`` to retire a spent job.
+        until: Optional ISO 8601 wall-clock instant after which a recurring
+               schedule stops firing and is retired (timezone-resolved exactly
+               like ``at`` via ``localize_wall_clock``). ``None`` ⇒ no end date.
         created_at: Epoch timestamp.
         last_run_at: Epoch timestamp of most recent execution.
         delivery: Optional delivery target for routing results back
@@ -375,6 +384,9 @@ class ScheduleJob:
     session_target: Literal["main", "isolated"] = "isolated"
     enabled: bool = True
     delete_after_run: bool = False
+    max_runs: Optional[int] = None
+    run_count: int = 0
+    until: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     last_run_at: Optional[float] = None
     delivery: Optional[DeliveryTarget] = None
@@ -394,6 +406,27 @@ class ScheduleJob:
     backend: Optional[str] = None
     backend_options: Dict[str, Any] = field(default_factory=dict)
 
+    # ── bounded-run retirement ───────────────────────────────────────
+
+    def should_retire(self) -> bool:
+        """Return ``True`` when the job has met a stop condition and is spent.
+
+        The single source of truth for "auto-remove this job now?", shared by
+        every claim path so the retire decision is defined once. A job retires
+        when it is a one-shot (``delete_after_run``) or has reached its
+        ``max_runs`` budget. ``until`` is enforced in :func:`due.is_due` (a
+        spent-by-date job simply stops being due), so it is not repeated here.
+
+        Assumes ``run_count`` has already been incremented for the current
+        fire, so ``max_runs=1`` retires after the first run (matching the
+        one-shot semantics ``delete_after_run`` provides).
+        """
+        if self.delete_after_run:
+            return True
+        if self.max_runs is not None and self.run_count >= self.max_runs:
+            return True
+        return False
+
     # ── serialisation ────────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
@@ -409,6 +442,15 @@ class ScheduleJob:
             "created_at": self.created_at,
             "last_run_at": self.last_run_at,
         }
+        # Bounded-run stop conditions. Only persist when configured / non-zero
+        # so unbounded jobs stay byte-for-byte unchanged and fully backward
+        # compatible; ``run_count`` is persisted only once it starts counting.
+        if self.max_runs is not None:
+            d["max_runs"] = self.max_runs
+        if self.run_count:
+            d["run_count"] = self.run_count
+        if self.until is not None:
+            d["until"] = self.until
         if self.delivery is not None:
             d["delivery"] = self.delivery.to_dict()
         if self.origin is not None:
@@ -488,6 +530,9 @@ class ScheduleJob:
             session_target=d.get("session_target", "isolated"),
             enabled=d.get("enabled", True),
             delete_after_run=d.get("delete_after_run", False),
+            max_runs=d.get("max_runs"),
+            run_count=d.get("run_count", 0),
+            until=d.get("until"),
             created_at=d.get("created_at", time.time()),
             last_run_at=d.get("last_run_at"),
             delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,

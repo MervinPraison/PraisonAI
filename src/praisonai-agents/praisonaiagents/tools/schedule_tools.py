@@ -108,6 +108,8 @@ def schedule_add(
     principal: str = "",
     tz: str = "",
     once: bool = False,
+    max_runs: int = 0,
+    until: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -148,6 +150,13 @@ def schedule_add(
             after its single successful fire (maps to ``delete_after_run``).
             Useful for ``at:`` / ``in ...`` reminders so a spent job does not
             linger in listings.
+        max_runs: Optional run-count bound for a recurring schedule — fire at
+            most this many times, then auto-remove (e.g. "remind me 3 times").
+            ``0`` (default) means unbounded. Generalises ``once`` (``max_runs=1``).
+        until: Optional ISO 8601 wall-clock instant after which a recurring
+            schedule stops firing and is retired (e.g. "every morning until
+            Friday"). Timezone-resolved exactly like an ``at:`` timestamp using
+            ``tz``. Empty (default) means no end date.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -216,6 +225,8 @@ def schedule_add(
             origin=origin,  # Set origin for "origin" token resolution
             principal=owner,
             delete_after_run=once,
+            max_runs=max_runs if max_runs and max_runs > 0 else None,
+            until=until or None,
         )
 
         store = _get_store()

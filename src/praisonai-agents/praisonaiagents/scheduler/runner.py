@@ -96,6 +96,7 @@ class ScheduleRunner:
             delivered: Whether result was delivered to a channel bot.
         """
         job.last_run_at = time.time()
+        job.run_count += 1
 
         # Log execution history if the store supports it
         if hasattr(self._store, "log_run"):
@@ -109,7 +110,7 @@ class ScheduleRunner:
                 job_name=job.name,
             )
 
-        if job.delete_after_run:
+        if job.should_retire():
             self._store.remove(job.id)
         else:
             self._store.update(job)

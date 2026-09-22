@@ -203,13 +203,15 @@ class FileScheduleStore:
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
+                job.run_count += 1
                 job._lease_until = now + lease_seconds
                 job._lease_owner = owner_id
                 self._held_leases[job.id] = owner_id
                 claimed.append(job)
                 changed = True
-                if job.delete_after_run:
-                    # One-shot: remove now so no competitor re-claims it.
+                if job.should_retire():
+                    # Spent (one-shot or run-count met): remove now so no
+                    # competitor re-claims it.
                     auto_removed.append(self._jobs.pop(job.id))
             if changed:
                 if not self._save():
