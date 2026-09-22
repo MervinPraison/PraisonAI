@@ -2058,9 +2058,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             self.send_error(405)
-        except ValueError as exc:
+        except (ValueError, TypeError, KeyError) as exc:
             self._json({"ok": False, "error": str(exc)}, 400)
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             self._json({"ok": False, "error": str(exc)}, 500)
 
     def _train_progress(self, run, cursor):
@@ -2154,7 +2154,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, **self._media().capabilities()})
             return
         if self.path.startswith("/media/recent?"):
-            from urllib.parse import parse_qs, urlparse
             kind = (parse_qs(urlparse(self.path).query).get("kind") or ["image"])[0]
             self._json({"ok": True, "items": self._media().list_recent(kind)})
             return
@@ -2165,7 +2164,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._bots().gateway_status())
             return
         if self.path.startswith("/bots/logs?"):
-            from urllib.parse import parse_qs, urlparse
             target = (parse_qs(urlparse(self.path).query).get("target") or [""])[0]
             try:
                 self._json(self._bots().logs(target))

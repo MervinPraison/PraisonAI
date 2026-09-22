@@ -393,6 +393,9 @@ body.studio .inner.studio-wrap{max-width:52rem}
 @media(max-width:48rem){.studio-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:32rem){.studio-grid{grid-template-columns:1fr}}
 .studio-grid-2{grid-template-columns:1fr 1fr}
+.studio-grid.mt-sm{margin-top:.35rem}
+.studio-grid.mt-md{margin-top:.75rem}
+.studio-credhint{margin:0 0 .5rem}
 .studio-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.65rem .75rem;margin-bottom:.75rem}
 .studio-row .tf{flex:1;min-width:10rem;margin:0}
 .studio-prompt{width:100%;min-height:5.25rem;resize:vertical;background:var(--ground);color:var(--ink);
@@ -854,14 +857,14 @@ body.studio .inner.studio-wrap{max-width:52rem}
             <button type="button" class="tbtn ghost" id="sNewProject">New project</button>
             <button type="button" class="tbtn ghost" id="sRefresh">Refresh</button>
           </div>
-          <p class="hint" id="sCredHint" style="margin:0 0 .5rem">Set API keys in Settings.</p>
+          <p class="hint studio-credhint" id="sCredHint">Set API keys in Settings.</p>
           <div class="tf">
             <label for="sPrompt">Prompt</label>
             <textarea id="sPrompt" class="studio-prompt" rows="4" placeholder="Describe the shot…"></textarea>
           </div>
           <details class="studio-adv">
             <summary>Image settings (testing &amp; keyframes)</summary>
-            <div class="studio-grid" style="margin-top:.35rem">
+            <div class="studio-grid mt-sm">
               <div class="tf">
                 <label for="sImageModel">Image model</label>
                 <select id="sImageModel"></select>
@@ -885,7 +888,7 @@ body.studio .inner.studio-wrap{max-width:52rem}
             </div>
             <div class="studio-notice warn" id="sImageCost" hidden></div>
           </details>
-          <div class="studio-grid studio-grid-2" style="margin-top:.75rem">
+          <div class="studio-grid studio-grid-2 mt-md">
             <div class="tf">
               <label for="sModel">Video model</label>
               <select id="sModel"></select>

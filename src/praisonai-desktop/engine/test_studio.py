@@ -44,6 +44,25 @@ class StudioProjectTests(unittest.TestCase):
         full = self.mgr.get_project(p["id"])
         self.assertEqual(len(full["assets"]), 1)
 
+    def test_concurrent_asset_appends_do_not_clobber(self):
+        import base64
+        import threading
+
+        p = self.mgr.create_project("Race")
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode()
+
+        def _add(i):
+            self.mgr.add_image_asset(p["id"], f"img{i}.png", png)
+
+        threads = [threading.Thread(target=_add, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        full = self.mgr.get_project(p["id"])
+        self.assertEqual(len(full["assets"]), 8)
+
     def test_timeline_and_single_clip_export(self):
         p = self.mgr.create_project("Export")
         proj_path = self.mgr.root / p["id"] / "project.json"

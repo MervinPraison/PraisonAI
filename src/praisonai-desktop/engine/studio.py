@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -250,6 +251,7 @@ class StudioManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self._log = log_fn or (lambda _msg: None)
         self._lock = threading.Lock()
+        self._project_lock = threading.Lock()
         self._jobs: Dict[str, StudioJob] = {}
         self._active = 0
 
@@ -295,7 +297,23 @@ class StudioManager:
     def _save_project(self, project: Dict[str, Any]) -> None:
         project["updated_at"] = _now()
         path = self._project_dir(project["id"]) / "project.json"
-        path.write_text(json.dumps(project, indent=2), encoding="utf-8")
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+        tmp.write_text(json.dumps(project, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def _append_assets(
+        self,
+        project_id: str,
+        new_assets: List[Dict[str, Any]],
+        timeline_ids: Optional[List[str]] = None,
+    ) -> None:
+        """Serialized read-modify-write so concurrent variants never clobber each other."""
+        with self._project_lock:
+            project = self._load_project(project_id)
+            project.setdefault("assets", []).extend(new_assets)
+            if timeline_ids:
+                project.setdefault("timeline", []).extend(timeline_ids)
+            self._save_project(project)
 
     def create_project(self, name: str) -> Dict[str, Any]:
         name = (name or "Untitled project").strip()[:120]
@@ -328,7 +346,11 @@ class StudioManager:
     def add_image_asset(
         self, project_id: str, filename: str, data_base64: str, prompt: str = ""
     ) -> Dict[str, Any]:
-        project = self._load_project(project_id)
+        self._load_project(project_id)  # validate exists
+        if not isinstance(data_base64, str):
+            raise ValueError("data_base64 must be a string")
+        if not isinstance(filename, str):
+            filename = "upload.png"
         raw = data_base64.split(",", 1)[-1]
         try:
             blob = base64.b64decode(raw, validate=True)
@@ -348,16 +370,16 @@ class StudioManager:
             "prompt": prompt,
             "created_at": _now(),
         }
-        project.setdefault("assets", []).append(asset)
-        self._save_project(project)
+        self._append_assets(project_id, [asset])
         return asset
 
     def set_timeline(self, project_id: str, asset_ids: List[str]) -> Dict[str, Any]:
-        project = self._load_project(project_id)
-        known = {a["id"] for a in project.get("assets", []) if a.get("type") == "video"}
-        timeline = [i for i in asset_ids if i in known]
-        project["timeline"] = timeline
-        self._save_project(project)
+        with self._project_lock:
+            project = self._load_project(project_id)
+            known = {a["id"] for a in project.get("assets", []) if a.get("type") == "video"}
+            timeline = [i for i in asset_ids if i in known]
+            project["timeline"] = timeline
+            self._save_project(project)
         return {"timeline": timeline}
 
     def get_job(self, job_id: str) -> Optional[StudioJob]:
@@ -463,7 +485,6 @@ class StudioManager:
         out = self._project_dir(job.project_id) / rel
         out.write_bytes(blob)
 
-        project = self._load_project(job.project_id)
         asset = {
             "id": aid,
             "type": "video",
@@ -473,9 +494,7 @@ class StudioManager:
             "job_id": job.id,
             "created_at": _now(),
         }
-        project.setdefault("assets", []).append(asset)
-        project.setdefault("timeline", []).append(aid)
-        self._save_project(project)
+        self._append_assets(job.project_id, [asset], timeline_ids=[aid])
         return asset
 
     def _generate_image(self, job: StudioJob) -> Dict[str, Any]:
@@ -507,7 +526,6 @@ class StudioManager:
         return self._register_image_asset(job, aid, rel)
 
     def _register_image_asset(self, job: StudioJob, aid: str, rel: str) -> Dict[str, Any]:
-        project = self._load_project(job.project_id)
         asset = {
             "id": aid,
             "type": "image",
@@ -517,8 +535,7 @@ class StudioManager:
             "job_id": job.id,
             "created_at": _now(),
         }
-        project.setdefault("assets", []).append(asset)
-        self._save_project(project)
+        self._append_assets(job.project_id, [asset])
         return asset
 
     def asset_file(self, project_id: str, asset_id: str) -> tuple[Path, str]:
@@ -574,8 +591,7 @@ class StudioManager:
             "path": rel,
             "created_at": _now(),
         }
-        project.setdefault("assets", []).append(export_asset)
-        self._save_project(project)
+        self._append_assets(project_id, [export_asset])
         return {"path": str(out), "asset": export_asset}
 
     def _ffmpeg_concat(self, clips: List[Path], out: Path) -> None:
