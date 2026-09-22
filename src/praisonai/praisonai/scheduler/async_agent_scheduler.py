@@ -591,8 +591,18 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             # since the shared delivery helper uses the sync bridge. Mirrors the
             # scheduled-loop success path so a one-time async run is not silently
             # undelivered.
+            delivered_ok = True
             if self.deliver:
-                await asyncio.to_thread(self._deliver_result, result)
+                delivered_ok = await asyncio.to_thread(self._finalize_delivery, result)
+
+            if delivered_ok:
+                safe_call(self.on_success, result)
+            else:
+                logger.error(
+                    "One-time async run executed but its result could not be "
+                    "delivered to the configured target"
+                )
+                safe_call(self.on_failure, "scheduled result could not be delivered")
 
             return result
         except Exception as e:
