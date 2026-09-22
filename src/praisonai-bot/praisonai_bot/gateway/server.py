@@ -3549,6 +3549,28 @@ class WebSocketGateway:
                 session = self._sessions.get(session_id)
                 if session:
                     content = data.get("content", "")
+                    # Issue #5193: optional client-supplied request idempotency
+                    # key. A client that queues a request while reconnecting and
+                    # flushes it on reconnect resends the SAME ``request_id``; the
+                    # server dedups by it (reusing the durable inbound store) so
+                    # the turn runs exactly once instead of double-running. A
+                    # duplicate is acked (not re-enqueued). Missing id keeps the
+                    # legacy fire-and-forget behaviour untouched.
+                    request_id = data.get("request_id")
+                    if request_id is not None:
+                        rid_key = f"op:{session_id}:{request_id}"
+                        try:
+                            fresh = self._get_hook_idem_store().reserve(rid_key)
+                        except Exception:  # pragma: no cover - defensive
+                            fresh = True
+                        if not fresh:
+                            await self._send_to_client(client_id, {
+                                "type": "response",
+                                "status": "duplicate",
+                                "session_id": session_id,
+                                "request_id": request_id,
+                            })
+                            return True
                     # Issue #3467: portable stop command. A chat/operator client
                     # can abort the in-flight turn by sending "/stop" (or "stop")
                     # instead of a dedicated abort frame.
@@ -3572,6 +3594,13 @@ class WebSocketGateway:
                             "session_id": session_id,
                         }
                         payload.update(result.to_dict())
+                        # A stop/cancel is not a turn: drop any reservation so
+                        # the key is not permanently held.
+                        if request_id is not None:
+                            try:
+                                self._get_hook_idem_store().release(rid_key)
+                            except Exception:  # pragma: no cover - defensive
+                                pass
                         await self._send_to_client(client_id, payload)
                         return True
                     message = GatewayMessage(
@@ -3585,6 +3614,13 @@ class WebSocketGateway:
                     # terminally here — otherwise an "accepted" ack would leave
                     # the client waiting forever for a "final" that never comes.
                     if self._agents.get(session.agent_id) is None:
+                        # The turn never ran: release the reservation so a later
+                        # retry (once the agent is available) is not deduped away.
+                        if request_id is not None:
+                            try:
+                                self._get_hook_idem_store().release(rid_key)
+                            except Exception:  # pragma: no cover - defensive
+                                pass
                         await self._send_to_client(client_id, {
                             "type": "response",
                             "status": "final",
@@ -3594,18 +3630,40 @@ class WebSocketGateway:
                         })
                         return True
 
-                    response = await self._process_agent_message(session, message)
+                    try:
+                        response = await self._process_agent_message(session, message)
+                    except BaseException:
+                        # The turn failed to be accepted/enqueued: release the
+                        # reservation so a legitimate retry of the same
+                        # request_id is not deduped away as a phantom duplicate.
+                        if request_id is not None:
+                            try:
+                                self._get_hook_idem_store().release(rid_key)
+                            except Exception:  # pragma: no cover - defensive
+                                pass
+                        raise
+
+                    # The turn was accepted/enqueued: commit the reservation so a
+                    # resend of the same request_id dedups instead of re-running.
+                    if request_id is not None:
+                        try:
+                            self._get_hook_idem_store().record(rid_key)
+                        except Exception:  # pragma: no cover - defensive
+                            pass
 
                     # Provisional acknowledgement: the turn was accepted/enqueued
                     # but is not yet resolved. A distinct status lets clients tell
                     # "accepted" from the "final" answer (sent later by
                     # _run_session_queue) instead of string-sniffing the content.
-                    await self._send_to_client(client_id, {
+                    accepted_ack = {
                         "type": "response",
                         "status": "accepted",
                         "content": response,
                         "session_id": session_id,
-                    })
+                    }
+                    if request_id is not None:
+                        accepted_ack["request_id"] = request_id
+                    await self._send_to_client(client_id, accepted_ack)
             else:
                 await self._send_to_client(client_id, {
                     "type": "error",

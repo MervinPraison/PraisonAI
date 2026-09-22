@@ -10,6 +10,7 @@ import json
 import logging
 import random
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 
@@ -179,7 +180,13 @@ class GatewayClient:
         self._features: Dict[str, List[str]] = {}
         self._policy: Dict[str, int] = {}
         self._negotiated: bool = False
-        
+
+        # Issue #5193: requests queued while disconnected, flushed on reconnect.
+        # Each entry is the fully-formed frame dict carrying a stable
+        # ``request_id`` so the resend is deduped server-side (exactly-once)
+        # instead of being lost (at-most-once) or double-run.
+        self._pending_outbox: List[Dict[str, Any]] = []
+
         # Callbacks
         self.on_gap: Optional[Callable[[int, int], None]] = None
         self.on_state_change: Optional[Callable[[str], None]] = None
@@ -317,6 +324,11 @@ class GatewayClient:
                 
                 # Reset reconnect attempts on successful connection
                 self._reconnect_attempts = 0
+
+                # Issue #5193: flush any requests queued while disconnected.
+                # They carry the request_id they were queued with, so the server
+                # dedups a request already delivered before the drop.
+                await self._flush_outbox()
 
                 # Issue #2798/#3911: a fresh connection is live now — reset the
                 # silence watchdog and start the heartbeat/watchdog alongside the
@@ -715,23 +727,61 @@ class GatewayClient:
         
         self._set_state(ConnectionState.DISCONNECTED)
     
-    async def send(self, message: Union[str, Dict[str, Any]]) -> None:
+    async def send(
+        self,
+        message: Union[str, Dict[str, Any]],
+        *,
+        request_id: Optional[str] = None,
+        queue: bool = False,
+    ) -> Optional[str]:
         """Send a message to the gateway.
-        
+
         Args:
             message: Message content (string or dict)
+            request_id: Optional idempotency key (Issue #5193). When provided (or
+                auto-generated for a queued send) it is attached to the ``message``
+                frame so the server dedups a resend — the turn runs exactly once
+                across a reconnect instead of being lost or double-run.
+            queue: When ``True``, a send issued while disconnected is queued and
+                flushed on the next reconnect (with the same ``request_id``)
+                instead of raising. Defaults to ``False`` for back-compat
+                (raise-on-disconnect).
+
+        Returns:
+            The ``request_id`` used (generated when one was needed), or ``None``
+            when no idempotency key was involved.
         """
-        if not self.is_connected:
-            raise ConnectionError("Not connected to gateway")
-        
+        # Normalise to a frame dict so an idempotency key can be attached to the
+        # ``message`` control frame regardless of the input shape.
         if isinstance(message, dict):
-            payload = json.dumps(message)
+            frame: Dict[str, Any] = dict(message)
         else:
-            payload = json.dumps({
-                "type": "message",
-                "content": message
-            })
-        
+            frame = {"type": "message", "content": message}
+
+        is_message_frame = frame.get("type") == "message"
+
+        rid = request_id
+        # A queued send must carry a stable id so the eventual flush is safe to
+        # dedup; an inline id is honoured on any message frame too.
+        if is_message_frame:
+            if rid is None and (queue or "request_id" in frame):
+                rid = frame.get("request_id") or uuid.uuid4().hex
+            if rid is not None:
+                frame["request_id"] = rid
+
+        if not self.is_connected:
+            if queue and is_message_frame:
+                self._pending_outbox.append(frame)
+                return rid
+            raise ConnectionError("Not connected to gateway")
+
+        await self._send_frame(frame)
+        return rid
+
+    async def _send_frame(self, frame: Dict[str, Any]) -> None:
+        """Serialize, size-guard and transmit a single frame."""
+        payload = json.dumps(frame)
+
         # Self-guard against the server-advertised max_payload so oversized
         # frames fail locally with a clear error instead of being rejected
         # (or silently dropped) by the gateway. A limit of 0 is honoured as a
@@ -744,8 +794,29 @@ class GatewayClient:
                     f"Outbound frame exceeds server max_payload "
                     f"({payload_size} > {max_payload} bytes)"
                 )
-        
+
         await self._ws.send(payload)
+
+    async def _flush_outbox(self) -> None:
+        """Resend queued requests after a (re)connect (Issue #5193).
+
+        Each queued frame carries the same ``request_id`` it was queued with, so
+        the server dedups a request that was actually delivered before the drop —
+        making the queue-and-flush exactly-once rather than duplicating the turn.
+        A frame that fails to send is put back at the head so the next reconnect
+        retries it (rather than dropping it).
+        """
+        if not self._pending_outbox:
+            return
+        pending = self._pending_outbox
+        self._pending_outbox = []
+        for idx, frame in enumerate(pending):
+            try:
+                await self._send_frame(frame)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Failed to flush queued request, re-queuing: %s", e)
+                self._pending_outbox = pending[idx:] + self._pending_outbox
+                break
     
     async def events(self) -> AsyncIterator[GatewayEvent]:
         """Iterate over received events.

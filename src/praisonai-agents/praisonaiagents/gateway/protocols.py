@@ -554,12 +554,18 @@ class MessageParams:
         content: The message body (text, or a structured payload).
         session_id: Optional session the message belongs to.
         message_id: Optional client-supplied idempotency/correlation id.
+        request_id: Optional client-supplied request-idempotency key (Issue
+            #5193). When present the gateway dedups a resend of the same
+            ``request_id`` — a request queued while reconnecting and flushed on
+            reconnect runs the turn exactly once instead of being lost or
+            double-run. Absent keeps the legacy fire-and-forget behaviour.
         metadata: Optional additional message metadata.
     """
 
     content: Union[str, Dict[str, Any]]
     session_id: Optional[str] = None
     message_id: Optional[str] = None
+    request_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     type: str = field(default="message", init=False)
@@ -591,6 +597,7 @@ class MessageParams:
             content=content,
             session_id=_as_opt_str(data.get("session_id")),
             message_id=_as_opt_str(data.get("message_id")),
+            request_id=_as_opt_str(data.get("request_id")),
             metadata=metadata,
         )
 
