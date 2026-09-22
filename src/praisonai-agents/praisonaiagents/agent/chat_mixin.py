@@ -1431,15 +1431,8 @@ Your Goal: {self.goal}"""
         from ..hooks import HookEvent as _HookEvent
         import logging
         
-        # Map policy strategy to compactor strategy
-        strategy_map = {
-            "truncate": LegacyStrategy.TRUNCATE,
-            "summarise": LegacyStrategy.SUMMARIZE,
-            "drop_oldest_tools": LegacyStrategy.PRUNE,
-            "sliding_window": LegacyStrategy.SLIDING,
-        }
-        
-        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        # Map policy strategy to compactor strategy (single source of truth)
+        compactor.strategy = LegacyStrategy.from_policy_value(policy.strategy.value)
         
         # Execute hooks
         try:
@@ -1624,15 +1617,8 @@ Your Goal: {self.goal}"""
         from ..hooks import HookEvent as _HookEvent
         import logging
         
-        # Map policy strategy to compactor strategy
-        strategy_map = {
-            "truncate": LegacyStrategy.TRUNCATE,
-            "summarise": LegacyStrategy.SUMMARIZE,
-            "drop_oldest_tools": LegacyStrategy.PRUNE,
-            "sliding_window": LegacyStrategy.SLIDING,
-        }
-        
-        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        # Map policy strategy to compactor strategy (single source of truth)
+        compactor.strategy = LegacyStrategy.from_policy_value(policy.strategy.value)
         
         # Execute hooks
         try:
