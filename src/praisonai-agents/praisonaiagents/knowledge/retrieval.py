@@ -117,30 +117,35 @@ class RetrieverRegistry:
         name: str, 
         factory: Callable[..., RetrieverProtocol]
     ) -> None:
-        """Register a retriever factory."""
-        self._retrievers[name] = factory
+        """Register a retriever factory. Thread-safe."""
+        with self._lock:
+            self._retrievers[name] = factory
     
     def get(
         self, 
         name: str, 
         **kwargs
     ) -> Optional[RetrieverProtocol]:
-        """Get a retriever by name."""
-        if name in self._retrievers:
-            try:
-                return self._retrievers[name](**kwargs)
-            except Exception as e:
-                logger.warning(f"Failed to initialize retriever '{name}': {e}")
-                return None
-        return None
+        """Get a retriever by name. Thread-safe."""
+        with self._lock:
+            factory = self._retrievers.get(name)
+        if factory is None:
+            return None
+        try:
+            return factory(**kwargs)
+        except Exception as e:
+            logger.warning(f"Failed to initialize retriever '{name}': {e}")
+            return None
     
     def list_retrievers(self) -> List[str]:
-        """List all registered retriever names."""
-        return list(self._retrievers.keys())
+        """List all registered retriever names. Thread-safe."""
+        with self._lock:
+            return list(self._retrievers.keys())
     
     def clear(self) -> None:
-        """Clear all registered retrievers."""
-        self._retrievers.clear()
+        """Clear all registered retrievers. Thread-safe."""
+        with self._lock:
+            self._retrievers.clear()
 
 def get_retriever_registry() -> RetrieverRegistry:
     """Get the global retriever registry instance."""

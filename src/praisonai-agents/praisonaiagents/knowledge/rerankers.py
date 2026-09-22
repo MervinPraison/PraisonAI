@@ -99,30 +99,35 @@ class RerankerRegistry:
         name: str, 
         factory: Callable[..., RerankerProtocol]
     ) -> None:
-        """Register a reranker factory."""
-        self._rerankers[name] = factory
+        """Register a reranker factory. Thread-safe."""
+        with self._lock:
+            self._rerankers[name] = factory
     
     def get(
         self, 
         name: str, 
         **kwargs
     ) -> Optional[RerankerProtocol]:
-        """Get a reranker by name."""
-        if name in self._rerankers:
-            try:
-                return self._rerankers[name](**kwargs)
-            except Exception as e:
-                logger.warning(f"Failed to initialize reranker '{name}': {e}")
-                return None
-        return None
+        """Get a reranker by name. Thread-safe."""
+        with self._lock:
+            factory = self._rerankers.get(name)
+        if factory is None:
+            return None
+        try:
+            return factory(**kwargs)
+        except Exception as e:
+            logger.warning(f"Failed to initialize reranker '{name}': {e}")
+            return None
     
     def list_rerankers(self) -> List[str]:
-        """List all registered reranker names."""
-        return list(self._rerankers.keys())
+        """List all registered reranker names. Thread-safe."""
+        with self._lock:
+            return list(self._rerankers.keys())
     
     def clear(self) -> None:
-        """Clear all registered rerankers."""
-        self._rerankers.clear()
+        """Clear all registered rerankers. Thread-safe."""
+        with self._lock:
+            self._rerankers.clear()
 
 def get_reranker_registry() -> RerankerRegistry:
     """Get the global reranker registry instance."""

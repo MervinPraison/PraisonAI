@@ -69,6 +69,21 @@ class TestCompactionStrategy:
         strategy = CompactionStrategy("truncate")
         assert strategy == CompactionStrategy.TRUNCATE
 
+    @pytest.mark.parametrize("policy_value,expected", [
+        ("truncate", CompactionStrategy.TRUNCATE),
+        ("summarise", CompactionStrategy.SUMMARIZE),
+        ("drop_oldest_tools", CompactionStrategy.PRUNE),
+        ("sliding_window", CompactionStrategy.SLIDING),
+    ])
+    def test_from_policy_value_known(self, policy_value, expected):
+        """Every known policy strategy maps to the correct compactor strategy."""
+        assert CompactionStrategy.from_policy_value(policy_value) == expected
+
+    def test_from_policy_value_unknown_falls_back_to_prune(self):
+        """Unknown policy values fall back to PRUNE."""
+        assert CompactionStrategy.from_policy_value("does_not_exist") == CompactionStrategy.PRUNE
+        assert CompactionStrategy.from_policy_value("") == CompactionStrategy.PRUNE
+
 
 # =============================================================================
 # CompactionResult Tests
