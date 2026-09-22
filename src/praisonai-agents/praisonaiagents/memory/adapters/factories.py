@@ -250,6 +250,24 @@ class Mem0MemoryAdapter:
         return self.mem0_client.get_all(**kwargs)
 
 
+def _create_chroma_client(chromadb, chroma_settings, path):
+    """Translate native Chroma panics into catchable memory backend failures."""
+    try:
+        return chromadb.PersistentClient(
+            path=path,
+            settings=chroma_settings(anonymized_telemetry=False, allow_reset=True),
+        )
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
+        # Preserve ordinary backend errors and interpreter control-flow signals.
+        raise
+    except BaseException as exc:
+        # Chroma's pyo3 PanicException inherits BaseException, not Exception.
+        raise RuntimeError(
+            f"Chroma persist failed at {path!r} ({type(exc).__name__}: {exc}). "
+            "Pass a fresh directory via memory config rag_db_path."
+        ) from exc
+
+
 class ChromaMemoryAdapter:
     """
     Memory adapter that uses ChromaDB to implement MemoryProtocol.
@@ -265,13 +283,7 @@ class ChromaMemoryAdapter:
         os.makedirs(rag_path, exist_ok=True)
         
         # Initialize ChromaDB client
-        self.client = chromadb.PersistentClient(
-            path=rag_path,
-            settings=chroma_settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-        )
+        self.client = _create_chroma_client(chromadb, chroma_settings, rag_path)
         
         # Initialize collection
         collection_name = kwargs.get("collection_name", "memory_store")

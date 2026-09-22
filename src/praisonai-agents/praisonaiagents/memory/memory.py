@@ -588,13 +588,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 ) from exc
 
             # Initialize ChromaDB with persistent storage
-            self.chroma_client = chromadb.PersistentClient(
-                path=rag_path,
-                settings=ChromaSettings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
-            )
+            from .adapters.factories import _create_chroma_client
+            self.chroma_client = _create_chroma_client(chromadb, ChromaSettings, rag_path)
 
             collection_name = self.cfg.get("collection_name", "memory_store")
             self._collection_name = collection_name
