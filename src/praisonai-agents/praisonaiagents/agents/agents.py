@@ -586,6 +586,10 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     # Inter-task context / validation feedback assembled by the workflow process
     # engine (Process._build_task_context) is stored on the task; fold it in so
     # downstream/retried tasks actually see upstream output and rejection reasons.
+    context_builder = getattr(task, '_execution_context_builder', None)
+    if context_builder is not None:
+        task._execution_context = context_builder(task)
+        task._execution_context_builder = None
     extra_context = getattr(task, '_execution_context', None)
     if extra_context:
         context_text = extra_context
@@ -593,7 +597,7 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
         # retries (guardrail/completion failures) re-enter this helper via the
         # run_task/arun_task retry loops, and clearing would strip the upstream
         # output + validation feedback the retry needs. The Process engine owns
-        # this field's lifecycle: it re-sets it before each task yield and resets
+        # this field's lifecycle: it rebuilds it for each workflow step and resets
         # every task's _execution_context to None before selecting the next task.
     if task.context:
         context_results = []  # Collect contexts then de-duplicate
