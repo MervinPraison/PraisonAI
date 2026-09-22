@@ -16,8 +16,6 @@ jobs:
   review:
     runs-on: ubuntu-latest
     if: >
-      secrets.PRAISONAI_APP_ID != '' &&
-      secrets.PRAISONAI_APP_PRIVATE_KEY != '' &&
       (
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
         github.event_name == 'workflow_dispatch' ||
@@ -32,7 +30,14 @@ jobs:
       )
     
     steps:
+      - name: Check reviewer configuration
+        id: config
+        env:
+          HAS_APP_CREDENTIALS: ${{ secrets.PRAISONAI_APP_ID != '' && secrets.PRAISONAI_APP_PRIVATE_KEY != '' }}
+        run: echo "configured=$HAS_APP_CREDENTIALS" >> "$GITHUB_OUTPUT"
+
       - name: Determine checkout ref
+        if: steps.config.outputs.configured == 'true'
         id: dest
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -48,6 +53,7 @@ jobs:
           fi
 
       - name: Checkout Repository
+        if: steps.config.outputs.configured == 'true'
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -55,6 +61,7 @@ jobs:
           fetch-depth: 0
           
       - name: Generate GitHub App Token
+        if: steps.config.outputs.configured == 'true'
         id: generate_token
         uses: tibdex/github-app-token@v2
         with:
@@ -62,14 +69,17 @@ jobs:
           private_key: ${{ secrets.PRAISONAI_APP_PRIVATE_KEY }}
           
       - name: Set up Python
+        if: steps.config.outputs.configured == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           
       - name: Install PraisonAI
+        if: steps.config.outputs.configured == 'true'
         run: pip install "praisonai[all]"
         
       - name: Run PraisonAI PR Review
+        if: steps.config.outputs.configured == 'true'
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
