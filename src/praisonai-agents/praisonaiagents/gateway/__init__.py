@@ -27,6 +27,10 @@ _LAZY_IMPORTS = {
     "GatewayMessage": ("praisonaiagents.gateway.protocols", "GatewayMessage"),
     "EventType": ("praisonaiagents.gateway.protocols", "EventType"),
     "OperatorScope": ("praisonaiagents.gateway.protocols", "OperatorScope"),
+    # Multi-observer session sharing (Issue #5192)
+    "SessionVisibility": ("praisonaiagents.gateway.protocols", "SessionVisibility"),
+    "SessionSharingRole": ("praisonaiagents.gateway.protocols", "SessionSharingRole"),
+    "SessionObserverProtocol": ("praisonaiagents.gateway.protocols", "SessionObserverProtocol"),
     "GatewayCloseCode": ("praisonaiagents.gateway.protocols", "GatewayCloseCode"),
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor": ("praisonaiagents.gateway.protocols", "GatewayMethodDescriptor"),
@@ -348,6 +352,10 @@ __all__ = [
     "GatewayMessage",
     "EventType",
     "OperatorScope",
+    # Multi-observer session sharing (Issue #5192)
+    "SessionVisibility",
+    "SessionSharingRole",
+    "SessionObserverProtocol",
     "GatewayCloseCode",
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor",
