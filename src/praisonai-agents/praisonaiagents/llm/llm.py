@@ -5846,6 +5846,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         final_response_text = response_text.strip()
                     break
 
+            # Preserve tool-loop finalization for structured output and reflection.
+            response_text = final_response_text or response_text
+
             # Handle output formatting
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
