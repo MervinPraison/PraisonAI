@@ -655,4 +655,4 @@ class _BaseAgentScheduler:
                     )
                     continue
         except Exception as e:
-            logger.debug("Failed to load persisted last_run_at: %s", e)
+            logger.warning("Failed to load persisted last_run_at: %s", e)
