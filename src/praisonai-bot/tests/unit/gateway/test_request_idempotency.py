@@ -140,6 +140,42 @@ def test_unavailable_agent_releases_reservation_for_retry():
     asyncio.run(go())
 
 
+def test_failed_turn_releases_reservation_for_retry():
+    async def go():
+        gw, session, calls, sent = _make_gateway_with_session()
+
+        # First delivery: _process_agent_message raises before the turn is
+        # committed (e.g. a socket failure during a preliminary status send).
+        async def _boom(session, message):
+            calls.append(message.content)
+            raise RuntimeError("preliminary send failed")
+
+        gw._process_agent_message = _boom  # type: ignore[assignment]
+
+        raised = False
+        try:
+            await gw._handle_client_message(
+                "client-1", {"type": "message", "content": "x", "request_id": "rid-3"}
+            )
+        except RuntimeError:
+            raised = True
+        assert raised
+
+        # The reservation was released, so a legitimate retry of the SAME id is
+        # not deduped away as a phantom duplicate — the turn gets a real chance.
+        async def _ok(session, message):
+            calls.append(message.content)
+            return "Started processing."
+
+        gw._process_agent_message = _ok  # type: ignore[assignment]
+        await gw._handle_client_message(
+            "client-1", {"type": "message", "content": "x", "request_id": "rid-3"}
+        )
+        assert calls == ["x", "x"]
+
+    asyncio.run(go())
+
+
 # ---------------------------------------------------------------------------
 # Client: safe queue-and-flush with a stable request_id
 # ---------------------------------------------------------------------------

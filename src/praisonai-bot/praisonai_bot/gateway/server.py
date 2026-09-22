@@ -3630,7 +3630,18 @@ class WebSocketGateway:
                         })
                         return True
 
-                    response = await self._process_agent_message(session, message)
+                    try:
+                        response = await self._process_agent_message(session, message)
+                    except BaseException:
+                        # The turn failed to be accepted/enqueued: release the
+                        # reservation so a legitimate retry of the same
+                        # request_id is not deduped away as a phantom duplicate.
+                        if request_id is not None:
+                            try:
+                                self._get_hook_idem_store().release(rid_key)
+                            except Exception:  # pragma: no cover - defensive
+                                pass
+                        raise
 
                     # The turn was accepted/enqueued: commit the reservation so a
                     # resend of the same request_id dedups instead of re-running.
