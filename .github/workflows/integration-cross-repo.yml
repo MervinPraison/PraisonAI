@@ -21,6 +21,9 @@ on:
       - '.github/actions/install-monorepo-packages/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   cross-repo-integration:
     runs-on: ubuntu-latest
