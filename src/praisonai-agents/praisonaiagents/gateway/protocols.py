@@ -268,6 +268,84 @@ class OperatorScope(str, Enum):
         return list(cls)
 
 
+class SessionVisibility(str, Enum):
+    """How widely a Gateway session may be observed by other clients.
+
+    A session's visibility gates *whether* a second authorised client may
+    attach to watch (or co-drive) the same live turn stream, on top of the
+    orthogonal :class:`OperatorScope` authorisation. The vocabulary lives in
+    core so every client/impl agrees; enforcement happens in the wrapper.
+
+    Values:
+        PRIVATE:   Owner only. Today's behaviour and the default — a session
+                   stays bound 1:1 to its owning client.
+        SHARED:    Members may co-drive; additional authorised clients may
+                   attach with WRITE-capable roles.
+        READ_ONLY: Additional clients may attach as viewers to observe the
+                   transcript, but not send.
+    """
+
+    PRIVATE = "private"
+    SHARED = "shared"
+    READ_ONLY = "read_only"
+
+
+class SessionSharingRole(str, Enum):
+    """The role an attached client holds within a shared Gateway session.
+
+    Roles describe *what an attached client may do* within the session and
+    layer on top of :class:`OperatorScope`. Fan-out remains scope-aware: an
+    observer without ``READ`` receives nothing regardless of role.
+
+    Values:
+        OWNER:  Controls sharing/visibility; the session's original driver.
+        MEMBER: May co-drive (send) when the session is ``SHARED``.
+        VIEWER: Observes the live turn stream but cannot send.
+    """
+
+    OWNER = "owner"
+    MEMBER = "member"
+    VIEWER = "viewer"
+
+
+@runtime_checkable
+class SessionObserverProtocol(Protocol):
+    """Protocol for attaching multiple observers to one live session.
+
+    Extends the single-owner :class:`GatewaySessionProtocol` model so that a
+    session can fan its live turn stream (tokens, tool calls, results, final)
+    out to more than one authorised client. Implementations live in the
+    wrapper Gateway; the contract lives here so every client agrees on the
+    attach/detach/enumerate surface.
+
+    Default behaviour is unchanged: a ``PRIVATE`` session keeps a single
+    ``OWNER`` observer (today's 1:1 model).
+    """
+
+    def attach(
+        self,
+        session_id: str,
+        client_id: str,
+        role: SessionSharingRole = SessionSharingRole.VIEWER,
+    ) -> None:
+        """Attach ``client_id`` to ``session_id`` with the given role.
+
+        Adds an observer rather than re-pointing ownership, so a second
+        client can watch a session without hijacking it.
+        """
+        ...
+
+    def detach(self, session_id: str, client_id: str) -> None:
+        """Detach ``client_id`` from ``session_id`` (stop observing)."""
+        ...
+
+    def observers(
+        self, session_id: str
+    ) -> "List[Tuple[str, SessionSharingRole]]":
+        """Return ``(client_id, role)`` pairs currently attached to the session."""
+        ...
+
+
 @dataclass
 class HelloParams:
     """Parameters for initiating a versioned handshake.
