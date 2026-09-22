@@ -148,31 +148,47 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
 
         _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
 
-        def _accepts_required(fn) -> Optional[str]:
+        def _inspect(fn):
+            """Return (error_or_None, unnamed_required_when_only_var_kwargs)."""
             params = inspect.signature(fn).parameters.values()
-            # A **kwargs catch-all accepts every required keyword by definition,
-            # so entry-point plugins that forward **kwargs to a delegate (the
-            # advertised extension surface) validate instead of being silently
-            # dropped from pick_default()/list_available_frameworks().
-            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
-                return None
             named = {
                 p.name for p in params
                 if p.kind in (inspect.Parameter.KEYWORD_ONLY,
                               inspect.Parameter.POSITIONAL_OR_KEYWORD)
             }
+            has_var_kwargs = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params
+            )
             missing = _REQUIRED_KW - named
-            return f"missing keyword parameters {sorted(missing)}" if missing else None
+            # A **kwargs catch-all accepts every required keyword by definition,
+            # so entry-point plugins that forward **kwargs to a delegate (the
+            # advertised extension surface) still validate. But a signature that
+            # names NONE of the required kwargs and relies solely on **kwargs can
+            # silently discard tool_timeout wraps, callbacks and cli_config
+            # safety knobs — surface that instead of failing silently.
+            if missing and not has_var_kwargs:
+                return f"missing keyword parameters {sorted(missing)}", None
+            unnamed = missing if (missing and has_var_kwargs) else None
+            return None, unnamed
 
         for method_name in ("run", "arun"):
             fn = getattr(cls, method_name, None)
             if fn is None:
                 continue  # arun is optional; sync-only adapters keep working
-            err = _accepts_required(fn)
+            err, unnamed = _inspect(fn)
             if err:
                 raise TypeError(
                     f"FrameworkAdapter {name!r}.{method_name} does not implement "
                     f"the protocol: {err}"
+                )
+            if unnamed:
+                logger.warning(
+                    "FrameworkAdapter %r.%s names none of the adapter kwargs %s "
+                    "explicitly and relies on **kwargs; if these are not "
+                    "forwarded, their safety guarantees (tool_timeout, "
+                    "callbacks, approval/guardrails via cli_config) will be "
+                    "silently dropped.",
+                    name, method_name, sorted(unnamed),
                 )
         self._validated_classes.add(cls)
 

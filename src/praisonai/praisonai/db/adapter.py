@@ -79,9 +79,12 @@ class PraisonAIDB:
         self._knowledge_store = None
         self._initialized = False
         self._init_lock = threading.Lock()          # guards the sync init path
-        # Async callers use a dedicated asyncio.Lock (created lazily per loop) so
-        # the event loop is never blocked on a threading.Lock, and the blocking
-        # store construction runs off-loop via asyncio.to_thread.
+        # Async callers do NOT cache an asyncio.Lock on the instance: such a lock
+        # binds to the loop that created it and raises when awaited from another
+        # (e.g. per-session scoped_bridge loops sharing one adapter). Instead the
+        # blocking store construction runs off-loop via asyncio.to_thread, where
+        # the sync _init_lock already serialises init. Kept as None for backward
+        # compatibility with any external references.
         self._ainit_lock: Optional["asyncio.Lock"] = None
         # Remember the last init failure so a soft error (bad config / missing
         # dep / cloud auth failure) is surfaced cleanly instead of being re-tried
@@ -273,19 +276,13 @@ class PraisonAIDB:
         if cached is not None:
             raise cached
 
-        # Create the asyncio.Lock lazily so it binds to the running loop. This
-        # serialises async callers; the off-loop _init_stores serialises against
-        # sync callers via the shared threading _init_lock.
-        if self._ainit_lock is None:
-            self._ainit_lock = asyncio.Lock()
-
-        async with self._ainit_lock:
-            if self._initialized:
-                return
-            cached = self._init_failure_active()
-            if cached is not None:
-                raise cached
-            await asyncio.to_thread(self._init_stores)
+        # Do not cache an asyncio.Lock on the instance: a lock created on one
+        # loop raises RuntimeError when awaited from another (e.g. per-session
+        # scoped_bridge loops sharing one PraisonAIDB). Blocking store
+        # construction is already serialised on the sync _init_lock inside
+        # _init_stores, which runs off the loop via asyncio.to_thread, so async
+        # callers on any loop can never construct stores concurrently.
+        await asyncio.to_thread(self._init_stores)
     
     def _detect_backend(self, url: str) -> str:
         """Detect backend type from URL.
@@ -1328,36 +1325,33 @@ class PraisonAIDB:
     async def aclose(self) -> None:
         """Async version of close; idempotent and lock-safe.
 
-        Serialises against concurrent async init callers via ``_ainit_lock`` and
-        resets lifecycle state under the shared sync ``_init_lock`` (off the event
-        loop) so init/close can never race and leave a half-closed adapter that
-        reports ``_initialized`` while its stores are shut.
+        Resets lifecycle state under the shared sync ``_init_lock`` (off the
+        event loop) so init/close can never race and leave a half-closed adapter
+        that reports ``_initialized`` while its stores are shut. No instance-
+        cached asyncio.Lock is used, so a shared adapter is safe to close from a
+        different loop than the one that initialised it (e.g. scoped_bridge).
         """
         # Flush any fire-and-forget writes submitted from a running loop before
         # tearing stores down, so a shutting-down worker does not drop in-flight
         # persistence. Runs off the event loop to avoid blocking it.
         await asyncio.to_thread(self.flush_pending_writes)
 
-        if self._ainit_lock is None:
-            self._ainit_lock = asyncio.Lock()
+        def _snapshot_and_reset():
+            with self._init_lock:
+                snapshot = (
+                    self._conversation_store,
+                    self._state_store,
+                    self._knowledge_store,
+                )
+                self._conversation_store = None
+                self._state_store = None
+                self._knowledge_store = None
+                self._initialized = False
+                self._init_failed = None
+                self._init_failed_at = 0.0
+                return snapshot
 
-        async with self._ainit_lock:
-            def _snapshot_and_reset():
-                with self._init_lock:
-                    snapshot = (
-                        self._conversation_store,
-                        self._state_store,
-                        self._knowledge_store,
-                    )
-                    self._conversation_store = None
-                    self._state_store = None
-                    self._knowledge_store = None
-                    self._initialized = False
-                    self._init_failed = None
-                    self._init_failed_at = 0.0
-                    return snapshot
-
-            stores = await asyncio.to_thread(_snapshot_and_reset)
+        stores = await asyncio.to_thread(_snapshot_and_reset)
 
         for store in stores:
             if store is None:
