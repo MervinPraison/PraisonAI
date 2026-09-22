@@ -7,6 +7,7 @@ NO heavy imports - only stdlib and typing.
 Implementations are provided by the wrapper layer.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from enum import Enum
@@ -99,11 +100,16 @@ class RetrieverRegistry:
     """
     
     _instance: Optional["RetrieverRegistry"] = None
+    _lock = threading.Lock()
     
     def __new__(cls) -> "RetrieverRegistry":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._retrievers: Dict[str, Callable[..., RetrieverProtocol]] = {}
+            with cls._lock:
+                # Double-checked locking for multi-agent safety
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance._retrievers: Dict[str, Callable[..., RetrieverProtocol]] = {}
+                    cls._instance = instance
         return cls._instance
     
     def register(

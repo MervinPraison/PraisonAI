@@ -7,6 +7,7 @@ NO heavy imports - only stdlib and typing.
 Implementations are provided by praisonai-tools or wrapper layer.
 """
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from praisonaiagents._logging import get_logger
@@ -81,11 +82,16 @@ class RerankerRegistry:
     """
     
     _instance: Optional["RerankerRegistry"] = None
+    _lock = threading.Lock()
     
     def __new__(cls) -> "RerankerRegistry":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._rerankers: Dict[str, Callable[..., RerankerProtocol]] = {}
+            with cls._lock:
+                # Double-checked locking for multi-agent safety
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance._rerankers: Dict[str, Callable[..., RerankerProtocol]] = {}
+                    cls._instance = instance
         return cls._instance
     
     def register(
