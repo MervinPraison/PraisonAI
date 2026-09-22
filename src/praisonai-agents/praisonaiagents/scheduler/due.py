@@ -109,10 +109,14 @@ def is_due(
                 sched.tz or default_timezone,
             ).timestamp()
         except (ValueError, TypeError):
+            # Fail safe: a stop bound that cannot be parsed must NOT let the
+            # job run past it forever. Treat the job as not-due; the claim path
+            # then retires it via ``ScheduleJob.should_retire`` (which returns
+            # True for an unparseable ``until``) rather than firing it.
             logger.warning("Invalid 'until' timestamp for job %s: %s", job.id, until)
-        else:
-            if now >= until_ts:
-                return False
+            return False
+        if now >= until_ts:
+            return False
 
     if sched.kind == "every":
         if sched.every_seconds is None:

@@ -96,7 +96,16 @@ class ScheduleRunner:
             delivered: Whether result was delivered to a channel bot.
         """
         job.last_run_at = time.time()
-        job.run_count += 1
+        # Count this fire exactly once. An atomic ``claim_due`` already
+        # incremented ``run_count`` when it reserved the job (and needs to, so
+        # ``should_retire()`` can drop a spent job before a competitor reclaims
+        # it); it flags the job with ``_run_counted`` so we do not double-count
+        # here. The non-atomic ``get_due_jobs`` path never sets that flag, so
+        # ``mark_run`` remains the single incrementer there.
+        if getattr(job, "_run_counted", False):
+            job._run_counted = False
+        else:
+            job.run_count += 1
 
         # Log execution history if the store supports it
         if hasattr(self._store, "log_run"):
@@ -110,7 +119,7 @@ class ScheduleRunner:
                 job_name=job.name,
             )
 
-        if job.should_retire():
+        if job.should_retire(job.last_run_at):
             self._store.remove(job.id)
         else:
             self._store.update(job)
