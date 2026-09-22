@@ -6,11 +6,33 @@ import threading
 import pytest
 
 from praisonaiagents import Agent
+from praisonaiagents.agent import async_safety
+from praisonaiagents.agent.tool_execution import ToolExecutionMixin
 from praisonaiagents.config import ExecutionConfig
 from praisonaiagents.escalation.loop_guard import LoopGuard, LoopGuardConfig
 
 
-def test_executor_lock_allows_tool_bodies_to_run_concurrently(monkeypatch):
+def test_standalone_mixin_initializes_one_lock_for_concurrent_callers(monkeypatch):
+    barrier = threading.Barrier(2)
+
+    class ConcurrentLock(async_safety.DualLock):
+        def __init__(self):
+            super().__init__()
+            barrier.wait(timeout=5)
+
+    instance = ToolExecutionMixin()
+    with monkeypatch.context() as context:
+        context.setattr(async_safety, "DualLock", ConcurrentLock)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as callers:
+            first = callers.submit(instance._get_tool_executor_lock)
+            second = callers.submit(instance._get_tool_executor_lock)
+            assert first.result(timeout=5) is second.result(timeout=5)
+
+    assert instance._get_tool_executor_lock() is not ToolExecutionMixin()._get_tool_executor_lock()
+
+
+@pytest.mark.parametrize("initialize_lock", [False, True])
+def test_executor_lock_allows_tool_bodies_to_run_concurrently(monkeypatch, initialize_lock):
     barrier = threading.Barrier(2)
 
     def paired_tool(value: int) -> str:
@@ -24,10 +46,12 @@ def test_executor_lock_allows_tool_bodies_to_run_concurrently(monkeypatch):
         instructions="Test tools",
         tools=[paired_tool],
         output="silent",
-        execution=ExecutionConfig(max_retry_limit=0),
+        execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
     )
     agent._loop_guard = LoopGuard(LoopGuardConfig(enabled=False))
     assert agent._execute_tool_with_context("paired_tool", {"value": 0}, None) == "0"
+    if not initialize_lock:
+        del agent._tool_executor_lock
     agent._tool_timeout = 10
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as callers:
@@ -88,7 +112,7 @@ def test_late_timeout_does_not_retire_another_calls_executor(monkeypatch, create
         instructions="Test tools",
         tools=[blocking_tool, quick_tool],
         output="silent",
-        execution=ExecutionConfig(max_retry_limit=0),
+        execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
     )
     assert agent._execute_tool_with_context("quick_tool", {}, None) == "ready"
     agent._tool_timeout = 1

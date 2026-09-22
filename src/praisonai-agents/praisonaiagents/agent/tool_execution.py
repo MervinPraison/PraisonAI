@@ -802,6 +802,14 @@ class ToolExecutionMixin:
             self._middleware_manager = manager
         return manager if manager.has_tool_hooks else None
 
+    def _get_tool_executor_lock(self):
+        """Return the per-instance lock, including for standalone mixin users."""
+        try:
+            return self._tool_executor_lock
+        except AttributeError:
+            from .async_safety import DualLock
+            return self.__dict__.setdefault("_tool_executor_lock", DualLock())
+
     def _get_turn_tools_lock(self):
         """Return the DualLock guarding the per-turn tool buffer.
 
@@ -1073,7 +1081,7 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                with self._tool_executor_lock.sync():
+                                with self._get_tool_executor_lock().sync():
                                     if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                                         self._tool_executor = concurrent.futures.ThreadPoolExecutor(
                                             max_workers=2, thread_name_prefix=f"tool-{self.name}"
@@ -1100,9 +1108,9 @@ class ToolExecutionMixin:
                                     # once the cap is reached we stop recycling and keep reusing
                                     # the existing pool so repeated timeouts can't exhaust process
                                     # resources with an unbounded number of leaked threads.
-                                    with self._tool_executor_lock.sync():
+                                    with self._get_tool_executor_lock().sync():
                                         orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                        if self._tool_executor is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
+                                        if getattr(self, '_tool_executor', None) is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
                                             executor.shutdown(wait=False)
                                             self._tool_executor = None
                                             self._tool_executor_orphaned = orphaned + 1
