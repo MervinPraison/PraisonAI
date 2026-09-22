@@ -6,11 +6,13 @@ import os
 import json
 import logging
 import tempfile
+import threading
 from enum import Enum
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
+_delivery_lock_guard = threading.Lock()
 
 
 def _atomic_write_json(path: str, payload: dict) -> None:
@@ -372,9 +374,11 @@ class _BaseAgentScheduler:
         """
         lock = getattr(self, "_delivery_lock_obj", None)
         if lock is None:
-            import threading as _threading
-            lock = _threading.Lock()
-            self._delivery_lock_obj = lock
+            with _delivery_lock_guard:
+                lock = getattr(self, "_delivery_lock_obj", None)
+                if lock is None:
+                    lock = threading.Lock()
+                    self._delivery_lock_obj = lock
         return lock
 
     def _should_suppress_delivery(self, text: str) -> bool:

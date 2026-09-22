@@ -1,6 +1,7 @@
 """One-time async runs must account for delivery and invoke the right callback."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -68,3 +69,46 @@ async def test_execution_error_propagates_without_delivery(error):
     delivery.deliver.assert_not_called()
     success.assert_not_called()
     failure.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["delivered", "failed"])
+@pytest.mark.parametrize("callback_error", [False, True])
+async def test_async_callback_finishes_before_execute_once_returns(outcome, callback_error):
+    scheduler, _, _, _, _, result = make_scheduler(outcome)
+    completed = []
+
+    async def callback(value):
+        await asyncio.sleep(0)
+        completed.append(value)
+        if callback_error:
+            raise ValueError("async callback failed")
+
+    if outcome == "failed":
+        scheduler.on_failure = callback
+    else:
+        scheduler.on_success = callback
+    assert await scheduler.execute_once() == result
+    assert completed == ["scheduled result could not be delivered" if outcome == "failed" else result]
+
+
+async def test_concurrent_first_delivery_uses_one_lock():
+    barrier = threading.Barrier(2, timeout=3)
+    local = threading.local()
+
+    class ConcurrentFirstRead(AsyncAgentScheduler):
+        def __getattribute__(self, name):
+            try:
+                return super().__getattribute__(name)
+            except AttributeError:
+                if name == "_delivery_lock_obj" and not getattr(local, "read_missing", False):
+                    local.read_missing = True
+                    # Force both callers to observe the missing lock before
+                    # either can create and publish its own instance.
+                    barrier.wait()
+                raise
+
+    scheduler = ConcurrentFirstRead(SimpleNamespace(astart=AsyncMock()), "Task")
+    locks = await asyncio.gather(*(
+        asyncio.to_thread(lambda: scheduler._delivery_lock) for _ in range(2)
+    ))
+    assert locks[0] is locks[1]

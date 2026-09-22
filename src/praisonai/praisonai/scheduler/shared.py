@@ -247,6 +247,20 @@ def backoff_delay(
     return delay * random.uniform(1 - jitter, 1 + jitter)
 
 
+async def safe_call_async(cb, *args) -> None:
+    """Finish a callback before returning, while logging ordinary callback errors."""
+    if cb is None:
+        return
+    import inspect
+    import logging
+    try:
+        result = cb(*args)
+        if inspect.isawaitable(result):
+            await result
+    except Exception as e:
+        logging.getLogger(__name__).error("Scheduler callback raised: %s", e)
+
+
 def safe_call(cb, *args) -> None:
     """Run a user callback without letting it tear the scheduler down.
 
