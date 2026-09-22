@@ -17,6 +17,7 @@ out of the core Memory class while preserving backward compatibility.
 import logging
 import os
 import threading
+from asyncio import CancelledError
 from typing import Any, Dict, List, Optional
 from ..protocols import MemoryProtocol
 
@@ -257,7 +258,7 @@ def _create_chroma_client(chromadb, chroma_settings, path):
             path=path,
             settings=chroma_settings(anonymized_telemetry=False, allow_reset=True),
         )
-    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit, CancelledError):
         # Preserve ordinary backend errors and interpreter control-flow signals.
         raise
     except BaseException as exc:

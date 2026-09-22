@@ -1,6 +1,7 @@
 """Native Chroma initialization errors must respect memory failure handling."""
 
 import sys
+from asyncio import CancelledError
 from types import ModuleType
 from unittest.mock import Mock
 
@@ -55,7 +56,7 @@ def test_native_panic_uses_normal_failure_path(bootstrap, caplog):
         assert path in caplog.text
 
 
-@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit, GeneratorExit])
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit, GeneratorExit, CancelledError])
 def test_control_flow_signals_propagate(bootstrap, signal):
     _, initialize, chroma, _, _ = bootstrap
     error = signal("stop")
