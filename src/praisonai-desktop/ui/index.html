@@ -350,19 +350,22 @@ button.stop{background:var(--bad)}
    Same tokens as chat, same centred column. A training view that invented its
    own palette would read as a bolted-on second app, which is exactly what it
    must not be: it is the same product doing a different job. */
-#train,#channels,#gateway,#knowledge,#images,#video{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
-#train.on,#channels.on,#gateway.on,#knowledge.on,#images.on,#video.on{display:block}
+#train,#channels,#gateway,#knowledge,#images,#video,#studio{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
+#train.on,#channels.on,#gateway.on,#knowledge.on,#images.on,#video.on,#studio.on{display:block}
 body.training #thread,body.training #f{display:none}
-body.view-channels #thread,body.view-channels #f,body.view-channels #train,body.view-channels #gateway,body.view-channels #knowledge,body.view-channels #images,body.view-channels #video{display:none}
+body.view-channels #thread,body.view-channels #f,body.view-channels #train,body.view-channels #gateway,body.view-channels #knowledge,body.view-channels #images,body.view-channels #video,body.view-channels #studio{display:none}
 body.view-channels #channels{display:block}
-body.view-gateway #thread,body.view-gateway #f,body.view-gateway #train,body.view-gateway #channels,body.view-gateway #knowledge,body.view-gateway #images,body.view-gateway #video{display:none}
+body.view-gateway #thread,body.view-gateway #f,body.view-gateway #train,body.view-gateway #channels,body.view-gateway #knowledge,body.view-gateway #images,body.view-gateway #video,body.view-gateway #studio{display:none}
 body.view-gateway #gateway{display:block}
-body.view-knowledge #thread,body.view-knowledge #f,body.view-knowledge #train,body.view-knowledge #channels,body.view-knowledge #gateway,body.view-knowledge #images,body.view-knowledge #video{display:none}
+body.view-knowledge #thread,body.view-knowledge #f,body.view-knowledge #train,body.view-knowledge #channels,body.view-knowledge #gateway,body.view-knowledge #images,body.view-knowledge #video,body.view-knowledge #studio{display:none}
 body.view-knowledge #knowledge{display:block}
-body.view-images #thread,body.view-images #f,body.view-images #train,body.view-images #channels,body.view-images #gateway,body.view-images #knowledge,body.view-images #video{display:none}
+body.view-images #thread,body.view-images #f,body.view-images #train,body.view-images #channels,body.view-images #gateway,body.view-images #knowledge,body.view-images #video,body.view-images #studio{display:none}
 body.view-images #images{display:block}
-body.view-video #thread,body.view-video #f,body.view-video #train,body.view-video #channels,body.view-video #gateway,body.view-video #knowledge,body.view-video #images{display:none}
+body.view-video #thread,body.view-video #f,body.view-video #train,body.view-video #channels,body.view-video #gateway,body.view-video #knowledge,body.view-video #images,body.view-video #studio{display:none}
 body.view-video #video{display:block}
+body.studio #thread,body.studio #f,body.studio #train,body.studio #channels,body.studio #gateway,body.studio #knowledge,body.studio #images,body.studio #video{display:none}
+body.studio #studio{display:block}
+body.studio .inner.studio-wrap{max-width:52rem}
 .imgpreview{max-width:min(100%,42rem);border-radius:10px;border:1px solid var(--rule);margin-top:1rem;display:block}
 .mediagrid{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
 .mediagrid img,.mediagrid video{max-width:10rem;max-height:10rem;object-fit:cover;border-radius:6px;border:1px solid var(--rule)}
@@ -386,6 +389,52 @@ body.view-video #video{display:block}
 .chrow .st.run{color:var(--accent);border-color:var(--accent)}
 .chlog{max-height:28vh;overflow:auto;font-size:.72rem;font-family:ui-monospace,Menlo,monospace;
   background:var(--code);border-radius:.4rem;padding:.5rem;margin-top:.6rem;white-space:pre-wrap}
+.studio-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem .9rem}
+@media(max-width:48rem){.studio-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:32rem){.studio-grid{grid-template-columns:1fr}}
+.studio-grid-2{grid-template-columns:1fr 1fr}
+.studio-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.65rem .75rem;margin-bottom:.75rem}
+.studio-row .tf{flex:1;min-width:10rem;margin:0}
+.studio-prompt{width:100%;min-height:5.25rem;resize:vertical;background:var(--ground);color:var(--ink);
+  border:1px solid var(--rule);border-radius:.45rem;padding:.55rem .65rem;font:inherit;font-size:.88rem;line-height:1.55}
+.studio-prompt:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.studio-notice{font-size:.72rem;color:var(--soft);line-height:1.45;margin:.55rem 0 0;padding:.55rem .65rem;
+  background:var(--code);border:1px solid var(--rule);border-radius:.45rem}
+.studio-notice.warn{border-color:color-mix(in srgb,var(--accent) 35%,var(--rule))}
+.studio-actions{display:flex;flex-wrap:wrap;gap:.45rem .55rem;margin-top:.85rem;align-items:center}
+.studio-actions .tbtn{min-width:9rem}
+.studio-actions .tbtn.primary{flex:none}
+.studio-status{font-size:.78rem;color:var(--soft);margin-top:.65rem;min-height:1.25em}
+.studio-status.busy{color:var(--accent)}
+.studio-status.err{color:var(--bad)}
+.studio-jobs-list{display:flex;flex-direction:column;gap:.45rem;min-height:2.5rem}
+.studio-jobs-list:empty::before{content:"No active jobs — generate an image or video above.";
+  font-size:.78rem;color:var(--soft);opacity:.75}
+.studio-job{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.35rem .65rem;padding:.55rem .65rem;
+  border:1px solid var(--rule);border-radius:.45rem;background:var(--ground);font-size:.78rem}
+.studio-job .jprompt{flex:1;min-width:8rem;color:var(--ink);line-height:1.4}
+.studio-job .jerr{width:100%;font-size:.72rem;color:var(--bad);margin-top:.15rem;word-break:break-word}
+.studio-assets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr));gap:.65rem;
+  max-height:22rem;overflow-y:auto;padding:.15rem 0}
+.studio-assets-grid:empty::before{content:"Generated clips and images appear here.";
+  grid-column:1/-1;font-size:.78rem;color:var(--soft);opacity:.75;padding:.5rem 0}
+.studio-asset{border:1px solid var(--rule);border-radius:.5rem;padding:.5rem .55rem;font-size:.72rem;
+  background:var(--ground);display:flex;flex-direction:column;gap:.35rem}
+.studio-asset .ameta{color:var(--soft);line-height:1.35}
+.studio-asset .ameta b{color:var(--ink);font-weight:650;text-transform:capitalize}
+.studio-asset video,.studio-asset img{width:100%;max-height:10rem;object-fit:contain;border-radius:.35rem;
+  background:var(--code);margin-top:.15rem}
+.studio-card{margin-bottom:.85rem}
+.studio-card-hd{display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;margin-bottom:.65rem}
+.studio-card-hd .sectlbl{margin:0;padding:0}
+.studio-adv{margin-top:.65rem;border:1px solid var(--rule);border-radius:.45rem;padding:.45rem .65rem .65rem}
+.studio-adv summary{cursor:pointer;font-size:.72rem;color:var(--soft);font-weight:650;user-select:none;list-style:none}
+.studio-adv summary::-webkit-details-marker{display:none}
+.studio-adv[open] summary{margin-bottom:.55rem}
+.ctool-link{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:.78rem;
+  padding:.25rem 0;text-decoration:underline;text-underline-offset:2px}
+.ctool-link:hover{color:var(--ink)}
 .trainhd{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .2rem}
 .trainhd h2{font-size:1.05rem;margin:0;font-weight:650}
 .trainhd p{margin:0;color:var(--soft);font-size:.78rem}
@@ -480,6 +529,8 @@ body.view-video #video{display:block}
               aria-controls="images"><span class="ic" aria-hidden="true">◻</span>Images</button>
       <button class="navbtn" id="viewVideo" type="button" role="tab" aria-selected="false"
               aria-controls="video"><span class="ic" aria-hidden="true">▷</span>Video</button>
+      <button class="navbtn" id="viewStudio" type="button" role="tab" aria-selected="false"
+              aria-controls="studio"><span class="ic" aria-hidden="true">▶</span>Studio</button>
     </div>
     <div class="sidetop">
       <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k" data-chord="N"></span></button>
@@ -785,6 +836,94 @@ body.view-video #video{display:block}
           </div>
           <p class="tnote" id="gwError" role="alert"></p>
           <div class="chlog" id="gwLog" hidden></div>
+        </div>
+      </div>
+    </section>
+    <section id="studio" role="tabpanel" aria-labelledby="viewStudio" aria-label="Creative Studio">
+      <div class="inner studio-wrap">
+        <div class="trainhd">
+          <h2>Creative Studio</h2>
+          <p>Projects, prompts, image &amp; video generation, timeline export.</p>
+        </div>
+        <div class="tcard studio-card">
+          <div class="studio-row">
+            <div class="tf">
+              <label for="sProject">Project</label>
+              <select id="sProject"></select>
+            </div>
+            <button type="button" class="tbtn ghost" id="sNewProject">New project</button>
+            <button type="button" class="tbtn ghost" id="sRefresh">Refresh</button>
+          </div>
+          <p class="hint" id="sCredHint" style="margin:0 0 .5rem">Set API keys in Settings.</p>
+          <div class="tf">
+            <label for="sPrompt">Prompt</label>
+            <textarea id="sPrompt" class="studio-prompt" rows="4" placeholder="Describe the shot…"></textarea>
+          </div>
+          <details class="studio-adv">
+            <summary>Image settings (testing &amp; keyframes)</summary>
+            <div class="studio-grid" style="margin-top:.35rem">
+              <div class="tf">
+                <label for="sImageModel">Image model</label>
+                <select id="sImageModel"></select>
+              </div>
+              <div class="tf">
+                <label for="sImageQuality">Quality</label>
+                <select id="sImageQuality">
+                  <option value="low" selected>Low (testing)</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div class="tf">
+                <label for="sImageSize">Size</label>
+                <select id="sImageSize">
+                  <option value="1024x1024" selected>1024×1024</option>
+                  <option value="1536x1024">1536×1024</option>
+                  <option value="1024x1536">1024×1536</option>
+                </select>
+              </div>
+            </div>
+            <div class="studio-notice warn" id="sImageCost" hidden></div>
+          </details>
+          <div class="studio-grid studio-grid-2" style="margin-top:.75rem">
+            <div class="tf">
+              <label for="sModel">Video model</label>
+              <select id="sModel"></select>
+            </div>
+            <div class="tf">
+              <label for="sRef">First-frame image</label>
+              <select id="sRef"><option value="">— none —</option></select>
+            </div>
+            <div class="tf">
+              <label for="sSeconds">Duration (sec)</label>
+              <input id="sSeconds" type="number" min="4" max="16" value="8"/>
+            </div>
+            <div class="tf">
+              <label for="sVariants">Variations</label>
+              <input id="sVariants" type="number" min="1" max="4" value="1"/>
+            </div>
+          </div>
+          <div class="studio-actions">
+            <button type="button" id="sGenerateImage" class="tbtn primary">Generate image</button>
+            <button type="button" id="sGenerate" class="tbtn ghost">Generate video</button>
+            <button type="button" id="sUploadRef" class="tbtn ghost">Upload reference</button>
+            <input type="file" id="sFileIn" accept="image/*" class="is-hidden"/>
+            <button type="button" id="sExport" class="tbtn ghost">Export timeline</button>
+          </div>
+          <div id="sStatus" class="studio-status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="tcard studio-card">
+          <div class="studio-card-hd">
+            <div class="sectlbl">Jobs</div>
+          </div>
+          <div class="studio-jobs-list" id="sJobs" aria-live="polite"></div>
+        </div>
+        <div class="tcard studio-card">
+          <div class="studio-card-hd">
+            <div class="sectlbl">Assets &amp; timeline</div>
+            <span class="hint" id="sTimelineMeta">0 clips</span>
+          </div>
+          <div class="studio-assets-grid" id="sAssets"></div>
         </div>
       </div>
     </section>
@@ -2783,6 +2922,8 @@ const trainView=document.getElementById('train'),
       viewChannels=document.getElementById('viewChannels'),
       viewGateway=document.getElementById('viewGateway'),
       viewKnowledge=document.getElementById('viewKnowledge'),
+      studioView=document.getElementById('studio'),
+      viewStudio=document.getElementById('viewStudio'),
       trainForm=document.getElementById('trainForm'),
       tStart=document.getElementById('tStart'), tStop=document.getElementById('tStop'),
       tState=document.getElementById('tState'), tError=document.getElementById('tError'),
@@ -2816,13 +2957,15 @@ const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file h
 // the deliberate choice is still persisted, and the post-boot restore below
 // returns Train once the engine is up.
 const VIEW_TABS={chat:viewChat,train:viewTrain,channels:viewChannels,gateway:viewGateway,
-  knowledge:viewKnowledge,images:viewImages,video:viewVideo};
+  knowledge:viewKnowledge,images:viewImages,video:viewVideo,studio:viewStudio};
 
 function showView(name,{persist=true}={}){
   const requested=name;
   if(name!=='chat' && engineBlocked) name='chat';
   const training=name==='train';
+  const studio=name==='studio';
   document.body.classList.toggle('training',training);
+  document.body.classList.toggle('studio',studio);
   document.body.classList.remove('view-channels','view-gateway','view-knowledge','view-images','view-video');
   if(name==='channels') document.body.classList.add('view-channels');
   if(name==='gateway') document.body.classList.add('view-gateway');
@@ -2835,6 +2978,7 @@ function showView(name,{persist=true}={}){
   knowledgeView.classList.toggle('on',name==='knowledge');
   imagesView.classList.toggle('on',name==='images');
   videoView.classList.toggle('on',name==='video');
+  studioView.classList.toggle('on',studio);
   for(const [v,btn] of Object.entries(VIEW_TABS)){
     const on=v===name;
     btn.setAttribute('aria-selected',String(on));
@@ -2847,6 +2991,7 @@ function showView(name,{persist=true}={}){
   if(name==='knowledge') refreshKnowledge();
   if(name==='images') refreshImages();
   if(name==='video') refreshVideo();
+  if(studio) refreshStudio();
 }
 viewChat.addEventListener('click',()=>showView('chat'));
 viewTrain.addEventListener('click',()=>showView('train'));
@@ -2855,6 +3000,273 @@ viewGateway.addEventListener('click',()=>showView('gateway'));
 viewKnowledge.addEventListener('click',()=>showView('knowledge'));
 viewImages.addEventListener('click',()=>showView('images'));
 viewVideo.addEventListener('click',()=>showView('video'));
+viewStudio.addEventListener('click',()=>showView('studio'));
+
+/* --- creative studio --------------------------------------------------- */
+let studioPoll=null, studioJobIds=[];
+const sProject=document.getElementById('sProject'),
+      sModel=document.getElementById('sModel'),
+      sImageModel=document.getElementById('sImageModel'),
+      sImageQuality=document.getElementById('sImageQuality'),
+      sImageSize=document.getElementById('sImageSize'),
+      sImageCost=document.getElementById('sImageCost'),
+      sGenerateImage=document.getElementById('sGenerateImage'),
+      sPrompt=document.getElementById('sPrompt'),
+      sSeconds=document.getElementById('sSeconds'),
+      sVariants=document.getElementById('sVariants'),
+      sRef=document.getElementById('sRef'),
+      sGenerate=document.getElementById('sGenerate'),
+      sUploadRef=document.getElementById('sUploadRef'),
+      sFileIn=document.getElementById('sFileIn'),
+      sExport=document.getElementById('sExport'),
+      sRefresh=document.getElementById('sRefresh'),
+      sNewProject=document.getElementById('sNewProject'),
+      sStatus=document.getElementById('sStatus'),
+      sJobs=document.getElementById('sJobs'),
+      sAssets=document.getElementById('sAssets'),
+      sCredHint=document.getElementById('sCredHint'),
+      sTimelineMeta=document.getElementById('sTimelineMeta');
+
+function studioEsc(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function studioSetStatus(msg,{busy=false,err=false}={}){
+  sStatus.textContent=msg||'';
+  sStatus.classList.toggle('busy',!!busy);
+  sStatus.classList.toggle('err',!!err);
+}
+
+function studioJobPill(status){
+  const s=(status||'').toLowerCase();
+  const cls=s==='completed'?'done':(s==='failed'?'failed':(s==='running'?'running':'stopping'));
+  return `<span class="pill ${cls}">${studioEsc(status||'unknown')}</span>`;
+}
+
+async function studioFetch(path,opts){
+  const res=await fetch(`http://127.0.0.1:${PORT}${path}`,opts);
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||res.statusText);
+  return data;
+}
+
+async function loadStudioModels(){
+  try{
+    const data=await studioFetch('/studio/models');
+    sModel.innerHTML='';
+    for(const m of data.video||[]){
+      const o=document.createElement('option');
+      o.value=m.id; o.textContent=m.label;
+      sModel.appendChild(o);
+    }
+    sImageModel.innerHTML='';
+    for(const m of data.image||[]){
+      const o=document.createElement('option');
+      o.value=m.id; o.textContent=m.label;
+      sImageModel.appendChild(o);
+    }
+    const defs=data.image_defaults||{};
+    if(defs.model) sImageModel.value=defs.model;
+    if(defs.quality) sImageQuality.value=defs.quality;
+    if(defs.size) sImageSize.value=defs.size;
+    const notice=data.image_cost_notice||'';
+    if(notice){
+      sImageCost.textContent=notice;
+      sImageCost.hidden=false;
+    }else{
+      sImageCost.hidden=true;
+    }
+    sCredHint.textContent='API keys: Settings → Models (OpenAI for Sora/Flare, Google for Veo, Runway secret for Runway).';
+  }catch(e){
+    sCredHint.textContent='Studio API unavailable — is the engine running?';
+  }
+}
+
+async function refreshStudioProjects(selectId){
+  const {projects}=await studioFetch('/studio/projects');
+  sProject.innerHTML='';
+  for(const p of projects){
+    const o=document.createElement('option');
+    o.value=p.id; o.textContent=p.name;
+    sProject.appendChild(o);
+  }
+  if(selectId) sProject.value=selectId;
+  else if(projects[0]) sProject.value=projects[0].id;
+  await refreshStudioAssets();
+}
+
+async function refreshStudioAssets(){
+  const pid=sProject.value;
+  if(!pid){
+    sAssets.innerHTML='';
+    sTimelineMeta.textContent='0 clips';
+    return;
+  }
+  const project=await studioFetch(`/studio/projects/${encodeURIComponent(pid)}`);
+  sRef.innerHTML='<option value="">— none —</option>';
+  sAssets.innerHTML='';
+  const tl=(project.timeline||[]).length;
+  sTimelineMeta.textContent=tl===1?'1 clip':`${tl} clips`;
+  for(const a of project.assets||[]){
+    if(a.type==='image'){
+      const o=document.createElement('option');
+      o.value=a.id;
+      o.textContent=(a.prompt||'Reference').slice(0,48)||a.id;
+      sRef.appendChild(o);
+    }
+    const div=document.createElement('div');
+    div.className='studio-asset';
+    const meta=document.createElement('div');
+    meta.className='ameta';
+    const promptBit=a.prompt?(' · '+studioEsc(a.prompt.slice(0,72))):'';
+    meta.innerHTML=`<b>${studioEsc(a.type)}</b>${a.model?(' · '+studioEsc(a.model)):''}${promptBit}`;
+    div.appendChild(meta);
+    if(a.type==='video'||a.type==='image'){
+      const url=`http://127.0.0.1:${PORT}/studio/projects/${encodeURIComponent(pid)}/file/${encodeURIComponent(a.id)}`;
+      if(a.type==='video'){
+        const v=document.createElement('video');
+        v.controls=true; v.src=url;
+        div.appendChild(v);
+      }else{
+        const img=document.createElement('img');
+        img.alt=a.prompt||'Generated image'; img.src=url;
+        div.appendChild(img);
+      }
+    }
+    sAssets.appendChild(div);
+  }
+}
+
+function refreshStudio(){
+  loadStudioModels();
+  refreshStudioProjects().catch(e=>{ studioSetStatus(e.message,{err:true}); });
+}
+
+async function pollStudioJobs(){
+  if(!studioJobIds.length) return;
+  sJobs.innerHTML='';
+  let pending=0;
+  let anyFailed=false;
+  for(const id of studioJobIds){
+    const row=document.createElement('div');
+    row.className='studio-job';
+    try{
+      const {job}=await studioFetch(`/studio/jobs/${encodeURIComponent(id)}`);
+      const kind=job.kind||'job';
+      const prompt=(job.prompt||'').slice(0,120);
+      row.innerHTML=`${studioJobPill(job.status)}<span class="pill">${studioEsc(kind)}</span>`
+        +`<span class="jprompt">${studioEsc(prompt||'(no prompt)')}</span>`;
+      if(job.status==='queued'||job.status==='running') pending++;
+      if(job.status==='failed') anyFailed=true;
+      if(job.error){
+        const er=document.createElement('div');
+        er.className='jerr';
+        er.textContent=job.error;
+        row.appendChild(er);
+      }
+    }catch(e){
+      row.innerHTML=`${studioJobPill('failed')}<span class="jprompt">${studioEsc(e.message)}</span>`;
+      anyFailed=true;
+    }
+    sJobs.appendChild(row);
+  }
+  if(pending){
+    studioSetStatus('Generation in progress…',{busy:true});
+  }
+  if(!pending){
+    studioJobIds=[];
+    if(studioPoll){ clearInterval(studioPoll); studioPoll=null; }
+    await refreshStudioAssets();
+    sGenerate.disabled=false;
+    sGenerateImage.disabled=false;
+    studioSetStatus(anyFailed?'Finished with errors — see jobs below.':'Generation finished.',{err:anyFailed});
+  }
+}
+
+sNewProject.addEventListener('click',async()=>{
+  const name=prompt('Project name','My video');
+  if(name===null) return;
+  const {project}=await studioFetch('/studio/projects',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name})});
+  await refreshStudioProjects(project.id);
+});
+
+sRefresh.addEventListener('click',()=>refreshStudio());
+
+sUploadRef.addEventListener('click',()=>sFileIn.click());
+sFileIn.addEventListener('change',async()=>{
+  const f=sFileIn.files&&sFileIn.files[0];
+  if(!f||!sProject.value) return;
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    try{
+      await studioFetch(`/studio/projects/${encodeURIComponent(sProject.value)}/assets`,{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({filename:f.name,data_base64:reader.result,prompt:''})});
+      await refreshStudioAssets();
+    }catch(e){ toast(e.message); }
+  };
+  reader.readAsDataURL(f);
+  sFileIn.value='';
+});
+
+async function studioStartJobs(body){
+  const pid=sProject.value;
+  if(!pid){ toast('Create a project first'); return; }
+  const prompt=(body.prompt||'').trim();
+  if(!prompt){ toast('Enter a prompt first'); sPrompt.focus(); return; }
+  body.prompt=prompt;
+  sGenerate.disabled=true;
+  sGenerateImage.disabled=true;
+  try{
+    const {jobs}=await studioFetch(`/studio/projects/${encodeURIComponent(pid)}/generate`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    studioJobIds=jobs.map(j=>j.id);
+    studioSetStatus(`Started ${jobs.length} job(s)…`,{busy:true});
+    if(studioPoll) clearInterval(studioPoll);
+    studioPoll=setInterval(pollStudioJobs,2000);
+    pollStudioJobs();
+  }catch(e){
+    sGenerate.disabled=false;
+    sGenerateImage.disabled=false;
+    studioSetStatus(e.message,{err:true});
+    toast(e.message);
+  }
+}
+
+sGenerate.addEventListener('click',()=>studioStartJobs({
+  kind:'video',
+  model:sModel.value,
+  prompt:sPrompt.value,
+  seconds:String(sSeconds.value||8),
+  n_variants:Number(sVariants.value||1),
+  ref_asset_id:sRef.value||null
+}));
+
+sGenerateImage.addEventListener('click',()=>studioStartJobs({
+  kind:'image',
+  model:sImageModel.value,
+  prompt:sPrompt.value,
+  n_variants:1,
+  image_quality:sImageQuality.value,
+  image_size:sImageSize.value
+}));
+
+sExport.addEventListener('click',async()=>{
+  const pid=sProject.value;
+  if(!pid) return;
+  try{
+    const r=await studioFetch(`/studio/projects/${encodeURIComponent(pid)}/export`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({output_name:'timeline_export.mp4'})});
+    studioSetStatus('Timeline exported.');
+    await refreshStudioAssets();
+  }catch(e){ studioSetStatus(e.message,{err:true}); toast(e.message); }
+});
+
+sProject.addEventListener('change',()=>refreshStudioAssets());
 
 function setTrainState(state){
   const live=state && !['done','failed','cancelled'].includes(state);
@@ -3397,7 +3809,7 @@ function restoreView(){
   let saved='chat';
   try{
     const v=localStorage.getItem('view');
-    if(v&&['train','channels','gateway','knowledge','images','video'].includes(v)) saved=v;
+    if(v&&['train','channels','gateway','knowledge','images','video','studio'].includes(v)) saved=v;
   }catch(e){}
   showView(saved);
 }

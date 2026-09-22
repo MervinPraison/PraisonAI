@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # The shell matches this exact prefix. Printed once, after the socket is bound,
 # so a port announced here is always a port that is actually listening.
@@ -121,6 +121,7 @@ _TRAINER = None
 _BOTS = None
 _KNOWLEDGE = None
 _MEDIA = None
+_STUDIO = None
 LOCK_FORMAT_VERSION = 2
 
 
@@ -1947,6 +1948,121 @@ class Handler(BaseHTTPRequestHandler):
             _MEDIA = MediaSupervisor(DATA_DIR)
         return _MEDIA
 
+    def _studio(self):
+        global _STUDIO
+        if _STUDIO is None:
+            from studio import StudioManager
+
+            def _log(msg: str) -> None:
+                _LOG.append(f"[studio] {msg}")
+
+            _STUDIO = StudioManager(DATA_DIR, log_fn=_log)
+        return _STUDIO
+
+    def _studio_dispatch(self, method: str, route: str) -> None:
+        """Route /studio/* to StudioManager."""
+        parts = route.strip("/").split("/")
+        mgr = self._studio()
+        try:
+            if method == "GET":
+                if route == "/studio/models":
+                    self._json(mgr.models())
+                    return
+                if route == "/studio/credentials":
+                    from studio import credential_hints
+
+                    self._json(credential_hints())
+                    return
+                if route == "/studio/projects":
+                    self._json({"projects": mgr.list_projects()})
+                    return
+                if len(parts) == 3 and parts[0] == "studio" and parts[1] == "projects":
+                    self._json(mgr.get_project(parts[2]))
+                    return
+                if len(parts) == 3 and parts[0] == "studio" and parts[1] == "jobs":
+                    job = mgr.get_job(parts[2])
+                    if job is None:
+                        self._json({"ok": False, "error": "no such job"}, 404)
+                        return
+                    self._json({"job": job.summary()})
+                    return
+                if (
+                    len(parts) == 5
+                    and parts[0] == "studio"
+                    and parts[1] == "projects"
+                    and parts[3] == "file"
+                ):
+                    path, mime = mgr.asset_file(parts[2], parts[4])
+                    data = path.read_bytes()
+                    self.send_response(200)
+                    self._cors()
+                    self.send_header("Content-Type", mime)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                self.send_error(404)
+                return
+
+            if method == "POST":
+                if route == "/studio/projects":
+                    payload = self._body()
+                    project = mgr.create_project(payload.get("name") or "Untitled")
+                    self._json({"ok": True, "project": project})
+                    return
+                if len(parts) == 4 and parts[3] == "generate":
+                    payload = self._body()
+                    jobs = mgr.start_generate(
+                        parts[2],
+                        kind=payload.get("kind") or "video",
+                        model=payload.get("model") or "",
+                        prompt=payload.get("prompt") or "",
+                        seconds=str(payload.get("seconds") or "8"),
+                        ref_asset_id=payload.get("ref_asset_id"),
+                        n_variants=int(payload.get("n_variants") or 1),
+                        image_quality=payload.get("image_quality"),
+                        image_size=payload.get("image_size"),
+                    )
+                    self._json(
+                        {
+                            "ok": True,
+                            "jobs": [j.summary() for j in jobs],
+                        }
+                    )
+                    return
+                if len(parts) == 4 and parts[3] == "assets":
+                    payload = self._body()
+                    asset = mgr.add_image_asset(
+                        parts[2],
+                        payload.get("filename") or "upload.png",
+                        payload.get("data_base64") or "",
+                        prompt=payload.get("prompt") or "",
+                    )
+                    self._json({"ok": True, "asset": asset})
+                    return
+                if len(parts) == 4 and parts[3] == "timeline":
+                    payload = self._body()
+                    result = mgr.set_timeline(
+                        parts[2], list(payload.get("timeline") or [])
+                    )
+                    self._json({"ok": True, **result})
+                    return
+                if len(parts) == 4 and parts[3] == "export":
+                    payload = self._body()
+                    result = mgr.export_timeline(
+                        parts[2], payload.get("output_name") or "export.mp4"
+                    )
+                    self._json({"ok": True, **result})
+                    return
+                self.send_error(404)
+                return
+
+            self.send_error(405)
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)}, 400)
+        except RuntimeError as exc:
+            self._json({"ok": False, "error": str(exc)}, 500)
+
     def _train_progress(self, run, cursor):
         """Replay from `cursor`, then follow. Not a subscription: a client that
         reconnects after a closed lid gets what it missed, which is the whole
@@ -2003,9 +2119,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._origin_ok():
             return
+        route = urlparse(self.path).path
+        if route.startswith("/studio"):
+            self._studio_dispatch("GET", route)
+            return
         if self.path.startswith("/train/progress"):
             trainer = self._training()
-            from urllib.parse import parse_qs, urlparse
             query = parse_qs(urlparse(self.path).query)
             run_id = (query.get("run") or [None])[0]
             run = trainer.get(run_id) if run_id else trainer.current
@@ -2102,7 +2221,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"lines": list(_LOG)})
             return
         if self.path.startswith("/search?"):
-            from urllib.parse import parse_qs, urlparse
             q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
             self._json({"hits": _search_chats(q) if q else []})
             return
@@ -2202,6 +2320,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             return
         route = urlparse(self.path).path
+
+        if route.startswith("/studio"):
+            self._studio_dispatch("POST", route)
+            return
 
         if route == "/knowledge/configure":
             payload = self._body() or {}
