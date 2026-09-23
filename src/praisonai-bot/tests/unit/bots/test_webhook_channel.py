@@ -413,3 +413,55 @@ def test_gateway_mounts_shared_webhook(monkeypatch):
     standalone = WebhookBot(agent=object(), webhook_port=8080)
     gw._maybe_mount_shared_webhook("legacy", standalone)
     assert "legacy" not in gw._webhook_channels
+
+
+@pytest.mark.asyncio
+async def test_stop_channels_clears_shared_webhook_registry(monkeypatch):
+    """Full teardown must drop shared webhook mounts (Issue #5146).
+
+    Otherwise a removed webhook channel stays reachable at
+    ``/webhooks/<channel>`` and keeps handling requests after it was stopped.
+    """
+    from praisonai_bot.gateway import server as S
+
+    gw = S.WebSocketGateway.__new__(S.WebSocketGateway)
+    gw._channel_bots = {}
+    gw._channel_tasks = {}
+    gw._routing_rules = {}
+    gw._routing_bindings = {}
+    gw._webhook_channels = {}
+    gw._channel_supervisor = AsyncMock()
+    gw._channel_supervisor.cleanup = lambda name: None
+
+    bot = WebhookBot(agent=object())
+    gw._maybe_mount_shared_webhook("billing", bot)
+    assert gw._webhook_channels == {"billing": bot}
+
+    await gw.stop_channels()
+
+    assert gw._webhook_channels == {}
+
+
+def test_start_single_channel_remounts_shared_webhook(monkeypatch):
+    """A reloaded/restarted webhook channel is re-mounted on the shared
+    listener (Issue #5146) — the reload path must not drop the mount."""
+    from praisonai_bot.gateway import server as S
+
+    gw = S.WebSocketGateway.__new__(S.WebSocketGateway)
+    gw._webhook_channels = {}
+
+    bot = WebhookBot(agent=object())
+    gw._maybe_mount_shared_webhook("billing", bot)
+    assert gw._webhook_channels["billing"] is bot
+
+    # Simulate _restart_channel dropping the stale entry (as it does before
+    # _start_single_channel creates the replacement).
+    gw._webhook_channels.pop("billing", None)
+    assert "billing" not in gw._webhook_channels
+
+    # _start_single_channel's tail calls _maybe_mount_shared_webhook on the
+    # replacement bot — the mount must come back.
+    replacement = WebhookBot(agent=object())
+    gw._maybe_mount_shared_webhook("billing", replacement)
+    assert gw._webhook_channels["billing"] is replacement
+    assert replacement._shared_mounted is True

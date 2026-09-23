@@ -9268,6 +9268,12 @@ class WebSocketGateway:
             self._channel_supervisor.cleanup(name)
 
         self._channel_bots.clear()
+        # Issue #5146: the shared webhook registry lives alongside
+        # ``_channel_bots`` but is populated separately, so clear it on full
+        # teardown too — otherwise a removed webhook channel would stay
+        # reachable at ``/webhooks/<channel>`` and keep handling requests after
+        # it has been stopped.
+        self._webhook_channels.clear()
         self._routing_rules.clear()
         self._routing_bindings.clear()
 
@@ -9687,6 +9693,12 @@ class WebSocketGateway:
             # gateway boot.
             self._replay_inbound_journal(bot)
             self._channel_bots[channel_name] = bot
+            # Issue #5146: a hot-reloaded/restarted webhook channel must be
+            # re-mounted on the gateway's shared listener too, otherwise the
+            # replacement falls back to its standalone port and
+            # ``/webhooks/<channel>`` 404s until a full restart. Same
+            # registration path used by ``start_channels``.
+            self._maybe_mount_shared_webhook(channel_name, bot)
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
             logger.error(f"Failed to create bot for '{channel_name}': {e}")
