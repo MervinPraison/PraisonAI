@@ -1202,6 +1202,124 @@ class DeliveryRouter:
 
         return ("ok", resolved, str(thread_id))
 
+    async def edit(
+        self,
+        target: str,
+        message_id: str,
+        text: str,
+        origin: Optional[SessionSource] = None,
+    ) -> Tuple[str, str]:
+        """Edit ``message_id`` at ``target`` to ``text``.
+
+        Resolves the symbolic target and dispatches through the live adapter's
+        native ``edit_message`` primitive, gated on the adapter's
+        ``supports_edit`` capability. Returns a ``(status, resolved_target)``
+        tuple where ``status`` is one of ``"ok"``, ``"unsupported"``,
+        ``"failed"`` or ``"no_route"`` — never raising — so a channel that
+        cannot edit degrades gracefully (Issue #5054).
+        """
+        adapter, channel_id, resolved, status = self._resolve_adapter(
+            target, origin
+        )
+        if status is not None:
+            return (status, resolved)
+
+        if not adapter.supports_edit:
+            return ("unsupported", resolved)
+
+        fn = getattr(adapter, "edit_message", None)
+        if not callable(fn):
+            return ("unsupported", resolved)
+
+        try:
+            result = await fn(channel_id, message_id, text)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.error(
+                "DeliveryRouter.edit failed for %s (%s): %s",
+                resolved,
+                message_id,
+                e,
+            )
+            return ("failed", resolved)
+
+        ok = getattr(result, "ok", bool(result))
+        return ("ok" if ok else "failed", resolved)
+
+    async def delete(
+        self,
+        target: str,
+        message_id: str,
+        origin: Optional[SessionSource] = None,
+    ) -> Tuple[str, str]:
+        """Delete ``message_id`` at ``target``.
+
+        Resolves the symbolic target and dispatches through the live adapter's
+        native ``delete_message`` primitive, gated on the adapter's
+        ``supports_delete`` capability. Returns a ``(status, resolved_target)``
+        tuple where ``status`` is one of ``"ok"``, ``"unsupported"``,
+        ``"failed"`` or ``"no_route"`` — never raising — so a channel that
+        cannot delete degrades gracefully (Issue #5054).
+        """
+        adapter, channel_id, resolved, status = self._resolve_adapter(
+            target, origin
+        )
+        if status is not None:
+            return (status, resolved)
+
+        if not adapter.supports_delete:
+            return ("unsupported", resolved)
+
+        fn = getattr(adapter, "delete_message", None)
+        if not callable(fn):
+            return ("unsupported", resolved)
+
+        try:
+            ok = await fn(channel_id, message_id)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.error(
+                "DeliveryRouter.delete failed for %s (%s): %s",
+                resolved,
+                message_id,
+                e,
+            )
+            return ("failed", resolved)
+
+        return ("ok" if ok else "failed", resolved)
+
+    def _resolve_adapter(
+        self,
+        target: str,
+        origin: Optional[SessionSource] = None,
+    ) -> Tuple[Any, str, str, Optional[str]]:
+        """Resolve ``target`` to ``(adapter, channel_id, resolved, status)``.
+
+        Shared resolution for the message-mutation verbs (edit/delete): returns
+        the unwrapped live adapter plus the resolved ``platform:channel`` label.
+        ``status`` is ``None`` on success, or a terminal ``"no_route"`` when the
+        target cannot be resolved to a live adapter — mirroring the guard
+        preamble ``react``/``create_thread`` already use.
+        """
+        try:
+            platform, channel_id, _thread_id = self.resolve(target, origin)
+        except ValueError as e:
+            logger.debug(
+                "DeliveryRouter._resolve_adapter: cannot resolve '%s': %s",
+                target,
+                e,
+            )
+            return (None, "", target, "no_route")
+
+        resolved = f"{platform}:{channel_id}"
+        bot = self._botos.get_bot(platform)
+        if not bot:
+            return (None, channel_id, resolved, "no_route")
+
+        # Native mutation primitives live on the underlying adapter, not the
+        # user-facing ``Bot`` wrapper — unwrap it before dispatch (as react and
+        # create_thread do for their platform primitives).
+        adapter = getattr(bot, "adapter", None) or bot
+        return (adapter, channel_id, resolved, None)
+
     def configure_from_dict(self, config: Dict) -> None:
         """
         Configure the directory from a configuration dictionary.

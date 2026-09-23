@@ -17,6 +17,7 @@ from praisonai_bot.bots.delivery import DeliveryRouter, SessionSource
 from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
+    MessageActionResult,
     ReactionResult,
     TargetInfo,
     ThreadResult,
@@ -528,6 +529,166 @@ def test_messenger_still_satisfies_protocol_with_create_thread():
     router, _ = _make_thread_router()
     messenger = BotOutboundMessenger(router)
     assert isinstance(messenger, OutboundMessengerProtocol)
+
+
+def _make_mutation_router(
+    *, supports_edit=True, supports_delete=True, edit_ok=True, delete_ok=True
+):
+    """Build a DeliveryRouter over a fake bot with edit/delete primitives (#5054).
+
+    The primitives live on an ``.adapter`` so the router's unwrap path is
+    exercised, matching real Telegram/Slack/Discord adapters.
+    """
+    calls = []
+
+    class FakeSendResult:
+        def __init__(self, ok):
+            self.ok = ok
+
+    class FakeAdapter:
+        platform = "telegram"
+
+        def __init__(self):
+            self.supports_edit = supports_edit
+            self.supports_delete = supports_delete
+
+        async def edit_message(self, channel_id, message_id, content):
+            calls.append(("edit", channel_id, message_id, content))
+            return FakeSendResult(edit_ok)
+
+        async def delete_message(self, channel_id, message_id):
+            calls.append(("delete", channel_id, message_id))
+            return delete_ok
+
+    class FakeWrapper:
+        def __init__(self):
+            self.adapter = FakeAdapter()
+
+        async def send_message(self, channel_id, text):
+            pass
+
+    wrapper = FakeWrapper()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return wrapper if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+    return router, calls
+
+
+def test_edit_ok_dispatches_to_adapter():
+    router, calls = _make_mutation_router()
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.edit("telegram:456", "98", "Done ✅"))
+
+    assert isinstance(result, MessageActionResult)
+    assert result.status == "ok"
+    assert result.ok is True
+    assert result.target == "telegram:456"
+    assert calls == [("edit", "456", "98", "Done ✅")]
+
+
+def test_delete_ok_dispatches_to_adapter():
+    router, calls = _make_mutation_router()
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.delete("telegram:456", "77"))
+
+    assert result.status == "ok"
+    assert calls == [("delete", "456", "77")]
+
+
+def test_edit_unsupported_channel_returns_typed_outcome():
+    router, calls = _make_mutation_router(supports_edit=False)
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.edit("telegram:456", "98", "x"))
+
+    assert result.status == "unsupported"
+    assert "cannot edit" in (result.detail or "")
+    assert calls == []  # never dispatched
+
+
+def test_delete_unsupported_channel_returns_typed_outcome():
+    router, calls = _make_mutation_router(supports_delete=False)
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.delete("telegram:456", "77"))
+
+    assert result.status == "unsupported"
+    assert "cannot delete" in (result.detail or "")
+    assert calls == []
+
+
+def test_edit_transport_failure_returns_failed():
+    router, calls = _make_mutation_router(edit_ok=False)
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.edit("telegram:456", "98", "x"))
+
+    assert result.status == "failed"
+    assert calls == [("edit", "456", "98", "x")]
+
+
+def test_delete_unresolvable_target_returns_no_route():
+    router, calls = _make_mutation_router()
+    messenger = BotOutboundMessenger(router)  # no origin
+
+    result = asyncio.run(messenger.delete("origin", "77"))
+
+    assert result.status == "no_route"
+    assert calls == []
+
+
+def test_messenger_still_satisfies_protocol_with_edit_delete():
+    router, _ = _make_mutation_router()
+    messenger = BotOutboundMessenger(router)
+    assert isinstance(messenger, OutboundMessengerProtocol)
+
+
+def test_production_adapters_declare_delete_capability():
+    """Regression for #5054: an adapter with a real ``delete_message`` MUST
+    declare ``supports_delete=True`` in its default capabilities, otherwise the
+    router's capability gate returns ``unsupported`` before ever calling the
+    primitive — silently disabling delete on every real channel.
+
+    The prior fake-adapter tests set ``supports_delete`` directly and so missed
+    this production-wiring gap. Telegram/Discord/Slack all ship a working
+    ``chat_delete``/``delete``/``delete_message`` transport call.
+    """
+    checks = []
+    try:
+        from praisonai_bot.bots.telegram import TelegramBot as _TG
+        checks.append(("telegram", _TG))
+    except Exception:  # pragma: no cover - optional dep import guard
+        pass
+    try:
+        from praisonai_bot.bots.discord import DiscordBot as _DC
+        checks.append(("discord", _DC))
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        from praisonai_bot.bots.slack import SlackBot as _SL
+        checks.append(("slack", _SL))
+    except Exception:  # pragma: no cover
+        pass
+
+    assert checks, "expected at least one production adapter to import"
+
+    for name, cls in checks:
+        caps = cls.default_capabilities()
+        assert caps.supports_delete is True, (
+            f"{name} implements delete_message but does not declare "
+            f"supports_delete=True — the router gate will report 'unsupported'"
+        )
 
 
 class TestSessionManagerRegistration:
