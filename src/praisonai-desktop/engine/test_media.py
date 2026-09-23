@@ -53,6 +53,16 @@ class MediaSupervisorTests(unittest.TestCase):
         self.assertIn("replicate/minimax/video-01", ids)
         self.assertGreater(len(ids), 1)
 
+    def test_generate_video_rejects_unknown_model(self):
+        with self.assertRaises(ValueError):
+            self.sup.generate_video("a cat", settings={}, model="replicate/bogus/model")
+
+    def test_generate_video_rejects_arbitrary_replicate_id(self):
+        with self.assertRaises(ValueError):
+            self.sup.generate_video(
+                "a cat", settings={}, model="replicate/minimax/video-99"
+            )
+
     def test_generate_image_requires_key(self):
         import os
 

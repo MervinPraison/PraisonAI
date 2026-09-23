@@ -164,9 +164,14 @@ class MediaSupervisor:
         if not prompt:
             raise ValueError("prompt is required")
         model = (model or "replicate/minimax/video-01").strip()
-        if not model.startswith("replicate/"):
-            return self._generate_video_sdk(prompt, model=model)
-        return self._generate_video_replicate(prompt)
+        known = {m["id"] for m in VIDEO_MODELS}
+        if model not in known:
+            raise ValueError(
+                f"Unknown video model {model!r}. Choose one of: {', '.join(sorted(known))}"
+            )
+        if model == "replicate/minimax/video-01":
+            return self._generate_video_replicate(prompt)
+        return self._generate_video_sdk(prompt, model=model)
 
     def _generate_video_sdk(self, prompt: str, *, model: str) -> dict:
         """Route SDK-capable providers (Sora, Veo) through VideoAgent so the
@@ -183,9 +188,22 @@ class MediaSupervisor:
         local_path = self.out / "videos" / f"{file_id}.mp4"
         try:
             agent = VideoAgent(llm=model, verbose=False)
-            agent.start(prompt, wait=True, output=str(local_path))
+            # On success start() returns the video bytes and writes `output`.
+            # On a failed/incomplete generation it returns the status object
+            # WITHOUT writing the file, so we must inspect the result and the
+            # file before reporting success — otherwise a failed job would show
+            # a "saved" notification pointing at a nonexistent path.
+            result = agent.start(prompt, wait=True, output=str(local_path))
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(str(exc)) from exc
+
+        if not isinstance(result, (bytes, bytearray)):
+            status = getattr(result, "status", "failed")
+            raise RuntimeError(
+                f"Video generation did not complete (status: {status})"
+            )
+        if not local_path.is_file() or local_path.stat().st_size == 0:
+            raise RuntimeError("Video generation reported success but wrote no file")
 
         return {
             "id": file_id,
