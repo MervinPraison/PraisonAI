@@ -4746,6 +4746,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
             return None
+        finally:
+            # Unregister this turn's ownership list from the process-wide
+            # live-turn registry once the turn finishes (success or failure).
+            # The sync path does this in _end_turn_tracking's finally; the async
+            # path previously relied only on the *next* turn's
+            # _clear_turn_tracking(), so a terminal achat/arun/astart left its
+            # completed ownership globally registered and a later ephemeral()
+            # cleanup treated its committed messages as still live. Rollback in
+            # the except blocks above already read ownership before this runs.
+            self._clear_turn_tracking()
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""

@@ -102,6 +102,35 @@ def test_async_tool_guardrail_offloaded_to_thread():
     assert seen["thread"] != seen["loop_thread"]
 
 
+def test_async_terminal_turn_unregisters_live_owner():
+    # Greptile finding: a terminal async turn (last achat/arun/astart in its
+    # context) began ownership tracking but never ended it, so its completed
+    # ownership list lingered in the process-wide live-turn registry and a later
+    # ephemeral() cleanup treated its committed messages as still live. The
+    # async default path now ends tracking in a finally (via _clear_turn_tracking).
+    from praisonaiagents.agent import memory_mixin
+
+    agent = _RollbackAgent()
+
+    # Simulate a completed async turn: begin tracking, append, then end via the
+    # same helper the fixed _achat_impl finally now calls.
+    agent._begin_turn_tracking()
+    agent._add_to_chat_history("user", "committed-user")
+    agent._add_to_chat_history("assistant", "committed-assistant")
+
+    # While the turn is live, its messages are exposed to concurrent ephemeral()
+    # cleanup via the live-turn registry.
+    assert len(memory_mixin._live_turn_message_ids()) == 2
+
+    # Terminal turn finishing must drop its ownership from the global registry.
+    agent._clear_turn_tracking()
+    assert memory_mixin._live_turn_message_ids() == set()
+
+    # Committed messages remain in history (only the *registry* entry is cleared).
+    contents = [m["content"] for m in agent.chat_history]
+    assert "committed-user" in contents and "committed-assistant" in contents
+
+
 def test_hooks_config_registry_isolates_event_hooks():
     from praisonaiagents.hooks import HookRegistry, get_default_registry
     from praisonaiagents.config import HooksConfig
