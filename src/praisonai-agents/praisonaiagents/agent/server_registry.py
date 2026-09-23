@@ -12,6 +12,7 @@ and routes registered through one launcher being invisible on the other's app.
 
 import os
 import threading
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -88,8 +89,61 @@ class _AgentServerRegistry:
                 self._endpoints.pop(port, None)
             return removed
 
+    def teardown_routes_for(self, endpoint_id: str) -> None:
+        """Remove every route owned by ``endpoint_id`` across all ports.
+
+        Performs BOTH the endpoint-registry removal AND the matching FastAPI
+        route teardown while holding ``self._lock`` for each port, so it cannot
+        interleave with a concurrent ``reserve_route`` + ``app.post()`` for the
+        same path (which would otherwise let this filter delete a freshly
+        registered live endpoint, or race the ``_apps`` snapshot). Only the
+        agent-owned POST route at each path is dropped; a co-located GET (e.g.
+        the built-in ``/`` and ``/health``) is preserved.
+        """
+        for port in list(self._apps.keys()):
+            with self._lock:
+                paths = self._endpoints.get(port, {})
+                removed = [p for p, owner in paths.items() if owner == endpoint_id]
+                if not removed:
+                    continue
+                for p in removed:
+                    del paths[p]
+                if not paths:
+                    self._endpoints.pop(port, None)
+
+                app = self._apps.get(port)
+                if app is None:
+                    continue
+                removed_set = set(removed)
+                try:
+                    app.router.routes = [
+                        r for r in app.router.routes
+                        if not (
+                            getattr(r, "path", None) in removed_set
+                            and "POST" in (getattr(r, "methods", None) or set())
+                        )
+                    ]
+                    # Invalidate cached OpenAPI schema so removed routes
+                    # disappear from /openapi.json and /docs.
+                    app.openapi_schema = None
+                except Exception:
+                    logger.debug(
+                        "Failed to tear down routes for %s on port %s",
+                        endpoint_id,
+                        port,
+                        exc_info=True,
+                    )
+
     def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:  # noqa: S104
-        """Start server with proper readiness signaling. Returns True if server was started."""
+        """Start server with proper readiness signaling. Returns True if server was started.
+
+        Readiness is signalled only *after* uvicorn has actually bound the
+        socket (``Server.started``), so a caller that observes readiness can
+        immediately issue a request without a connection-refused race. If the
+        bind fails (e.g. ``Address already in use``) the port's ``_started``
+        flag is cleared so a later ``launch()`` can retry the bind instead of
+        registering routes on an app whose server never came up.
+        """
         with self._lock:
             if self._started.get(port, False):
                 return False  # Already started
@@ -97,17 +151,49 @@ class _AgentServerRegistry:
             app = self._apps.get(port)
 
         if not app:
+            # Roll back the reservation so a caller that first registers an app
+            # can start it — we must not leave the port permanently "started".
+            with self._lock:
+                self._started[port] = False
             raise ValueError(f"No app registered for port {port}")
 
         ready_event = self._ready_events[port]
 
         def run_server():
-            import uvicorn
-            # Remove hardcoded log_level to avoid conflict with kwargs
-            config = uvicorn.Config(app, host=host, port=port, **kwargs)
-            server = uvicorn.Server(config)
-            ready_event.set()  # Signal readiness
-            server.run()
+            try:
+                import uvicorn
+                # Remove hardcoded log_level to avoid conflict with kwargs
+                config = uvicorn.Config(app, host=host, port=port, **kwargs)
+                server = uvicorn.Server(config)
+
+                # Signal readiness only once uvicorn reports the socket is bound
+                # (server.started flips True after startup completes). A watcher
+                # thread polls that flag and sets the event, so waiters are not
+                # told "ready" before the port actually accepts connections.
+                def _signal_when_bound():
+                    while not server.started:
+                        if ready_event.is_set():
+                            return  # bind failed / server exited before startup
+                        time.sleep(0.02)
+                    ready_event.set()
+
+                watcher = threading.Thread(target=_signal_when_bound, daemon=True)
+                watcher.start()
+                server.run()
+            except Exception:
+                # Bind/startup failed. Clear the started flag so a subsequent
+                # launch() can re-attempt binding instead of silently
+                # registering routes on a dead server, and unblock any waiter.
+                logger.warning(
+                    "Agent server on port %s failed to start.", port, exc_info=True
+                )
+                with self._lock:
+                    self._started[port] = False
+            finally:
+                # Always release the waiter: on failure the started flag has been
+                # cleared above, so the (now-false) readiness is correctly
+                # observable via the flag rather than a hung wait().
+                ready_event.set()
 
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
@@ -129,7 +215,11 @@ class _AgentServerRegistry:
                 timeout,
             )
 
-        return True
+        # Report whether the bind actually succeeded: on failure run_server has
+        # cleared the flag, so returning it lets callers distinguish a live
+        # server from a poisoned port.
+        with self._lock:
+            return self._started.get(port, False)
 
 
 # Module level — single registry instance shared by every launch() call site.

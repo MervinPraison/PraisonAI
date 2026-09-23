@@ -37,33 +37,13 @@ def cleanup_launch_registration(agent_id: str) -> None:
     tears those routes back down so a closed agent's endpoint stops accepting
     requests and the request handler closure no longer keeps the Agent object
     graph alive.
+
+    The endpoint-registry removal and the matching FastAPI route teardown are
+    performed together under the registry lock (see
+    ``_AgentServerRegistry.teardown_routes_for``) so cleanup cannot race a
+    concurrent launch that reserves and registers a route on the same port.
     """
-    for port in list(_server_registry._apps.keys()):
-        removed = _server_registry.unregister_routes_for(port, agent_id)
-        if not removed:
-            continue
-        app = _server_registry._apps.get(port)
-        if app is None:
-            continue
-        for p in removed:
-            try:
-                # Only drop the agent-owned POST route. launch() always
-                # registers the handler via ``.post(path)``, so filtering
-                # on both path AND method preserves unrelated routes that
-                # share the path with a different verb (e.g. the built-in
-                # GET /health and GET /).
-                app.router.routes = [
-                    r for r in app.router.routes
-                    if not (
-                        getattr(r, "path", None) == p
-                        and "POST" in (getattr(r, "methods", None) or set())
-                    )
-                ]
-                # Invalidate cached OpenAPI schema so removed routes
-                # disappear from /openapi.json and /docs.
-                app.openapi_schema = None
-            except Exception:
-                pass
+    _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
     pass
