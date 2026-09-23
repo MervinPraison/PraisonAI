@@ -1,11 +1,11 @@
 {
   "version": "1.7.6",
-  "lastUpdated": "2026-10-01",
+  "lastUpdated": "2026-10-07",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 433,
-    "pythonWrapperFeatures": 21,
+    "pythonWrapperFeatures": 20,
     "typescriptFeatures": 2106,
     "gapCount": 7,
     "stubCount": 0,
@@ -958,7 +958,6 @@
       "endpoints",
       "eval",
       "gateway",
-      "ollama",
       "onboard",
       "persistence",
       "recipe",
