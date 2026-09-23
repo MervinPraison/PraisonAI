@@ -375,7 +375,10 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         @self._app.event("message")
         async def handle_message(event, say):
             if event.get("bot_id"):
-                return
+                # Bot-authored: drop unless the channel opts in (#5062). When it
+                # does, the BotLoopGuard breaks a runaway A<->B reply loop.
+                if not self._bot_sender_allowed(event):
+                    return
             
             bot_message = self._convert_event_to_message(event)
 
@@ -648,7 +651,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         @self._app.event("app_mention")
         async def handle_mention(event, say):
             if event.get("bot_id"):
-                return
+                # Bot-authored @mention: drop unless the channel opts in (#5062).
+                if not self._bot_sender_allowed(event):
+                    return
 
             bot_message = self._convert_event_to_message(event)
             bot_message._channel_type = "slack"
@@ -1275,6 +1280,21 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
     
+    def _bot_sender_allowed(self, event: Dict[str, Any]) -> bool:
+        """Whether a bot-authored Slack event may be dispatched (#5062).
+
+        Slack surfaces the sending app via ``bot_id`` (not ``user``), so the
+        loop-guard pair is keyed on that. Returns ``False`` (drop) unless the
+        channel opted into bot-authored messages and the pair is still within
+        the ``BotLoopGuard`` budget.
+        """
+        sender = BotUser(
+            user_id=str(event.get("bot_id") or event.get("user") or ""),
+            is_bot=True,
+        )
+        self_id = str(getattr(self._bot_user, "user_id", "") or "")
+        return self.bot_loop_allows(sender, self_bot_id=self_id)
+
     def _convert_event_to_message(self, event: Dict[str, Any]) -> BotMessage:
         """Convert Slack event to BotMessage."""
         sender = BotUser(

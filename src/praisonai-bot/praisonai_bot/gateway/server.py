@@ -190,6 +190,27 @@ def _delivery_text_digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+def _apply_bot_loop_config(config_kwargs: Dict[str, Any], ch_cfg: Mapping[str, Any]) -> None:
+    """Fold a channel's ``allow_bots`` / ``bot_loop_protection`` into BotConfig.
+
+    Issue #5062: mirrors how ``unknown_user_policy`` is wired from ``gateway.yaml``.
+    ``allow_bots`` (bool, string, or 0/1) opts the channel into bot-authored
+    inbound messages; ``bot_loop_protection`` is a dict passed through untouched
+    so the adapter can build a ``BotLoopGuard`` from it. Both are only set when
+    present, so a channel that declares neither is byte-for-byte unchanged.
+    """
+    _raw_allow_bots = ch_cfg.get("allow_bots")
+    if _raw_allow_bots is not None:
+        if isinstance(_raw_allow_bots, str):
+            allow_bots = _raw_allow_bots.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            allow_bots = bool(_raw_allow_bots)
+        config_kwargs["allow_bots"] = allow_bots
+    _raw_loop = ch_cfg.get("bot_loop_protection")
+    if isinstance(_raw_loop, dict):
+        config_kwargs["bot_loop_protection"] = dict(_raw_loop)
+
+
 def _should_bypass_loopback_auth(
     bind_host: Optional[str],
     client_host: Optional[str],
@@ -7913,6 +7934,11 @@ class WebSocketGateway:
             if _raw_owner is not None and str(_raw_owner).strip():
                 config_kwargs["owner_user_id"] = str(_raw_owner).strip()
 
+            # Issue #5062: bot-to-bot inbound opt-in + loop guard. When a channel
+            # accepts bot-authored messages, the core BotLoopGuard auto-breaks a
+            # runaway A<->B reply loop using the per-pair sliding-window budget.
+            _apply_bot_loop_config(config_kwargs, ch_cfg)
+
             # Only pass default_tools when the channel explicitly overrides it,
             # so BotConfig's own default_factory stays the single source of truth.
             _raw_yaml_tools = ch_cfg.get("default_tools")
@@ -9521,6 +9547,9 @@ class WebSocketGateway:
         _raw_owner = ch_cfg.get("owner_user_id")
         if _raw_owner is not None and str(_raw_owner).strip():
             config_kwargs["owner_user_id"] = str(_raw_owner).strip()
+
+        # Issue #5062: honour bot-to-bot opt-in + loop guard on hot-reload too.
+        _apply_bot_loop_config(config_kwargs, ch_cfg)
 
         # Only pass default_tools when the channel explicitly overrides it
         _raw_yaml_tools = ch_cfg.get("default_tools")

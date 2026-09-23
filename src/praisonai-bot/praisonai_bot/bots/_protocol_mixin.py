@@ -256,6 +256,69 @@ class MessageHookMixin:
             return None
         return getattr(agent, '_hook_runner', None)
 
+    def bot_loop_allows(
+        self,
+        sender: Any,
+        *,
+        self_bot_id: str = "",
+    ) -> bool:
+        """Decide whether to dispatch a *bot-authored* inbound turn (#5062).
+
+        Adapters that admit bot senders call this at their existing bot-author
+        decision point, passing the inbound message's ``sender`` (a ``BotUser``)
+        and our own bot identity. The verdict folds two gates:
+
+        * ``allow_bots`` opt-in — ``False`` (the default) drops every
+          bot-authored message exactly as today (fail-closed).
+        * the core ``BotLoopGuard`` sliding-window pair budget — once an
+          A<->B pair exceeds its budget the reply is suppressed for a cooldown,
+          breaking a runaway bot-to-bot reply loop.
+
+        Returns ``True`` to dispatch, ``False`` to drop. A human sender (or a
+        missing ``sender``) always returns ``True`` — the guard is a zero-cost
+        no-op on the common path.
+        """
+        # Human sender (or no sender): never gated by the bot-loop guard.
+        if sender is None or not getattr(sender, "is_bot", False):
+            return True
+
+        # Bot-authored: honour the opt-in first. Default-off keeps today's
+        # "drop bot messages" behaviour byte-for-byte.
+        allow_bots = getattr(self.config, "allow_bots", False) if hasattr(self, "config") else False
+        if not allow_bots:
+            return False
+
+        guard = self._get_bot_loop_guard()
+        if guard is None:  # pragma: no cover — defensive: core always present
+            return True
+        sender_bot_id = str(getattr(sender, "user_id", "") or "")
+        try:
+            return guard.observe(
+                self_bot_id=str(self_bot_id or getattr(self, "_self_bot_id", "") or ""),
+                sender_bot_id=sender_bot_id,
+            )
+        except Exception as e:  # pragma: no cover — never crash the inbound path
+            logger.debug("BotLoopGuard.observe failed (allowing): %s", e)
+            return True
+
+    def _get_bot_loop_guard(self) -> Any:
+        """Lazily build this adapter's ``BotLoopGuard`` from config (cached)."""
+        guard = getattr(self, "_bot_loop_guard", None)
+        if guard is not None:
+            return guard
+        try:
+            from praisonaiagents.bots import BotLoopGuard, BotLoopPolicy
+        except ImportError:  # pragma: no cover — core always present in wrapper
+            return None
+        policy_data = (
+            getattr(self.config, "bot_loop_protection", None)
+            if hasattr(self, "config")
+            else None
+        )
+        guard = BotLoopGuard(BotLoopPolicy.from_dict(policy_data))
+        self._bot_loop_guard = guard
+        return guard
+
     @staticmethod
     def _run_hooks_blocking(runner: Any, event: Any, event_input: Any) -> List[Any]:
         """Execute hooks and return their results, safe from any context.

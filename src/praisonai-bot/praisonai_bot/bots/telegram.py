@@ -641,7 +641,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             message = await process_inbound_telegram_message(update, self)
             if not message:
                 return  # Message was dropped by security checks
-            
+
+            # Bot-to-bot loop guard (#5062). A bot-authored message is dropped
+            # unless the channel opted into ``allow_bots``; once opted in, the
+            # BotLoopGuard breaks a runaway A<->B reply loop. Human senders are
+            # a zero-cost no-op.
+            if not self.bot_loop_allows(
+                message.sender,
+                self_bot_id=str(getattr(self._bot_user, "user_id", "") or ""),
+            ):
+                return
+
             for handler in self._message_handlers:
                 try:
                     if asyncio.iscoroutinefunction(handler):
