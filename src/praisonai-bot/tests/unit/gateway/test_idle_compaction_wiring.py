@@ -88,6 +88,7 @@ def test_configure_enabled_defaults_and_overrides():
     # Unspecified knobs fall back to sane defaults.
     assert cfg["cooldown_seconds"] == 3600.0
     assert cfg["max_per_sweep"] == 20
+    assert cfg["scan_limit"] == 5000
 
 
 def test_candidate_selection_filters():
@@ -116,7 +117,7 @@ def test_candidate_selection_filters():
         "cooldown_seconds": 3600.0,
         "max_per_sweep": 20,
     }
-    picks = gw._idle_compaction_candidates(cfg, now)
+    picks = {sid for sid, _ in gw._idle_compaction_candidates(cfg, now)}
     assert "big-idle" in picks
     assert "big-unknown" in picks
     assert "small-idle" not in picks
@@ -151,3 +152,60 @@ def test_seconds_since_iso_parsing():
     val = WebSocketGateway._seconds_since_iso(_iso_ago(100), now)
     assert val is not None
     assert 90 <= val <= 110
+
+
+def test_configure_rejects_non_positive_values():
+    # A non-positive sweep interval (or any numeric knob) must disable the
+    # feature rather than start a busy-spinning / crashing loop (#5170 review).
+    for bad in (
+        {"sweep_interval_seconds": 0},
+        {"sweep_interval_seconds": -5},
+        {"idle_after_seconds": 0},
+        {"min_tokens": 0},
+        {"cooldown_seconds": -1},
+        {"max_per_sweep": 0},
+        {"scan_limit": 0},
+    ):
+        gw = WebSocketGateway()
+        gw._session_store = _FakeStore([])
+        gw._configure_lifecycle(
+            {"idle_compaction": {"enabled": True, **bad}}
+        )
+        assert gw._idle_compaction_cfg is None, bad
+
+
+def test_candidate_selection_carries_message_count():
+    now = time.time()
+    rows = [
+        {"session_id": "s1", "updated_at": _iso_ago(2000),
+         "total_tokens": 20000, "message_count": 42},
+        {"session_id": "s2", "updated_at": _iso_ago(2000),
+         "total_tokens": 20000},  # no message_count -> None
+    ]
+    gw = WebSocketGateway()
+    gw._session_store = _FakeStore(rows)
+    cfg = {
+        "idle_after_seconds": 1800.0,
+        "min_tokens": 8000,
+        "sweep_interval_seconds": 300.0,
+        "cooldown_seconds": 3600.0,
+        "max_per_sweep": 20,
+        "scan_limit": 5000,
+    }
+    picks = dict(gw._idle_compaction_candidates(cfg, now))
+    assert picks["s1"] == 42
+    assert picks["s2"] is None
+
+
+def test_session_grew_detects_new_turn():
+    # Guards the stale-checkpoint race: a turn appended during summarisation
+    # grows the transcript, so the checkpoint must be skipped (#5170 review).
+    store = _FakeStore([
+        {"session_id": "s1", "message_count": 44},
+    ])
+    assert WebSocketGateway._session_grew(store, "s1", 42) is True
+    assert WebSocketGateway._session_grew(store, "s1", 44) is False
+    # Unknown / missing session -> treated as not grown.
+    assert WebSocketGateway._session_grew(store, "absent", 1) is False
+    store_no_count = _FakeStore([{"session_id": "s1"}])
+    assert WebSocketGateway._session_grew(store_no_count, "s1", 42) is False

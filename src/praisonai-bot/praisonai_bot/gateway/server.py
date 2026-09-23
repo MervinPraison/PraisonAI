@@ -2665,7 +2665,7 @@ class WebSocketGateway:
                 self._idle_compaction_cfg = None
             else:
                 try:
-                    self._idle_compaction_cfg = {
+                    parsed = {
                         "idle_after_seconds": float(
                             ic.get("idle_after_seconds", 1800.0)
                         ),
@@ -2677,7 +2677,23 @@ class WebSocketGateway:
                             ic.get("cooldown_seconds", 3600.0)
                         ),
                         "max_per_sweep": int(ic.get("max_per_sweep", 20)),
+                        # How many sessions to enumerate per sweep. Stores return
+                        # newest-first, so a small cap would starve older idle
+                        # sessions on a busy gateway (Issue #5170 review).
+                        "scan_limit": int(ic.get("scan_limit", 5000)),
                     }
+                    # Reject non-positive numbers instead of starting a broken
+                    # loop: a zero/negative sweep interval would busy-spin or
+                    # make ``asyncio.sleep`` raise and kill the task, and
+                    # non-positive token/cooldown/limit values disable the
+                    # safeguards the sweep depends on (Issue #5170 review).
+                    invalid = [k for k, v in parsed.items() if v <= 0]
+                    if invalid:
+                        raise ValueError(
+                            "non-positive values not allowed: "
+                            + ", ".join(sorted(invalid))
+                        )
+                    self._idle_compaction_cfg = parsed
                     logger.info(
                         "Gateway idle_compaction enabled "
                         "(idle_after=%ss, min_tokens=%s, sweep=%ss)",
@@ -2964,27 +2980,34 @@ class WebSocketGateway:
             raise
 
     def _idle_compaction_candidates(
-        self, cfg: Dict[str, Any], now: float
-    ) -> List[str]:
-        """Select persisted session ids eligible for off-path compaction.
+        self, cfg: Dict[str, Any], now: float, listing: Any = None
+    ) -> List[Tuple[str, Optional[int]]]:
+        """Select persisted sessions eligible for off-path compaction.
 
         Pure selection over the durable store's session listing: a session is a
         candidate when it has been idle at least ``idle_after_seconds``, its
         transcript is at least ``min_tokens``, it is not currently held live and
         executing in this gateway, and it is not inside its per-session cooldown.
         Kept separate from the loop so the decision stays testable.
+
+        Returns ``(session_id, message_count)`` pairs. The message count is the
+        transcript length observed at selection time; the loop rechecks it before
+        committing a checkpoint so a turn that arrives during summarisation is
+        never silently dropped (Issue #5170 review). ``listing`` may be supplied
+        by the caller (e.g. fetched off-thread); otherwise it is read here.
         """
         store = self._session_store
         if store is None or not hasattr(store, "list_sessions"):
             return []
         idle_after = cfg["idle_after_seconds"]
         min_tokens = cfg["min_tokens"]
-        try:
-            listing = store.list_sessions(limit=1000)
-        except Exception as e:
-            logger.debug("idle_compaction list_sessions failed: %s", e)
-            return []
-        candidates: List[str] = []
+        if listing is None:
+            try:
+                listing = store.list_sessions(limit=cfg.get("scan_limit", 5000))
+            except Exception as e:
+                logger.debug("idle_compaction list_sessions failed: %s", e)
+                return []
+        candidates: List[Tuple[str, Optional[int]]] = []
         for row in listing:
             sid = row.get("session_id") or row.get("id")
             if not sid:
@@ -3002,7 +3025,8 @@ class WebSocketGateway:
             total_tokens = row.get("total_tokens")
             if isinstance(total_tokens, (int, float)) and total_tokens < min_tokens:
                 continue
-            candidates.append(sid)
+            mc = row.get("message_count")
+            candidates.append((sid, mc if isinstance(mc, int) else None))
         return candidates
 
     @staticmethod
@@ -3058,6 +3082,7 @@ class WebSocketGateway:
             target_tokens=int(min_tokens * 0.75),
             strategy=CompactionStrategy.SUMMARIZE,
         )
+        scan_limit = cfg.get("scan_limit", 5000)
         logger.info("Gateway idle-compaction sweep armed")
         try:
             while self._is_running:
@@ -3065,13 +3090,25 @@ class WebSocketGateway:
                 if self._is_dormant:
                     continue
                 now = time.time()
-                candidates = self._idle_compaction_candidates(cfg, now)
+                # Store I/O is synchronous; run it off the gateway event loop so
+                # websocket and turn handling are never paused by a sweep
+                # (Issue #5170 review).
+                try:
+                    listing = await asyncio.to_thread(
+                        store.list_sessions, limit=scan_limit
+                    )
+                except Exception as e:
+                    logger.debug("idle_compaction list_sessions failed: %s", e)
+                    continue
+                candidates = self._idle_compaction_candidates(cfg, now, listing)
                 processed = 0
-                for sid in candidates:
+                for sid, seen_count in candidates:
                     if processed >= max_per_sweep:
                         break
                     try:
-                        messages = store.get_working_history(sid)
+                        messages = await asyncio.to_thread(
+                            store.get_working_history, sid
+                        )
                     except Exception as e:
                         logger.debug(
                             "idle_compaction get_working_history(%s) failed: %s",
@@ -3095,31 +3132,75 @@ class WebSocketGateway:
                         and bool((result.summary or "").strip())
                     )
                     if shrank:
-                        try:
-                            store.append_compaction_checkpoint(
-                                sid,
-                                result.summary,
-                                tokens_before=result.original_tokens,
-                                tokens_after=result.compacted_tokens,
-                                metadata={"source": "idle_compaction"},
+                        # Guard against the stale-checkpoint race: if a turn was
+                        # persisted while we were summarising, the transcript
+                        # grew and the summary no longer covers the whole log.
+                        # ``append_compaction_checkpoint`` anchors to the *current*
+                        # length, so committing now would drop the new turn from
+                        # resume context. Re-read the length and skip if it moved
+                        # (Issue #5170 review); the session is cooled down and
+                        # retried on a later sweep.
+                        grew = False
+                        if seen_count is not None:
+                            grew = await asyncio.to_thread(
+                                self._session_grew, store, sid, seen_count,
+                                scan_limit,
                             )
-                            logger.info(
-                                "[idle-compaction] %s: %s->%s tokens",
-                                sid,
-                                result.original_tokens,
-                                result.compacted_tokens,
-                            )
-                        except Exception as e:
+                        if grew:
                             logger.debug(
-                                "idle_compaction checkpoint(%s) failed: %s",
-                                sid, e,
+                                "idle_compaction skip(%s): transcript grew "
+                                "during compaction; will retry",
+                                sid,
                             )
+                        else:
+                            try:
+                                await asyncio.to_thread(
+                                    store.append_compaction_checkpoint,
+                                    sid,
+                                    result.summary,
+                                    tokens_before=result.original_tokens,
+                                    tokens_after=result.compacted_tokens,
+                                    metadata={"source": "idle_compaction"},
+                                )
+                                logger.info(
+                                    "[idle-compaction] %s: %s->%s tokens",
+                                    sid,
+                                    result.original_tokens,
+                                    result.compacted_tokens,
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    "idle_compaction checkpoint(%s) failed: %s",
+                                    sid, e,
+                                )
                     # Cool the session down either way: if it shrank we do not
                     # need to revisit it soon; if it could not shrink we must
                     # not retry it every sweep.
                     self._idle_compaction_cooldown[sid] = now + cooldown_seconds
         except asyncio.CancelledError:
             raise
+
+    @staticmethod
+    def _session_grew(
+        store: Any, session_id: str, seen_count: int, scan_limit: int = 5000
+    ) -> bool:
+        """Return True if the persisted transcript grew past ``seen_count``.
+
+        Used to detect a turn appended while we were summarising off-path, so a
+        stale checkpoint is not committed over it. Unknown length (store cannot
+        report a fresh count) is treated as "not grown" to avoid starving
+        compaction on stores lacking a cheap length probe.
+        """
+        try:
+            listing = store.list_sessions(limit=scan_limit)
+        except Exception:
+            return False
+        for row in listing:
+            sid = row.get("session_id") or row.get("id")
+            if sid == session_id:
+                mc = row.get("message_count")
+                return isinstance(mc, int) and mc > seen_count
+        return False
 
     def _read_drain_marker(self) -> Optional[Dict[str, Any]]:
         """Read + parse the external drain marker file, or ``None`` if absent."""
