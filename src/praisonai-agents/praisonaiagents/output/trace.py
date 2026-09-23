@@ -95,7 +95,8 @@ class TraceOutput:
     
     def llm_start(self, model: str = None) -> None:
         """Record LLM call start."""
-        self._llm_start_time = time.time()
+        with _output_lock:
+            self._llm_start_time = time.time()
         model_str = f" ({model})" if model else ""
         self._emit(f"Calling LLM{model_str}...", "cyan")
     
@@ -112,8 +113,12 @@ class TraceOutput:
         # Otherwise calculate from internal tracking
         if duration_ms is not None and duration_ms > 0:
             pass  # Use the passed value
-        elif self._llm_start_time:
-            duration_ms = (time.time() - self._llm_start_time) * 1000
+        else:
+            with _output_lock:
+                start_ts = self._llm_start_time
+                self._llm_start_time = None
+            if start_ts:
+                duration_ms = (time.time() - start_ts) * 1000
         
         duration_str = f" [{duration_ms/1000:.1f}s]" if duration_ms and duration_ms > 0 else ""
         
@@ -125,11 +130,11 @@ class TraceOutput:
             self._emit(metrics_line, "dim")
         else:
             self._emit(f"LLM responded{duration_str}", "green")
-        self._llm_start_time = None
     
     def tool_start(self, tool_name: str, tool_args: Dict[str, Any] = None) -> None:
         """Record tool execution start."""
-        self._tool_start_times[tool_name] = time.time()
+        with _output_lock:
+            self._tool_start_times[tool_name] = time.time()
         
         # Format args compactly
         args_str = ""
@@ -153,8 +158,9 @@ class TraceOutput:
     ) -> None:
         """Record tool execution end."""
         # Calculate duration if not provided
-        if duration_ms is None and tool_name in self._tool_start_times:
-            start_ts = self._tool_start_times.pop(tool_name, None)
+        if duration_ms is None:
+            with _output_lock:
+                start_ts = self._tool_start_times.pop(tool_name, None)
             if start_ts:
                 duration_ms = (time.time() - start_ts) * 1000
         

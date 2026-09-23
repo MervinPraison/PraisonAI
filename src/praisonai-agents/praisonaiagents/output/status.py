@@ -132,7 +132,8 @@ class StatusOutput:
     def agent_start(self, agent_name: str) -> None:
         """Record agent start."""
         ts = time.time()
-        _agent_start_times[agent_name] = ts
+        with _output_lock:
+            _agent_start_times[agent_name] = ts
         
         if self._format == "jsonl":
             self._emit_jsonl("agent_start", agent_name=agent_name, timestamp=ts)
@@ -144,8 +145,9 @@ class StatusOutput:
         ts = time.time()
         
         # Calculate duration if not provided
-        if duration_ms is None and agent_name in _agent_start_times:
-            start_ts = _agent_start_times.pop(agent_name, None)
+        if duration_ms is None:
+            with _output_lock:
+                start_ts = _agent_start_times.pop(agent_name, None)
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
         
@@ -160,11 +162,13 @@ class StatusOutput:
         """Record LLM call start."""
         global _ai_call_count
         ts = time.time()
-        self._llm_start_time = ts
-        _ai_call_count += 1
+        with _output_lock:
+            self._llm_start_time = ts
+            _ai_call_count += 1
+            call_count = _ai_call_count
         
         # Context based on call sequence
-        if _ai_call_count == 1:
+        if call_count == 1:
             context = "thinking"
         else:
             context = "responding"
@@ -191,22 +195,26 @@ class StatusOutput:
         if latency_ms is not None and latency_ms > 0:
             duration_ms = latency_ms
         elif duration_ms is None and hasattr(self, '_llm_start_time'):
-            start_ts = self._llm_start_time
+            with _output_lock:
+                start_ts = self._llm_start_time
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
         
-        # Track session totals for summary
-        if not hasattr(self, '_session_tokens_in'):
-            self._session_tokens_in = 0
-            self._session_tokens_out = 0
-            self._session_cost = 0.0
-            self._session_llm_calls = 0
-        
-        self._session_tokens_in += tokens_in
-        self._session_tokens_out += tokens_out
-        if cost:
-            self._session_cost += cost
-        self._session_llm_calls += 1
+        # Track session totals for summary (shared instance across all agents,
+        # so guard the read-modify-write with the module lock to avoid
+        # under-counting when two LLM calls land concurrently).
+        with _output_lock:
+            if not hasattr(self, '_session_tokens_in'):
+                self._session_tokens_in = 0
+                self._session_tokens_out = 0
+                self._session_cost = 0.0
+                self._session_llm_calls = 0
+
+            self._session_tokens_in += tokens_in
+            self._session_tokens_out += tokens_out
+            if cost:
+                self._session_cost += cost
+            self._session_llm_calls += 1
         
         # Only show metrics line in debug mode (when show_metrics is enabled)
         show_metrics = getattr(self, '_show_metrics', False)
@@ -227,7 +235,8 @@ class StatusOutput:
     def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
         """Record tool start - stores info for inline display with result."""
         ts = time.time()
-        self._tool_start_times[tool_name] = ts
+        with _output_lock:
+            self._tool_start_times[tool_name] = ts
         self._pending_tool_args = tool_args  # Store for display with result
         self._pending_tool_name = tool_name
         
@@ -246,8 +255,9 @@ class StatusOutput:
         ts = time.time()
         
         # Calculate duration if not provided
-        if duration_ms is None and tool_name in self._tool_start_times:
-            start_ts = self._tool_start_times.pop(tool_name, None)
+        if duration_ms is None:
+            with _output_lock:
+                start_ts = self._tool_start_times.pop(tool_name, None)
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
         

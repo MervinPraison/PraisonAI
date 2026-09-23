@@ -291,11 +291,18 @@ def resolve_runtime(
     try:
         runtime = resolver.resolve(agent_id, model_ref, session_ctx, **kwargs)
         
-        # Cache the resolved runtime
+        # Cache the resolved runtime and lazily start the background cleanup
+        # thread — both under the same lock so the check-and-start in
+        # _start_cleanup_thread() is atomic and two concurrent first-writers
+        # can't each spawn a redundant daemon thread.
         with _runtime_cache_lock:
             if session_ctx.session_id not in _runtime_cache:
                 _runtime_cache[session_ctx.session_id] = {}
             _runtime_cache[session_ctx.session_id][cache_key] = (runtime, current_time)
+
+            # Start the background cleanup thread lazily, only once something is
+            # actually cached — not merely because the module was imported.
+            _start_cleanup_thread()
             
         logger.info(f"Successfully resolved runtime for {cache_key}")
         return runtime
@@ -374,5 +381,7 @@ def _start_cleanup_thread():
         _cleanup_thread.start()
         logger.debug("Started runtime cache cleanup thread")
 
-# Initialize cleanup thread when module is imported
-_start_cleanup_thread()
+# NOTE: the cleanup thread is started lazily on the first cache write
+# (see resolve_runtime), NOT at import time, so a bare
+# `import praisonaiagents` / touching `runtime.SessionContext` never spawns a
+# thread the caller didn't ask for (important for fork-based servers).
