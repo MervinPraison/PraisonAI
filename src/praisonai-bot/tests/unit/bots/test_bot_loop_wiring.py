@@ -88,3 +88,42 @@ def test_gateway_config_parse_falsey_string():
     kwargs: dict = {}
     _apply_bot_loop_config(kwargs, {"allow_bots": "false"})
     assert kwargs["allow_bots"] is False
+
+
+def test_malformed_policy_does_not_crash_inbound():
+    # A config typo (non-numeric max_events_per_window) must not raise on the
+    # first opted-in bot message; the guard falls back to safe defaults (#5062).
+    adapter = _FakeAdapter(
+        BotConfig(allow_bots=True, bot_loop_protection={"max_events_per_window": "oops"})
+    )
+    bot = BotUser(user_id="otherbot", is_bot=True)
+    # Default budget is 20; a single exchange is well within it → allowed.
+    assert adapter.bot_loop_allows(bot, self_bot_id="me") is True
+
+
+def test_non_dict_policy_tolerated():
+    # A misdeclared scalar for bot_loop_protection is ignored, not fatal.
+    adapter = _FakeAdapter(BotConfig(allow_bots=True, bot_loop_protection="nonsense"))
+    bot = BotUser(user_id="otherbot", is_bot=True)
+    assert adapter.bot_loop_allows(bot, self_bot_id="me") is True
+
+
+def test_cli_policy_kwargs_forwards_bot_fields():
+    # The `praisonai bot start` path must fold allow_bots / bot_loop_protection
+    # into BotConfig, mirroring the gateway (#5062).
+    from praisonai_bot.cli.features.bots_cli import BotCapabilities, BotHandler
+
+    caps = BotCapabilities(
+        allow_bots=True, bot_loop_protection={"max_events_per_window": 7}
+    )
+    kwargs = BotHandler._policy_kwargs(caps)
+    assert kwargs["allow_bots"] is True
+    assert kwargs["bot_loop_protection"] == {"max_events_per_window": 7}
+
+
+def test_cli_policy_kwargs_defaults_omit_bot_fields():
+    from praisonai_bot.cli.features.bots_cli import BotCapabilities, BotHandler
+
+    kwargs = BotHandler._policy_kwargs(BotCapabilities())
+    assert "allow_bots" not in kwargs
+    assert "bot_loop_protection" not in kwargs

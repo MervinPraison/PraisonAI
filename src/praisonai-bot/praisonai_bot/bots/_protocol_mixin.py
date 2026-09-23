@@ -315,7 +315,13 @@ class MessageHookMixin:
             if hasattr(self, "config")
             else None
         )
-        guard = BotLoopGuard(BotLoopPolicy.from_dict(policy_data))
+        if policy_data is not None and not isinstance(policy_data, dict):
+            policy_data = None  # tolerate a misdeclared scalar
+        try:
+            guard = BotLoopGuard(BotLoopPolicy.from_dict(policy_data))
+        except Exception as e:  # pragma: no cover — never crash the inbound path
+            logger.debug("BotLoopGuard build failed, using defaults: %s", e)
+            guard = BotLoopGuard(BotLoopPolicy.from_dict(None))
         self._bot_loop_guard = guard
         return guard
 
