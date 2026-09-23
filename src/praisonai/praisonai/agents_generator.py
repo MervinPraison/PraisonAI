@@ -1443,6 +1443,7 @@ class AgentsGenerator:
         config = await self._aload_config()
         import asyncio
         from .observability.hooks import observability_session
+        from ._async_bridge import scoped_bridge
         if self._is_workflow_yaml(config):
             # Bracket the async workflow run in the same observability session
             # the sequential/hierarchical path uses so AgentOps init/finalize
@@ -1453,7 +1454,11 @@ class AgentsGenerator:
             workflow_label = self._adapter_registry.resolve_or_default(
                 self.framework or config.get('framework')
             ).lower()
-            with observability_session(workflow_label):
+            # Isolate sync→async fan-out (tools, delivery router, blueprint
+            # dispatch) onto this run's own loop+thread, matching the sync path
+            # so a stuck coroutine in one tenant does not park the shared default
+            # bridge for the rest.
+            with observability_session(workflow_label), scoped_bridge():
                 return await self._arun_yaml_workflow(config)
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
@@ -1463,7 +1468,11 @@ class AgentsGenerator:
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
         # paired for every adapter (the CM finalizes on success and error alike).
-        with observability_session(prep['adapter'].name):
+        # Isolate this run's sync→async work (adapter internals, tools, delivery
+        # router and blueprint dispatch call run_sync) onto its own loop+thread,
+        # matching generate_crew_and_kickoff, so a stuck coroutine in one
+        # agent/tenant does not park the shared default loop for the rest.
+        with observability_session(prep['adapter'].name), scoped_bridge():
             # Run setup INSIDE the session (off the event loop, as it may block)
             # so setup events and any setup/import failure are recorded and
             # finalized, not dropped outside observability.
