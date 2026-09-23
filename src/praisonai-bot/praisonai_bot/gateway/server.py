@@ -4835,37 +4835,49 @@ class WebSocketGateway:
         ``LIVENESS_TIMEOUT`` and its state released. A connection with no bound
         session yet (stalled pre-``hello``/``join`` handshake) is evaluated
         against its per-connection ``_client_last_seen`` clock so it too ages
-        out. No-op when the policy is disabled (``interval_ms == 0``).
+        out. Heartbeat/reap is a no-op when the policy is disabled
+        (``interval_ms == 0``), but the loop still runs so the memory-pressure
+        sweep (issue #5153) keeps shedding cold sessions — that OOM guard must
+        not depend on liveness being enabled.
         """
         policy = self._liveness_policy()
-        if not policy.enabled:
-            return
+        # When liveness is disabled we still need a housekeeping cadence for the
+        # pressure sweep; fall back to the config's interval (or the policy
+        # default) rather than exiting, so shedding is never silently disabled.
         interval = policy.interval_seconds
+        if not policy.enabled:
+            from praisonaiagents.gateway.protocols import LivenessPolicy
+
+            interval = LivenessPolicy().interval_seconds
         while self._is_running:
             try:
                 await asyncio.sleep(interval)
                 if self._draining:
                     continue
                 now = time.time()
-                for client_id in list(self._clients.keys()):
-                    session_id = self._client_sessions.get(client_id)
-                    session = self._sessions.get(session_id) if session_id else None
-                    if session is not None:
-                        last_activity = session.last_activity
-                    else:
-                        # No bound session yet (pre-``hello``/``join``): fall
-                        # back to the per-connection last-seen clock so a
-                        # stalled handshake ages out instead of living forever.
-                        last_activity = self._client_last_seen.get(client_id, now)
-                    if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
-                        await self._reap_session(client_id)
-                    else:
-                        await self._send_to_client(
-                            client_id, {"type": EventType.PING.value}
+                if policy.enabled:
+                    for client_id in list(self._clients.keys()):
+                        session_id = self._client_sessions.get(client_id)
+                        session = (
+                            self._sessions.get(session_id) if session_id else None
                         )
+                        if session is not None:
+                            last_activity = session.last_activity
+                        else:
+                            # No bound session yet (pre-``hello``/``join``): fall
+                            # back to the per-connection last-seen clock so a
+                            # stalled handshake ages out instead of living forever.
+                            last_activity = self._client_last_seen.get(client_id, now)
+                        if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
+                            await self._reap_session(client_id)
+                        else:
+                            await self._send_to_client(
+                                client_id, {"type": EventType.PING.value}
+                            )
                 # Issue #5153: on the same housekeeping tick, shed the coldest
                 # already-persisted sessions if the resident set is approaching
                 # the cgroup budget — before the kernel OOM-kills the process.
+                # Runs regardless of whether liveness ping/reap is enabled.
                 self._sweep_sessions_under_pressure()
             except asyncio.CancelledError:
                 raise
@@ -4887,10 +4899,14 @@ class WebSocketGateway:
         ``headroom`` of the budget, so it sheds the minimum.
 
         Persistence-gated: a session is only evictable when a session store is
-        configured (its transcript is durable and rebuildable) *and* it is not
-        currently executing a turn (never abort live work). A no-op (returns
-        ``0``) when no store is configured or the platform reports no cgroup
-        budget, preserving today's behaviour exactly.
+        configured (its transcript is durable and rebuildable), it is not
+        currently executing a turn (never abort live work), and **no live
+        WebSocket is bound to it** — a connected client's next ordinary
+        ``message`` looks the session up in ``_sessions`` directly and would be
+        silently dropped (only ``hello``/``join`` rehydrate), so evicting a
+        bound session would strand that client. A no-op (returns ``0``) when no
+        store is configured or the platform reports no cgroup budget, preserving
+        today's behaviour exactly.
         """
         # No durable store ⇒ nothing is rebuildable ⇒ evicting would lose data.
         if self._session_store is None or not self._sessions:
@@ -4916,6 +4932,11 @@ class WebSocketGateway:
         except Exception:  # pragma: no cover — defensive
             return 0
         headroom = self._pressure_headroom
+        # Sessions with a live WebSocket bound to them are excluded from the
+        # eviction candidate set: evicting them would strand the connection
+        # (Finding: ordinary ``message`` frames do not rehydrate). Only cold,
+        # disconnected-but-resumable sessions are candidates.
+        bound_session_ids = set(self._client_sessions.values())
         warm = [
             WarmSession(
                 session_id=sid,
@@ -4924,7 +4945,10 @@ class WebSocketGateway:
                 flushed=True,
             )
             for sid, session in self._sessions.items()
+            if sid not in bound_session_ids
         ]
+        if not warm:
+            return 0
         plan = plan_pressure_evictions(budget, rss, warm, headroom_ratio=headroom)
         if not plan:
             return 0
@@ -4935,14 +4959,15 @@ class WebSocketGateway:
         evicted = 0
         for sid in plan:
             session = self._sessions.get(sid)
-            # Re-check at enact time: a turn may have started, or the session
-            # may already be gone, since the plan was computed. Never abort
-            # live work (an executing turn), but an idle session — even one with
-            # a live connection — is safe to shed: its transcript is durable, so
-            # the next message transparently rehydrates it from the store.
+            # Re-check at enact time: a turn may have started, the session may
+            # already be gone, or a client may have (re)bound to it since the
+            # plan was computed. Never abort live work (an executing turn) and
+            # never strand a now-bound connection.
             if session is None or getattr(session, "_is_executing", False):
                 continue
-            if self.close_session(sid, persist=True):
+            if sid in set(self._client_sessions.values()):
+                continue
+            if self._evict_persisted_session(sid):
                 evicted += 1
                 try:
                     if mp.anon_rss_mb() <= target:
@@ -4956,6 +4981,50 @@ class WebSocketGateway:
                 evicted,
             )
         return evicted
+
+    def _evict_persisted_session(self, session_id: str) -> bool:
+        """Remove ``session_id`` from memory **only after** its transcript is durable.
+
+        Unlike ``close_session(persist=True)`` — which best-effort persists but
+        still drops the in-memory session even when the store write fails — this
+        enactor refuses to evict a session whose final snapshot could not be
+        persisted. Under memory pressure the live session may hold the only copy
+        of recent messages/events, so a failed persist must leave it in memory
+        (no data loss) rather than count it as safely shed.
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            return False
+        store = self._session_store
+        if store is None:  # pragma: no cover — guarded by caller
+            return False
+        try:
+            store.add_message(
+                session_id=session_id,
+                role="system",
+                content="Session closed",
+                metadata={"session_data": session.to_dict()},
+            )
+        except Exception as exc:  # persist failed ⇒ keep session in memory
+            logger.warning(
+                "WebSocketGateway: skipped pressure eviction of %s — "
+                "persistence failed (%s); session retained in memory",
+                session_id,
+                exc,
+            )
+            return False
+        # Durable now: mark resumable, close, and drop from the live set.
+        try:
+            session.close()
+        except Exception:  # pragma: no cover — defensive
+            pass
+        resume_window = self.config.session_config.resume_window
+        self._session_ttls[session_id] = time.time() + resume_window
+        self._sessions.pop(session_id, None)
+        logger.info(
+            "Session %s persisted, resumable for %ss", session_id, resume_window
+        )
+        return True
 
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to a specific client through its bounded outbound queue."""
