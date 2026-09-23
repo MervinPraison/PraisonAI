@@ -50,6 +50,39 @@ _NO_GATEWAY_ASK_MSG = (
 
 _MEDIA_RE = re.compile(r"MEDIA:(\S+)")
 
+# Closed, core-owned message-action vocabulary with a per-action authorisation
+# contract (Issue #5054). Every verb the ``send_message`` tool accepts MUST
+# appear here declaring its *authority* — how much conversation it may touch:
+#
+# * ``read-only``          — inspects reachable targets, sends nothing.
+# * ``current-conversation`` — writes to the conversation the turn is on
+#                            (or an operator-permitted target).
+# * ``own-prior-message``  — mutates a specific earlier message the agent sent
+#                            (edit/delete); the most sensitive class, since a
+#                            steered agent could otherwise rewrite history.
+#
+# The map is the single source of truth: a verb missing from it is rejected
+# fail-closed (see ``_authority_for``), so a new action can never silently
+# inherit ``send``'s guard. Adding a verb *requires* declaring its authority.
+MESSAGE_ACTION_AUTHORITY = {
+    "list": "read-only",
+    "send": "current-conversation",
+    "react": "current-conversation",
+    "unreact": "current-conversation",
+    "thread": "current-conversation",
+    "edit": "own-prior-message",
+    "delete": "own-prior-message",
+}
+
+
+def _authority_for(action: str) -> Optional[str]:
+    """Return the declared authority for ``action``, or ``None`` if unknown.
+
+    ``None`` means the verb is not in the closed vocabulary and must be rejected
+    fail-closed rather than dispatched.
+    """
+    return MESSAGE_ACTION_AUTHORITY.get(action)
+
 # Default and hard upper bound for ``ask_conversation``'s bounded wait. The
 # target is model-controlled, so a steered/prompt-injected agent could pass a
 # negative, non-finite (NaN/inf), or absurdly large timeout. Any such value is
@@ -233,12 +266,16 @@ def send_message(
     target: str = "origin",
     message: str = "",
     action: str = "send",
+    message_id: str = "",
 ) -> str:
-    """Proactively message the user through the active gateway.
+    """Manage the conversation through the active gateway (Issue #5054).
 
-    Use this to reach the user mid-task on the channel this conversation came
-    from, or on another channel they have configured. Requires a running
-    bot/gateway; it is unavailable for plain CLI/one-shot runs.
+    One coherent, authorised action surface: reach the user mid-task, react,
+    open a thread, or edit/retract a message this agent sent — dispatched to
+    whichever channel the current turn is on. Requires a running bot/gateway;
+    it is unavailable for plain CLI/one-shot runs. Every action is drawn from a
+    closed vocabulary (:data:`MESSAGE_ACTION_AUTHORITY`); an unknown verb is
+    rejected fail-closed rather than dispatched.
 
     Args:
         target: Symbolic destination. One of:
@@ -246,21 +283,31 @@ def send_message(
             - "<platform>": that platform's home channel (e.g. "telegram")
             - "<platform>:<chat_id>[:<thread_id>]": an explicit chat
             - "<alias>": a friendly alias for a known target
-        message: The text to send. Append " MEDIA:<path>" to attach a local
-            file, e.g. "Report ready MEDIA:/tmp/report.pdf".
-        action: "send" to deliver a message (default), "list" to return the
-            targets currently reachable so you can pick a destination, "react"
-            to add an emoji reaction to the message being handled (pass the
-            emoji as ``message``), or "unreact" to remove one. Reactions are a
-            lightweight acknowledgement for busy group channels; on a channel
-            that cannot react you get a typed ``unsupported`` outcome rather
+        message: The text to send (for "send"), the emoji (for
+            "react"/"unreact"), the thread title (for "thread"), or the new
+            text (for "edit"). Append " MEDIA:<path>" to a send to attach a
+            local file, e.g. "Report ready MEDIA:/tmp/report.pdf".
+        action: The verb to perform:
+            - "send"    — deliver a message (default)
+            - "list"    — return the targets currently reachable
+            - "react"   — add an emoji reaction (pass the emoji as ``message``)
+            - "unreact" — remove an emoji reaction
+            - "thread"  — open a thread/topic titled ``message`` under ``target``
+            - "edit"    — replace ``message_id`` with ``message`` (your own message)
+            - "delete"  — delete/unsend ``message_id`` (your own message)
+            Capability-gated verbs (react/thread/edit/delete) return a typed
+            ``unsupported`` outcome on a channel that cannot render them, rather
             than an error.
+        message_id: The id of the message to react to / edit / delete. For
+            "react"/"unreact" it may be omitted when ``target`` is "origin"
+            (the message being handled is used).
 
     Returns:
         For action="send": a short human-readable summary of the delivery.
         For action="list": a JSON array of reachable targets.
-        For action="react"/"unreact": a JSON object with a typed ``status``
-            (``ok`` / ``unsupported`` / ``failed`` / ``no_route``).
+        For action="react"/"unreact"/"thread"/"edit"/"delete": a JSON object
+            with a typed ``status`` (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
     """
     try:
         from ..session.context import get_outbound_messenger
@@ -269,9 +316,63 @@ def send_message(
         if messenger is None:
             return _NO_GATEWAY_MSG
 
+        # Fail-closed vocabulary gate (Issue #5054): reject any verb that has
+        # not declared its authority, before any dispatch or policy work.
+        authority = _authority_for(action)
+        if authority is None:
+            return (
+                f"Unknown action '{action}'. Use 'send', 'list', 'react', "
+                "'unreact', 'thread', 'edit', or 'delete'."
+            )
+
         if action == "list":
             targets = messenger.list_targets()
             return json.dumps([t.as_dict() for t in targets])
+
+        if action == "thread":
+            denied = _check_send_policy(target)
+            if denied is not None:
+                return json.dumps({"status": "failed", "detail": denied})
+            name = message.strip()
+            if not name:
+                return json.dumps(
+                    {"status": "failed", "detail": "no thread title provided"}
+                )
+            create_thread = getattr(messenger, "create_thread", None)
+            if create_thread is None:
+                return json.dumps(
+                    {
+                        "status": "unsupported",
+                        "detail": "the active gateway does not support threads",
+                    }
+                )
+            result = _run_async(create_thread(target, name))
+            return json.dumps(result.as_dict())
+
+        if action in ("edit", "delete"):
+            denied = _check_send_policy(target)
+            if denied is not None:
+                return json.dumps({"status": "failed", "detail": denied})
+            mid = message_id.strip()
+            if not mid:
+                return json.dumps(
+                    {"status": "failed", "detail": "no message_id provided"}
+                )
+            fn = getattr(messenger, action, None)
+            if fn is None:
+                return json.dumps(
+                    {
+                        "status": "unsupported",
+                        "detail": (
+                            f"the active gateway does not support {action}"
+                        ),
+                    }
+                )
+            if action == "edit":
+                result = _run_async(fn(target, mid, message))
+            else:
+                result = _run_async(fn(target, mid))
+            return json.dumps(result.as_dict())
 
         if action in ("react", "unreact"):
             # Reuse the same operator send-policy guard as ``send`` so a
@@ -297,15 +398,14 @@ def send_message(
                 )
 
             result = _run_async(
-                react(target, emoji, remove=(action == "unreact"))
+                react(
+                    target,
+                    emoji,
+                    message_id=message_id.strip(),
+                    remove=(action == "unreact"),
+                )
             )
             return json.dumps(result.as_dict())
-
-        if action != "send":
-            return (
-                f"Unknown action '{action}'. Use 'send', 'list', 'react', "
-                "or 'unreact'."
-            )
 
         # Outbound send-policy guard (Issue #2226): the target is
         # model-controlled, so a steered/prompt-injected agent could misdeliver
@@ -387,4 +487,4 @@ def ask_conversation(
         return json.dumps({"status": "undelivered", "detail": str(e)})
 
 
-__all__ = ["send_message", "ask_conversation"]
+__all__ = ["send_message", "ask_conversation", "MESSAGE_ACTION_AUTHORITY"]

@@ -3074,6 +3074,57 @@ ReactionStatus = Literal["ok", "unsupported", "failed", "no_route"]
 """
 
 
+MessageActionStatus = Literal["ok", "unsupported", "failed", "no_route"]
+"""Closed set of outcomes for a message-mutation verb (``edit`` / ``delete``).
+
+Mirrors :data:`ReactionStatus` so every agent-callable message action returns
+the same typed shape:
+
+* ``ok`` — the message was edited/deleted.
+* ``unsupported`` — the channel has no matching capability
+  (``supports_edit`` / ``supports_delete``).
+* ``failed`` — the transport rejected the action (e.g. no such message, or the
+  message is not editable/deletable by this bot).
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class MessageActionResult:
+    """Outcome of an agent-initiated message mutation (Issue #5054).
+
+    Shared typed result for the ``edit`` and ``delete`` verbs of the unified
+    message-action surface. Every call resolves to exactly one
+    :data:`MessageActionStatus`, so a channel that cannot edit/delete returns a
+    typed ``unsupported`` outcome instead of raising — identical to how
+    :class:`ReactionResult` and :class:`ThreadResult` degrade.
+
+    Attributes:
+        status: The outcome (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
+        target: The resolved target the action was routed to.
+        detail: Optional model-readable explanation.
+    """
+
+    status: MessageActionStatus
+    target: str = ""
+    detail: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        """Whether the action succeeded (``status == "ok"``)."""
+        return self.status == "ok"
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["target"] = self.target
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
 @dataclass
 class ReactionResult:
     """Outcome of an agent-initiated message reaction (Issue #3917).
@@ -3256,6 +3307,51 @@ class OutboundMessengerProtocol(Protocol):
             A :class:`ThreadResult` carrying the new thread id on success, or a
             typed ``unsupported`` / ``failed`` / ``no_route`` outcome. Never
             raises.
+        """
+        ...
+
+    async def edit(
+        self,
+        target: str,
+        message_id: str,
+        text: str,
+    ) -> "MessageActionResult":
+        """Edit a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent update its own live status message in place rather than
+        posting a follow-up — e.g. editing "Working…" to "Done ✅". Gated on the
+        channel's ``PlatformCapabilities.supports_edit``; a channel that cannot
+        edit returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to edit.
+            text: The new message text.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
+        """
+        ...
+
+    async def delete(
+        self,
+        target: str,
+        message_id: str,
+    ) -> "MessageActionResult":
+        """Delete/unsend a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent retract a message it should not have sent. Gated on the
+        channel's ``PlatformCapabilities.supports_delete``; a channel that
+        cannot delete returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to delete.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
         """
         ...
 

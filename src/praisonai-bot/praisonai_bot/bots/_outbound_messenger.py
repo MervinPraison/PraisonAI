@@ -27,6 +27,7 @@ from typing import List, Optional
 
 from praisonaiagents.gateway import (
     DeliveryResult,
+    MessageActionResult,
     ReactionResult,
     TargetInfo,
     ThreadResult,
@@ -316,6 +317,60 @@ class BotOutboundMessenger:
             thread_id=thread_id,
             detail=detail,
         )
+
+    async def edit(
+        self,
+        target: str,
+        message_id: str,
+        text: str,
+    ) -> MessageActionResult:
+        """Edit a prior message via the delivery router (#5054).
+
+        Dispatches through the live adapter's native ``edit_message`` primitive,
+        gated on the channel's ``supports_edit`` capability. A channel that
+        cannot edit returns a typed ``unsupported`` outcome rather than raising,
+        so the agent can fall back to sending a follow-up.
+        """
+        status, resolved = await self._router.edit(
+            target, message_id, text, self._origin
+        )
+        return MessageActionResult(
+            status=status,
+            target=resolved,
+            detail=self._mutation_detail(status, resolved, "edit"),
+        )
+
+    async def delete(
+        self,
+        target: str,
+        message_id: str,
+    ) -> MessageActionResult:
+        """Delete/unsend a prior message via the delivery router (#5054).
+
+        Dispatches through the live adapter's native ``delete_message``
+        primitive, gated on the channel's ``supports_delete`` capability. A
+        channel that cannot delete returns a typed ``unsupported`` outcome
+        rather than raising.
+        """
+        status, resolved = await self._router.delete(
+            target, message_id, self._origin
+        )
+        return MessageActionResult(
+            status=status,
+            target=resolved,
+            detail=self._mutation_detail(status, resolved, "delete"),
+        )
+
+    @staticmethod
+    def _mutation_detail(status: str, resolved: str, verb: str) -> Optional[str]:
+        """Compose a model-readable detail for an edit/delete outcome."""
+        if status == "unsupported":
+            return f"channel '{resolved}' cannot {verb} messages"
+        if status == "no_route":
+            return f"could not resolve target '{resolved}'"
+        if status == "failed":
+            return f"transport could not {verb} the message on '{resolved}'"
+        return None
 
     def list_targets(self) -> List[TargetInfo]:
         """List targets currently reachable through the delivery router.
