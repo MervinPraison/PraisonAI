@@ -155,6 +155,12 @@ class BotCapabilities:
     # gateway path already reads.
     unknown_user_policy: Optional[str] = None
     owner_user_id: Optional[str] = None  # Owner user ID for pairing approvals
+
+    # Bot-to-bot inbound opt-in + loop guard (Issue #5062). Default-off keeps
+    # today's "drop bot-authored messages" behaviour; wired from bot.yaml so
+    # `praisonai bot start` honours the same fields the gateway path reads.
+    allow_bots: bool = False
+    bot_loop_protection: Optional[Dict[str, Any]] = None
     
     # Session
     session_id: Optional[str] = None
@@ -193,6 +199,8 @@ class BotCapabilities:
             "silence_token": self.silence_token,
             "unknown_user_policy": self.unknown_user_policy,
             "owner_user_id": "***" if self.owner_user_id else None,
+            "allow_bots": self.allow_bots,
+            "bot_loop_protection": self.bot_loop_protection,
             "session_id": self.session_id,
             "user_id": self.user_id,
         }
@@ -304,6 +312,8 @@ class BotHandler:
             silence_token=channel.silence_token,
             unknown_user_policy=getattr(channel, "unknown_user_policy", None),
             owner_user_id=getattr(channel, "owner_user_id", None),
+            allow_bots=bool(getattr(channel, "allow_bots", False)),
+            bot_loop_protection=getattr(channel, "bot_loop_protection", None),
         )
         
         # Start bot based on platform
@@ -957,6 +967,12 @@ class BotHandler:
         owner = capabilities.owner_user_id
         if owner is not None and str(owner).strip():
             kwargs["owner_user_id"] = str(owner).strip()
+        # Bot-to-bot opt-in + loop guard (Issue #5062). Only forward when set so
+        # BotConfig's own defaults (allow_bots=False) remain the source of truth.
+        if capabilities.allow_bots:
+            kwargs["allow_bots"] = True
+        if isinstance(capabilities.bot_loop_protection, dict):
+            kwargs["bot_loop_protection"] = dict(capabilities.bot_loop_protection)
         return kwargs
 
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:

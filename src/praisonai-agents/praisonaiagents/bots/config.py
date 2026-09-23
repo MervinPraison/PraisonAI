@@ -130,6 +130,17 @@ class BotConfig:
     allow_silence: bool = False
     silence_token: Optional[str] = None
 
+    # Bot-to-bot inbound (#5062). Off by default: a bot-authored inbound
+    # message is dropped as before. When ``allow_bots=True`` the channel accepts
+    # bot-authored messages and the runaway-loop guard (``BotLoopGuard``) is
+    # auto-active, tracking each participant pair and suppressing further replies
+    # once ``bot_loop_protection``'s sliding-window budget is exceeded.
+    # ``bot_loop_protection`` is a plain dict (enabled / max_events_per_window /
+    # window_seconds / cooldown_seconds) coerced into a ``BotLoopPolicy``; ``None``
+    # uses the default budget.
+    allow_bots: bool = False
+    bot_loop_protection: Optional[Dict[str, Any]] = None
+
     def __post_init__(self) -> None:
         if self.unknown_user_policy not in {"deny", "pair", "allow"}:
             raise ValueError(
@@ -176,6 +187,8 @@ class BotConfig:
             "stream_edit_interval_ms": self.stream_edit_interval_ms,
             "allow_silence": self.allow_silence,
             "silence_token": self.silence_token,
+            "allow_bots": self.allow_bots,
+            "bot_loop_protection": self.bot_loop_protection,
             "metadata": self.metadata,
         }
     
