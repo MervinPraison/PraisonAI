@@ -43,6 +43,13 @@ class MentionsParser:
         "rule": re.compile(r'@rule:([^\s]+)'),
         "url": re.compile(r'@url:(https?://[^\s]+)'),
     }
+
+    # Bare ``@path`` form (e.g. ``@src/app.py``). Interactive chat expanded this
+    # via a private regex; sharing it here gives ``run``/YAML/Python the same
+    # inline-file behaviour. It is applied last and only inlines a token that
+    # actually resolves to a workspace file, so unrelated ``@handle``/``@email``
+    # tokens and prefixed forms above are left untouched.
+    BARE_FILE_PATTERN = re.compile(r'@([^\s]+)')
     
     # Default max file chars: 500K (~125K tokens) - fits GPT-4o (128K), Claude 3.5 (200K)
     DEFAULT_MAX_FILE_CHARS = 500000
@@ -129,6 +136,19 @@ class MentionsParser:
                 # Remove the mention from the prompt
                 cleaned_prompt = pattern.sub('', cleaned_prompt, count=1)
         
+        # Bare ``@path`` form, applied after the prefixed patterns so their
+        # already-consumed tokens are gone. Only tokens that resolve to a real
+        # workspace file are inlined; everything else is left in the prompt.
+        for match in self.BARE_FILE_PATTERN.findall(cleaned_prompt):
+            if not self._is_workspace_file(match):
+                continue
+            context = self._process_file_mention(match)
+            if context:
+                context_parts.append(context)
+            cleaned_prompt = re.sub(
+                r'@' + re.escape(match), '', cleaned_prompt, count=1
+            )
+        
         # Clean up extra whitespace
         cleaned_prompt = ' '.join(cleaned_prompt.split())
         
@@ -162,6 +182,23 @@ class MentionsParser:
             return self._process_url_mention(value)
         return None
     
+    def _is_workspace_file(self, file_path: str) -> bool:
+        """True only if a bare ``@token`` resolves to a real file inside the
+        workspace. Bare tokens are inlined only when this holds, so unrelated
+        ``@handle`` / ``@email`` mentions and path-traversal (``@../secret``)
+        are left in the prompt untouched.
+        """
+        if ".." in file_path:
+            return False
+        try:
+            full_path = (self.workspace_path / file_path).resolve()
+            workspace_root = self.workspace_path.resolve()
+        except (OSError, ValueError):
+            return False
+        if not str(full_path).startswith(str(workspace_root) + os.sep):
+            return False
+        return full_path.is_file()
+
     def _process_file_mention(self, file_path: str) -> Optional[str]:
         """Process @file:path mention."""
         try:
@@ -364,6 +401,11 @@ class MentionsParser:
         """Check if a prompt contains any @mentions."""
         for pattern in self.PATTERNS.values():
             if pattern.search(prompt):
+                return True
+        # Bare ``@path`` counts only when it resolves to a workspace file, so a
+        # plain ``@handle`` does not trigger mention processing.
+        for match in self.BARE_FILE_PATTERN.findall(prompt):
+            if self._is_workspace_file(match):
                 return True
         return False
 

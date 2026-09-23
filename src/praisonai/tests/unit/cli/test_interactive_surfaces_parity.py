@@ -90,6 +90,54 @@ def test_async_tui_expands_at_mentions():
         os.unlink(temp_path)
 
 
+def test_bare_at_mention_expands_non_interactively():
+    """The shared ``MentionsParser`` must inline a bare ``@path`` when it
+    resolves to a workspace file.
+
+    This is what gives ``praisonai run``, YAML and Python the same inline-file
+    behaviour that interactive chat has — the non-interactive surfaces call this
+    parser (``direct_prompt.py`` gates on ``has_mentions`` then ``process``).
+    Unrelated ``@handle`` tokens and ``@../secret`` traversal must be left in
+    the prompt untouched.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "app.py"), "w") as f:
+        f.write("SENTINEL_BARE_BODY")
+
+    parser = MentionsParser(workspace_path=workspace)
+
+    assert parser.has_mentions("explain @app.py")
+    context, cleaned = parser.process("explain @app.py")
+    assert "SENTINEL_BARE_BODY" in context
+    assert "@app.py" not in cleaned
+
+    # A plain @handle is not a file, so nothing is inlined or stripped.
+    assert not parser.has_mentions("ping @someuser")
+    context2, cleaned2 = parser.process("ping @someuser about @../secret")
+    assert context2 == ""
+    assert "@someuser" in cleaned2
+    assert "@../secret" in cleaned2
+
+
+def test_tui_delegates_to_shared_mentions_parser():
+    """The async TUI must expand ``@file`` via the shared core parser, not a
+    private regex, so interactive and non-interactive surfaces cannot drift.
+    """
+    from praisonai.cli.interactive.async_tui import AsyncTUI
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "notes.md"), "w") as f:
+        f.write("SENTINEL_TUI_SHARED")
+
+    tui = AsyncTUI()
+    tui.config.workspace = workspace
+
+    processed = tui._process_file_mentions("summarise @notes.md")
+    assert "SENTINEL_TUI_SHARED" in processed
+
+
 # ---------------------------------------------------------------------------
 # Defect 2: /stats available on all REPL surfaces
 # ---------------------------------------------------------------------------
