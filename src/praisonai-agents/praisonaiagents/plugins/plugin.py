@@ -246,6 +246,42 @@ class Plugin(ABC):
     def cli_backend_execute(self, context: Dict[str, Any]) -> None:
         """Called after a CLI backend delegates a turn. Observe-only."""
         pass
+
+    def gateway_start(self, context: Dict[str, Any]) -> None:
+        """Called when the gateway/BotOS starts. Observe-only (platforms, bot_count)."""
+        pass
+
+    def gateway_stop(self, context: Dict[str, Any]) -> None:
+        """Called when the gateway/BotOS stops. Observe-only (platforms, reason)."""
+        pass
+
+    def schedule_add(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job is persisted. Observe-only."""
+        pass
+
+    def schedule_remove(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job is deleted. Observe-only."""
+        pass
+
+    def schedule_trigger(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job fires. Observe-only."""
+        pass
+
+    def before_compaction(self, context: Dict[str, Any]) -> None:
+        """Called before conversation memory is compacted. Observe-only."""
+        pass
+
+    def after_compaction(self, context: Dict[str, Any]) -> None:
+        """Called after conversation memory is compacted. Observe-only."""
+        pass
+
+    def subagent_stop(self, context: Dict[str, Any]) -> None:
+        """Called when a spawned subagent reaches a terminal state. Observe-only."""
+        pass
+
+    def model_fallback(self, context: Dict[str, Any]) -> None:
+        """Called when the runtime falls back to a secondary model. Observe-only."""
+        pass
     
     def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:
         """Called when permission is requested. Return True/False to auto-approve/deny."""
