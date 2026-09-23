@@ -6289,15 +6289,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return None
 
     def __deepcopy__(self, memo):
-        """Deep-copy safely: give the clone a fresh attribution ContextVar.
+        """Deep-copy safely: give the clone fresh non-copyable primitives.
 
-        ``_current_agent_name_var`` is a ``contextvars.ContextVar``, which
-        cannot be pickled/deep-copied (``TypeError: cannot pickle
-        '_contextvars.ContextVar' object``). It also carries runtime, task-local
-        state that must NOT be shared between an original LLM and its clone.
-        We therefore reconstruct the instance normally but swap in a brand-new
-        ContextVar so the clone starts with independent (empty) attribution.
+        Two kinds of attribute cannot be deep-copied and must be rebuilt on the
+        clone rather than shared with the original:
+
+        * ``_current_agent_name_var`` is a ``contextvars.ContextVar`` (``TypeError:
+          cannot pickle '_contextvars.ContextVar' object``). It also carries
+          runtime, task-local state, so the clone gets a brand-new one and starts
+          with independent (empty) attribution.
+        * ``threading`` locks (e.g. a lock-bearing subclass such as
+          :class:`~praisonaiagents.model_harness.ScriptedModel`, whose
+          ``_script_lock`` is an ``RLock``) also cannot be deep-copied
+          (``TypeError: cannot pickle '_thread.RLock' object``). Each is replaced
+          with a fresh lock of the same kind so the clone is independently
+          synchronised, mirroring ``Agent.__deepcopy__``.
         """
+        import threading
+
+        lock_type = type(threading.Lock())
+        rlock_type = type(threading.RLock())
+
         cls = self.__class__
         new = cls.__new__(cls)
         memo[id(self)] = new
@@ -6306,6 +6318,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 new.__dict__[key] = contextvars.ContextVar(
                     "praisonai_current_agent_name", default=None
                 )
+            elif isinstance(value, rlock_type):
+                new.__dict__[key] = threading.RLock()
+            elif isinstance(value, lock_type):
+                new.__dict__[key] = threading.Lock()
             else:
                 new.__dict__[key] = copy.deepcopy(value, memo)
         return new
