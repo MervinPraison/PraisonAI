@@ -22,6 +22,87 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+# Lifecycle hooks that carry the user's prompt / conversation content and can
+# rewrite it (transform-style). Dispatching these to an arbitrary pip-installed
+# entry-point plugin lets a transitively-installed dependency read or tamper
+# with every user's messages, so they are gated behind an explicit grant.
+#
+# This deliberately covers BOTH directions of the conversation: the inbound
+# prompt/messages/model-response events AND the outbound message-delivery
+# events (``message_sending`` can rewrite the assistant reply sent to the
+# user; ``message_sent`` / ``message_undelivered`` expose that reply). Gating
+# only the inbound half would let an ungranted plugin still read or tamper with
+# every outbound reply.
+CONVERSATION_HOOKS = frozenset({
+    PluginHook.MESSAGE_RECEIVED,
+    PluginHook.BEFORE_LLM,
+    PluginHook.AFTER_LLM,
+    PluginHook.BEFORE_AGENT,
+    PluginHook.AFTER_AGENT,
+    PluginHook.MESSAGE_SENDING,
+    PluginHook.MESSAGE_SENT,
+    PluginHook.MESSAGE_UNDELIVERED,
+})
+
+
+def _package_root() -> Optional[Path]:
+    """Filesystem directory of the installed ``praisonaiagents`` package.
+
+    Used to verify first-party provenance by real file location rather than a
+    self-asserted ``__module__`` string. Returns ``None`` if it cannot be
+    resolved (in which case provenance falls back to failing closed).
+    """
+    try:
+        import praisonaiagents
+
+        file = getattr(praisonaiagents, "__file__", None)
+        if not file:
+            return None
+        return Path(file).resolve().parent
+    except Exception:
+        return None
+
+
+def _is_first_party(plugin: Plugin) -> bool:
+    """True only for plugins genuinely bundled inside the framework.
+
+    First-party plugins are shipped and reviewed with the framework, so they
+    are trusted with conversation content. A plugin's ``__module__`` string is
+    self-asserted and therefore spoofable — a third-party pip package could set
+    ``__module__ = "praisonaiagents.evil"`` to falsely claim first-party trust.
+
+    To make the trust decision on provenance the plugin cannot forge, we
+    require BOTH:
+
+    1. the class's ``__module__`` sits under the ``praisonaiagents`` namespace, and
+    2. the module's real ``__file__`` resolves to a path *inside* the installed
+       ``praisonaiagents`` package directory.
+
+    Any plugin failing either check — notably an auto-discovered
+    ``praisonai.plugins`` entry point from an arbitrary distribution — is
+    treated as third-party and denied conversation access by default.
+    """
+    cls = type(plugin)
+    module_name = getattr(cls, "__module__", "") or ""
+    if module_name != "praisonaiagents" and not module_name.startswith("praisonaiagents."):
+        return False
+
+    root = _package_root()
+    if root is None:
+        # Cannot verify provenance — fail closed rather than trust a string.
+        return False
+
+    module = sys.modules.get(module_name)
+    module_file = getattr(module, "__file__", None) if module is not None else None
+    if not module_file:
+        return False
+    try:
+        resolved = Path(module_file).resolve()
+    except Exception:
+        return False
+    return root == resolved.parent or root in resolved.parents
+
+
 def _env_plugins_suppressed() -> bool:
     """Return True when external plugins are suppressed via env for this run.
 
@@ -284,6 +365,27 @@ class PluginManager:
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
         return self._enabled.get(name, False)
+
+    def _granted_conversation_access(self, name: str) -> bool:
+        """Whether a plugin may receive conversation-content hooks.
+
+        Least-privilege, safe-by-default: a plugin sees ``before_llm`` /
+        ``after_llm`` / ``before_agent`` / ``after_agent`` / ``message_received``
+        (which carry — and can rewrite — the user's prompt/messages) only when
+
+        - it is **first-party** (bundled in the framework), or
+        - the operator **granted** it in the per-plugin config options map via
+          ``allow_conversation: true`` (e.g. ``plugins.<name>.allow_conversation``).
+
+        Any other plugin — notably an auto-discovered ``praisonai.plugins``
+        entry point from an arbitrary pip package — is denied these hooks by
+        default while still receiving its tool/channel/utility hooks.
+        """
+        plugin = self._plugins.get(name)
+        if plugin is not None and _is_first_party(plugin):
+            return True
+        options = self._plugin_options.get(name) or {}
+        return options.get("allow_conversation") is True
     
     def get_plugin(self, name: str) -> Optional[Plugin]:
         """Get a plugin by name."""
@@ -426,6 +528,12 @@ class PluginManager:
 
         for name, plugin in enabled_plugins:
             if hook not in plugin.info.hooks:
+                continue
+
+            # Least-privilege gate: conversation-content hooks are default-deny
+            # for third-party/ungranted plugins so a pip-installed dependency
+            # cannot silently read or rewrite every user's prompt/messages.
+            if hook in CONVERSATION_HOOKS and not self._granted_conversation_access(name):
                 continue
             
             try:
@@ -714,8 +822,16 @@ class PluginManager:
                 if getattr(plugin, "_wired_into_registry", None) is registry:
                     # Avoid double-registration on repeated enable() calls
                     continue
+                allow_conversation = self._granted_conversation_access(name)
                 hook_ids: List[str] = []
                 for event, func in _adapt_plugin_hooks(plugin):
+                    # Same least-privilege gate as execute_hook(): never bridge
+                    # a conversation-content hook of an ungranted plugin into the
+                    # runtime the Agent actually consults, so a third-party
+                    # entry-point plugin cannot read/rewrite prompts even though
+                    # its tool/channel hooks still wire in.
+                    if event in CONVERSATION_HOOKS and not allow_conversation:
+                        continue
                     hook_id = registry.register_function(
                         event=event,
                         func=func,
