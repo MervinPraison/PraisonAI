@@ -418,6 +418,41 @@ class TestA2ACapabilities:
         assert result.target_agent == "data-analyst"
 
 
+class TestVideoDefaultModelParity:
+    """Regression tests: video-generation default model must stay canonical.
+
+    Guards against cross-surface default drift (issue #5172): the wrapper
+    ``video_generate`` / ``avideo_generate`` defaults must match the canonical
+    ``VideoAgent.DEFAULT_MODEL`` (``openai/sora-2``).
+    """
+
+    def _default_of(self, func, param="model"):
+        import inspect
+        return inspect.signature(func).parameters[param].default
+
+    def test_canonical_default_is_sora2(self):
+        """VideoAgent.DEFAULT_MODEL is the single source of truth."""
+        from praisonaiagents.agent.video_agent import VideoAgent
+        assert VideoAgent.DEFAULT_MODEL == "openai/sora-2"
+
+    def test_video_generate_default_matches_canonical(self):
+        """Sync wrapper default matches VideoAgent.DEFAULT_MODEL."""
+        from praisonaiagents.agent.video_agent import VideoAgent
+        from praisonai.capabilities.videos import video_generate
+        assert self._default_of(video_generate) == VideoAgent.DEFAULT_MODEL
+
+    def test_avideo_generate_default_matches_canonical(self):
+        """Async wrapper default matches VideoAgent.DEFAULT_MODEL."""
+        from praisonaiagents.agent.video_agent import VideoAgent
+        from praisonai.capabilities.videos import avideo_generate
+        assert self._default_of(avideo_generate) == VideoAgent.DEFAULT_MODEL
+
+    def test_sync_and_async_defaults_agree(self):
+        """Sync and async wrapper defaults must not drift apart."""
+        from praisonai.capabilities.videos import video_generate, avideo_generate
+        assert self._default_of(video_generate) == self._default_of(avideo_generate)
+
+
 class TestCapabilitiesModuleImports:
     """Tests for capabilities module lazy loading."""
     

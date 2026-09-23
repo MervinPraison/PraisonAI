@@ -20,7 +20,7 @@ class VideoResult:
 
 def video_generate(
     prompt: str,
-    model: str = "runway/gen3a_turbo",
+    model: str = "openai/sora-2",
     duration: int = 5,
     aspect_ratio: str = "16:9",
     timeout: float = 600.0,
@@ -34,7 +34,7 @@ def video_generate(
     
     Args:
         prompt: Text description of the video to generate
-        model: Model name (e.g., "runway/gen3a_turbo")
+        model: Model name (e.g., "openai/sora-2")
         duration: Video duration in seconds
         aspect_ratio: Aspect ratio (e.g., "16:9", "9:16", "1:1")
         timeout: Request timeout in seconds
@@ -90,7 +90,7 @@ def video_generate(
 
 async def avideo_generate(
     prompt: str,
-    model: str = "runway/gen3a_turbo",
+    model: str = "openai/sora-2",
     duration: int = 5,
     aspect_ratio: str = "16:9",
     timeout: float = 600.0,
