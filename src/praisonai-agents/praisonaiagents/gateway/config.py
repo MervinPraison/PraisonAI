@@ -776,6 +776,96 @@ class EmergencyStopConfig:
 
 
 @dataclass
+class AttachmentConfig:
+    """Attachment/media ceilings for the gateway wire protocol (Issue #5207).
+
+    The gateway is the control plane custom ``/ws`` clients build on, but the
+    ``message`` frame had no attachment contract and no per-attachment size/type
+    policy — only the whole-frame ``max_payload``. These ceilings are advertised
+    to clients in the ``hello`` handshake (folded into ``HelloResult.policy``) so
+    a well-behaved client self-limits — inlining small files, chunking larger
+    ones at ``chunk_bytes`` — instead of discovering the limit by being
+    disconnected. All fields are advisory limits; enforcement lives wherever the
+    gateway materialises attachments (a wrapper/bot concern).
+
+    Backward-compatible: attachments are opt-in per turn, and a client that
+    never sends one is unaffected by these values.
+
+    Attributes:
+        max_attachment_bytes: Largest single attachment (inline or stored) the
+            gateway accepts, in bytes. Default 10 MiB.
+        max_attachments: Maximum number of attachments on one ``message`` turn.
+        chunk_bytes: Advertised chunk size a client should use when streaming a
+            large file into the attachment store (reserve → put chunk → close).
+        allowed_types: Optional allow-list of MIME types / prefixes (e.g.
+            ``image/`` or ``application/pdf``). Empty (default) means no type
+            restriction is advertised.
+    """
+
+    max_attachment_bytes: int = 10 * 1024 * 1024  # 10 MiB
+    max_attachments: int = 10
+    chunk_bytes: int = 256 * 1024  # 256 KiB
+    allowed_types: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.max_attachment_bytes < 0:
+            raise ValueError(
+                "max_attachment_bytes must be >= 0 (use 0 to disable attachments)"
+            )
+        if self.max_attachments < 0:
+            raise ValueError("max_attachments must be >= 0")
+        if self.chunk_bytes <= 0:
+            raise ValueError("chunk_bytes must be > 0")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the gateway advertises any attachment capacity."""
+        return self.max_attachment_bytes > 0 and self.max_attachments > 0
+
+    def to_policy(self) -> Dict[str, Any]:
+        """Build the policy fragment advertised in ``HelloResult.policy``.
+
+        Only advertises the attachment ceilings when enabled, so a gateway with
+        attachments disabled advertises exactly today's policy shape. The type
+        allow-list is included only when configured.
+        """
+        if not self.enabled:
+            return {}
+        policy: Dict[str, Any] = {
+            "max_attachment_bytes": self.max_attachment_bytes,
+            "max_attachments": self.max_attachments,
+            "chunk_bytes": self.chunk_bytes,
+        }
+        if self.allowed_types:
+            policy["allowed_attachment_types"] = list(self.allowed_types)
+        return policy
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "max_attachment_bytes": self.max_attachment_bytes,
+            "max_attachments": self.max_attachments,
+            "chunk_bytes": self.chunk_bytes,
+            "allowed_types": list(self.allowed_types),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "AttachmentConfig":
+        """Create from a parsed ``gateway.attachments`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        allowed = data.get("allowed_types")
+        return cls(
+            max_attachment_bytes=int(
+                data.get("max_attachment_bytes", 10 * 1024 * 1024)
+            ),
+            max_attachments=int(data.get("max_attachments", 10)),
+            chunk_bytes=int(data.get("chunk_bytes", 256 * 1024)),
+            allowed_types=[str(t) for t in allowed] if isinstance(allowed, (list, tuple)) else [],
+        )
+
+
+@dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
     
@@ -858,6 +948,12 @@ class GatewayConfig:
     control: "EmergencyStopConfig" = field(
         default_factory=lambda: EmergencyStopConfig()
     )
+    # Issue #5207: first-class attachment ceilings for the gateway wire
+    # protocol, advertised to clients via HelloResult.policy so a custom /ws
+    # client can self-limit/chunk before sending a file. Defaults keep a
+    # sensible 10 MiB / 10-file / 256 KiB-chunk policy; attachments remain
+    # opt-in per turn so a client that never sends one is unaffected.
+    attachments: "AttachmentConfig" = field(default_factory=lambda: AttachmentConfig())
     # Issue #4766: per-session turn-execution seam. Selects *where* a session's
     # agent turn runs (see ``TurnExecutorProtocol``). ``None`` (the default)
     # resolves to ``InProcessTurnExecutor`` at runtime — today's on-loop
@@ -989,6 +1085,7 @@ class GatewayConfig:
             "liveness": self.liveness.to_dict(),
             "turn_lock": self.turn_lock.to_dict(),
             "control": self.control.to_dict(),
+            "attachments": self.attachments.to_dict(),
             # Report the active executor type so ``gateway doctor`` can surface
             # it; ``None`` means the in-process default (today's behaviour).
             "executor": (
@@ -1188,6 +1285,7 @@ class MultiChannelGatewayConfig:
             liveness=LivenessConfig.from_dict(gw_data.get("liveness")),
             turn_lock=TurnLockConfig.from_dict(gw_data.get("turn_lock")),
             control=EmergencyStopConfig.from_dict(gw_data.get("control")),
+            attachments=AttachmentConfig.from_dict(gw_data.get("attachments")),
         )
         
         # Parse agents section (pass through as dicts)
