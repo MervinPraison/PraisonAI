@@ -49,6 +49,20 @@ from praisonaiagents.gateway.protocols import (
     evaluate_pressure,
 )
 
+try:  # Central registry-driven authorization guard (Issue #5166).
+    from praisonaiagents.gateway.protocols import (
+        authorize_method,
+        GatewayUnauthorized,
+    )
+except ImportError:  # pragma: no cover - core predates the central guard
+    authorize_method = None  # type: ignore[assignment]
+
+    class GatewayUnauthorized(PermissionError):  # type: ignore[no-redef]
+        def __init__(self, method=None, required=None):
+            self.method = method
+            self.required = required
+            super().__init__("insufficient scope")
+
 try:  # Scoped-stop primitive (Issue #5129); optional at import time.
     from praisonaiagents.gateway.protocols import StopScope, StopResult
 except Exception:  # pragma: no cover - only when core predates scoped stop
@@ -3210,6 +3224,34 @@ class WebSocketGateway:
         if msg_type == EventType.PONG.value:
             return
 
+        # Issue #5166: central, default-deny authorization gate. Resolve the
+        # scope this method requires from the declarative registry (the single
+        # source of truth) and deny before dispatch when the client lacks it.
+        # A method nobody classified is ADMIN-only by omission rather than
+        # reachable ungated, and plugin-registered methods are gated too. The
+        # per-endpoint ``_client_has_scope`` checks below become a redundant
+        # (harmless) second line rather than the sole gate. ``PING``/``PONG``
+        # are transport frames handled above and never reach here. If the core
+        # is too old to expose the guard, fall through to the legacy checks.
+        if authorize_method is not None:
+            try:
+                params = data if isinstance(data, dict) else None
+                authorize_method(
+                    msg_type, self._client_scope_set(client_id), params
+                )
+            except GatewayUnauthorized as exc:
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": (
+                        exc.required.value
+                        if getattr(exc, "required", None) is not None
+                        else None
+                    ),
+                })
+                return True
+
         # Handle versioned handshake
         if msg_type == "hello":
             agent_id = data.get("agent_id")
@@ -5395,6 +5437,25 @@ class WebSocketGateway:
         if scopes is None:
             return True
         return OperatorScope.ADMIN.value in scopes or scope.value in scopes
+
+    def _client_scope_set(self, client_id: str) -> "Set[OperatorScope]":
+        """Return the ``OperatorScope`` set a connected client holds.
+
+        Clients connected before scopes were tracked, or when no scope policy
+        is configured, hold every scope — preserving prior binary-auth
+        behaviour so the central guard changes nothing for those callers.
+        Unknown scope strings are ignored rather than crashing the gate.
+        """
+        raw = self._client_scopes.get(client_id)
+        if raw is None:
+            return set(OperatorScope.all())
+        resolved: "Set[OperatorScope]" = set()
+        for value in raw:
+            try:
+                resolved.add(OperatorScope(value))
+            except ValueError:
+                continue
+        return resolved
 
     @staticmethod
     def _event_required_scope(event: GatewayEvent) -> OperatorScope:

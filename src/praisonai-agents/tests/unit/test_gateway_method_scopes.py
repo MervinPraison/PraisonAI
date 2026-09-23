@@ -11,6 +11,8 @@ from praisonaiagents.gateway import (
     OperatorScope,
     register_gateway_method,
     resolve_required_scope,
+    authorize_method,
+    GatewayUnauthorized,
     GATEWAY_METHODS,
 )
 
@@ -106,6 +108,69 @@ def test_descriptor_collections_are_immutable_after_construction():
     assert "mutate" not in desc.safe_fields
     # Unknown structural field still fails closed.
     assert desc.resolve({"text": "hi", "mutate": True}) == OperatorScope.ADMIN
+
+
+def test_authorize_method_allows_when_scope_held():
+    """A classified method passes when the caller holds the required scope."""
+    authorize_method("message", {OperatorScope.WRITE})
+    authorize_method("session.status", {OperatorScope.READ})
+    # ADMIN implies all -> satisfies any classified method.
+    authorize_method("channels.control", {OperatorScope.ADMIN})
+    authorize_method("message", {OperatorScope.ADMIN})
+
+
+def test_authorize_method_denies_when_scope_missing():
+    """A caller lacking the required scope is denied with the required scope."""
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("message", {OperatorScope.READ})
+    assert exc.value.method == "message"
+    assert exc.value.required == OperatorScope.WRITE
+
+
+def test_authorize_method_default_denies_unknown_method():
+    """An unclassified method is ADMIN-only by omission (fail closed)."""
+    scopes = {OperatorScope.READ, OperatorScope.WRITE, OperatorScope.APPROVALS}
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("totally.new.unwired.method", scopes)
+    assert exc.value.required == OperatorScope.ADMIN
+    # Only ADMIN can reach it until it is classified.
+    authorize_method("totally.new.unwired.method", {OperatorScope.ADMIN})
+
+
+def test_authorize_method_gates_plugin_registered_method():
+    """A plugin method registered via the registry is gated automatically."""
+    name = "test.plugin.authz.5166"
+    try:
+        register_gateway_method(name, scope=OperatorScope.APPROVALS, owner="plugin")
+        # WRITE alone does not satisfy an APPROVALS method.
+        with pytest.raises(GatewayUnauthorized):
+            authorize_method(name, {OperatorScope.WRITE})
+        # The declared scope does.
+        authorize_method(name, {OperatorScope.APPROVALS})
+        # ADMIN implies it too.
+        authorize_method(name, {OperatorScope.ADMIN})
+    finally:
+        GATEWAY_METHODS.pop(name, None)
+
+
+def test_authorize_method_honours_field_escalation():
+    """authorize_method resolves per-field escalation via the descriptor."""
+    name = "test.plugin.escalate.5166"
+    try:
+        register_gateway_method(
+            name,
+            scope=OperatorScope.WRITE,
+            escalate_fields={"config": OperatorScope.ADMIN},
+            owner="plugin",
+        )
+        # Baseline field set -> WRITE suffices.
+        authorize_method(name, {OperatorScope.WRITE}, {"text": "hi"})
+        # Escalating field present -> now needs ADMIN.
+        with pytest.raises(GatewayUnauthorized) as exc:
+            authorize_method(name, {OperatorScope.WRITE}, {"config": {}})
+        assert exc.value.required == OperatorScope.ADMIN
+    finally:
+        GATEWAY_METHODS.pop(name, None)
 
 
 def test_register_gateway_method_and_resolve():

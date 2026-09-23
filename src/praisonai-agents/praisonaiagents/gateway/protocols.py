@@ -7061,6 +7061,56 @@ def resolve_required_scope(
     return desc.resolve(params)
 
 
+class GatewayUnauthorized(PermissionError):
+    """Raised when a caller lacks the scope a gateway method requires.
+
+    Carries the ``method`` and the ``required`` scope so the dispatcher can
+    render a structured, machine-readable denial (matching today's
+    ``insufficient scope`` envelope) without re-deriving either.
+    """
+
+    def __init__(self, method: str, required: OperatorScope) -> None:
+        self.method = method
+        self.required = required
+        super().__init__(
+            f"method {method!r} requires scope {required.value!r}"
+        )
+
+
+def _scope_satisfies(
+    held: "Set[OperatorScope]", required: OperatorScope
+) -> bool:
+    """Whether the ``held`` scopes satisfy ``required`` (ADMIN implies all).
+
+    A caller is authorised when it holds the exact required scope or ``ADMIN``
+    (the top of the lattice). This mirrors the wrapper's long-standing
+    ``ADMIN implies all`` rule so wiring the registry into dispatch does not
+    change behaviour for already-classified methods.
+    """
+    if OperatorScope.ADMIN in held:
+        return True
+    return required in held
+
+
+def authorize_method(
+    method: str,
+    client_scopes: "Set[OperatorScope]",
+    params: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Central, default-deny authorisation gate for a gateway method.
+
+    Resolves the required scope from the single source of truth
+    (:func:`resolve_required_scope`) — so an unclassified/plugin-registered
+    method is ``ADMIN``-only by omission rather than reachable ungated — and
+    raises :class:`GatewayUnauthorized` when ``client_scopes`` do not satisfy
+    it. Dispatch calls this once, centrally, instead of scattering per-endpoint
+    checks that can drift from the registry.
+    """
+    required = resolve_required_scope(method, params)
+    if not _scope_satisfies(set(client_scopes), required):
+        raise GatewayUnauthorized(method=method, required=required)
+
+
 # Core method classification. Registered once at import so the dispatcher can
 # consult the registry instead of scattered per-endpoint checks. Structural
 # mutations (channel control) demand ADMIN; sending as the agent needs WRITE;
@@ -7075,8 +7125,11 @@ def _register_core_gateway_methods() -> None:
         "leave": OperatorScope.READ,
         "agent.message": OperatorScope.WRITE,
         "message": OperatorScope.WRITE,
-        # Aborting a turn mutates it, so it carries the same scope as sending one.
+        # Aborting a turn mutates it, so it carries the same scope as sending
+        # one. The wire also accepts the ``message_abort`` event-type alias for
+        # the same action, so both names carry the WRITE scope in lockstep.
         "abort": OperatorScope.WRITE,
+        "message_abort": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,
