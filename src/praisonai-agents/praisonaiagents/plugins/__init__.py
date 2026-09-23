@@ -378,6 +378,21 @@ def get_plugin_registry() -> list:
             return manager.is_enabled(name)
         return name in config_enabled
 
+    # Surface the least-privilege conversation boundary so an operator can see,
+    # per plugin, whether it *requested* prompt/message access (declared a
+    # conversation hook) and whether it is *granted*. Imported once and reused
+    # across all three registry sources so the capability columns are never
+    # silently omitted for a given plugin-listing path.
+    from .manager import CONVERSATION_HOOKS
+
+    def _requests_conversation(declared) -> bool:
+        for h in declared or []:
+            value = h.value if hasattr(h, "value") else h
+            for ch in CONVERSATION_HOOKS:
+                if value == ch or value == getattr(ch, "value", ch):
+                    return True
+        return False
+
     entries: list = []
     seen: set = set()
 
@@ -393,11 +408,6 @@ def get_plugin_registry() -> list:
             h.value if hasattr(h, "value") else str(h)
             for h in declared
         ]
-        # Surface the least-privilege conversation boundary so an operator can
-        # see, per plugin, whether it *requested* prompt/message access
-        # (declared a conversation hook) and whether it is *granted*.
-        from .manager import CONVERSATION_HOOKS
-
         entries.append({
             "name": name,
             "version": getattr(info, "version", "1.0.0"),
@@ -405,7 +415,7 @@ def get_plugin_registry() -> list:
             "source": "registered",
             "enabled": manager.is_enabled(name) or _config_says_enabled(name),
             "hooks": hooks,
-            "requests_conversation": any(h in CONVERSATION_HOOKS for h in declared),
+            "requests_conversation": _requests_conversation(declared),
             "conversation_granted": manager._granted_conversation_access(name),
         })
 
@@ -423,6 +433,10 @@ def get_plugin_registry() -> list:
                 continue
             seen.add(ep.name)
             dist = getattr(getattr(ep, "dist", None), "name", None)
+            # Installed-but-not-loaded entry points: hooks are unknown without
+            # executing the plugin (which we deliberately avoid), so we report a
+            # conservative view — it has not been granted conversation access and
+            # its requested capability is unknown until loaded.
             entries.append({
                 "name": ep.name,
                 "version": "-",
@@ -430,6 +444,8 @@ def get_plugin_registry() -> list:
                 "source": f"entry_point:{dist}" if dist else "entry_point",
                 "enabled": _config_says_enabled(ep.name),
                 "hooks": [],
+                "requests_conversation": None,
+                "conversation_granted": manager._granted_conversation_access(ep.name),
             })
     except Exception as e:
         import logging
@@ -444,14 +460,17 @@ def get_plugin_registry() -> list:
             if not name or name in seen:
                 continue
             seen.add(name)
+            single_hooks = list(meta.get("hooks", []) or [])
             entries.append({
                 "name": name,
                 "version": meta.get("version", "1.0.0"),
                 "description": meta.get("description", ""),
                 "source": "single_file",
                 "enabled": manager.is_enabled(name) or _config_says_enabled(name),
-                "hooks": list(meta.get("hooks", []) or []),
+                "hooks": single_hooks,
                 "path": meta.get("path"),
+                "requests_conversation": _requests_conversation(single_hooks),
+                "conversation_granted": manager._granted_conversation_access(name),
             })
     except Exception as e:
         import logging

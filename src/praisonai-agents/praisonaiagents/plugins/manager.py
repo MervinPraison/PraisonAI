@@ -26,25 +26,81 @@ logger = get_logger(__name__)
 # rewrite it (transform-style). Dispatching these to an arbitrary pip-installed
 # entry-point plugin lets a transitively-installed dependency read or tamper
 # with every user's messages, so they are gated behind an explicit grant.
+#
+# This deliberately covers BOTH directions of the conversation: the inbound
+# prompt/messages/model-response events AND the outbound message-delivery
+# events (``message_sending`` can rewrite the assistant reply sent to the
+# user; ``message_sent`` / ``message_undelivered`` expose that reply). Gating
+# only the inbound half would let an ungranted plugin still read or tamper with
+# every outbound reply.
 CONVERSATION_HOOKS = frozenset({
     PluginHook.MESSAGE_RECEIVED,
     PluginHook.BEFORE_LLM,
     PluginHook.AFTER_LLM,
     PluginHook.BEFORE_AGENT,
     PluginHook.AFTER_AGENT,
+    PluginHook.MESSAGE_SENDING,
+    PluginHook.MESSAGE_SENT,
+    PluginHook.MESSAGE_UNDELIVERED,
 })
 
 
-def _is_first_party(plugin: Plugin) -> bool:
-    """True for plugins bundled inside the framework itself.
+def _package_root() -> Optional[Path]:
+    """Filesystem directory of the installed ``praisonaiagents`` package.
 
-    First-party plugins live under the ``praisonaiagents`` package namespace;
-    they are shipped and reviewed with the framework, so they are trusted with
-    conversation content. Any plugin loaded from another distribution (e.g. a
-    pip package's ``praisonai.plugins`` entry point) is third-party.
+    Used to verify first-party provenance by real file location rather than a
+    self-asserted ``__module__`` string. Returns ``None`` if it cannot be
+    resolved (in which case provenance falls back to failing closed).
     """
-    module = getattr(type(plugin), "__module__", "") or ""
-    return module == "praisonaiagents" or module.startswith("praisonaiagents.")
+    try:
+        import praisonaiagents
+
+        file = getattr(praisonaiagents, "__file__", None)
+        if not file:
+            return None
+        return Path(file).resolve().parent
+    except Exception:
+        return None
+
+
+def _is_first_party(plugin: Plugin) -> bool:
+    """True only for plugins genuinely bundled inside the framework.
+
+    First-party plugins are shipped and reviewed with the framework, so they
+    are trusted with conversation content. A plugin's ``__module__`` string is
+    self-asserted and therefore spoofable — a third-party pip package could set
+    ``__module__ = "praisonaiagents.evil"`` to falsely claim first-party trust.
+
+    To make the trust decision on provenance the plugin cannot forge, we
+    require BOTH:
+
+    1. the class's ``__module__`` sits under the ``praisonaiagents`` namespace, and
+    2. the module's real ``__file__`` resolves to a path *inside* the installed
+       ``praisonaiagents`` package directory.
+
+    Any plugin failing either check — notably an auto-discovered
+    ``praisonai.plugins`` entry point from an arbitrary distribution — is
+    treated as third-party and denied conversation access by default.
+    """
+    cls = type(plugin)
+    module_name = getattr(cls, "__module__", "") or ""
+    if module_name != "praisonaiagents" and not module_name.startswith("praisonaiagents."):
+        return False
+
+    root = _package_root()
+    if root is None:
+        # Cannot verify provenance — fail closed rather than trust a string.
+        return False
+
+    module = sys.modules.get(module_name)
+    module_file = getattr(module, "__file__", None) if module is not None else None
+    if not module_file:
+        return False
+    try:
+        resolved = Path(module_file).resolve()
+    except Exception:
+        return False
+    return root == resolved.parent or root in resolved.parents
 
 
 def _env_plugins_suppressed() -> bool:
