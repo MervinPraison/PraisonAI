@@ -102,6 +102,15 @@ class VideoAgent:
             - vertex_ai/veo-3.1-fast-generate-001   # GA Fast
             - vertex_ai/veo-3.1-lite-generate-001   # Lite
         - RunwayML: runwayml/gen4_turbo (requires input_reference)
+        - OpenRouter (uses OPENROUTER_API_KEY, requires the openrouter/ prefix):
+            - openrouter/google/veo-3.1, openrouter/kling/kling-3.0-std,
+              openrouter/minimax/hailuo-3, openrouter/bytedance/seedance-2.0, ...
+            - Discover exact model ids via GET https://openrouter.ai/api/v1/videos/models
+            - OpenRouter body fields (duration, resolution, aspect_ratio,
+              generate_audio, seed, ...) are passed straight through as kwargs to
+              generate(); e.g. agent.generate(prompt, duration=6, resolution="720p").
+            - HTTP-Referer / X-Title attribution headers are added automatically
+              (override via OPENROUTER_REFERER / OPENROUTER_APP_TITLE env vars).
 
     Deprecated (do NOT recommend; kept working only if LiteLLM still routes them):
         - gemini/veo-2.0-generate-001 (Gemini API shutdown 30 Jun 2026)
@@ -294,7 +303,26 @@ class VideoAgent:
             params["api_base"] = self.base_url
         if self.api_version:
             params["api_version"] = self.api_version
+        headers = self._provider_headers()
+        if headers:
+            params["extra_headers"] = headers
         return params
+
+    def _provider_headers(self) -> Dict[str, str]:
+        """Optional attribution headers for gateway providers.
+
+        OpenRouter recommends sending HTTP-Referer and X-Title so requests
+        show up under your app in the OpenRouter dashboard. These mirror the
+        chat gateway (praisonai/llm/gateways.py) and are only added for
+        openrouter/ models to keep other providers untouched.
+        """
+        model = self.llm if isinstance(self.llm, str) else ""
+        if not model.startswith("openrouter/"):
+            return {}
+        return {
+            "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "https://praison.ai"),
+            "X-Title": os.getenv("OPENROUTER_APP_TITLE", "PraisonAI"),
+        }
     
     # ─────────────────────────────────────────────────────────────────────────
     # Core Video Operations (5 operations, sync + async)

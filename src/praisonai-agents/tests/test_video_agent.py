@@ -353,6 +353,83 @@ class TestVideoAgentProviders:
         agent = VideoAgent(llm="runwayml/gen4_turbo")
         assert "runwayml" in agent.llm
 
+    def test_openrouter_provider(self):
+        """Test OpenRouter configuration keeps the openrouter/ prefix."""
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="openrouter/google/veo-3.1")
+        assert agent.llm == "openrouter/google/veo-3.1"
+
+
+class TestVideoAgentOpenRouterHeaders:
+    """OpenRouter attribution headers are added only for openrouter/ models."""
+
+    def test_openrouter_default_headers(self, monkeypatch):
+        from praisonaiagents import VideoAgent
+
+        monkeypatch.delenv("OPENROUTER_REFERER", raising=False)
+        monkeypatch.delenv("OPENROUTER_APP_TITLE", raising=False)
+        agent = VideoAgent(llm="openrouter/google/veo-3.1", verbose=False)
+        params = agent._get_model_params()
+        assert params["extra_headers"]["HTTP-Referer"] == "https://praison.ai"
+        assert params["extra_headers"]["X-Title"] == "PraisonAI"
+
+    def test_openrouter_headers_env_override(self, monkeypatch):
+        from praisonaiagents import VideoAgent
+
+        monkeypatch.setenv("OPENROUTER_REFERER", "https://example.com")
+        monkeypatch.setenv("OPENROUTER_APP_TITLE", "MyApp")
+        agent = VideoAgent(llm="openrouter/kling/kling-3.0-std", verbose=False)
+        params = agent._get_model_params()
+        assert params["extra_headers"]["HTTP-Referer"] == "https://example.com"
+        assert params["extra_headers"]["X-Title"] == "MyApp"
+
+    def test_non_openrouter_has_no_headers(self):
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="openai/sora-2", verbose=False)
+        params = agent._get_model_params()
+        assert "extra_headers" not in params
+
+    def test_openrouter_generate_forwards_headers_and_body_fields(self, monkeypatch):
+        """Contract test: generate() forwards the openrouter/ model, attribution
+        headers, and provider body fields straight into LiteLLM's video route."""
+        from praisonaiagents import VideoAgent
+
+        monkeypatch.delenv("OPENROUTER_REFERER", raising=False)
+        monkeypatch.delenv("OPENROUTER_APP_TITLE", raising=False)
+
+        captured = {}
+
+        def fake_video_generation(**kwargs):
+            captured.update(kwargs)
+            return MockVideoObject()
+
+        agent = VideoAgent(llm="openrouter/google/veo-3.1", verbose=False)
+        agent._litellm_video = {"video_generation": fake_video_generation}
+
+        agent.generate(
+            "A serene mountain landscape",
+            duration=6,
+            resolution="720p",
+            generate_audio=False,
+        )
+
+        assert captured["model"] == "openrouter/google/veo-3.1"
+        assert captured["prompt"] == "A serene mountain landscape"
+        assert captured["extra_headers"]["HTTP-Referer"] == "https://praison.ai"
+        assert captured["extra_headers"]["X-Title"] == "PraisonAI"
+        assert captured["duration"] == 6
+        assert captured["resolution"] == "720p"
+        assert captured["generate_audio"] is False
+
+    def test_openrouter_litellm_routes_provider(self):
+        """LiteLLM strips the openrouter/ prefix and routes to the openrouter provider."""
+        litellm = pytest.importorskip("litellm")
+        model, provider, _, _ = litellm.get_llm_provider(model="openrouter/google/veo-3.1")
+        assert provider == "openrouter"
+        assert model == "google/veo-3.1"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Async Tests
