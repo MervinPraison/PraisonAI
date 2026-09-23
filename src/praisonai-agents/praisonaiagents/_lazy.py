@@ -37,6 +37,20 @@ _cache_lock = threading.RLock()
 # Global module cache
 _module_cache: Dict[str, Any] = {}
 
+# Import roots of praisonaiagents' declared *core* runtime dependencies (see
+# pyproject.toml ``[project].dependencies``). A lazy import that fails because
+# one of these is missing/broken indicates a genuinely broken install, which
+# must be surfaced rather than masked as a graceful ``None``. Optional
+# integrations whose own optional SDKs are absent are NOT in this set, so they
+# keep the documented ``None`` fallback.
+_CORE_REQUIRED_DEPENDENCIES = frozenset({
+    "pydantic",
+    "rich",
+    "openai",
+    "posthog",
+    "aiohttp",
+})
+
 
 def lazy_import(
     module_path: str,
@@ -221,21 +235,23 @@ def create_lazy_getattr_with_fallback(
                 return None
             except ImportError as exc:
                 # Distinguish "optional integration not installed" from
-                # "required transitive dependency is broken". When the failing
-                # module is the target module itself (or its top-level package),
-                # treat it as an intentionally-absent optional feature and keep
-                # the graceful None fallback. When the failure came from a
-                # *different* module — i.e. a required dependency of the target
-                # failed to import — surface it instead of masking it as a
-                # later NoneType error.
+                # "a required *core* dependency is broken". A missing/broken core
+                # dependency (e.g. ``pydantic``) must be surfaced loudly instead
+                # of being masked as ``None`` (which resurfaces later as a
+                # confusing ``NoneType`` error). But an optional integration whose
+                # own optional SDK is absent must keep the documented graceful
+                # ``None`` fallback — the failing module name there belongs to
+                # that optional SDK, not to us. We therefore only escalate when
+                # the failing module is one of praisonaiagents' declared *core*
+                # runtime dependencies; everything else stays a soft None.
                 failing = getattr(exc, "name", None)
-                top_level = module_path.split(".")[0]
-                if failing is not None and failing not in (module_path, top_level):
+                failing_root = failing.split(".")[0] if failing else None
+                if failing_root in _CORE_REQUIRED_DEPENDENCIES:
                     raise ImportError(
                         f"Failed to load {name!r} because importing {module_path!r} "
-                        f"raised: {exc}. This usually means a required dependency is "
-                        f"missing or broken, not that {name!r} is an optional feature "
-                        f"you chose not to install."
+                        f"raised: {exc}. This usually means a required core dependency "
+                        f"({failing_root!r}) is missing or broken, not that {name!r} is "
+                        f"an optional feature you chose not to install."
                     ) from exc
                 _logger.debug(
                     "Lazy import of %r (%s.%s) failed: %s",

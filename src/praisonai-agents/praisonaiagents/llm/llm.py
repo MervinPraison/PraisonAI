@@ -7,6 +7,7 @@ import re
 import inspect
 import asyncio
 import threading
+import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -579,10 +580,21 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
-        # Stable per-instance identity for token accounting, so unrelated agents
-        # sharing a display name don't merge into one cost bucket.
-        self.current_agent_id: Optional[str] = None
+        # Agent attribution for token accounting is stored in ContextVars so it
+        # is *task/thread-local*, not shared instance state. A single LLM
+        # instance is routinely shared by many concurrently-running agents; a
+        # plain attribute would let one agent's ``set_current_agent`` clobber
+        # another's while the first is still awaiting its own completion,
+        # mis-attributing tokens across tenants (issue #5052). The
+        # ``current_agent_id`` is a stable per-instance identity used as the
+        # aggregation key so unrelated agents sharing a display name don't merge
+        # into one cost bucket.
+        self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praisonai_current_agent_name", default=None)
+        )
+        self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praisonai_current_agent_id", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6287,15 +6299,53 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Task/thread-local display name of the agent currently attributing tokens."""
+        return self._current_agent_name_var.get()
+
+    @property
+    def current_agent_id(self) -> Optional[str]:
+        """Task/thread-local stable identity of the agent currently attributing tokens."""
+        return self._current_agent_id_var.get()
+
     def set_current_agent(self, agent_name: Optional[str], agent_id: Optional[str] = None):
         """Set the current agent name (and optional stable id) for token tracking.
 
-        ``agent_id`` is a stable per-instance identity used as the token
-        aggregation key so unrelated agents sharing a display name are not
+        The attribution is stored in ContextVars, so it is local to the current
+        asyncio task / thread. A single LLM instance shared by several
+        concurrently-running agents therefore attributes each response to the
+        agent that issued it, instead of whichever agent last called this method
+        (issue #5052). ``agent_id`` is a stable per-instance identity used as the
+        token aggregation key so unrelated agents sharing a display name are not
         merged into one cost bucket.
         """
-        self.current_agent_name = agent_name
-        self.current_agent_id = agent_id
+        self._current_agent_name_var.set(agent_name)
+        self._current_agent_id_var.set(agent_id)
+
+    def __deepcopy__(self, memo):
+        """Deep-copy the LLM, giving the clone its own attribution ContextVars.
+
+        ``contextvars.ContextVar`` objects are not copyable (they raise
+        ``TypeError: cannot pickle '_contextvars.ContextVar' object``), and their
+        value is task-local runtime state that must not be shared with the
+        clone. Copy everything else normally, then hand the clone fresh,
+        independent ContextVars (issue #5052).
+        """
+        cls = self.__class__
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
+        for key, value in self.__dict__.items():
+            if key in ("_current_agent_name_var", "_current_agent_id_var"):
+                continue
+            setattr(clone, key, copy.deepcopy(value, memo))
+        clone._current_agent_name_var = contextvars.ContextVar(
+            "praisonai_current_agent_name", default=None
+        )
+        clone._current_agent_id_var = contextvars.ContextVar(
+            "praisonai_current_agent_id", default=None
+        )
+        return clone
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.

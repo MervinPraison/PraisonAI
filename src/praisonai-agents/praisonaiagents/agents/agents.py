@@ -3330,17 +3330,27 @@ class AgentTeam(SpawnAnnounceProtocol):
         scoped_by_agent: Dict[str, Dict[str, int]] = {}
         if own_ids and by_agent_id:
             for key, entry in by_agent_id.items():
-                if key in own_ids:
-                    name = entry.get("name") or key
-                    metrics = entry.get("metrics", {})
-                    if name in scoped_by_agent:
-                        scoped_by_agent[name] = {
-                            k: scoped_by_agent[name].get(k, 0) + v
-                            for k, v in metrics.items()
-                            if isinstance(v, (int, float))
-                        }
-                    else:
-                        scoped_by_agent[name] = dict(metrics)
+                name = entry.get("name") or key
+                # Match by stable id (collision-free) OR by display name for
+                # id-less buckets — e.g. the native OpenAI-client path records
+                # ``agent`` without an ``agent_id``, so the collector keys that
+                # bucket by name (``key == name``). Dropping those would zero out
+                # real OpenAI usage even though the interaction and per-model
+                # rows still show it (Greptile P1). We treat a bucket as id-less
+                # when its key equals its own display name.
+                is_id_match = key in own_ids
+                is_idless_name_match = key == name and name in own_names
+                if not (is_id_match or is_idless_name_match):
+                    continue
+                metrics = entry.get("metrics", {})
+                if name in scoped_by_agent:
+                    scoped_by_agent[name] = {
+                        k: scoped_by_agent[name].get(k, 0) + v
+                        for k, v in metrics.items()
+                        if isinstance(v, (int, float))
+                    }
+                else:
+                    scoped_by_agent[name] = dict(metrics)
         else:
             scoped_by_agent = {
                 name: metrics for name, metrics in by_agent.items() if name in own_names
