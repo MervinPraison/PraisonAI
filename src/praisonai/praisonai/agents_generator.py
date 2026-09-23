@@ -86,8 +86,12 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
-        bucket_from_roles = "roles" in config
-        bucket = config.get("roles") or config.get("agents") or {}
+        # An empty ``roles: {}`` must behave like a missing one, otherwise the
+        # grafted bucket (below) is never merged back and the run silently ends
+        # with zero agents.
+        existing_roles = config.get("roles") if isinstance(config.get("roles"), dict) else None
+        bucket_from_roles = bool(existing_roles)
+        bucket = existing_roles or config.get("agents") or {}
         if not isinstance(bucket, dict):
             bucket = {}
         for i, task in enumerate(tasks):
@@ -116,8 +120,10 @@ def _normalize_yaml_config(config: dict) -> dict:
             entry[task_name] = {
                 k: v for k, v in task.items() if k != "agent"
             }
+        # Always merge the grafted bucket back into ``roles`` so an initially
+        # empty ``roles: {}`` never leaves the run with zero agents.
         if not bucket_from_roles and bucket:
-            config["roles"] = {k: v for k, v in bucket.items()}
+            config["roles"] = {**(existing_roles or {}), **bucket}
         config.pop("tasks", None)
 
     return config
@@ -819,7 +825,9 @@ class AgentsGenerator:
         selection, and adapter resolution. Used by BOTH sync and async.
         """
         # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
-        if 'agents' in config and 'roles' not in config:
+        # Treat an empty ``roles: {}`` the same as a missing one so populated
+        # ``agents:`` is still promoted instead of running with zero agents.
+        if 'agents' in config and not config.get('roles'):
             config['roles'] = {}
             for agent_name, agent_config in config['agents'].items():
                 role_config = dict(agent_config) if agent_config else {}
