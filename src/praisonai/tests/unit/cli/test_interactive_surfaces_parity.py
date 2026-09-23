@@ -90,6 +90,62 @@ def test_async_tui_expands_at_mentions():
         os.unlink(temp_path)
 
 
+def test_run_surface_expands_bare_at_mentions(tmp_path):
+    """Non-interactive parity (issue #5158): the shared ``MentionsParser`` used
+    by ``praisonai run`` / YAML / Python must expand the *bare* ``@path`` form
+    (``@src/app.py``) — the same form the interactive TUI expands — not only the
+    prefixed ``@file:path`` form.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    (tmp_path / "app.py").write_text("SENTINEL_RUN_BODY")
+    parser = MentionsParser(workspace_path=str(tmp_path))
+
+    assert parser.has_mentions("Explain @app.py")
+    context, _cleaned = parser.process("Explain @app.py and fix the bug")
+    assert "SENTINEL_RUN_BODY" in context
+
+    # A bare ``@handle`` that is not a workspace file is left untouched.
+    assert not parser.has_mentions("ping @someuser")
+    ctx2, cleaned2 = parser.process("ping @someuser now")
+    assert ctx2 == ""
+    assert "@someuser" in cleaned2
+
+    # Path traversal is refused for the bare form too.
+    assert not parser.has_mentions("@../secret.txt")
+
+    # Punctuation-adjacent mention: a trailing ``,`` (or ``.``/``)`` etc.) must
+    # not be treated as part of the path, so ``@app.py,`` still resolves the
+    # real ``app.py`` file (greptile P1).
+    assert parser.has_mentions("Explain @app.py, then suggest a fix")
+    ctx3, _ = parser.process("Explain @app.py, then suggest a fix")
+    assert "SENTINEL_RUN_BODY" in ctx3
+
+    # A filename embedded in an email address must NOT be expanded: only
+    # standalone ``@`` tokens (start-of-string or after whitespace) count, so
+    # ``alice@app.py`` leaks nothing (greptile P1 security).
+    assert not parser.has_mentions("email alice@app.py please")
+    ctx4, cleaned4 = parser.process("email alice@app.py please")
+    assert ctx4 == ""
+    assert "alice@app.py" in cleaned4
+
+
+def test_tui_and_run_share_the_same_resolver(tmp_path):
+    """The TUI's ``_process_file_mentions`` must delegate to the shared
+    ``MentionsParser`` so the interactive and ``run`` surfaces cannot drift.
+    """
+    from praisonai.cli.interactive.async_tui import AsyncTUI
+
+    (tmp_path / "readme.md").write_text("SHARED_RESOLVER_BODY")
+    tui = AsyncTUI()
+    tui.config.workspace = str(tmp_path)
+
+    result = tui._process_file_mentions("summarise @readme.md")
+    assert "SHARED_RESOLVER_BODY" in result
+    # No mentions => prompt returned unchanged.
+    assert tui._process_file_mentions("no mentions here") == "no mentions here"
+
+
 # ---------------------------------------------------------------------------
 # Defect 2: /stats available on all REPL surfaces
 # ---------------------------------------------------------------------------

@@ -43,6 +43,26 @@ class MentionsParser:
         "rule": re.compile(r'@rule:([^\s]+)'),
         "url": re.compile(r'@url:(https?://[^\s]+)'),
     }
+
+    # Bare ``@path`` mention (no ``type:`` prefix), matching the interactive
+    # TUI form (e.g. ``@src/app.py``). Processed last and only inlined when the
+    # value resolves to an existing workspace file, so unrelated ``@handle`` /
+    # ``@email`` tokens are left untouched.
+    #
+    # Boundaries:
+    # - ``(?:^|(?<=\s))`` requires the ``@`` to start a standalone token (start
+    #   of string or after whitespace) so a filename embedded in an email
+    #   address (``alice@app.py``) is NOT treated as a file reference.
+    # - The negative lookahead skips the already-prefixed forms handled above
+    #   (``@file:``/``@web:``/...).
+    # - Trailing sentence punctuation (``,`` ``.`` ``;`` ``:`` ``!`` ``?`` and
+    #   closing brackets/quotes) is excluded from the captured path so a common
+    #   prompt like ``Explain @app.py, then...`` resolves ``app.py`` rather than
+    #   the literal ``app.py,``.
+    BARE_FILE_PATTERN = re.compile(
+        r'(?:^|(?<=\s))@(?!(?:file|web|doc|rule|url):)'
+        r'([^\s]*[^\s,.;:!?)\]}>"\'])'
+    )
     
     # Default max file chars: 500K (~125K tokens) - fits GPT-4o (128K), Claude 3.5 (200K)
     DEFAULT_MAX_FILE_CHARS = 500000
@@ -128,7 +148,18 @@ class MentionsParser:
                     context_parts.append(context)
                 # Remove the mention from the prompt
                 cleaned_prompt = pattern.sub('', cleaned_prompt, count=1)
-        
+
+        # Bare ``@path`` mentions (TUI parity). Only inline when the value
+        # resolves to an existing workspace file; otherwise leave the token
+        # in place so unrelated ``@handle``/``@email`` text is preserved.
+        for match in self.BARE_FILE_PATTERN.findall(prompt):
+            if not self._is_workspace_file(match):
+                continue
+            context = self._process_file_mention(match)
+            if context:
+                context_parts.append(context)
+            cleaned_prompt = cleaned_prompt.replace('@' + match, '', 1)
+
         # Clean up extra whitespace
         cleaned_prompt = ' '.join(cleaned_prompt.split())
         
@@ -162,6 +193,22 @@ class MentionsParser:
             return self._process_url_mention(value)
         return None
     
+    def _is_workspace_file(self, file_path: str) -> bool:
+        """True when a bare ``@path`` resolves to an existing file inside the
+        workspace. Used to decide whether a bare mention should be inlined."""
+        try:
+            if ".." in file_path:
+                return False
+            full_path = (self.workspace_path / file_path).resolve()
+            workspace_root = self.workspace_path.resolve()
+            within = (
+                str(full_path).startswith(str(workspace_root) + os.sep)
+                or full_path == workspace_root
+            )
+            return within and full_path.is_file()
+        except Exception:
+            return False
+
     def _process_file_mention(self, file_path: str) -> Optional[str]:
         """Process @file:path mention."""
         try:
@@ -364,6 +411,10 @@ class MentionsParser:
         """Check if a prompt contains any @mentions."""
         for pattern in self.PATTERNS.values():
             if pattern.search(prompt):
+                return True
+        # Bare ``@path`` counts only when it points at a real workspace file.
+        for match in self.BARE_FILE_PATTERN.findall(prompt):
+            if self._is_workspace_file(match):
                 return True
         return False
 

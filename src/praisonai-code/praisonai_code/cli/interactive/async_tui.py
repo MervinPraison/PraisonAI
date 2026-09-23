@@ -545,32 +545,29 @@ class AsyncTUI:
             self.messages.append(ChatMessage(role="system", content="Failed to revert."))
 
     def _process_file_mentions(self, prompt: str) -> str:
-        """Process @file mentions and include file contents."""
+        """Process @file mentions and include file contents.
+
+        Delegates to the shared, security-aware ``MentionsParser`` (core SDK)
+        so the interactive surface and the non-interactive ``run``/YAML/Python
+        surfaces expand ``@file`` identically. The original prompt (with the
+        ``@token`` intact) is kept and the resolved file context is appended,
+        matching the previous TUI behaviour.
+        """
         import os
-        import re
-        
+
         workspace = self.config.workspace or os.getcwd()
-        
-        # Find all @file mentions
-        pattern = r'@([^\s]+)'
-        matches = re.findall(pattern, prompt)
-        
-        if not matches:
+        try:
+            from praisonaiagents.tools.mentions import MentionsParser
+        except ImportError:
             return prompt
-        
-        file_contents = []
-        for match in matches:
-            file_path = os.path.join(workspace, match)
-            if os.path.isfile(file_path):
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                    file_contents.append(f"\n--- Content of {match} ---\n{content}\n--- End of {match} ---\n")
-                except Exception as e:
-                    file_contents.append(f"\n[Error reading {match}: {e}]\n")
-        
-        if file_contents:
-            return prompt + "\n" + "\n".join(file_contents)
+
+        parser = MentionsParser(workspace_path=workspace)
+        if not parser.has_mentions(prompt):
+            return prompt
+
+        context, _cleaned = parser.process(prompt)
+        if context:
+            return prompt + "\n\n" + context
         return prompt
     
     # Tool names that can mutate the workspace or run commands. Review turns
