@@ -5,11 +5,75 @@ Inspired by OpenCode's multiedit tool, this allows efficient batch editing
 without multiple file read/write cycles.
 """
 
+import contextlib
 import difflib
 import os
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from praisonai.code.utils.file_utils import is_path_within_directory
+
+
+def _atomic_write(path: str, content: str) -> None:
+    """Write ``content`` to ``path`` atomically (temp file + fsync + os.replace).
+
+    ``open(path, 'w')`` truncates the target immediately, so any interrupt
+    (cancellation, SIGTERM, disk-full) between open and write leaves the file
+    zero-byte or half-written and the original content lost. multiedit runs on
+    LLM-driven tool calls that regularly hit timeouts/cancellations, so it needs
+    the same crash-safe write the rest of the wrapper already uses for configs.
+    """
+    target_dir = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=target_dir)
+    try:
+        # Preserve the existing file's mode so a replaced file stays readable
+        # (mkstemp creates 0600 by default).
+        try:
+            existing_mode = os.stat(path).st_mode
+        except OSError:
+            existing_mode = None
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())  # durability before rename
+        if existing_mode is not None:
+            try:
+                os.chmod(tmp_path, existing_mode)
+            except OSError:
+                pass  # best-effort
+        os.replace(tmp_path, path)  # atomic on POSIX + Windows
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+@contextlib.contextmanager
+def _file_lock(path: str):
+    """Advisory exclusive lock over the read-modify-write window for ``path``.
+
+    Prevents the lost-update race where two concurrent multiedit calls both read
+    the same snapshot and the later write silently discards the earlier edit.
+    Falls back to a no-op where ``fcntl`` is unavailable (e.g. Windows).
+    """
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+
+    lock_path = path + ".lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _resolve_safe_path(filepath: str, workspace_root: Optional[str] = None) -> Optional[str]:
@@ -102,15 +166,34 @@ def multiedit(
             return result
     
     try:
-        # Read file
-        with open(filepath, 'r') as f:
-            original_content = f.read()
-        
-        content = original_content
-        lines = content.split('\n')
-        
-        # Apply edits
-        for edit in edits:
+        # Hold an advisory lock across the whole read-modify-write so two
+        # concurrent multiedit calls on the same file cannot lose each other's
+        # edits (classic lost-update). No-op where fcntl is unavailable.
+        lock_cm = contextlib.nullcontext() if dry_run else _file_lock(filepath)
+        with lock_cm:
+            _run_edits(filepath, edits, dry_run, result)
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _run_edits(
+    filepath: str,
+    edits: List[Dict[str, Any]],
+    dry_run: bool,
+    result: Dict[str, Any],
+) -> None:
+    """Read, apply edits, and atomically write ``filepath`` (mutates ``result``)."""
+    # Read file
+    with open(filepath, 'r') as f:
+        original_content = f.read()
+
+    content = original_content
+    lines = content.split('\n')
+
+    # Apply edits
+    for edit in edits:
             old_text = edit["old"]
             new_text = edit["new"]
             line_hint = edit.get("line")
@@ -145,29 +228,23 @@ def multiedit(
                         result["edits_applied"] += 1
                     else:
                         result["edits_failed"] += 1
-        
-        # Generate diff
-        original_lines = original_content.splitlines(keepends=True)
-        new_lines = content.splitlines(keepends=True)
-        diff = difflib.unified_diff(
-            original_lines,
-            new_lines,
-            fromfile=f"a/{os.path.basename(filepath)}",
-            tofile=f"b/{os.path.basename(filepath)}",
-        )
-        result["diff"] = ''.join(diff)
-        
-        # Write file if not dry run
-        if not dry_run and result["edits_applied"] > 0:
-            with open(filepath, 'w') as f:
-                f.write(content)
-        
-        result["success"] = result["edits_failed"] == 0
-        
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
+
+    # Generate diff
+    original_lines = original_content.splitlines(keepends=True)
+    new_lines = content.splitlines(keepends=True)
+    diff = difflib.unified_diff(
+        original_lines,
+        new_lines,
+        fromfile=f"a/{os.path.basename(filepath)}",
+        tofile=f"b/{os.path.basename(filepath)}",
+    )
+    result["diff"] = ''.join(diff)
+
+    # Write file atomically if not dry run (crash-safe: no zero-byte truncation)
+    if not dry_run and result["edits_applied"] > 0:
+        _atomic_write(filepath, content)
+
+    result["success"] = result["edits_failed"] == 0
 
 
 def _apply_edit_with_hint(

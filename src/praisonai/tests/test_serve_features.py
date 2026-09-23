@@ -43,7 +43,7 @@ class TestRateLimiting:
         
         # Should allow 10 requests
         for _ in range(10):
-            allowed, _ = limiter.check(client_ip)
+            allowed, _ = limiter.check_sync(client_ip)
             assert allowed is True
     
     def test_rate_limiter_blocks_over_limit(self):
@@ -55,10 +55,10 @@ class TestRateLimiting:
         
         # Use up the limit
         for _ in range(5):
-            limiter.check(client_ip)
+            limiter.check_sync(client_ip)
         
         # Next request should be blocked
-        allowed, retry_after = limiter.check(client_ip)
+        allowed, retry_after = limiter.check_sync(client_ip)
         assert allowed is False
         assert retry_after > 0
     
@@ -70,10 +70,10 @@ class TestRateLimiting:
         
         # Client 1 uses up limit
         for _ in range(2):
-            limiter.check("client1")
+            limiter.check_sync("client1")
         
         # Client 2 should still be allowed
-        allowed, _ = limiter.check("client2")
+        allowed, _ = limiter.check_sync("client2")
         assert allowed is True
     
     def test_rate_limit_middleware_returns_429(self):

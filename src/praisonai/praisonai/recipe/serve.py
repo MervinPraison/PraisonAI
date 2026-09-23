@@ -85,42 +85,61 @@ DEFAULT_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
 DEFAULT_RATE_LIMIT = 100  # requests per minute
 DEFAULT_RATE_LIMIT_EXEMPT_PATHS = ["/health", "/metrics"]
 SUPPORTED_AUTH_TYPES = frozenset({"none", "api-key", "jwt"})
+# Env var used to hand the serve config to uvicorn worker subprocesses when
+# workers > 1 (uvicorn spawns fresh processes that cannot see the parent's
+# in-memory config, so it travels through the environment as JSON).
+_SERVE_CONFIG_ENV = "PRAISONAI_RECIPE_SERVE_CONFIG"
 
 
 class RateLimiter:
-    """Simple in-memory rate limiter using sliding window."""
-    
+    """In-memory sliding-window rate limiter.
+
+    The sliding window is guarded by an ``asyncio.Lock`` so overlapping requests
+    for the same client cannot both pass the length check before either appends
+    (the classic check-then-act race that lets a small burst exceed the limit in
+    a single worker). ``check`` is awaitable; a sync ``check_sync`` is retained
+    for non-async callers / tests.
+    """
+
     def __init__(self, requests_per_minute: int = DEFAULT_RATE_LIMIT):
         self.requests_per_minute = requests_per_minute
         self.window_seconds = 60
         self._requests: Dict[str, List[float]] = defaultdict(list)
-    
-    def check(self, client_id: str) -> Tuple[bool, int]:
+        self._lock = asyncio.Lock()
+
+    def check_sync(self, client_id: str) -> Tuple[bool, int]:
+        """Check if request is allowed (no locking; for tests / sync callers)."""
+        if self.requests_per_minute <= 0:
+            return True, 0
+
+        now = time.time()
+        window_start = now - self.window_seconds
+
+        # Clean old requests
+        bucket = [t for t in self._requests[client_id] if t > window_start]
+        self._requests[client_id] = bucket
+
+        if len(bucket) >= self.requests_per_minute:
+            # Calculate retry-after
+            oldest = min(bucket)
+            retry_after = int(oldest + self.window_seconds - now) + 1
+            return False, max(1, retry_after)
+
+        bucket.append(now)
+        return True, 0
+
+    async def check(self, client_id: str) -> Tuple[bool, int]:
         """
         Check if request is allowed.
-        
+
         Returns:
             Tuple of (allowed, retry_after_seconds)
         """
         if self.requests_per_minute <= 0:
             return True, 0
-        
-        now = time.time()
-        window_start = now - self.window_seconds
-        
-        # Clean old requests
-        self._requests[client_id] = [
-            t for t in self._requests[client_id] if t > window_start
-        ]
-        
-        if len(self._requests[client_id]) >= self.requests_per_minute:
-            # Calculate retry-after
-            oldest = min(self._requests[client_id])
-            retry_after = int(oldest + self.window_seconds - now) + 1
-            return False, max(1, retry_after)
-        
-        self._requests[client_id].append(now)
-        return True, 0
+
+        async with self._lock:
+            return self.check_sync(client_id)
 
 
 def create_rate_limiter(requests_per_minute: int = DEFAULT_RATE_LIMIT) -> RateLimiter:
@@ -775,10 +794,25 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
             if request.url.path in rate_limit_exempt:
                 return await call_next(request)
             
-            # Get client identifier (IP or API key)
-            client_id = request.headers.get("X-API-Key") or request.client.host if request.client else "unknown"
+            # Bucket only on an identity the auth layer has already validated,
+            # never on a raw client-controlled header. Otherwise an attacker (or
+            # any anonymous caller in auth modes 'none'/'jwt', where X-API-Key is
+            # never validated) rotates X-API-Key per request and each value gets
+            # its own bucket, defeating rate limiting entirely.
+            user = getattr(request.state, "user", None)
+            if user and isinstance(user, dict) and user.get("sub"):
+                client_id = f"jwt:{user['sub']}"
+            elif auth_type == "api-key":
+                # Auth middleware has already validated the key for this mode,
+                # so it is safe to use as a stable per-client bucket id.
+                provided_key = request.headers.get("X-API-Key")
+                client_id = f"apikey:{provided_key}" if provided_key else "anonymous"
+            elif request.client:
+                client_id = f"ip:{request.client.host}"
+            else:
+                client_id = "anonymous"
             
-            allowed, retry_after = rate_limiter.check(client_id)
+            allowed, retry_after = await rate_limiter.check(client_id)
             if not allowed:
                 return JSONResponse(
                     {"error": {"code": "rate_limited", "message": "Too many requests"}},
@@ -833,6 +867,17 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
     return Starlette(routes=routes, middleware=middleware)
 
 
+def _app_factory():
+    """Uvicorn app-factory used when ``serve(workers>1)`` spawns workers.
+
+    Each worker is a fresh process, so the config is read back from the
+    environment variable set by :func:`serve` rather than shared in memory.
+    """
+    raw = os.environ.get(_SERVE_CONFIG_ENV)
+    config = json.loads(raw) if raw else {}
+    return create_app(config)
+
+
 def serve(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -862,15 +907,29 @@ def serve(
     if trace_exporter and trace_exporter != "none":
         _init_tracing(trace_exporter, config or {})
     
-    app = create_app(config)
-    
     # Workers > 1 requires reload=False
     if workers > 1 and reload:
         import warnings
         warnings.warn("Cannot use reload with multiple workers. Disabling reload.")
         reload = False
-    
-    uvicorn.run(app, host=host, port=port, reload=reload, workers=workers if workers > 1 else None)
+
+    if workers > 1:
+        # uvicorn needs an import string (not a live app object) to spawn
+        # multiple worker processes; passing the app object silently degrades
+        # to a single worker. Hand it an app-factory import string and ship the
+        # config to each worker via the environment.
+        os.environ[_SERVE_CONFIG_ENV] = json.dumps(config or {})
+        uvicorn.run(
+            "praisonai.recipe.serve:_app_factory",
+            host=host,
+            port=port,
+            reload=False,
+            workers=workers,
+            factory=True,
+        )
+        return
+
+    uvicorn.run(create_app(config), host=host, port=port, reload=reload)
 
 
 def _init_tracing(exporter: str, config: Dict[str, Any]):
