@@ -757,10 +757,9 @@ Context tasks: {[getattr(t, 'name', str(t)) for t in current_task.context] if cu
 Description length: {len(current_task.description)}
             """)
 
-            # Build context and store separately instead of mutating description
-            context = self._build_task_context(current_task)
-            # Store context in dedicated field instead of concatenating to description
-            current_task._execution_context = context if context else ""
+            # Pending async predecessors may finish only after this task is
+            # yielded. Resolve their outputs when the task actually executes.
+            current_task._execution_context_builder = self._build_task_context
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
@@ -1446,6 +1445,7 @@ Description length: {len(current_task.description)}
             """)
 
             # Build context and store separately instead of mutating description
+            current_task._execution_context_builder = None
             context = self._build_task_context(current_task)
             # Store context in dedicated field instead of concatenating to description
             current_task._execution_context = context if context else ""
