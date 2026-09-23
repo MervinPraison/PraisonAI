@@ -2379,6 +2379,20 @@ class AgentTeam(SpawnAnnounceProtocol):
 
     def run_all_tasks(self):
         """Synchronous version of run_all_tasks method"""
+        # The sync entry point (.start()/.run()) drives tasks one at a time and
+        # cannot batch async_execution=True tasks via asyncio.gather the way
+        # arun_all_tasks does. Warn once so the parallel fan-out feature the
+        # constructor docstring/ValueError advertise doesn't silently degrade to
+        # sequential execution -- point the caller at the async entry point.
+        if self.process in ("workflow", "sequential") and any(
+            getattr(t, 'async_execution', False) for t in self.tasks.values()
+        ):
+            logger.warning(
+                "One or more tasks have async_execution=True, but the synchronous "
+                "entry point (.start()/.run()) runs them sequentially -- use "
+                "`await team.astart()` / `await team.arun()` for parallel fan-out."
+            )
+
         process = Process(
             tasks=self.tasks,
             agents=self.agents,
