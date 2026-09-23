@@ -49,7 +49,18 @@ class MentionsParser:
     # inline-file behaviour. It is applied last and only inlines a token that
     # actually resolves to a workspace file, so unrelated ``@handle``/``@email``
     # tokens and prefixed forms above are left untouched.
-    BARE_FILE_PATTERN = re.compile(r'@([^\s]+)')
+    #
+    # ``(?<![^\s])`` anchors the ``@`` to the start of a token (start-of-string
+    # or after whitespace) so an embedded ``@`` in ``ops@.env`` is NOT treated
+    # as a file reference — otherwise a stray email-like token would leak a
+    # workspace file's contents to the model. The path body stops at whitespace;
+    # trailing sentence punctuation is trimmed separately so ``@app.py,`` still
+    # resolves to ``app.py``.
+    BARE_FILE_PATTERN = re.compile(r'(?<![^\s])@([^\s]+)')
+
+    # Sentence punctuation that commonly trails an inline reference and must not
+    # be treated as part of the filename (``@app.py,`` / ``@app.py.`` / ``@a)``).
+    _TRAILING_PUNCT = ".,;:!?)]}\"'"
     
     # Default max file chars: 500K (~125K tokens) - fits GPT-4o (128K), Claude 3.5 (200K)
     DEFAULT_MAX_FILE_CHARS = 500000
@@ -139,18 +150,24 @@ class MentionsParser:
         # Bare ``@path`` form, applied after the prefixed patterns so their
         # already-consumed tokens are gone. Only tokens that resolve to a real
         # workspace file are inlined; everything else is left in the prompt.
-        for match in self.BARE_FILE_PATTERN.findall(cleaned_prompt):
-            if not self._is_workspace_file(match):
+        for raw_match in self.BARE_FILE_PATTERN.findall(cleaned_prompt):
+            file_path = raw_match.rstrip(self._TRAILING_PUNCT)
+            if not file_path or not self._is_workspace_file(file_path):
                 continue
-            context = self._process_file_mention(match)
+            context = self._process_file_mention(file_path)
             if context:
                 context_parts.append(context)
+            # Strip only the ``@path`` token (keeping any trimmed trailing
+            # punctuation in place) so surrounding text and formatting survive.
             cleaned_prompt = re.sub(
-                r'@' + re.escape(match), '', cleaned_prompt, count=1
+                r'(?<![^\s])@' + re.escape(file_path), '', cleaned_prompt, count=1
             )
         
-        # Clean up extra whitespace
-        cleaned_prompt = ' '.join(cleaned_prompt.split())
+        # Tidy whitespace left by removed mentions WITHOUT flattening the
+        # prompt: collapse runs of spaces/tabs on each line but preserve
+        # newlines, indentation-bearing blank lines, and paragraph breaks so a
+        # multiline interactive prompt keeps its Markdown / code structure.
+        cleaned_prompt = self._tidy_whitespace(cleaned_prompt)
         
         # Build context string
         context_string = ""
@@ -159,6 +176,30 @@ class MentionsParser:
         
         return context_string, cleaned_prompt
     
+    def _tidy_whitespace(self, text: str) -> str:
+        """Collapse whitespace left behind by removed mentions while keeping the
+        prompt's line structure intact.
+
+        Historically ``process()`` ran ``' '.join(text.split())`` which flattened
+        the entire prompt onto one line — destroying paragraph breaks, Markdown
+        structure and code indentation whenever a prompt happened to contain a
+        file mention. Here we only collapse repeated spaces/tabs *within* a line
+        and trim trailing spaces, preserving newlines and interior indentation.
+        """
+        lines = text.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            # Collapse internal runs of spaces/tabs to a single space, then trim
+            # trailing whitespace. Leading indentation is preserved by capturing
+            # it before the collapse.
+            stripped_leading = line.lstrip(" \t")
+            indent = line[: len(line) - len(stripped_leading)]
+            collapsed = re.sub(r"[ \t]+", " ", stripped_leading).rstrip()
+            cleaned_lines.append(f"{indent}{collapsed}" if collapsed else "")
+        result = "\n".join(cleaned_lines)
+        # Trim leading/trailing blank lines but keep interior structure.
+        return result.strip("\n")
+
     def _process_mention(self, mention_type: str, value: str) -> Optional[str]:
         """
         Process a single mention.
@@ -403,9 +444,11 @@ class MentionsParser:
             if pattern.search(prompt):
                 return True
         # Bare ``@path`` counts only when it resolves to a workspace file, so a
-        # plain ``@handle`` does not trigger mention processing.
-        for match in self.BARE_FILE_PATTERN.findall(prompt):
-            if self._is_workspace_file(match):
+        # plain ``@handle`` does not trigger mention processing. Trailing
+        # sentence punctuation is trimmed to match ``process()``.
+        for raw_match in self.BARE_FILE_PATTERN.findall(prompt):
+            file_path = raw_match.rstrip(self._TRAILING_PUNCT)
+            if file_path and self._is_workspace_file(file_path):
                 return True
         return False
 
