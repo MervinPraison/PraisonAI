@@ -519,7 +519,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None, strict_validation=None, tool_timeout_workers=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -535,6 +535,8 @@ class AgentsGenerator:
             cli_config (dict, optional): CLI configuration to override YAML settings. Defaults to None.
             adapter_registry (FrameworkAdapterRegistry, optional): Registry for framework adapters. Defaults to process default.
             tool_resolver (ToolResolver, optional): Canonical tool resolver. Defaults to the shared context-local resolver so discovery runs once per run.
+            strict_validation (bool, optional): Per-run override for strict YAML validation. Precedence: this arg > cli_config['strict_validation'] > PRAISONAI_VALIDATE_STRICT env var. Lets multi-tenant hosts scope strictness per request without mutating os.environ.
+            tool_timeout_workers (int, optional): Per-run override for the sync-tool timeout pool size. Precedence: this arg > cli_config['tool_timeout_workers'] > PRAISONAI_TOOL_TIMEOUT_WORKERS env var. Lets multi-tenant hosts scope the pool per request.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -554,6 +556,22 @@ class AgentsGenerator:
         self.agent_yaml = agent_yaml
         self.tools = tools or []  # Store tool class names as a list
         self.cli_config = cli_config or {}  # Store CLI configuration overrides
+
+        # Per-run behaviour toggles. Precedence: explicit arg > cli_config > env
+        # var fallback. This lets multi-tenant `praisonai serve` hosts scope
+        # strictness and pool size per request via the existing DI seams instead
+        # of relying on process-global os.environ (which cannot isolate tenants).
+        self._strict_validation = (
+            strict_validation
+            if strict_validation is not None
+            else self.cli_config.get("strict_validation")
+        )
+        self._tool_timeout_workers = (
+            tool_timeout_workers
+            if tool_timeout_workers is not None
+            else self.cli_config.get("tool_timeout_workers")
+        )
+
         # Use namespaced logger - no hot-path basicConfig calls
         from ._logging import get_logger
         self.logger = get_logger("agents_generator")
@@ -596,7 +614,7 @@ class AgentsGenerator:
         # Track workers permanently held by stuck sync tools. Once half the pool
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
-        self._max_leaked_workers = max(1, _resolve_tool_timeout_workers() // 2)
+        self._max_leaked_workers = max(1, self._resolve_tool_timeout_workers() // 2)
         # Stable per-generator identity for timeout-wrapper ownership. A bound
         # method (self._get_tool_timeout_executor) yields a fresh object with a
         # different id() on every access, so it cannot be used as a reliable
@@ -606,6 +624,37 @@ class AgentsGenerator:
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
+
+    def _is_strict(self) -> bool:
+        """Whether strict validation is enabled for this run.
+
+        Per-run precedence: explicit arg / cli_config first, then the
+        process-global env var as fallback. Multi-tenant hosts can therefore
+        demand strict validation for one tenant without forcing it on another.
+        """
+        override = getattr(self, "_strict_validation", None)
+        if override is not None:
+            return bool(override)
+        return _strict_validation_enabled()
+
+    def _resolve_tool_timeout_workers(self) -> int:
+        """Resolve this run's sync-tool timeout pool size.
+
+        Per-run precedence: explicit arg / cli_config first, then the
+        process-global env var as fallback. A per-run value lets a large tenant
+        get a bigger pool without inflating it for every other tenant sharing
+        the process.
+        """
+        override = getattr(self, "_tool_timeout_workers", None)
+        if override is not None:
+            try:
+                return max(1, int(override))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid tool_timeout_workers=%r; falling back to env/default.",
+                    override,
+                )
+        return _resolve_tool_timeout_workers()
 
     def _get_tool_timeout_executor(self):
         """Lazily create this generator's bounded sync-tool-timeout thread pool.
@@ -633,7 +682,7 @@ class AgentsGenerator:
                 # Resolve once so the pool size and the leak threshold that
                 # governs its recycling always agree, even if the env var was
                 # changed between construction and (re)creation.
-                workers = _resolve_tool_timeout_workers()
+                workers = self._resolve_tool_timeout_workers()
                 self._tool_timeout_executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=workers,
                     thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
@@ -1269,9 +1318,9 @@ class AgentsGenerator:
         # Use existing tool resolver if available
         validator = ConfigValidator(tool_resolver=self.tool_resolver)
         
-        # Check for strict mode from environment or config
-        import os
-        strict_mode = os.getenv('PRAISONAI_VALIDATE_STRICT', 'false').lower() == 'true'
+        # Check for strict mode: per-run override (arg / cli_config) first, then
+        # the process-global env var as fallback. See _is_strict().
+        strict_mode = self._is_strict()
         
         # Validate configuration
         result = validator.validate_config(config, strict=strict_mode)
