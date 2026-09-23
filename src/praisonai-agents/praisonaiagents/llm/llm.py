@@ -6,6 +6,8 @@ import warnings
 import re
 import inspect
 import asyncio
+import threading
+import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -35,6 +37,12 @@ from ..tools.schema import build_tool_definition
 # with the WRONG arguments and report success. Callers must detect this sentinel
 # and surface a tool-error so the model can re-emit the call instead.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+# ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
+# process-global lists shared by every LLM instance. Guard the read-modify-write
+# in ``_setup_event_tracking`` so concurrent instances don't corrupt them.
+_EVENT_TRACKING_LOCK = threading.Lock()
 
 
 def _ollama_tool_result_is_successful(tool_result: Any) -> bool:
@@ -572,7 +580,21 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # Agent attribution for token accounting is stored in ContextVars so it
+        # is *task/thread-local*, not shared instance state. A single LLM
+        # instance is routinely shared by many concurrently-running agents; a
+        # plain attribute would let one agent's ``set_current_agent`` clobber
+        # another's while the first is still awaiting its own completion,
+        # mis-attributing tokens across tenants (issue #5052). The
+        # ``current_agent_id`` is a stable per-instance identity used as the
+        # aggregation key so unrelated agents sharing a display name don't merge
+        # into one cost bucket.
+        self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praisonai_current_agent_name", default=None)
+        )
+        self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praisonai_current_agent_id", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -908,7 +930,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription required", "subscription expired",
+            "plan limit"
         ]):
             return "billing"
         
@@ -934,17 +957,27 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "model_not_found"
         
-        # Empty or malformed responses
+        # Format errors (checked before empty_response so "malformed response"
+        # and "*parse error*" are classified as format rather than empty output)
+        if any(indicator in error_str for indicator in [
+            "validation error", "invalid format", "parse error", "parsing error",
+            "malformed", "invalid json", "schema error", "decode error"
+        ]):
+            return "format_error"
+        
+        # Empty or missing response content
         if any(indicator in error_str for indicator in [
             "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "unexpected end of json", "no content", "blank output",
+            "null response"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "try again later", "server busy",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -954,13 +987,6 @@ Respond with ONLY a valid JSON tool call in this format:
             "request timeout", "deadline exceeded"
         ]):
             return "idle_timeout"
-        
-        # Format errors
-        if any(indicator in error_str for indicator in [
-            "validation error", "invalid format", "parse error",
-            "malformed", "invalid json", "schema error"
-        ]):
-            return "format_error"
         
         # Default fallback
         return "unknown"
@@ -1044,13 +1070,22 @@ Respond with ONLY a valid JSON tool call in this format:
                 is_retryable=True
             )
         
-        # Auth errors - try profile rotation if available
-        if error_kind == "auth" and self._failover_manager:
+        # Auth errors - try profile rotation if available, else surface.
+        # Without a failover manager there is no alternate credential to try,
+        # so blind retries would just replay the same rejected credential;
+        # surface the auth failure immediately instead.
+        if error_kind == "auth":
+            if self._failover_manager:
+                return FailoverDecision(
+                    action="rotate_profile",
+                    reason=error_kind,
+                    backoff_ms=1000,  # Brief delay before trying new profile
+                    is_retryable=True
+                )
             return FailoverDecision(
-                action="rotate_profile",
+                action="surface_error",
                 reason=error_kind,
-                backoff_ms=1000,  # Brief delay before trying new profile
-                is_retryable=True
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
@@ -6048,11 +6083,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def _setup_event_tracking(self, events: List[Any]) -> None:
         """Setup callback functions for tracking model usage.
 
-        ``litellm.callbacks`` is a process-global list shared by every LLM
-        instance. Overwriting it wipes callbacks registered by other concurrent
-        agents, so we merge into it instead: only the callbacks *this* instance
-        previously registered are removed, and unrelated instances' callbacks
-        are never touched. An empty ``events`` list is a no-op.
+        ``litellm.success_callback``, ``litellm._async_success_callback`` and
+        ``litellm.callbacks`` are process-global lists shared by every LLM
+        instance. Overwriting (or type-based stripping of) them wipes callbacks
+        registered by other concurrent agents — or by the application itself via
+        litellm's documented ``litellm.success_callback.append(...)`` extension
+        point. So we merge into each list instead: only the callbacks *this*
+        instance previously registered are removed, and unrelated instances'
+        callbacks are never touched. An empty ``events`` list is a no-op. The
+        whole read-modify-write is guarded by a module-level lock so concurrent
+        instances can't corrupt the shared lists.
         """
         if not events:
             return
@@ -6065,29 +6105,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
 
-        event_types = [type(event) for event in events]
-        
-        # Remove old events of same type
-        for event in litellm.success_callback[:]:
-            if type(event) in event_types:
-                litellm.success_callback.remove(event)
-                
-        for event in litellm._async_success_callback[:]:
-            if type(event) in event_types:
-                litellm._async_success_callback.remove(event)
+        with _EVENT_TRACKING_LOCK:
+            # Only remove the success callbacks *this* instance registered on a
+            # prior call — never strip by type, which would delete another
+            # instance's or the application's own callbacks of the same class
+            # (e.g. an app-registered ``litellm.success_callback.append(...)``).
+            for cb in getattr(self, "_registered_success_callbacks", []):
+                if cb in litellm.success_callback:
+                    litellm.success_callback.remove(cb)
+            for cb in getattr(self, "_registered_async_success_callbacks", []):
+                if cb in litellm._async_success_callback:
+                    litellm._async_success_callback.remove(cb)
+            for event in events:
+                if event not in litellm.success_callback:
+                    litellm.success_callback.append(event)
+                if event not in litellm._async_success_callback:
+                    litellm._async_success_callback.append(event)
+            self._registered_success_callbacks = list(events)
+            self._registered_async_success_callbacks = list(events)
 
-        # Merge into the global list rather than replacing it. Only remove the
-        # callbacks this instance registered on a prior call, then append the
-        # current ones, preserving other instances' callbacks.
-        if litellm.callbacks is None:
-            litellm.callbacks = []
-        for cb in getattr(self, "_registered_callbacks", []):
-            if cb in litellm.callbacks:
-                litellm.callbacks.remove(cb)
-        for event in events:
-            if event not in litellm.callbacks:
-                litellm.callbacks.append(event)
-        self._registered_callbacks = list(events)
+            # Merge into the global list rather than replacing it. Only remove the
+            # callbacks this instance registered on a prior call, then append the
+            # current ones, preserving other instances' callbacks.
+            if litellm.callbacks is None:
+                litellm.callbacks = []
+            for cb in getattr(self, "_registered_callbacks", []):
+                if cb in litellm.callbacks:
+                    litellm.callbacks.remove(cb)
+            for event in events:
+                if event not in litellm.callbacks:
+                    litellm.callbacks.append(event)
+            self._registered_callbacks = list(events)
 
     def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
@@ -6169,7 +6217,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 metadata={
                     "provider": provider,
                     "stream": False
-                }
+                },
+                agent_id=self.current_agent_id,
             )
             
             return metrics
@@ -6263,9 +6312,53 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
-    def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
-        self.current_agent_name = agent_name
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Task/thread-local display name of the agent currently attributing tokens."""
+        return self._current_agent_name_var.get()
+
+    @property
+    def current_agent_id(self) -> Optional[str]:
+        """Task/thread-local stable identity of the agent currently attributing tokens."""
+        return self._current_agent_id_var.get()
+
+    def set_current_agent(self, agent_name: Optional[str], agent_id: Optional[str] = None):
+        """Set the current agent name (and optional stable id) for token tracking.
+
+        The attribution is stored in ContextVars, so it is local to the current
+        asyncio task / thread. A single LLM instance shared by several
+        concurrently-running agents therefore attributes each response to the
+        agent that issued it, instead of whichever agent last called this method
+        (issue #5052). ``agent_id`` is a stable per-instance identity used as the
+        token aggregation key so unrelated agents sharing a display name are not
+        merged into one cost bucket.
+        """
+        self._current_agent_name_var.set(agent_name)
+        self._current_agent_id_var.set(agent_id)
+
+    def __deepcopy__(self, memo):
+        """Deep-copy the LLM, giving the clone its own attribution ContextVars.
+
+        ``contextvars.ContextVar`` objects are not copyable (they raise
+        ``TypeError: cannot pickle '_contextvars.ContextVar' object``), and their
+        value is task-local runtime state that must not be shared with the
+        clone. Copy everything else normally, then hand the clone fresh,
+        independent ContextVars (issue #5052).
+        """
+        cls = self.__class__
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
+        for key, value in self.__dict__.items():
+            if key in ("_current_agent_name_var", "_current_agent_id_var"):
+                continue
+            setattr(clone, key, copy.deepcopy(value, memo))
+        clone._current_agent_name_var = contextvars.ContextVar(
+            "praisonai_current_agent_name", default=None
+        )
+        clone._current_agent_id_var = contextvars.ContextVar(
+            "praisonai_current_agent_id", default=None
+        )
+        return clone
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
