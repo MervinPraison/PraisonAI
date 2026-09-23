@@ -242,7 +242,13 @@ def _invoke_with_approval(
 
     if policy_hook is not None:
         rewritten = _run_policy_hook(policy_hook, name, dict(effective_kwargs))
-        if rewritten is not effective_kwargs:
+        # Only switch to keyword-only redispatch when the hook *actually*
+        # changed the arguments. Compare by value (not identity): the hook is
+        # handed a copy, so an allow-with-no-rewrite still returns a distinct
+        # object whose contents equal ``effective_kwargs``. Forcing keyword-only
+        # dispatch on an unchanged call would rebind a positional argument to a
+        # decorated tool's ``*args``/``**kwargs`` parameter names and break it.
+        if rewritten != effective_kwargs:
             effective_kwargs = dict(rewritten)
             use_kwargs_only = True
 
