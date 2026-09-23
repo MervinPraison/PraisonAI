@@ -90,6 +90,11 @@ def load_user_module(
     except Exception:
         sys.modules.pop(qualified, None)
         raise
+    # Drop the entry once exec has completed. Every reachable caller binds the
+    # returned module object, so leaving it in sys.modules serves no purpose and
+    # would leak one entry per load in long-lived processes (e.g. a TUI that
+    # rebuilds its agent). The unique key still isolated the load during exec.
+    sys.modules.pop(qualified, None)
     return module
 
 
@@ -140,4 +145,7 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
     except Exception:
         sys.modules.pop(qualified, None)
         raise
+    # See load_user_module: drop the entry after a successful exec so
+    # long-lived processes don't accumulate one sys.modules entry per load.
+    sys.modules.pop(qualified, None)
     return module
