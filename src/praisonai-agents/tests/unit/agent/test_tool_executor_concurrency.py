@@ -151,3 +151,29 @@ def test_late_timeout_does_not_retire_another_calls_executor(monkeypatch, create
         for executor in executors:
             executor.shutdown(wait=True)
         agent.close()
+
+
+def test_close_detaches_executor_under_lock(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    agent = Agent(
+        instructions="Test tools",
+        output="silent",
+        execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
+    )
+
+    class RecordingExecutor(concurrent.futures.ThreadPoolExecutor):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.shutdown_calls = 0
+
+        def shutdown(self, *args, **kwargs):
+            self.shutdown_calls += 1
+            return super().shutdown(*args, **kwargs)
+
+    executor = RecordingExecutor(max_workers=1)
+    agent._tool_executor = executor
+
+    agent.close()
+
+    assert executor.shutdown_calls == 1
+    assert getattr(agent, "_tool_executor", None) is None

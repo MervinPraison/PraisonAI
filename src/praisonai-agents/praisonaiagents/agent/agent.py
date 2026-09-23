@@ -7994,16 +7994,28 @@ Answer:"""
         except Exception as e:
             logger.warning(f"Task cleanup failed: {e}")
 
-        # ThreadPoolExecutor cleanup
+        # ThreadPoolExecutor cleanup. Detach the executor under the same lock
+        # that guards timeout retirement/replacement (see tool_execution.py) so
+        # cleanup and a concurrent timeout can never act on different executor
+        # generations. Shut down outside the critical section to avoid holding
+        # the lock across a blocking call.
         try:
-            if hasattr(self, '_tool_executor') and self._tool_executor:
+            executor = None
+            lock = getattr(self, '_tool_executor_lock', None)
+            if lock is not None:
+                with lock.sync():
+                    executor = getattr(self, '_tool_executor', None)
+                    self._tool_executor = None
+            elif hasattr(self, '_tool_executor'):
+                executor = self._tool_executor
+                self._tool_executor = None
+            if executor is not None:
                 # Use cancel_futures only if supported (Python 3.9+)
                 import sys
                 if sys.version_info >= (3, 9):
-                    self._tool_executor.shutdown(wait=False, cancel_futures=True)
+                    executor.shutdown(wait=False, cancel_futures=True)
                 else:
-                    self._tool_executor.shutdown(wait=False)
-                delattr(self, '_tool_executor')
+                    executor.shutdown(wait=False)
         except Exception as e:
             logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
 
@@ -8106,22 +8118,35 @@ Answer:"""
                     except asyncio.CancelledError:
                         pass
 
-            # ThreadPoolExecutor cleanup (async-safe)
-            if hasattr(self, '_tool_executor') and self._tool_executor:
+            # ThreadPoolExecutor cleanup (async-safe). Detach the executor under
+            # the lock that guards timeout retirement/replacement so cleanup and
+            # a concurrent timeout can never act on different executor
+            # generations. Capture the reference before scheduling the shutdown
+            # so the deferred call cannot resolve a replacement pool created by
+            # another call.
+            executor = None
+            lock = getattr(self, '_tool_executor_lock', None)
+            if lock is not None:
+                async with lock.async_lock():
+                    executor = getattr(self, '_tool_executor', None)
+                    self._tool_executor = None
+            elif hasattr(self, '_tool_executor'):
+                executor = self._tool_executor
+                self._tool_executor = None
+            if executor is not None:
                 import sys
                 loop = asyncio.get_running_loop()
                 # Use run_in_executor to avoid blocking the event loop
                 if sys.version_info >= (3, 9):
                     await loop.run_in_executor(
-                        None, 
-                        lambda: self._tool_executor.shutdown(wait=False, cancel_futures=True)
+                        None,
+                        lambda: executor.shutdown(wait=False, cancel_futures=True)
                     )
                 else:
                     await loop.run_in_executor(
-                        None, 
-                        lambda: self._tool_executor.shutdown(wait=False)
+                        None,
+                        lambda: executor.shutdown(wait=False)
                     )
-                delattr(self, '_tool_executor')
 
             # Approval scope cleanup (see close()).
             self._release_approval_scope()
