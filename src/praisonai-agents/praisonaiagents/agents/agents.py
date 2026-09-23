@@ -2390,7 +2390,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.warning(
                 "One or more tasks have async_execution=True, but the synchronous "
                 "entry point (.start()/.run()) runs them sequentially -- use "
-                "`await team.astart()` / `await team.arun()` for parallel fan-out."
+                "`await team.astart()` for parallel fan-out."
             )
 
         process = Process(
