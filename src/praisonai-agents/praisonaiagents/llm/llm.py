@@ -3942,8 +3942,8 @@ Respond with ONLY a valid JSON tool call in this format:
                         if _deferred_media_followups:
                             messages.extend(_deferred_media_followups)
 
-                        # If we should continue, increment iteration and continue loop
-                        if should_continue:
+                        # Continuations must still reach the budget finalizer on the last step.
+                        if should_continue and iteration_count + 1 < max_iterations:
                             iteration_count += 1
                             continue
 
@@ -3966,9 +3966,6 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Reset interaction_displayed to ensure final summary is shown
                             interaction_displayed = False
                             break
-                        elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                            # Continue iteration after adding final answer prompt
-                            continue
                         
                         # Safety check: prevent infinite loops for any provider
                         if iteration_count + 1 >= max_iterations:
@@ -5776,9 +5773,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Reset interaction_displayed to ensure final summary is shown
                         interaction_displayed = False
                         break
-                    elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                        # Continue iteration after adding final answer prompt
-                        continue
                     
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count + 1 >= max_iterations:
@@ -5814,6 +5808,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()
                     break
+
+            # Preserve tool-loop finalization for structured output and reflection.
+            response_text = final_response_text or response_text
 
             # Handle output formatting
             if output_json or output_pydantic:
