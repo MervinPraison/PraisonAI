@@ -705,7 +705,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
-                    
+
+                    # Render any resolved reply/quote context (Issue #5223) as a
+                    # compact quoted block above the (possibly debounced) text so
+                    # the agent honours the referent. No quote -> unchanged.
+                    if message.quoted is not None and message.quoted.text.strip():
+                        from praisonaiagents.bots import BotMessage as _BM
+                        message_text = _BM(
+                            content=message_text or "", quoted=message.quoted
+                        ).prompt_text
+
                     # Check if streaming is enabled and configured
                     streaming_enabled = (
                         self._streaming_config and 
@@ -2450,6 +2459,43 @@ def _record_passive_group_message(bot: "TelegramBot", message) -> None:
         logger.debug(f"Failed to record passive group message: {e}")
 
 
+def _resolve_quoted_ref(update, bot: "TelegramBot") -> Optional["QuotedRef"]:
+    """Resolve the content a Telegram reply/quote points at (Issue #5223).
+
+    Telegram carries the referenced message on ``reply_to_message`` including
+    its text/caption (and, on newer clients, an explicit ``quote`` of the
+    selected span) for both peer *and* bot messages — so the referent can be
+    resolved directly on the inbound path with no separate sent-message store.
+    Best-effort: any missing field or error yields ``None`` (degrades to
+    today's context-blind behaviour, never drops the turn). Quoted content is
+    returned as context only; callers render it as a quoted block, never as a
+    control frame.
+    """
+    try:
+        from praisonaiagents.bots.protocols import QuotedRef
+
+        replied = getattr(update.message, "reply_to_message", None)
+        # Prefer the explicit quote span the user selected, if present.
+        quote = getattr(update.message, "quote", None)
+        quoted_text = getattr(quote, "text", "") if quote else ""
+        if not quoted_text and replied is not None:
+            quoted_text = getattr(replied, "text", "") or getattr(replied, "caption", "") or ""
+        if not quoted_text:
+            return None
+
+        author = "user"
+        ref_id = ""
+        if replied is not None:
+            ref_id = str(getattr(replied, "message_id", "") or "")
+            from_user = getattr(replied, "from_user", None)
+            bot_id = bot._bot_user.user_id if bot._bot_user else None
+            if from_user is not None and bot_id and str(from_user.id) == str(bot_id):
+                author = "bot"
+        return QuotedRef(message_id=ref_id, text=quoted_text, author=author)
+    except Exception:  # pragma: no cover — defensive
+        return None
+
+
 def _is_reply_to_bot(update, bot: "TelegramBot") -> bool:
     """Whether an inbound update replies to one of the bot's own messages.
 
@@ -2517,7 +2563,12 @@ async def process_inbound_telegram_message(
     
     # Convert to BotMessage for consistent processing
     message = bot._convert_update_to_message(update, override_text=message_text)
-    
+
+    # Resolve reply/quote context (Issue #5223): when the user taps Reply or
+    # quotes an earlier message, attach the referenced content so the agent
+    # sees the referent instead of answering context-blind. Best-effort.
+    message.quoted = _resolve_quoted_ref(update, bot)
+
     # Set channel type for pairing system
     message._channel_type = "telegram"
     
