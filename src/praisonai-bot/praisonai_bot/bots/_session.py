@@ -210,6 +210,7 @@ class BotSessionManager:
         admission_gate: Optional[Any] = None,
         turn_lock_map: Optional["LockMap"] = None,
         surface_completion_reason: bool = False,
+        defer_journal_completion: bool = False,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         # Issue #3232: the per-turn lock map is keyed on the *resolved* storage
@@ -270,6 +271,14 @@ class BotSessionManager:
         # behaviour (the tool returns its "no gateway available" message).
         self._delivery_router = delivery_router
         self._last_journal_key = None  # Store key for delayed completion
+        # Issue #5152: when True, chat() does NOT mark the inbound journal
+        # complete on clean exit; instead it stashes the journal key so the
+        # adapter can call complete_last_journal_entry() *after* the reply is
+        # durably delivered. This closes the window where a crash between
+        # "agent finished" and "reply sent" would settle the inbound (no
+        # replay) yet lose the user's reply. Default False keeps the legacy
+        # settle-on-agent-completion behaviour byte-for-byte unchanged.
+        self._defer_journal_completion = defer_journal_completion
         # Run control for in-flight message handling
         self._run_control = run_control
         # Issue #3296: opt-in surfacing of *why* a turn ended. When True, a turn
@@ -1641,13 +1650,22 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(type(e), e, e.__traceback__)
                 raise
             else:
-                # Clean exit - mark journal complete before releasing claim
+                # Clean exit - settle the inbound journal.
                 if journal_key is not None and self._ingress_journal is not None:
-                    try:
-                        self._ingress_journal.complete(journal_key)
-                        self._last_journal_key = None
-                    except Exception as e:
-                        logger.warning("Failed to complete journal entry: %s", e)
+                    if self._defer_journal_completion:
+                        # Issue #5152: defer completion until the adapter has
+                        # durably delivered the reply. Stash the key so the
+                        # adapter calls complete_last_journal_entry() *after*
+                        # send; on a crash before delivery the entry stays
+                        # pending and boot-time replay re-drives it.
+                        self._last_journal_key = journal_key
+                    else:
+                        # Legacy behaviour: mark complete on agent completion.
+                        try:
+                            self._ingress_journal.complete(journal_key)
+                            self._last_journal_key = None
+                        except Exception as e:
+                            logger.warning("Failed to complete journal entry: %s", e)
                 if claim_ctx is not None:
                     await claim_ctx.__aexit__(None, None, None)
                 return result or ""
