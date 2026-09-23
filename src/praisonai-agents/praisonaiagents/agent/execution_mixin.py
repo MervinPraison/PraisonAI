@@ -22,49 +22,48 @@ logger = logging.getLogger(__name__)
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
-# Shared HTTP launch state (Agent.launch() multi-endpoint registration)
-_server_lock = threading.Lock()
-_server_started: Dict[int, bool] = {}
-_registered_agents: Dict[int, Dict[str, str]] = {}
-_shared_apps: Dict[int, Any] = {}
+# Shared HTTP launch state — the process-wide registry is defined in
+# agent/server_registry.py and shared with PraisonAIAgents.launch() so a
+# standalone Agent and a team launched on the same port cannot double-bind it or
+# hide each other's endpoints.
+from .server_registry import _server_registry
 
 
 def cleanup_launch_registration(agent_id: str) -> None:
     """Remove launch() endpoints registered for ``agent_id`` from the shared
     HTTP state that ``Agent.launch()`` actually populates.
 
-    ``Agent.launch()`` writes routes into the module-level ``_registered_agents``
-    and ``_shared_apps`` dicts above. This tears those routes back down so a
-    closed agent's endpoint stops accepting requests and the request handler
-    closure no longer keeps the Agent object graph alive.
+    ``Agent.launch()`` reserves routes on the shared ``_server_registry``. This
+    tears those routes back down so a closed agent's endpoint stops accepting
+    requests and the request handler closure no longer keeps the Agent object
+    graph alive.
     """
-    with _server_lock:
-        for port, paths in list(_registered_agents.items()):
-            stale_paths = [p for p, aid in paths.items() if aid == agent_id]
-            for p in stale_paths:
-                del paths[p]
-                app = _shared_apps.get(port)
-                if app is not None:
-                    try:
-                        # Only drop the agent-owned POST route. launch() always
-                        # registers the handler via ``.post(path)``, so filtering
-                        # on both path AND method preserves unrelated routes that
-                        # share the path with a different verb (e.g. the built-in
-                        # GET /health and GET /).
-                        app.router.routes = [
-                            r for r in app.router.routes
-                            if not (
-                                getattr(r, "path", None) == p
-                                and "POST" in (getattr(r, "methods", None) or set())
-                            )
-                        ]
-                        # Invalidate cached OpenAPI schema so removed routes
-                        # disappear from /openapi.json and /docs.
-                        app.openapi_schema = None
-                    except Exception:
-                        pass
-            if not paths:
-                _registered_agents.pop(port, None)
+    for port in list(_server_registry._apps.keys()):
+        removed = _server_registry.unregister_routes_for(port, agent_id)
+        if not removed:
+            continue
+        app = _server_registry._apps.get(port)
+        if app is None:
+            continue
+        for p in removed:
+            try:
+                # Only drop the agent-owned POST route. launch() always
+                # registers the handler via ``.post(path)``, so filtering
+                # on both path AND method preserves unrelated routes that
+                # share the path with a different verb (e.g. the built-in
+                # GET /health and GET /).
+                app.router.routes = [
+                    r for r in app.router.routes
+                    if not (
+                        getattr(r, "path", None) == p
+                        and "POST" in (getattr(r, "methods", None) or set())
+                    )
+                ]
+                # Invalidate cached OpenAPI schema so removed routes
+                # disappear from /openapi.json and /docs.
+                app.openapi_schema = None
+            except Exception:
+                pass
 
 if TYPE_CHECKING:
     pass
@@ -2274,18 +2273,13 @@ Write the complete compiled report:"""
         NOTE: This implementation will be moved to wrapper layer in future version.
         For now, it maintains backward compatibility while following lazy import patterns.
         """
-        global _server_started, _registered_agents, _shared_apps, _server_lock
-
         from .launch_security import authorise_launch_request, resolve_launch_host
 
         # Try to import FastAPI dependencies - lazy loading
         try:
-            import uvicorn
-            from fastapi import FastAPI, HTTPException, Request
+            from fastapi import HTTPException, Request
             from fastapi.responses import JSONResponse
             from pydantic import BaseModel
-            import threading
-            import time
             import asyncio
             
             # Define the request model here since we need pydantic
@@ -2311,130 +2305,102 @@ Write the complete compiled report:"""
         # process-wide launch token and retroactively 401 a running endpoint.
         host = resolve_launch_host(host)
 
-        should_start = False
-        with _server_lock:
-            # Initialize port-specific collections if needed (once per port)
-            if port not in _registered_agents:
-                _registered_agents[port] = {}
+        # Get or create the shared FastAPI app for this port (shared with
+        # PraisonAIAgents.launch via the same _server_registry singleton).
+        app, is_new_app = _server_registry.get_or_create_app(
+            port,
+            title=f"PraisonAI Agents API (Port {port})",
+        )
 
-            # Initialize shared FastAPI app if not already created for this port
-            if _shared_apps.get(port) is None:
-                _shared_apps[port] = FastAPI(
-                    title=f"PraisonAI Agents API (Port {port})",
-                    description="API for interacting with PraisonAI Agents"
+        if is_new_app:
+            # Add a root endpoint with a welcome message
+            @app.get("/")
+            async def root():
+                return {
+                    "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                    "endpoints": _server_registry.list_routes(port)
+                }
+
+            # Add healthcheck endpoint
+            @app.get("/health")
+            async def healthcheck():
+                return {
+                    "status": "ok",
+                    "endpoints": _server_registry.list_routes(port)
+                }
+
+        # Normalize path to ensure it starts with /
+        if not path.startswith('/'):
+            path = f'/{path}'
+
+        # Atomically reserve the route; on collision the registry returns a
+        # de-duplicated path so multiple agents can share a single port.
+        path, original_path = _server_registry.reserve_route(port, path, self.agent_id)
+        if original_path is not None:
+            logging.warning(f"Path '{original_path}' is already registered on port {port}.")
+            print(f"⚠️ Warning: Path '{original_path}' is already registered on port {port}.")
+            print(f"🔄 Using '{path}' instead")
+
+        # Define the endpoint handler
+        @app.post(path)
+        async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
+            if not authorise_launch_request(request):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            # Handle both direct JSON with query field and form data
+            if query_data is None:
+                try:
+                    request_data = await request.json()
+                    if "query" not in request_data:
+                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                    query = request_data["query"]
+                except Exception:
+                    # Fallback to form data or query params
+                    form_data = await request.form()
+                    if "query" in form_data:
+                        query = form_data["query"]
+                    else:
+                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+            else:
+                query = query_data.query
+
+            try:
+                # Use async version if available, otherwise use sync version
+                if asyncio.iscoroutinefunction(self.chat):
+                    response = await self.achat(query, task_name=None, task_description=None, task_id=None)
+                else:
+                    # Run sync function in a thread to avoid blocking
+                    loop = asyncio.get_running_loop()
+                    response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
+
+                return {"response": response}
+            except Exception as e:
+                logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Error processing query: {str(e)}"}
                 )
 
-                # Add a root endpoint with a welcome message
-                @_shared_apps[port].get("/")
-                async def root():
-                    return {
-                        "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_registered_agents[port].keys())
-                    }
+        # Invalidate the cached OpenAPI schema so routes registered by later
+        # shared-port launch() calls still show up in /openapi.json and /docs.
+        # FastAPI caches app.openapi_schema on first access and does not
+        # regenerate it when new routes are added afterwards.
+        app.openapi_schema = None
 
-                # Add healthcheck endpoint
-                @_shared_apps[port].get("/health")
-                async def healthcheck():
-                    return {
-                        "status": "ok",
-                        "endpoints": list(_registered_agents[port].keys())
-                    }
+        print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
 
-            # The path registration below must run on EVERY call, not just when the
-            # port is new, so multiple agents can share a single port.
-
-            # Normalize path to ensure it starts with /
-            if not path.startswith('/'):
-                path = f'/{path}'
-
-            # Check if path is already registered for this port
-            if path in _registered_agents[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                path = f"{path}_{self.agent_id[:6]}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-
-            # Register the agent to this path
-            _registered_agents[port][path] = self.agent_id
-
-            # Define the endpoint handler
-            @_shared_apps[port].post(path)
-            async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
-                if not authorise_launch_request(request):
-                    raise HTTPException(status_code=401, detail="Unauthorized")
-                # Handle both direct JSON with query field and form data
-                if query_data is None:
-                    try:
-                        request_data = await request.json()
-                        if "query" not in request_data:
-                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                        query = request_data["query"]
-                    except Exception:
-                        # Fallback to form data or query params
-                        form_data = await request.form()
-                        if "query" in form_data:
-                            query = form_data["query"]
-                        else:
-                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                else:
-                    query = query_data.query
-
-                try:
-                    # Use async version if available, otherwise use sync version
-                    if asyncio.iscoroutinefunction(self.chat):
-                        response = await self.achat(query, task_name=None, task_description=None, task_id=None)
-                    else:
-                        # Run sync function in a thread to avoid blocking
-                        loop = asyncio.get_running_loop()
-                        response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
-
-                    return {"response": response}
-                except Exception as e:
-                    logging.error(f"Error processing query: {str(e)}", exc_info=True)
-                    return JSONResponse(
-                        status_code=500,
-                        content={"error": f"Error processing query: {str(e)}"}
-                    )
-
-            # Invalidate the cached OpenAPI schema so routes registered by later
-            # shared-port launch() calls still show up in /openapi.json and /docs.
-            # FastAPI caches app.openapi_schema on first access and does not
-            # regenerate it when new routes are added afterwards.
-            _shared_apps[port].openapi_schema = None
-
-            print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
-
-            # Check and mark server as started atomically to prevent race conditions
-            should_start = not _server_started.get(port, False)
-            if should_start:
-                _server_started[port] = True
-
-        # Server start/wait outside the lock to avoid holding it during sleep
-        if should_start:
-            # Start the server in a separate thread
-            def run_server():
-                try:
-                    print(f"✅ FastAPI server started at http://{host}:{port}")
-                    print(f"📚 API documentation available at http://{host}:{port}/docs")
-                    print(f"🔌 Available endpoints: {', '.join(list(_registered_agents[port].keys()))}")
-                    uvicorn.run(_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
-                except Exception as e:
-                    logging.error(f"Error starting server: {str(e)}", exc_info=True)
-                    print(f"❌ Error starting server: {str(e)}")
-
-            # Run server in a background thread
-            server_thread = threading.Thread(target=run_server, daemon=True)
-            server_thread.start()
-
-            # Wait for a moment to allow the server to start and register endpoints
-            self._safe_sleep(0.5)
-        else:
-            # If server is already running, wait a moment to make sure the endpoint is registered
-            self._safe_sleep(0.1)
-            print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
+        # Start the shared server for this port if it is not already running.
+        # start_server_if_needed atomically checks-and-marks the port and blocks
+        # on the registry's readiness Event (configurable via
+        # PRAISONAI_SERVER_READY_TIMEOUT) instead of a heuristic sleep, matching
+        # PraisonAIAgents.launch().
+        started = _server_registry.start_server_if_needed(
+            port, host, log_level="debug" if debug else "info"
+        )
+        endpoints = _server_registry.list_routes(port)
+        if started:
+            print(f"✅ FastAPI server started at http://{host}:{port}")
+            print(f"📚 API documentation available at http://{host}:{port}/docs")
+        print(f"🔌 Available endpoints on port {port}: {', '.join(endpoints)}")
 
         # Get the stack frame to check if this is the last launch() call in the script
         import inspect
