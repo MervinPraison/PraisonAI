@@ -168,6 +168,56 @@ def test_build_tools_dict_clears_stale_wrap_state_on_reuse():
         gen.close()
 
 
+def test_dispatch_cli_config_merges_run_ctx_without_mutating_user_config():
+    # The dispatch contract adapters rely on: the merged cli_config they receive
+    # carries the user overrides PLUS the private per-run closures, while the
+    # caller-owned ``self.cli_config`` stays "user overrides only". If dispatch
+    # stopped merging, adapters would silently lose timeout enforcement; if it
+    # mutated ``self.cli_config`` the closures would leak across runs/tenants.
+    gen = _make_generator()
+
+    def sentinel():
+        return "ok"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"plain": sentinel}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    try:
+        user_cfg = {"tool_timeout": 5, "framework": "praisonai"}
+        gen.cli_config = user_cfg
+        gen._build_tools_dict({"roles": {"a": {}}})
+
+        dispatched = gen._dispatch_cli_config()
+        # Adapter-facing config carries user overrides untouched...
+        assert dispatched["tool_timeout"] == 5
+        assert dispatched["framework"] == "praisonai"
+        # ...plus the private per-run closures merged in.
+        assert callable(dispatched["_tool_timeout_wrap"])
+        assert "_agent_tool_wrap_resolver" in dispatched
+
+        # The caller-owned dict must NOT be mutated or stamped with closures,
+        # and dispatch must return a fresh object (never the same instance).
+        assert dispatched is not user_cfg
+        assert "_tool_timeout_wrap" not in user_cfg
+        assert "_agent_tool_wrap_resolver" not in user_cfg
+        assert user_cfg == {"tool_timeout": 5, "framework": "praisonai"}
+    finally:
+        gen.close()
+
+
+def test_dispatch_cli_config_returns_base_when_no_run_ctx():
+    # Before any _build_tools_dict call there is no per-run context; dispatch
+    # must return the user config unchanged rather than fabricating closure keys.
+    gen = _make_generator()
+    gen.cli_config = {"framework": "praisonai"}
+    gen._run_ctx = {}
+    assert gen._dispatch_cli_config() == {"framework": "praisonai"}
+
+
 def test_timeout_proxy_preserves_isinstance_and_schema():
     # A shared framework-tool object wrapped for timeout must keep its type
     # identity: downstream executors (praisonaiagents tool_execution, CrewAI /
