@@ -353,6 +353,44 @@ class TestVideoAgentProviders:
         agent = VideoAgent(llm="runwayml/gen4_turbo")
         assert "runwayml" in agent.llm
 
+    def test_openrouter_provider(self):
+        """Test OpenRouter configuration keeps the openrouter/ prefix."""
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="openrouter/google/veo-3.1")
+        assert agent.llm == "openrouter/google/veo-3.1"
+
+
+class TestVideoAgentOpenRouterHeaders:
+    """OpenRouter attribution headers are added only for openrouter/ models."""
+
+    def test_openrouter_default_headers(self, monkeypatch):
+        from praisonaiagents import VideoAgent
+
+        monkeypatch.delenv("OPENROUTER_REFERER", raising=False)
+        monkeypatch.delenv("OPENROUTER_APP_TITLE", raising=False)
+        agent = VideoAgent(llm="openrouter/google/veo-3.1", verbose=False)
+        params = agent._get_model_params()
+        assert params["extra_headers"]["HTTP-Referer"] == "https://praison.ai"
+        assert params["extra_headers"]["X-Title"] == "PraisonAI"
+
+    def test_openrouter_headers_env_override(self, monkeypatch):
+        from praisonaiagents import VideoAgent
+
+        monkeypatch.setenv("OPENROUTER_REFERER", "https://example.com")
+        monkeypatch.setenv("OPENROUTER_APP_TITLE", "MyApp")
+        agent = VideoAgent(llm="openrouter/kling/kling-3.0-std", verbose=False)
+        params = agent._get_model_params()
+        assert params["extra_headers"]["HTTP-Referer"] == "https://example.com"
+        assert params["extra_headers"]["X-Title"] == "MyApp"
+
+    def test_non_openrouter_has_no_headers(self):
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="openai/sora-2", verbose=False)
+        params = agent._get_model_params()
+        assert "extra_headers" not in params
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Async Tests
