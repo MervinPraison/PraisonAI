@@ -85,23 +85,31 @@ class TemplateSecurity:
         """Load security config from file or use defaults."""
         config_path = Path.home() / self.CONFIG_FILE
         
-        if config_path.exists():
-            try:
-                import yaml
-                with open(config_path) as f:
-                    data = yaml.safe_load(f)
-                return SecurityConfig(
-                    allowed_sources=set(data.get("allowed_sources", [])),
-                    allow_local=data.get("allow_local", True),
-                    allow_any_github=data.get("allow_any_github", True),
-                    allow_http=data.get("allow_http", False),
-                    require_checksum=data.get("require_checksum", False),
-                    max_template_size=data.get("max_template_size", 10 * 1024 * 1024),
-                )
-            except Exception:
-                pass
-        
-        return SecurityConfig()
+        if not config_path.exists():
+            return SecurityConfig()
+
+        try:
+            import yaml
+            with open(config_path) as f:
+                data = yaml.safe_load(f) or {}
+        except Exception as exc:
+            # Fail CLOSED: never fall through to permissive defaults when a
+            # hardened config cannot be read/parsed. Silently reverting would
+            # let an ops team's `allow_any_github: false` become True again on
+            # a single malformed line, with no audit trail.
+            raise RuntimeError(
+                f"Refusing to start: security config {config_path} could not be "
+                f"parsed: {exc}"
+            ) from exc
+
+        return SecurityConfig(
+            allowed_sources=set(data.get("allowed_sources", [])),
+            allow_local=data.get("allow_local", True),
+            allow_any_github=data.get("allow_any_github", True),
+            allow_http=data.get("allow_http", False),
+            require_checksum=data.get("require_checksum", False),
+            max_template_size=data.get("max_template_size", 10 * 1024 * 1024),
+        )
     
     def is_source_allowed(self, uri: str) -> bool:
         """

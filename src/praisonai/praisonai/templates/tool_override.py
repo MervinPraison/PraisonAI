@@ -192,6 +192,16 @@ class ToolOverrideLoader:
         Returns:
             Dict mapping tool names to callable functions
         """
+        # Importing a dotted module executes its top-level code (``__init__``),
+        # exactly like the file-based path that is routed through the canonical
+        # safe loader. Honour the same PRAISONAI_ALLOW_LOCAL_TOOLS opt-in here so
+        # a template-supplied module string cannot bypass the single security
+        # gate and run arbitrary user code on the failure path.
+        if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+            raise PermissionError(
+                "PRAISONAI_ALLOW_LOCAL_TOOLS=true is required to import user "
+                f"modules (refusing to load '{module_path}')."
+            )
         try:
             module = importlib.import_module(module_path)
         except ImportError as e:
