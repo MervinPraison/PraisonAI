@@ -455,6 +455,7 @@ def execute_code_with_tools(
     timeout: int = 30,
     max_output_size: int = 10000,
     bridge: Optional[Any] = None,
+    policy_hook: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Execute model-generated code that may call the agent's registered tools.
 
@@ -506,18 +507,27 @@ def execute_code_with_tools(
         # (allow-list, registry) and limits are forwarded explicitly so the
         # isolated path is gated by exactly what this caller authorised — never
         # the transport's own defaults, and never a weaker path.
-        return bridge.run_code(
-            code,
+        run_kwargs: Dict[str, Any] = dict(
             allowed_tools=allowed,
             registry=registry,
             timeout=timeout,
             max_output_size=max_output_size,
         )
+        # Only forward ``policy_hook`` when set so third-party CodeToolBridge
+        # transports whose ``run_code`` predates this keyword remain compatible
+        # (the shipped LocalProcessBridge accepts and honours it).
+        if policy_hook is not None:
+            run_kwargs["policy_hook"] = policy_hook
+        return bridge.run_code(code, **run_kwargs)
 
     injected: Dict[str, Any] = {}
     if allowed:
-        injected.update(build_tool_namespace(allowed, registry=registry))
-        injected["tools"] = ToolProxy(allowed, registry=registry)
+        injected.update(
+            build_tool_namespace(allowed, registry=registry, policy_hook=policy_hook)
+        )
+        injected["tools"] = ToolProxy(
+            allowed, registry=registry, policy_hook=policy_hook
+        )
 
     return _execute_code_direct(
         code,
@@ -979,7 +989,8 @@ class PythonTools:
 # ──────────────────────────────────────────────────────────────────────
 
 def _build_unsafe_execute_code(
-    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None
+    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None,
+    policy_hook: Optional[Any] = None,
 ):
     """Build the in-process ``execute_code`` tool for ``code_mode="unsafe"``.
 
@@ -987,6 +998,10 @@ def _build_unsafe_execute_code(
     a registry built from its own granted tools so code-mode cannot reach a
     globally-registered tool (e.g. a plugin entry-point tool) the agent was
     never given; omitting it falls back to the global registry.
+
+    ``policy_hook`` is the agent's PolicyEngine / permission-deny / per-tool
+    guardrail gate, applied to every tool call the code makes so code-mode is
+    gated identically to the direct tool-call loop (not by approval alone).
     """
 
     @require_approval(risk_level="critical")
@@ -1003,14 +1018,16 @@ def _build_unsafe_execute_code(
             Dict with ``result``, ``stdout``, ``stderr`` and ``success``.
         """
         return execute_code_with_tools(
-            code, allowed_tools=allowed_tools, timeout=timeout, registry=registry
+            code, allowed_tools=allowed_tools, timeout=timeout, registry=registry,
+            policy_hook=policy_hook,
         )
 
     return execute_code
 
 
 def _build_isolated_execute_code(
-    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None
+    allowed_tools: List[str], timeout: int = 30, registry: Optional[Any] = None,
+    policy_hook: Optional[Any] = None,
 ):
     """Build the ``execute_code`` tool for ``code_mode="isolated"``.
 
@@ -1045,6 +1062,7 @@ def _build_isolated_execute_code(
             timeout=timeout,
             registry=registry,
             bridge=LocalProcessBridge(),
+            policy_hook=policy_hook,
         )
 
     return execute_code
@@ -1055,6 +1073,7 @@ def build_code_execution_tools(
     allowed_tools: Optional[List[str]] = None,
     timeout: int = 30,
     registry: Optional[Any] = None,
+    policy_hook: Optional[Any] = None,
 ) -> List[Any]:
     """Return the code-execution tools for ``ExecutionConfig(code_execution=True)``.
 
@@ -1101,13 +1120,15 @@ def build_code_execution_tools(
     if code_mode == "unsafe":
         return [
             _build_unsafe_execute_code(
-                list(allowed_tools or []), timeout=timeout, registry=registry
+                list(allowed_tools or []), timeout=timeout, registry=registry,
+                policy_hook=policy_hook,
             )
         ]
     if code_mode == "isolated":
         return [
             _build_isolated_execute_code(
-                list(allowed_tools or []), timeout=timeout, registry=registry
+                list(allowed_tools or []), timeout=timeout, registry=registry,
+                policy_hook=policy_hook,
             )
         ]
 
