@@ -690,6 +690,19 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         
         # Assume it's a package name - but warn that packages need wrapper tools
         else:
+            # Importing a package runs its top-level __init__ code. Honour the
+            # same PRAISONAI_ALLOW_LOCAL_TOOLS opt-in the local-file and github:
+            # branches enforce, so `tools add <pkg>` cannot execute arbitrary
+            # Python (e.g. a typosquat resolving on sys.path) without the gate.
+            if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+                self.print_status(
+                    "Refusing to add package tools: set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+                    "to enable (importing a package runs its code; same opt-in the "
+                    "runtime loader requires).",
+                    "error",
+                )
+                return {"success": False, "error": "PRAISONAI_ALLOW_LOCAL_TOOLS not set"}
+
             try:
                 import importlib
                 module = importlib.import_module(source)
