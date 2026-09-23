@@ -62,6 +62,13 @@ ARITY: Dict[str, int] = {
     "apt-get": 2,
     "brew": 2,
     "systemctl": 2,
+    # Windows / PowerShell wrappers: keep the wrapper + inner verb so a
+    # ``powershell -Command Get-ChildItem`` generalises to ``powershell *``
+    # rather than staying fully literal (the inner cmdlet is gated separately by
+    # the dialect-aware command parser).
+    "powershell": 1,
+    "pwsh": 1,
+    "cmd": 1,
 }
 
 

@@ -15,7 +15,12 @@ from praisonaiagents.permissions import (
     PermissionRule,
     PermissionAction,
 )
-from praisonaiagents.permissions.command_parser import parse_command
+from praisonaiagents.permissions.command_parser import (
+    parse_command,
+    is_mutating_executable,
+    DIALECT_POWERSHELL,
+    DIALECT_CMD,
+)
 
 
 @pytest.fixture
@@ -121,6 +126,94 @@ class TestCommandParser:
         # Double quotes do not suppress command substitution.
         ops = parse_command('echo "$(rm -rf x)"')
         assert any(op.executable == "rm" for op in ops)
+
+    def test_posix_default_dialect_unchanged(self):
+        # A backslash-only token is *not* a path under POSIX (byte-for-byte).
+        ops = parse_command("Remove-Item C:\\Windows\\foo")
+        assert all(op.dialect == "posix" for op in ops)
+        assert ops[0].path_args == []
+
+
+class TestPowerShellParser:
+    def test_powershell_command_wrapper_unwrapped(self):
+        ops = parse_command('powershell -Command "Remove-Item C:\\tmp\\x"')
+        execs = [op.executable for op in ops]
+        assert "Remove-Item" in execs
+        rm = next(op for op in ops if op.executable == "Remove-Item")
+        assert rm.dialect == DIALECT_POWERSHELL
+
+    def test_pwsh_short_flag_unwrapped(self):
+        ops = parse_command('pwsh -c "New-Item .\\out.txt"')
+        assert any(op.executable == "New-Item" for op in ops)
+
+    def test_cmd_wrapper_unwrapped(self):
+        ops = parse_command('cmd /c "del C:\\tmp\\x"')
+        exe = [op.executable for op in ops]
+        assert "del" in exe
+        assert all(op.dialect == DIALECT_CMD for op in ops if op.executable == "del")
+
+    def test_powershell_pipeline(self):
+        ops = parse_command(
+            'powershell -Command "Get-Content a.txt | Set-Content b.txt"'
+        )
+        execs = [op.executable for op in ops]
+        assert "Get-Content" in execs
+        assert "Set-Content" in execs
+
+    def test_windows_drive_path_is_path_arg(self):
+        ops = parse_command('powershell -Command "Remove-Item C:\\tmp\\x"')
+        rm = next(op for op in ops if op.executable == "Remove-Item")
+        assert "C:\\tmp\\x" in rm.path_args
+
+    def test_windows_relative_path_is_path_arg(self):
+        ops = parse_command('powershell -Command "Set-Content .\\out.txt hi"')
+        sc = next(op for op in ops if op.executable == "Set-Content")
+        assert ".\\out.txt" in sc.path_args
+
+    def test_mutating_executable_powershell(self):
+        assert is_mutating_executable("Remove-Item", DIALECT_POWERSHELL)
+        assert is_mutating_executable("out-file", DIALECT_POWERSHELL)
+        assert not is_mutating_executable("Get-ChildItem", DIALECT_POWERSHELL)
+
+    def test_mutating_executable_cmd(self):
+        assert is_mutating_executable("del", DIALECT_CMD)
+        assert is_mutating_executable("RMDIR", DIALECT_CMD)
+        assert not is_mutating_executable("dir", DIALECT_CMD)
+
+    def test_mutating_executable_posix_is_false(self):
+        # POSIX keeps its path-based (executable-agnostic) boundary behaviour.
+        assert not is_mutating_executable("Remove-Item")
+        assert not is_mutating_executable("rm")
+
+
+class TestPowerShellBoundary:
+    def test_external_powershell_mutation_asks(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as outside:
+                mgr = PermissionManager(storage_dir=workspace, workspace_root=workspace)
+                mgr.add_rule(
+                    PermissionRule(
+                        pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+                    )
+                )
+                target = (
+                    f'bash:powershell -Command "Remove-Item {outside}\\\\secret.txt"'
+                )
+                result = mgr.check(target)
+                assert result.needs_approval
+
+    def test_in_workspace_powershell_mutation_allowed(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            mgr = PermissionManager(storage_dir=workspace, workspace_root=workspace)
+            mgr.add_rule(
+                PermissionRule(
+                    pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+                )
+            )
+            inside = f"{workspace}/note.txt"
+            target = f'bash:powershell -Command "Set-Content {inside} hi"'
+            result = mgr.check(target)
+            assert result.is_allowed
 
 
 class TestCommandAwareDeny:

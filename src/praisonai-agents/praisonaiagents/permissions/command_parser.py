@@ -13,12 +13,20 @@ Design goals:
 - Best-effort and conservative: on any parse failure we fall back to treating
   the whole command as a single operation (today's behaviour) so a rule is
   never silently weakened.
+
+Windows dialects (PowerShell / ``cmd``): a ``powershell -Command "…"`` /
+``pwsh -c "…"`` / ``cmd /c "…"`` wrapper otherwise collapses to a single
+opaque op, hiding the inner file-mutating cmdlet from the workspace-boundary
+gate. Such wrappers are unwrapped and their inner command string is parsed so
+the same boundary check that fires for POSIX mutations also fires on Windows.
+POSIX parsing is byte-for-byte unchanged (the wrapper unwrap only triggers for
+the ``powershell``/``pwsh``/``cmd`` executables).
 """
 
 import re
 import shlex
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 # Operators that separate simple-commands within a compound command.
@@ -59,6 +67,90 @@ def has_unresolvable_expansion(cmd: str) -> bool:
 _WRITE_REDIRECTS = (">", ">>", ">|", "&>", "&>>")
 
 
+# Supported shell dialects for parsing. ``posix`` is the default and unchanged
+# path; ``powershell`` and ``cmd`` recognise Windows command shape.
+DIALECT_POSIX = "posix"
+DIALECT_POWERSHELL = "powershell"
+DIALECT_CMD = "cmd"
+
+
+# Wrapper executables whose quoted ``-Command``/``-c``/``/c`` argument carries an
+# inner command string that must be parsed in the matching dialect so the inner
+# cmdlet/built-in is gated rather than the opaque wrapper.
+_POWERSHELL_WRAPPERS = ("powershell", "powershell.exe", "pwsh", "pwsh.exe")
+_CMD_WRAPPERS = ("cmd", "cmd.exe")
+
+
+# File-mutating PowerShell cmdlets, their common aliases, and ``cmd`` built-ins.
+# Used by the permission engine's file-mutation classifier so the external-
+# directory boundary check recognises Windows mutations the same way it does
+# POSIX ones (``rm``/``cp``/``mv``/…). Matched case-insensitively.
+_POWERSHELL_MUTATING = frozenset(
+    {
+        "remove-item",
+        "new-item",
+        "move-item",
+        "copy-item",
+        "rename-item",
+        "set-content",
+        "add-content",
+        "clear-content",
+        "out-file",
+        # PowerShell aliases for the cmdlets above.
+        "ri",
+        "rd",
+        "del",
+        "erase",
+        "ni",
+        "mi",
+        "move",
+        "cpi",
+        "copy",
+        "cp",
+        "rni",
+        "ren",
+        "sc",
+        "ac",
+        "rm",
+        "mv",
+    }
+)
+
+_CMD_MUTATING = frozenset(
+    {
+        "del",
+        "erase",
+        "rd",
+        "rmdir",
+        "md",
+        "mkdir",
+        "move",
+        "copy",
+        "xcopy",
+        "ren",
+        "rename",
+    }
+)
+
+
+def is_mutating_executable(executable: str, dialect: str = DIALECT_POSIX) -> bool:
+    """Return ``True`` if *executable* is a file-mutating command for *dialect*.
+
+    POSIX callers keep their existing (executable-agnostic, path-based) boundary
+    behaviour; this helper is provided so Windows dialects can recognise
+    PowerShell cmdlets/aliases and ``cmd`` built-ins by name. Matching is
+    case-insensitive and ignores any directory prefix on the executable.
+    """
+    if not executable:
+        return False
+    name = executable.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    if dialect == DIALECT_POWERSHELL:
+        return name in _POWERSHELL_MUTATING
+    if dialect == DIALECT_CMD:
+        return name in _CMD_MUTATING
+    return False
+
+
 def _looks_like_path(tok: str) -> bool:
     """Return ``True`` if *tok* is path-like enough to warrant a boundary check.
 
@@ -78,6 +170,30 @@ def _looks_like_path(tok: str) -> bool:
         or tok == ".."
         or tok.startswith("$")
         or "/" in tok
+    )
+
+
+# Drive-letter absolute path (``C:\x`` / ``C:/x``) or UNC share (``\\host\x``).
+_WINDOWS_ABS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _looks_like_windows_path(tok: str) -> bool:
+    """Return ``True`` if *tok* is a Windows/PowerShell path shape.
+
+    Recognises drive-letter absolutes (``C:\\x``), UNC shares (``\\\\host\\x``),
+    explicit relatives (``.\\x``, ``..\\x``) and any bare token embedding a
+    backslash separator, in addition to the POSIX shapes. Used only for
+    ``powershell``/``cmd`` ops so POSIX boundary behaviour is unchanged.
+    """
+    if not tok:
+        return False
+    if _looks_like_path(tok):
+        return True
+    return (
+        bool(_WINDOWS_ABS_RE.match(tok))
+        or tok.startswith(".\\")
+        or tok.startswith("..\\")
+        or "\\" in tok
     )
 
 
@@ -110,11 +226,14 @@ class ShellOp:
         executable: The command name (e.g. ``rm``), or ``""`` if unknown.
         args: Positional/flag arguments following the executable.
         write_targets: Paths that are written/truncated via redirection.
+        dialect: The shell dialect this op was parsed under (``posix`` by
+            default; ``powershell``/``cmd`` for unwrapped Windows commands).
     """
 
     executable: str = ""
     args: List[str] = field(default_factory=list)
     write_targets: List[str] = field(default_factory=list)
+    dialect: str = DIALECT_POSIX
 
     @property
     def command_string(self) -> str:
@@ -134,6 +253,13 @@ class ShellOp:
         (``-o/tmp/x``) are also unwrapped so the value is boundary-checked.
         Plain flags and non-path values are ignored.
         """
+        # POSIX behaviour is unchanged; Windows dialects additionally recognise
+        # drive-letter/UNC/backslash path shapes so cmdlet operands are gated.
+        is_path = (
+            _looks_like_path
+            if self.dialect == DIALECT_POSIX
+            else _looks_like_windows_path
+        )
         paths: List[str] = []
         for tok in self.args:
             if not tok:
@@ -143,14 +269,14 @@ class ShellOp:
             if tok.startswith("-"):
                 if "=" in tok:
                     value = tok.split("=", 1)[1]
-                    if value and _looks_like_path(value):
+                    if value and is_path(value):
                         paths.append(value)
                     continue
                 attached = _extract_flag_path(tok)
                 if attached:
                     paths.append(attached)
                 continue
-            if _looks_like_path(tok):
+            if is_path(tok):
                 paths.append(tok)
         return paths
 
@@ -275,25 +401,84 @@ def _split_simple_commands(cmd: str) -> List[str]:
     return segments
 
 
-def _parse_segment(segment: str) -> List[ShellOp]:
+def _strip_quotes(tok: str) -> str:
+    """Strip a single pair of surrounding single/double quotes from *tok*."""
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        return tok[1:-1]
+    return tok
+
+
+# ``powershell``/``pwsh -Command|-c <inner>`` and ``cmd /c|/k <inner>`` wrappers.
+# The inner command is captured verbatim from the *raw* segment (before shlex
+# tokenization) so backslash path separators are preserved. Matched
+# case-insensitively; an optional ``.exe`` suffix is tolerated.
+_WRAPPER_RE = re.compile(
+    r"""^\s*
+        (?P<exe>powershell|pwsh|cmd)(?:\.exe)?
+        \s+
+        (?P<flag>-command|-c|-encodedcommand|/c|/k)
+        \s+
+        (?P<inner>.+)$
+    """,
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
+
+def _unwrap_shell_wrapper(segment: str) -> Optional[List[ShellOp]]:
+    """Return ops for the inner command of a ``powershell``/``cmd`` wrapper.
+
+    Detects ``powershell -Command "…"`` / ``pwsh -c "…"`` / ``cmd /c "…"`` in the
+    *raw* segment and parses the (verbatim) inner command string in the matching
+    dialect so the inner cmdlet/built-in and its paths are gated rather than the
+    opaque wrapper. Returns ``None`` when *segment* is not such a wrapper, so
+    callers fall back to normal per-segment parsing. Detection is
+    executable-name based, so a POSIX command never triggers this path.
+    """
+    match = _WRAPPER_RE.match(segment)
+    if match is None:
+        return None
+    exe = match.group("exe").lower()
+    inner_dialect = DIALECT_CMD if exe == "cmd" else DIALECT_POWERSHELL
+    inner = _strip_quotes(match.group("inner").strip()).strip()
+    if not inner:
+        return None
+    return parse_command(inner, dialect=inner_dialect)
+
+
+def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
     """Parse a single simple-command segment into ShellOp(s).
 
     May return multiple ops when the segment embeds command substitutions.
     """
     ops: List[ShellOp] = []
 
+    # ``powershell -Command "…"`` / ``cmd /c "…"`` carries an inner command that
+    # would otherwise be an opaque op. Unwrap from the *raw* segment (before
+    # shlex) so the inner command — and its backslash paths — are preserved and
+    # parsed in the matching dialect.
+    wrapped = _unwrap_shell_wrapper(segment)
+    if wrapped is not None:
+        return wrapped
+
     # First, recurse into any command substitutions so e.g. ``$(rm -rf x)``
     # is evaluated as an ``rm`` operation.
     for inner in _extract_substitutions(segment):
-        ops.extend(parse_command(inner))
+        ops.extend(parse_command(inner, dialect=dialect))
 
+    # POSIX tokenizes with ``posix=True`` (unchanged). Windows dialects use
+    # ``posix=False`` so backslash path separators (``C:\tmp\x``) are preserved
+    # rather than consumed as escape characters; surrounding quotes are then
+    # stripped from each token.
+    posix_mode = dialect == DIALECT_POSIX
     try:
-        tokens = shlex.split(segment, comments=False, posix=True)
+        tokens = shlex.split(segment, comments=False, posix=posix_mode)
     except ValueError:
         # Unbalanced quotes etc. — conservative fallback: whole segment.
         tokens = segment.split()
+    if not posix_mode:
+        tokens = [_strip_quotes(t) for t in tokens]
 
-    op = ShellOp()
+    op = ShellOp(dialect=dialect)
     args: List[str] = []
     skip_next = False
     skip_input_target = False
@@ -368,11 +553,19 @@ def _parse_segment(segment: str) -> List[ShellOp]:
     return ops
 
 
-def parse_command(cmd: str) -> List[ShellOp]:
+def parse_command(cmd: str, *, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
     """Parse a shell command string into a list of ShellOp operations.
 
     Args:
         cmd: The raw shell command (without the ``bash:``/``shell:`` prefix).
+        dialect: The shell dialect to parse under — ``posix`` (default,
+            byte-for-byte unchanged), ``powershell`` or ``cmd``. Statement
+            separators (``;``, ``|``, ``&&``/``||``, ``&``) are shared across
+            dialects; the dialect is recorded on each op and drives the
+            file-mutation classifier for Windows cmdlets/built-ins. A
+            ``powershell``/``pwsh``/``cmd`` wrapper is unwrapped and its inner
+            command parsed in the matching dialect regardless of the requested
+            *dialect*, so a POSIX gate still sees into a Windows wrapper.
 
     Returns:
         A list of ShellOp. On parse failure, returns a single best-effort
@@ -385,20 +578,20 @@ def parse_command(cmd: str) -> List[ShellOp]:
         segments = _split_simple_commands(cmd)
         ops: List[ShellOp] = []
         for seg in segments:
-            ops.extend(_parse_segment(seg))
+            ops.extend(_parse_segment(seg, dialect))
 
         if not ops:
             # Nothing extracted — fall back to whole command.
-            return [_fallback_op(cmd)]
+            return [_fallback_op(cmd, dialect)]
         return ops
     except Exception:  # noqa: BLE001 - conservative: never weaken a rule on parse failure
         # Any unexpected failure must not weaken the rule: fall back.
-        return [_fallback_op(cmd)]
+        return [_fallback_op(cmd, dialect)]
 
 
-def _fallback_op(cmd: str) -> ShellOp:
+def _fallback_op(cmd: str, dialect: str = DIALECT_POSIX) -> ShellOp:
     """Build a single ShellOp representing the whole command (legacy path)."""
     tokens = cmd.split()
     if not tokens:
-        return ShellOp()
-    return ShellOp(executable=tokens[0], args=tokens[1:])
+        return ShellOp(dialect=dialect)
+    return ShellOp(executable=tokens[0], args=tokens[1:], dialect=dialect)
