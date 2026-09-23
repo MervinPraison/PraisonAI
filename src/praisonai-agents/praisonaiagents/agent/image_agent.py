@@ -3,6 +3,7 @@ ImageAgent - A specialized agent class for generating images using AI models.
 This class extends the base Agent class to provide specific functionality for image generation,
 including support for different image models, sizes, and quality settings.
 """
+import asyncio
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
 from pydantic import BaseModel, Field
@@ -180,8 +181,8 @@ class ImageAgent(Agent):
                 logging.error(error_msg)
                 raise
     async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
-        """Async wrapper for generate_image."""
-        return self.generate_image(prompt, **kwargs)
+        """Offload the synchronous generation path to keep the event loop responsive."""
+        return await asyncio.to_thread(self.generate_image, prompt, **kwargs)
     
     # Aliases for consistency with other agents
     def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
@@ -190,7 +191,7 @@ class ImageAgent(Agent):
     
     async def agenerate(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Async alias for generate_image()."""
-        return self.generate_image(prompt, **kwargs)
+        return await self.agenerate_image(prompt, **kwargs)
 
     def chat(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate an image from the prompt."""
@@ -302,8 +303,8 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Async version of edit()."""
-        return self.edit(image, prompt, mask, n, size, **kwargs)
+        """Offload the synchronous editing path to keep the event loop responsive."""
+        return await asyncio.to_thread(self.edit, image, prompt, mask, n, size, **kwargs)
 
     def variation(
         self,
@@ -372,6 +373,5 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Async version of variation()."""
-        return self.variation(image, n, size, **kwargs)
-
+        """Offload the synchronous variation path to keep the event loop responsive."""
+        return await asyncio.to_thread(self.variation, image, n, size, **kwargs)
