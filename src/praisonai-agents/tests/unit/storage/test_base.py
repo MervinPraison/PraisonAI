@@ -5,6 +5,7 @@ TDD: Tests for the DRY storage base implementation.
 """
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from datetime import datetime
@@ -130,6 +131,57 @@ class TestFileLock:
             with FileLock(temp_path) as lock:
                 assert lock is not None
         finally:
+            temp_path.unlink()
+
+    def test_live_lock_survives_beyond_timeout(self):
+        """A lock held longer than ``timeout`` must NOT be reclaimed.
+
+        Regression for the mtime-staleness bug: a live holder refreshes the
+        lock file's mtime via a heartbeat, so a legitimately long critical
+        section stays exclusive and a waiter cannot bust the live lock.
+        """
+        import time
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            temp_path = Path(f.name)
+        lock_path = Path(str(temp_path) + ".lock")
+
+        try:
+            with FileLock(temp_path, timeout=0.1):
+                # Hold well past the timeout; heartbeat should keep it fresh.
+                time.sleep(0.5)
+                # A waiter must still see the lock as live (not stale).
+                waiter = FileLock(temp_path, timeout=0.1)
+                age = time.time() - lock_path.stat().st_mtime
+                assert age <= waiter.timeout, (
+                    "live lock aged past timeout; heartbeat not refreshing mtime"
+                )
+                assert lock_path.exists()
+        finally:
+            temp_path.unlink()
+
+    def test_abandoned_lock_is_reclaimed(self):
+        """A stale lock (crashed holder, no heartbeat) is reclaimable."""
+        import time
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            temp_path = Path(f.name)
+        lock_path = Path(str(temp_path) + ".lock")
+
+        try:
+            # Simulate a crashed holder: a bare lock file with no heartbeat,
+            # aged past the timeout.
+            lock_path.touch()
+            old = time.time() - 100
+            os.utime(lock_path, (old, old))
+
+            # Acquisition should reclaim the abandoned lock without hanging.
+            with FileLock(temp_path, timeout=0.1):
+                assert lock_path.exists()
+            assert not lock_path.exists()
+        finally:
+            if lock_path.exists():
+                lock_path.unlink()
             temp_path.unlink()
 
 
