@@ -1236,6 +1236,7 @@ def run_main(
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
+    pick: bool = typer.Option(False, "--pick", "--interactive-session", help="Interactively pick a recent session to resume before running (TTY only; ignored with --session/--continue or --json)"),
     fork: bool = typer.Option(False, "--fork", help="Fork from the specified session (requires --session)"),
     no_save: bool = typer.Option(False, "--no-save", help="Don't auto-save session after execution"),
     # Custom definitions
@@ -1354,6 +1355,20 @@ def run_main(
     # Validate session options before any model/credential resolution so an
     # invalid combination fails closed and session-model restoration below sees
     # a well-formed request.
+    # --pick resolves a session id via the shared interactive picker, then flows
+    # into the normal resume path (as if --session <id> had been passed). It is
+    # a no-op when a session is already specified via --session/--continue, and
+    # degrades silently in --json/non-TTY so scripts and CI are unaffected.
+    if pick and not session and not continue_session:
+        import sys as _sys
+
+        if not output.is_json_mode and _sys.stdin.isatty() and _sys.stdout.isatty():
+            from .session import _pick_session
+
+            picked = _pick_session(output)
+            if picked:
+                session = picked
+
     if fork and not session:
         output.print_error("--fork requires --session to specify which session to fork from")
         raise typer.Exit(1)
