@@ -1238,6 +1238,62 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             return HookResult.allow()
         yield HookEvent.CLI_BACKEND_EXECUTE, cli_backend_execute_hook
 
+    # Generic, declaration-driven bridge for the remaining lifecycle events.
+    #
+    # The explicit branches above give rich, per-event adaptation (rewrite /
+    # deny semantics) for the conversation and tool hooks. Everything else the
+    # runtime emits -- gateway_start/stop, schedule_*, kanban_*,
+    # before/after_compaction, subagent_stop, model_fallback -- is observe-only
+    # from a plugin's perspective, so a single generic loop bridges any declared
+    # hook whose matching method (``event.value``) is overridden. This keeps the
+    # coverage matrix from drifting: newly emitted events become first-class
+    # automatically the moment a plugin declares and defines them.
+    already_yielded = {
+        HookEvent.BEFORE_AGENT, HookEvent.AFTER_AGENT,
+        HookEvent.BEFORE_LLM, HookEvent.AFTER_LLM,
+        HookEvent.BEFORE_TOOL, HookEvent.AFTER_TOOL,
+        HookEvent.BEFORE_TOOL_DEFINITIONS,
+        HookEvent.MESSAGE_RECEIVED, HookEvent.MESSAGE_SENDING,
+        HookEvent.MESSAGE_SENT, HookEvent.MESSAGE_UNDELIVERED,
+        HookEvent.ON_PERMISSION_ASK,
+        HookEvent.ON_CONFIG, HookEvent.ON_AUTH,
+        HookEvent.SESSION_START, HookEvent.SESSION_END,
+        HookEvent.ON_ERROR, HookEvent.CLI_BACKEND_EXECUTE,
+    }
+
+    def _make_observer(method):
+        def observer_hook(data, _m=method):
+            # Lifecycle observer methods are typed ``context: Dict[str, Any]``.
+            # Some emitters (e.g. BEFORE/AFTER_COMPACTION in chat_mixin) fire
+            # with ``None``, so normalise an absent payload to an empty dict to
+            # honour the contract and keep ``context.get(...)`` from raising.
+            if hasattr(data, "to_dict"):
+                _m(data.to_dict())
+            else:
+                _m({} if data is None else data)
+            return HookResult.allow()
+        return observer_hook
+
+    def _method_overridden(method_name: str) -> bool:
+        # A method counts only when the concrete plugin actually replaces the
+        # base implementation. Unlike ``_overrides`` (which treats a mere
+        # PluginInfo.hooks declaration as sufficient for the conversation
+        # hooks), an observe-only lifecycle hook with the base no-op left in
+        # place has nothing to report, so it must not register a dead hook.
+        own = getattr(type(plugin), method_name, None)
+        parent = getattr(base, method_name, None)
+        return own is not None and own is not parent
+
+    seen: set = set()
+    for event in getattr(plugin.info, "hooks", None) or []:
+        if not isinstance(event, HookEvent) or event in already_yielded or event in seen:
+            continue
+        method_name = event.value
+        method = getattr(plugin, method_name, None)
+        if callable(method) and _method_overridden(method_name):
+            seen.add(event)
+            yield event, _make_observer(method)
+
 
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None
