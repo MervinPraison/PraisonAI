@@ -42,8 +42,15 @@ def _pick_session(output) -> Optional[str]:
 
     try:
         rows = list_project_sessions(limit=20)
-    except Exception:
-        rows = []
+    except (OSError, ValueError, KeyError) as exc:
+        # Only expected storage/parse failures degrade to "couldn't list";
+        # keep them distinct from a genuinely empty store so the message isn't
+        # misleading, and let unexpected exceptions surface for diagnostics.
+        output.print_error(
+            f"Could not list sessions: {exc}",
+            remediation="Use 'praisonai session list' to inspect the session store",
+        )
+        return None
 
     if not rows:
         output.print_info("No sessions found")

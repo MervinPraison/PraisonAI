@@ -1368,6 +1368,13 @@ def run_main(
             picked = _pick_session(output)
             if picked:
                 session = picked
+            else:
+                # The user explicitly asked to pick a session but cancelled (or
+                # none exist). Abort here rather than silently proceeding as a
+                # fresh run — starting an unintended new session would defeat
+                # the selection gate the user requested. _pick_session already
+                # printed the reason ("No sessions found" / "Cancelled").
+                raise typer.Exit(1)
 
     if fork and not session:
         output.print_error("--fork requires --session to specify which session to fork from")
