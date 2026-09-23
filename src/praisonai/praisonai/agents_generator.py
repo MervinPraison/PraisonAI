@@ -735,8 +735,22 @@ class AgentsGenerator:
                 break
 
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
-        agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
+        agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch', 'max_tokens']
+        agent_overrides = {}
+        for key in agent_level_fields:
+            if key not in cli_config:
+                continue
+            # The legacy parser always supplies 16000, even when the user did
+            # not pass --max-tokens. Do not let that default overwrite a
+            # per-agent or nested YAML budget; only a marked explicit value or
+            # a non-default value is a real CLI override.
+            if (
+                key == 'max_tokens'
+                and not cli_config.get('_max_tokens_explicit')
+                and cli_config[key] == 16000
+            ):
+                continue
+            agent_overrides[key] = cli_config[key]
 
         if "tool_retry_policy" in agent_overrides:
             policy = agent_overrides["tool_retry_policy"]

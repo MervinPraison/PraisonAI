@@ -393,6 +393,8 @@ class PraisonAI:
                 'approve_all_tools',
                 'approval_timeout',
                 'output',
+                'max_tokens',
+                '_max_tokens_explicit',
             ):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
@@ -2052,6 +2054,16 @@ class PraisonAI:
             output_mode = getattr(self.args, 'output_format', None)
         if output_mode is not None:
             cli_config['output'] = output_mode
+
+        max_tokens = getattr(self.args, 'max_tokens', None)
+        if max_tokens is not None:
+            cli_config['max_tokens'] = max_tokens
+        # Newer callers mark whether the CLI option was explicitly supplied;
+        # retain that bit so YAML agent-level budgets are not shadowed by a
+        # parser default of 16000.
+        explicit_max_tokens = getattr(self.args, '_max_tokens_explicit', None)
+        if explicit_max_tokens is not None:
+            cli_config['_max_tokens_explicit'] = bool(explicit_max_tokens)
 
         # Extract handoff configuration for YAML CLI parity
         handoff = getattr(self.args, 'handoff', None)
