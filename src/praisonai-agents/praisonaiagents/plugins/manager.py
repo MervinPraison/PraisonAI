@@ -1263,7 +1263,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     def _make_observer(method):
         def observer_hook(data, _m=method):
-            _m(data.to_dict() if hasattr(data, "to_dict") else data)
+            # Lifecycle observer methods are typed ``context: Dict[str, Any]``.
+            # Some emitters (e.g. BEFORE/AFTER_COMPACTION in chat_mixin) fire
+            # with ``None``, so normalise an absent payload to an empty dict to
+            # honour the contract and keep ``context.get(...)`` from raising.
+            if hasattr(data, "to_dict"):
+                _m(data.to_dict())
+            else:
+                _m({} if data is None else data)
             return HookResult.allow()
         return observer_hook
 

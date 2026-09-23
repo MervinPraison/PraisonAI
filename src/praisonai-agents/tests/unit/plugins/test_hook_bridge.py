@@ -597,6 +597,40 @@ class TestGenericLifecycleBridge:
         events = dict(_adapt_plugin_hooks(DeclareOnlyPlugin()))
         assert HookEvent.GATEWAY_START not in events
 
+    def test_compaction_none_payload_normalized_to_dict(self):
+        # BEFORE/AFTER_COMPACTION emit with ``None`` (chat_mixin), but the
+        # observer method is typed ``context: Dict[str, Any]``. The bridge must
+        # normalise ``None`` to ``{}`` so ``context.get(...)`` never raises.
+        received = {}
+
+        class CompactionPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(
+                    name="compaction",
+                    hooks=[
+                        PluginHook.BEFORE_COMPACTION,
+                        PluginHook.AFTER_COMPACTION,
+                    ],
+                )
+
+            def before_compaction(self, context):
+                received["before"] = context
+                context.get("anything")
+
+            def after_compaction(self, context):
+                received["after"] = context
+                context.get("anything")
+
+        events = dict(_adapt_plugin_hooks(CompactionPlugin()))
+        result_before = events[HookEvent.BEFORE_COMPACTION](None)
+        result_after = events[HookEvent.AFTER_COMPACTION](None)
+
+        assert received["before"] == {}
+        assert received["after"] == {}
+        assert result_before.is_allowed
+        assert result_after.is_allowed
+
 
 class BlockToolDecisionPlugin(Plugin):
     @property
