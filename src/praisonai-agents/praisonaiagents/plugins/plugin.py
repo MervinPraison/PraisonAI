@@ -246,6 +246,53 @@ class Plugin(ABC):
     def cli_backend_execute(self, context: Dict[str, Any]) -> None:
         """Called after a CLI backend delegates a turn. Observe-only."""
         pass
+
+    # -------------------------------------------------------------------------
+    # Gateway / schedule / kanban / compaction lifecycle. Observe-only.
+    #
+    # These bridge automatically via the declaration-driven tail of
+    # ``_adapt_plugin_hooks``: declare the matching ``HookEvent`` in
+    # ``PluginInfo.hooks`` and override the method here to receive the emitted
+    # event payload (a plain dict). They are defined on the base for
+    # discoverability so a subclass can override without dropping to the
+    # low-level ``HookRegistry`` API.
+    # -------------------------------------------------------------------------
+
+    def gateway_start(self, context: Dict[str, Any]) -> None:
+        """Called when the gateway / BotOS starts. Observe-only."""
+        pass
+
+    def gateway_stop(self, context: Dict[str, Any]) -> None:
+        """Called when the gateway / BotOS stops. Observe-only."""
+        pass
+
+    def schedule_add(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job is added. Observe-only."""
+        pass
+
+    def schedule_remove(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job is removed. Observe-only."""
+        pass
+
+    def schedule_trigger(self, context: Dict[str, Any]) -> None:
+        """Called when a scheduled job triggers. Observe-only."""
+        pass
+
+    def before_compaction(self, context: Dict[str, Any]) -> None:
+        """Called before conversation/memory compaction. Observe-only."""
+        pass
+
+    def after_compaction(self, context: Dict[str, Any]) -> None:
+        """Called after conversation/memory compaction. Observe-only."""
+        pass
+
+    def subagent_stop(self, context: Dict[str, Any]) -> None:
+        """Called when a spawned subagent reaches a terminal state. Observe-only."""
+        pass
+
+    def model_fallback(self, context: Dict[str, Any]) -> None:
+        """Called when the runtime falls back to a secondary model. Observe-only."""
+        pass
     
     def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:
         """Called when permission is requested. Return True/False to auto-approve/deny."""

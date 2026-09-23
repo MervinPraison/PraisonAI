@@ -447,6 +447,157 @@ class TestBridge:
         assert "praisonaiagents.plugins" not in src
 
 
+class GatewayForensicsStub(Plugin):
+    """Mirrors the bundled GatewayForensicsPlugin: declares GATEWAY_* and
+    defines matching methods that were previously never wired."""
+
+    def __init__(self):
+        self.events = []
+
+    @property
+    def info(self):
+        return PluginInfo(
+            name="gwforensics",
+            hooks=[PluginHook.GATEWAY_START, PluginHook.GATEWAY_STOP],
+        )
+
+    def gateway_start(self, context):
+        self.events.append(("start", context))
+
+    def gateway_stop(self, context):
+        self.events.append(("stop", context))
+
+
+class LifecycleObserverPlugin(Plugin):
+    """Declares schedule/kanban/compaction/subagent/model-fallback hooks and
+    records that they fired via the generic declaration-driven bridge."""
+
+    def __init__(self):
+        self.fired = []
+
+    @property
+    def info(self):
+        return PluginInfo(
+            name="lifecycle_observer",
+            hooks=[
+                PluginHook.SCHEDULE_ADD,
+                PluginHook.SCHEDULE_TRIGGER,
+                PluginHook.KANBAN_TASK_CREATED,
+                PluginHook.BEFORE_COMPACTION,
+                PluginHook.AFTER_COMPACTION,
+                PluginHook.SUBAGENT_STOP,
+                PluginHook.MODEL_FALLBACK,
+            ],
+        )
+
+    def schedule_add(self, context):
+        self.fired.append("schedule_add")
+
+    def schedule_trigger(self, context):
+        self.fired.append("schedule_trigger")
+
+    def kanban_task_created(self, context):
+        self.fired.append("kanban_task_created")
+
+    def before_compaction(self, context):
+        self.fired.append("before_compaction")
+
+    def after_compaction(self, context):
+        self.fired.append("after_compaction")
+
+    def subagent_stop(self, context):
+        self.fired.append("subagent_stop")
+
+    def model_fallback(self, context):
+        self.fired.append("model_fallback")
+
+
+class TestGenericLifecycleBridge:
+    """The declaration-driven tail of ``_adapt_plugin_hooks`` bridges the
+    gateway/schedule/kanban/compaction/subagent/model-fallback events that had
+    no explicit branch (Issue #5159)."""
+
+    def test_gateway_hooks_are_bridged_and_fire(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        plugin = GatewayForensicsStub()
+        mgr.register(plugin)
+        assert mgr.wire_into_hook_registry(reg) == 2
+        assert reg.has_hooks(HookEvent.GATEWAY_START)
+        assert reg.has_hooks(HookEvent.GATEWAY_STOP)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+
+        class _Ctx:
+            def __init__(self, name):
+                self.session_id = "s"
+                self.cwd = os.getcwd()
+                self.event_name = name
+                self.timestamp = str(time.time())
+
+            def to_dict(self):
+                return {"event_name": self.event_name}
+
+        runner.execute_sync(HookEvent.GATEWAY_START, _Ctx("gateway_start"))
+        runner.execute_sync(HookEvent.GATEWAY_STOP, _Ctx("gateway_stop"))
+        assert [e[0] for e in plugin.events] == ["start", "stop"]
+
+    def test_all_remaining_lifecycle_events_bridge(self):
+        events = dict(_adapt_plugin_hooks(LifecycleObserverPlugin()))
+        for evt in (
+            HookEvent.SCHEDULE_ADD,
+            HookEvent.SCHEDULE_TRIGGER,
+            HookEvent.KANBAN_TASK_CREATED,
+            HookEvent.BEFORE_COMPACTION,
+            HookEvent.AFTER_COMPACTION,
+            HookEvent.SUBAGENT_STOP,
+            HookEvent.MODEL_FALLBACK,
+        ):
+            assert evt in events, f"{evt} was not bridged"
+
+    def test_lifecycle_observer_methods_receive_payload(self):
+        plugin = LifecycleObserverPlugin()
+        events = dict(_adapt_plugin_hooks(plugin))
+
+        class _Payload:
+            def to_dict(self):
+                return {"k": "v"}
+
+        events[HookEvent.SCHEDULE_ADD](_Payload())
+        events[HookEvent.KANBAN_TASK_CREATED](_Payload())
+        events[HookEvent.MODEL_FALLBACK](_Payload())
+        assert "schedule_add" in plugin.fired
+        assert "kanban_task_created" in plugin.fired
+        assert "model_fallback" in plugin.fired
+
+    def test_undeclared_lifecycle_method_not_bridged(self):
+        # A plugin that overrides gateway_start but does NOT declare it in
+        # PluginInfo.hooks must not be spuriously wired (declaration-driven).
+        class UndeclaredPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(name="undeclared", hooks=[])
+
+            def gateway_start(self, context):
+                pass
+
+        events = dict(_adapt_plugin_hooks(UndeclaredPlugin()))
+        assert HookEvent.GATEWAY_START not in events
+
+    def test_declared_but_not_overridden_not_bridged(self):
+        # Declaring gateway_start without overriding the base no-op must not
+        # register a hook (nothing to observe).
+        class DeclareOnlyPlugin(Plugin):
+            @property
+            def info(self):
+                return PluginInfo(
+                    name="declareonly", hooks=[PluginHook.GATEWAY_START]
+                )
+
+        events = dict(_adapt_plugin_hooks(DeclareOnlyPlugin()))
+        assert HookEvent.GATEWAY_START not in events
+
+
 class BlockToolDecisionPlugin(Plugin):
     @property
     def info(self):
