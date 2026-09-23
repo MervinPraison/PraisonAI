@@ -210,6 +210,7 @@ class BotSessionManager:
         admission_gate: Optional[Any] = None,
         turn_lock_map: Optional["LockMap"] = None,
         surface_completion_reason: bool = False,
+        defer_journal_completion: bool = False,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         # Issue #3232: the per-turn lock map is keyed on the *resolved* storage
@@ -270,6 +271,21 @@ class BotSessionManager:
         # behaviour (the tool returns its "no gateway available" message).
         self._delivery_router = delivery_router
         self._last_journal_key = None  # Store key for delayed completion
+        # Issue #5152: set of inbound journal keys deferred for delayed
+        # completion. Unlike the single ``_last_journal_key`` slot, this holds
+        # *every* in-flight deferred key so two concurrent turns (different
+        # users run under different per-storage-key locks, so ``chat()`` is not
+        # globally serialised) can never clobber one another — settling one
+        # turn must never settle another turn's still-undelivered inbound.
+        self._deferred_journal_keys: set[str] = set()
+        # Issue #5152: when True, chat() does NOT mark the inbound journal
+        # complete on clean exit; instead it stashes the journal key so the
+        # adapter can call complete_last_journal_entry() *after* the reply is
+        # durably delivered. This closes the window where a crash between
+        # "agent finished" and "reply sent" would settle the inbound (no
+        # replay) yet lose the user's reply. Default False keeps the legacy
+        # settle-on-agent-completion behaviour byte-for-byte unchanged.
+        self._defer_journal_completion = defer_journal_completion
         # Run control for in-flight message handling
         self._run_control = run_control
         # Issue #3296: opt-in surfacing of *why* a turn ended. When True, a turn
@@ -1641,13 +1657,26 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(type(e), e, e.__traceback__)
                 raise
             else:
-                # Clean exit - mark journal complete before releasing claim
+                # Clean exit - settle the inbound journal.
                 if journal_key is not None and self._ingress_journal is not None:
-                    try:
-                        self._ingress_journal.complete(journal_key)
-                        self._last_journal_key = None
-                    except Exception as e:
-                        logger.warning("Failed to complete journal entry: %s", e)
+                    if self._defer_journal_completion:
+                        # Issue #5152: defer completion until the adapter has
+                        # durably delivered the reply. Record the key so the
+                        # adapter calls complete_last_journal_entry(journal_key)
+                        # *after* send; on a crash before delivery the entry
+                        # stays pending and is redeliverable rather than lost.
+                        # The key is added to the per-turn set (race-safe under
+                        # concurrent turns) and also mirrored into the single
+                        # slot for the convenience no-arg completion path.
+                        self._deferred_journal_keys.add(journal_key)
+                        self._last_journal_key = journal_key
+                    else:
+                        # Legacy behaviour: mark complete on agent completion.
+                        try:
+                            self._ingress_journal.complete(journal_key)
+                            self._last_journal_key = None
+                        except Exception as e:
+                            logger.warning("Failed to complete journal entry: %s", e)
                 if claim_ctx is not None:
                     await claim_ctx.__aexit__(None, None, None)
                 return result or ""
@@ -2006,22 +2035,44 @@ class BotSessionManager:
             )
         return evicted
 
-    def complete_last_journal_entry(self) -> bool:
-        """Complete the last journal entry if one exists.
-        
-        Call this after successfully delivering a message to the platform
-        to ensure the journal entry is marked as completed.
-        
-        Returns True if an entry was completed, False if no entry was pending.
+    def complete_last_journal_entry(
+        self, journal_key: Optional[str] = None
+    ) -> bool:
+        """Complete a deferred inbound journal entry after delivery.
+
+        Call this *after* the reply has been durably delivered to the platform
+        so the inbound entry is settled only once the user has actually been
+        answered (Issue #5152).
+
+        Args:
+            journal_key: The exact deferred key to settle. **Prefer passing
+                this** — under concurrent turns (different users run under
+                different per-storage-key locks) the manager-wide "last" slot
+                is ambiguous, so settling a specific key guarantees turn A's
+                acknowledgement never settles turn B's still-undelivered
+                inbound. When ``None`` (single-turn convenience), the most
+                recently deferred key is used.
+
+        Returns True if an entry was completed, False if no matching entry was
+        pending.
         """
-        if self._last_journal_key is not None and self._ingress_journal is not None:
-            try:
-                self._ingress_journal.complete(self._last_journal_key)
-                self._last_journal_key = None
-                return True
-            except Exception as e:
-                logger.warning("Failed to complete journal entry: %s", e)
-        return False
+        if self._ingress_journal is None:
+            return False
+        key = journal_key if journal_key is not None else self._last_journal_key
+        if key is None:
+            return False
+        try:
+            self._ingress_journal.complete(key)
+        except Exception as e:
+            logger.warning("Failed to complete journal entry: %s", e)
+            return False
+        # Settle bookkeeping: drop the key from the deferred set and clear the
+        # convenience slot only when it referred to this key (so a concurrent
+        # turn's slot is never silently cleared out from under it).
+        self._deferred_journal_keys.discard(key)
+        if self._last_journal_key == key:
+            self._last_journal_key = None
+        return True
 
     def _should_reset_session(self, storage_key: str) -> bool:
         """Check if a session should be reset based on the policy.
