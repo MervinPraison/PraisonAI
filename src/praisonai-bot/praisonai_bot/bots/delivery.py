@@ -25,6 +25,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _redact_outbound_text(text: str) -> str:
+    """Scrub registered secrets + credential-shaped tokens before dispatch.
+
+    Shared safe-by-default helper for the proactive/scheduled delivery path
+    (Issue #5055). Best-effort — a scrubber error (or core predating the
+    primitive) leaves the text unchanged rather than blocking delivery.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    try:
+        from praisonaiagents.secrets import redact_outbound
+
+        return redact_outbound(text)
+    except Exception:  # pragma: no cover — never block delivery on a scrubber bug
+        return text
+
+
 def _accepts_thread_id(bot: Any) -> bool:
     """Whether ``bot.send_message`` accepts a ``thread_id`` argument.
 
@@ -737,6 +754,14 @@ class DeliveryRouter:
             if not bot:
                 logger.warning(f"DeliveryRouter: platform '{platform}' not available")
                 return False
+
+            # Outbound secret redaction (Issue #5055): the proactive/scheduled
+            # path (agent ``send_message``, continuable deliveries) does NOT pass
+            # through an adapter's ``fire_message_sending`` reply seam, so scrub
+            # registered secrets + credential-shaped tokens here before dispatch.
+            # Safe-by-default and best-effort — a scrubber error leaves the text
+            # unchanged rather than blocking delivery.
+            text = _redact_outbound_text(text)
 
             # Idempotency short-circuit (issue #2578): suppress a duplicate
             # proactive send whose caller-stable key we have already delivered,

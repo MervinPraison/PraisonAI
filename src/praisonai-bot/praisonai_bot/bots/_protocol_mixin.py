@@ -569,6 +569,10 @@ class MessageHookMixin:
         result: Dict[str, Any] = {"content": content, "cancel": False}
         runner = self._get_hook_runner()
         if runner is None:
+            # No hooks, but the outbound secret scrub must still run so a reply
+            # is never delivered with a leaked secret just because no hook is
+            # registered (Issue #5055).
+            result["content"] = self._redact_outbound(result["content"])
             return result
         try:
             from praisonaiagents.hooks.types import HookEvent
@@ -598,7 +602,38 @@ class MessageHookMixin:
                 result["content"] = new_content
         except Exception as e:
             logger.debug(f"MESSAGE_SENDING hook error (non-fatal): {e}")
+
+        # Outbound secret redaction (Issue #5055): scrub registered secrets and
+        # credential-shaped tokens from the reply before dispatch, at the single
+        # delivery decision point every adapter funnels through. Safe-by-default
+        # (on unless explicitly disabled) and additive — absent a leak, ordinary
+        # text is unchanged. An optional PII policy layers on via the injected
+        # redactor. Runs LAST so a hook cannot re-introduce a secret afterwards.
+        result["content"] = self._redact_outbound(result.get("content", ""))
         return result
+
+    def _redact_outbound(self, content: str) -> str:
+        """Scrub secrets/credentials from outbound text before it leaves.
+
+        Uses an injected :class:`OutboundRedactor` when present (e.g. one that
+        also applies a PII policy), otherwise the core safe-by-default
+        :func:`redact_outbound` primitive. Opt-out via ``_redact_secrets_outbound
+        = False``. Never raises — a scrubber error returns the text unchanged
+        rather than blocking delivery.
+        """
+        if not content or not isinstance(content, str):
+            return content
+        if not getattr(self, "_redact_secrets_outbound", True):
+            return content
+        redactor = getattr(self, "_outbound_redactor", None)
+        try:
+            if redactor is not None:
+                return redactor.redact(content)
+            from praisonaiagents.secrets import redact_outbound
+            return redact_outbound(content)
+        except Exception as e:  # pragma: no cover — never block delivery
+            logger.debug(f"Outbound redaction skipped (non-fatal): {e}")
+            return content
 
     _DEFAULT_EMPTY_FINAL = "Task completed — no message to show."
 

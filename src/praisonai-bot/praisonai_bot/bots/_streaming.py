@@ -34,6 +34,25 @@ _REASONING_OPEN_RE = re.compile(
 )
 
 
+def redact_outbound_text(text: str) -> str:
+    """Scrub registered secrets + credential-shaped tokens from streamed text.
+
+    The progressive draft/edit path does not pass through the adapters'
+    ``fire_message_sending`` seam (only the final content does), so an
+    intermediate edit could otherwise flash a secret to the user before the
+    final scrub. Applying the same core primitive here closes that window.
+    Best-effort — a scrubber error leaves the text unchanged (Issue #5055).
+    """
+    if not text:
+        return text
+    try:
+        from praisonaiagents.secrets import redact_outbound
+
+        return redact_outbound(text)
+    except Exception:  # pragma: no cover — never block a stream on a scrubber bug
+        return text
+
+
 def strip_reasoning_tags(text: str) -> str:
     """Remove ``<think>``/``<reasoning>`` spans from streamed content.
 
@@ -407,6 +426,11 @@ class DraftStreamer:
         else:
             return None  # Should not happen
         
+        # Scrub secrets/credential-shaped tokens from the streamed draft before
+        # it is edited into the live message (Issue #5055). Runs before the text
+        # limit so a mask cannot be split across the truncation boundary.
+        content = redact_outbound_text(content)
+        
         # Apply text limit if configured
         if self._text_limit > 0 and len(content) > self._text_limit:
             content = content[:self._text_limit - 3] + "..."
@@ -495,6 +519,12 @@ class DraftStreamer:
         # Strip reasoning tags from the final answer too
         if final_content and self._config.strip_reasoning_tags:
             final_content = strip_reasoning_tags(final_content)
+        
+        # Scrub secrets before the final edit/send (Issue #5055). Idempotent, so
+        # a caller that already redacted via ``fire_message_sending`` is
+        # unaffected, while a caller that finalises directly (e.g. UnifiedDelivery)
+        # still gets the safe-by-default guarantee.
+        final_content = redact_outbound_text(final_content)
         
         if self._rate_limiter:
             await self._rate_limiter.acquire(self._channel_id)
