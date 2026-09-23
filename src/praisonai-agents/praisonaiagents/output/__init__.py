@@ -29,6 +29,8 @@ Usage:
     formatted = formatter.format(response)
 """
 
+from .._lazy import create_lazy_getattr
+
 __all__ = [
     # Core classes
     "OutputStyle",
@@ -61,100 +63,35 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name == "OutputStyle":
-        from .style import OutputStyle
-        return OutputStyle
-    
-    if name == "OutputFormatter":
-        from .formatter import OutputFormatter
-        return OutputFormatter
-    
-    if name == "StylePreset":
-        from .style import StylePreset
-        return StylePreset
-    
-    if name == "OutputConfig":
-        # Consolidated to the canonical config.OutputConfig (see issue #2294).
-        # The former divergent dataclass in output/config.py was unused; this
-        # import path is preserved for backward compatibility.
-        from ..config import OutputConfig
-        return OutputConfig
-    
+_LAZY_IMPORTS = {
+    "OutputStyle": ("praisonaiagents.output.style", "OutputStyle"),
+    "OutputFormatter": ("praisonaiagents.output.formatter", "OutputFormatter"),
+    "StylePreset": ("praisonaiagents.output.style", "StylePreset"),
+    # Consolidated to the canonical config.OutputConfig (see issue #2294).
+    # The former divergent dataclass in output/config.py was unused; this
+    # import path is preserved for backward compatibility.
+    "OutputConfig": ("praisonaiagents.config", "OutputConfig"),
     # Status output (for status preset - no timestamps)
-    if name == "StatusOutput":
-        from .status import StatusOutput
-        return StatusOutput
-    
-    if name == "enable_status_output":
-        from .status import enable_status_output
-        return enable_status_output
-    
-    if name == "disable_status_output":
-        from .status import disable_status_output
-        return disable_status_output
-    
-    if name == "is_status_output_enabled":
-        from .status import is_status_output_enabled
-        return is_status_output_enabled
-    
-    if name == "get_status_output":
-        from .status import get_status_output
-        return get_status_output
-    
+    "StatusOutput": ("praisonaiagents.output.status", "StatusOutput"),
+    "enable_status_output": ("praisonaiagents.output.status", "enable_status_output"),
+    "disable_status_output": ("praisonaiagents.output.status", "disable_status_output"),
+    "is_status_output_enabled": ("praisonaiagents.output.status", "is_status_output_enabled"),
+    "get_status_output": ("praisonaiagents.output.status", "get_status_output"),
     # Trace output (for trace preset - with timestamps)
-    if name == "TraceOutput":
-        from .trace import TraceOutput
-        return TraceOutput
-    
-    if name == "enable_trace_output":
-        from .trace import enable_trace_output
-        return enable_trace_output
-    
-    if name == "disable_trace_output":
-        from .trace import disable_trace_output
-        return disable_trace_output
-    
-    if name == "is_trace_output_enabled":
-        from .trace import is_trace_output_enabled
-        return is_trace_output_enabled
-    
-    if name == "get_trace_output":
-        from .trace import get_trace_output
-        return get_trace_output
-    
+    "TraceOutput": ("praisonaiagents.output.trace", "TraceOutput"),
+    "enable_trace_output": ("praisonaiagents.output.trace", "enable_trace_output"),
+    "disable_trace_output": ("praisonaiagents.output.trace", "disable_trace_output"),
+    "is_trace_output_enabled": ("praisonaiagents.output.trace", "is_trace_output_enabled"),
+    "get_trace_output": ("praisonaiagents.output.trace", "get_trace_output"),
     # Editor output (for editor preset - beginner-friendly numbered steps)
-    if name == "EditorOutput":
-        from .editor import EditorOutput
-        return EditorOutput
-    
-    if name == "enable_editor_output":
-        from .editor import enable_editor_output
-        return enable_editor_output
-    
-    if name == "disable_editor_output":
-        from .editor import disable_editor_output
-        return disable_editor_output
-    
-    if name == "is_editor_output_enabled":
-        from .editor import is_editor_output_enabled
-        return is_editor_output_enabled
-    
-    if name == "get_editor_output":
-        from .editor import get_editor_output
-        return get_editor_output
-    
-    if name == "TOOL_LABELS":
-        from .editor import TOOL_LABELS
-        return TOOL_LABELS
-    
-    if name == "BlockType":
-        from .editor import BlockType
-        return BlockType
-    
-    if name == "DisplayBlock":
-        from .editor import DisplayBlock
-        return DisplayBlock
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    "EditorOutput": ("praisonaiagents.output.editor", "EditorOutput"),
+    "enable_editor_output": ("praisonaiagents.output.editor", "enable_editor_output"),
+    "disable_editor_output": ("praisonaiagents.output.editor", "disable_editor_output"),
+    "is_editor_output_enabled": ("praisonaiagents.output.editor", "is_editor_output_enabled"),
+    "get_editor_output": ("praisonaiagents.output.editor", "get_editor_output"),
+    "TOOL_LABELS": ("praisonaiagents.output.editor", "TOOL_LABELS"),
+    "BlockType": ("praisonaiagents.output.editor", "BlockType"),
+    "DisplayBlock": ("praisonaiagents.output.editor", "DisplayBlock"),
+}
+
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
