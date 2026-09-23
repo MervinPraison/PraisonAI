@@ -34,6 +34,40 @@ _REASONING_OPEN_RE = re.compile(
 )
 
 
+def redact_outbound_text(text: str, adapter: Any = None) -> str:
+    """Scrub registered secrets + credential-shaped tokens from streamed text.
+
+    The progressive draft/edit path does not pass through the adapters'
+    ``fire_message_sending`` seam (only the final content does), so an
+    intermediate edit could otherwise flash a secret to the user before the
+    final scrub. Applying the same core primitive here closes that window.
+
+    When an ``adapter`` is supplied, the same controls as the mixin seam apply:
+    an injected ``_outbound_redactor`` (e.g. one that also enforces a PII
+    policy) takes precedence and ``_redact_secrets_outbound = False`` opts out,
+    so one consistent redaction policy governs every outbound seam (Issue #5055).
+    Best-effort — a scrubber error leaves the text unchanged.
+    """
+    if not text:
+        return text
+    if adapter is not None and not getattr(adapter, "_redact_secrets_outbound", True):
+        return text
+    redactor = getattr(adapter, "_outbound_redactor", None) if adapter is not None else None
+    try:
+        if redactor is not None:
+            masked = redactor.redact(text)
+            # Only honour a well-behaved injected redactor (returns a str);
+            # anything else falls back to the core primitive so a stray/mock
+            # attribute cannot yield a coroutine or drop the scrub.
+            if isinstance(masked, str):
+                return masked
+        from praisonaiagents.secrets import redact_outbound
+
+        return redact_outbound(text)
+    except Exception:  # pragma: no cover — never block a stream on a scrubber bug
+        return text
+
+
 def strip_reasoning_tags(text: str) -> str:
     """Remove ``<think>``/``<reasoning>`` spans from streamed content.
 
@@ -407,6 +441,12 @@ class DraftStreamer:
         else:
             return None  # Should not happen
         
+        # Scrub secrets/credential-shaped tokens from the streamed draft before
+        # it is edited into the live message (Issue #5055). Runs before the text
+        # limit so a mask cannot be split across the truncation boundary. Passes
+        # the adapter so an injected redactor / opt-out governs this seam too.
+        content = redact_outbound_text(content, self._adapter)
+        
         # Apply text limit if configured
         if self._text_limit > 0 and len(content) > self._text_limit:
             content = content[:self._text_limit - 3] + "..."
@@ -495,6 +535,13 @@ class DraftStreamer:
         # Strip reasoning tags from the final answer too
         if final_content and self._config.strip_reasoning_tags:
             final_content = strip_reasoning_tags(final_content)
+        
+        # Scrub secrets before the final edit/send (Issue #5055). Idempotent, so
+        # a caller that already redacted via ``fire_message_sending`` is
+        # unaffected, while a caller that finalises directly (e.g. UnifiedDelivery)
+        # still gets the safe-by-default guarantee. The adapter carries any
+        # injected redactor / opt-out so one policy governs every outbound seam.
+        final_content = redact_outbound_text(final_content, self._adapter)
         
         if self._rate_limiter:
             await self._rate_limiter.acquire(self._channel_id)

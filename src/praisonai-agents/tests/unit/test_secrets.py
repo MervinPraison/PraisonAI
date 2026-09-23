@@ -14,10 +14,12 @@ from praisonaiagents.secrets import (
     MISSING,
     UNAVAILABLE,
     DefaultSecretResolver,
+    OutboundRedactor,
     SecretRef,
     SecretResolution,
     SecretResolver,
     is_secret_ref,
+    redact_outbound,
     redact_secrets,
     register_resolver,
     register_secret_for_redaction,
@@ -153,3 +155,54 @@ def test_custom_resolver_registration():
         # Reset the registry entry so we don't leak into other tests.
         import praisonaiagents.secrets as s
         s._resolvers.pop("env", None)
+
+
+# ── Outbound redaction (Issue #5055) ──────────────────────────────────────
+
+
+def test_redact_outbound_masks_registered_secret():
+    register_secret_for_redaction("sk-registered-outbound-1234")
+    out = redact_outbound("your key is sk-registered-outbound-1234 done")
+    assert out == "your key is [REDACTED] done"
+
+
+def test_redact_outbound_masks_unregistered_credential_shapes():
+    # None of these are registered; they are caught purely by shape.
+    assert "AKIA" not in redact_outbound("id AKIAIOSFODNN7EXAMPLE here")
+    assert "sk-" not in redact_outbound("key sk-abcDEF123456ghiJKL789 end")
+    ghp = "found ghp_" + "a" * 36 + " token"
+    assert "ghp_" not in redact_outbound(ghp)
+
+
+def test_redact_outbound_masks_private_key_block():
+    pem = (
+        "before -----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIBmid...line\n"
+        "-----END RSA PRIVATE KEY-----after"
+    )
+    out = redact_outbound(pem)
+    assert "PRIVATE KEY" not in out
+    assert "before" in out and "after" in out
+
+
+def test_redact_outbound_leaves_ordinary_text_unchanged():
+    text = "The meeting is at 3pm in room 1234, bring your laptop."
+    assert redact_outbound(text) == text
+
+
+def test_redact_outbound_handles_empty_and_none():
+    assert redact_outbound("") == ""
+    assert redact_outbound(None) is None
+
+
+def test_outbound_redactor_protocol_is_runtime_checkable():
+    class _R:
+        def redact(self, text):
+            return text
+
+    assert isinstance(_R(), OutboundRedactor)
+
+    class _NotR:
+        pass
+
+    assert not isinstance(_NotR(), OutboundRedactor)

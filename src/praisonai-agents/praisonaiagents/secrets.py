@@ -39,6 +39,8 @@ __all__ = [
     "register_resolver",
     "register_secret_for_redaction",
     "redact_secrets",
+    "redact_outbound",
+    "OutboundRedactor",
     "is_secret_ref",
 ]
 
@@ -287,3 +289,85 @@ def redact_secrets(text: str) -> str:
         if secret in text:
             text = text.replace(secret, _REDACTED)
     return text
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Outbound redaction — the safe-by-default reply-path primitive (Issue #5055).
+#
+# ``redact_secrets`` masks only values the framework has *seen* (resolved
+# credentials). An unregistered secret surfaced in a tool result or a document
+# would still slip through, so the outbound primitive additionally masks tokens
+# by *shape* (API keys, bearer tokens, ``AKIA…``, private-key blocks). This is
+# the counterpart to log redaction: it is applied to text on its way to a chat
+# user, before dispatch, by the wrapper's delivery seam.
+# ────────────────────────────────────────────────────────────────────────────
+
+# Credential-shaped patterns, matched by value (not key=value), so a naked token
+# echoed by the model or embedded in a tool result is caught even when never
+# registered. Kept deliberately narrow to avoid over-redacting ordinary text.
+_CREDENTIAL_SHAPE_PATTERNS = (
+    # OpenAI-style keys (sk-..., sk-proj-...), Anthropic (sk-ant-...)
+    r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}\b",
+    # AWS access key id
+    r"\bAKIA[0-9A-Z]{16}\b",
+    # GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_)
+    r"\bgh[pousr]_[A-Za-z0-9]{16,}\b",
+    r"\bgithub_pat_[A-Za-z0-9_]{22,}\b",
+    # Google API key
+    r"\bAIza[0-9A-Za-z_-]{35}\b",
+    # Slack token
+    r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b",
+    # Bearer token in an Authorization-style value
+    r"\bBearer\s+[A-Za-z0-9._-]{16,}\b",
+    # PEM private-key block
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
+    r"[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
+)
+
+_credential_shape_re = None
+
+
+def _get_credential_shape_re():
+    """Compile the credential-shape matcher lazily (stdlib ``re`` only)."""
+    global _credential_shape_re
+    if _credential_shape_re is None:
+        import re
+
+        _credential_shape_re = re.compile(
+            "|".join(f"(?:{p})" for p in _CREDENTIAL_SHAPE_PATTERNS)
+        )
+    return _credential_shape_re
+
+
+def redact_outbound(text: str) -> str:
+    """Scrub secrets from text on its way to a chat user (safe-by-default).
+
+    Combines the registered-value registry (:func:`redact_secrets`, holding
+    every resolved gateway credential) with a credential-shape regex so an
+    *unregistered* token surfaced in a tool result is still masked. Personal
+    data is intentionally out of scope here — an opt-in PII policy layers on top
+    via the wrapper/plugin hook — so ordinary text is never over-redacted.
+
+    Zero dependency, never raises: a scrubber error returns the registered-value
+    result rather than blocking delivery.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    text = redact_secrets(text)
+    try:
+        text = _get_credential_shape_re().sub(_REDACTED, text)
+    except Exception:  # pragma: no cover — never block delivery on a regex bug
+        pass
+    return text
+
+
+@runtime_checkable
+class OutboundRedactor(Protocol):
+    """Overridable contract for scrubbing outbound text before dispatch.
+
+    The default implementation is :func:`redact_outbound`. A deployment may
+    supply its own (e.g. one that also applies a PII policy) and inject it at
+    the wrapper's delivery seam without importing anything heavy into core.
+    """
+
+    def redact(self, text: str) -> str: ...
