@@ -71,16 +71,18 @@ def load_user_module(
             logger.warning("Refusing to exec %s: outside working directory.", path)
             return None
 
-    # Namespace the sys.modules entry so parallel loads of the same file from
-    # different tenants (multi-tenant ``praisonai serve``) cannot clobber one
-    # another's slot, and a failed exec cannot pop another tenant's live
-    # module. Every reachable caller binds the returned module object, not
-    # sys.modules[name], so this is transparent to them.
+    # Namespace the sys.modules entry per-load so two concurrent user-tool
+    # loads on the same process (e.g. multi-tenant ``praisonai serve``) cannot
+    # clobber one another through a shared, fixed module name — and a failed
+    # exec can only pop *its own* entry, never another live tenant's module.
+    # ``name`` is retained only as a readable hint in the qualified key; every
+    # reachable caller binds the returned module object rather than reading
+    # ``sys.modules[name]``.
     qualified = f"praisonai_userload::{name}::{path}::{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(qualified, str(path))
     if spec is None or spec.loader is None:
         return None
-    
+
     module = importlib.util.module_from_spec(spec)
     # Register before exec so decorators/dataclasses that consult
     # sys.modules[__name__] during module execution resolve correctly.
@@ -130,14 +132,14 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
             f"Refusing to exec {path}: outside working directory."
         ) from None
 
-    # Per-load-unique sys.modules key (see load_user_module above) so
-    # concurrent loads cannot clobber each other or pop another tenant's
-    # live module on a failed exec.
+    # Per-load-unique sys.modules key: see load_user_module for the rationale
+    # (multi-tenant / concurrent-load isolation; failed exec pops only its own
+    # entry). Callers bind the returned module rather than sys.modules[name].
     qualified = f"praisonai_userload::{name}::{path}::{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(qualified, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not create spec for {path}")
-    
+
     module = importlib.util.module_from_spec(spec)
     sys.modules[qualified] = module
     try:
