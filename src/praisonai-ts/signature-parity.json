@@ -1876,7 +1876,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:811",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [
@@ -2714,7 +2714,7 @@
           "PraisonAIAgents",
           "Agents"
         ],
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:911",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:819",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2554",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2462",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4656,7 +4656,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:426",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:446",
         "resolved_class": "LLM"
       },
       "ts_only": [

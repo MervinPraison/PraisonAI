@@ -99,7 +99,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 
 ### `AgentTeam.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:911`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:819`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:93` (ctor `src/praisonai-ts/src/agent/team.ts:381`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
@@ -207,7 +207,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:811`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2493`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
@@ -247,7 +247,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2554`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2462`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1125`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -279,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:426`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:446`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 
