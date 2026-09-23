@@ -908,7 +908,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription required", "subscription expired",
+            "plan limit"
         ]):
             return "billing"
         
@@ -936,15 +937,17 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Empty or malformed responses
         if any(indicator in error_str for indicator in [
-            "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "empty response", "no response", "no content", "blank output",
+            "null response", "invalid response format",
+            "json decode error", "unexpected end of json"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "server busy", "try again later",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -958,7 +961,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Format errors
         if any(indicator in error_str for indicator in [
             "validation error", "invalid format", "parse error",
-            "malformed", "invalid json", "schema error"
+            "parsing error", "decode error", "malformed",
+            "invalid json", "schema error"
         ]):
             return "format_error"
         
@@ -1044,13 +1048,21 @@ Respond with ONLY a valid JSON tool call in this format:
                 is_retryable=True
             )
         
-        # Auth errors - try profile rotation if available
-        if error_kind == "auth" and self._failover_manager:
+        # Auth errors - try profile rotation if available, else surface.
+        # Without a failover manager there is no alternate credential to try,
+        # so blind retry cannot succeed — surface the auth failure immediately.
+        if error_kind == "auth":
+            if self._failover_manager:
+                return FailoverDecision(
+                    action="rotate_profile",
+                    reason=error_kind,
+                    backoff_ms=1000,  # Brief delay before trying new profile
+                    is_retryable=True
+                )
             return FailoverDecision(
-                action="rotate_profile",
+                action="surface_error",
                 reason=error_kind,
-                backoff_ms=1000,  # Brief delay before trying new profile
-                is_retryable=True
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
