@@ -440,6 +440,128 @@ class _FailingRedis(_FakeRedis):
     def eval(self, *a, **k):
         raise ConnectionError("redis down")
 
+    def pipeline(self, *a, **k):
+        raise ConnectionError("redis down")
+
+
+class _RecoverableRedis(_FakeRedis):
+    """A client whose data ops fail while ``down`` is set, then succeed again.
+
+    Models a transient runtime Redis outage that later recovers, exercising the
+    degraded-then-recovered path (Greptile P2): the store must clear its
+    degraded fact once a subsequent op succeeds.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.down = True
+
+    def _guard(self):
+        if self.down:
+            raise ConnectionError("redis down")
+
+    def set(self, key, value, nx=False, px=None):
+        self._guard()
+        return super().set(key, value, nx=nx, px=px)
+
+    def get(self, key):
+        self._guard()
+        return super().get(key)
+
+    def delete(self, key):
+        self._guard()
+        return super().delete(key)
+
+    def eval(self, script, numkeys, key, *args):
+        self._guard()
+        return super().eval(script, numkeys, key, *args)
+
+
+def _watch_error():
+    """Raise the exact ``WatchError`` type the store catches.
+
+    The store resolves ``redis.WatchError`` when redis is installed, else a
+    private sentinel. Reusing its resolver here guarantees the fake pipeline's
+    abort is caught by the store's retry loop regardless of whether the redis
+    package is present in the test environment."""
+    from praisonai_bot.bots._idempotency import _watch_error_type
+
+    return _watch_error_type()()
+
+
+class _NoEvalPipe:
+    """A watched-transaction pipeline over a shared dict, atomic on ``execute``.
+
+    Emulates ``redis-py``'s ``WATCH``/``MULTI``/``EXEC``: if the watched key's
+    value changed between ``watch`` and ``execute`` the transaction aborts with
+    ``WatchError`` (here modelled by the injected ``on_before_exec`` hook that a
+    test uses to simulate a concurrent reclaim).
+    """
+
+    def __init__(self, backend):
+        self._backend = backend
+        self._queued = []
+        self._watched_val = None
+        self._watch_key = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def watch(self, key):
+        self._watch_key = key
+        self._watched_val = self._backend.store.get(key)
+
+    def unwatch(self):
+        self._watch_key = None
+
+    def get(self, key):
+        return self._backend.store.get(key)
+
+    def multi(self):
+        self._queued = []
+
+    def set(self, key, value, px=None):
+        self._queued.append(("set", key, value))
+
+    def delete(self, key):
+        self._queued.append(("delete", key))
+
+    def execute(self):
+        hook = self._backend._on_before_exec
+        if hook is not None:
+            hook()
+        # Optimistic check: abort if the watched value changed under us.
+        if self._backend.store.get(self._watch_key) != self._watched_val:
+            raise _watch_error()
+        for op in self._queued:
+            if op[0] == "set":
+                self._backend.store[op[1]] = op[2]
+            elif op[0] == "delete":
+                self._backend.store.pop(op[1], None)
+        self._queued = []
+        return []
+
+
+class _NoEvalRedis(_FakeRedis):
+    """A client without ``eval`` but with a watched-transaction ``pipeline``.
+
+    Exercises the non-Lua fallback path in ``record``/``release``: the fallback
+    must remain atomic (owner-checked compare-and-set / -del) via WATCH/MULTI.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._on_before_exec = None
+
+    def eval(self, *a, **k):
+        raise RuntimeError("EVAL not supported")
+
+    def pipeline(self):
+        return _NoEvalPipe(self)
+
 
 class TestRedisIdempotencyStore:
     """Issue #5154: cluster-wide exactly-once inbound admission."""
@@ -568,3 +690,84 @@ class TestRedisIdempotencyStore:
         s.record("k")  # must not raise
         s.release("k")  # must not raise
         clear_durability_degraded("idempotency")
+
+    def test_runtime_degradation_clears_after_recovery(self):
+        # Greptile P2: a runtime outage marks degraded, but once Redis recovers a
+        # subsequent successful op must clear the degraded fact so gateway
+        # status/doctor stop reporting best-effort dedup (and a later outage
+        # re-warns).
+        from praisonai_bot.bots import RedisIdempotencyStore
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+
+        clear_durability_degraded("idempotency")
+        backend = _RecoverableRedis()
+        s = RedisIdempotencyStore(backend)
+
+        # Outage: reserve fails open and records the degraded fact.
+        assert s.reserve("k") is True
+        assert any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+
+        # Redis recovers; the next successful reserve clears the degradation.
+        backend.down = False
+        assert s.reserve("k2") is True
+        assert not any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        clear_durability_degraded("idempotency")
+
+    def test_noeval_record_fallback_is_atomic_owner_checked(self):
+        # Greptile P1 (fallback): a client without EVAL uses the WATCH/MULTI
+        # fallback. If another replica reclaims the key mid-commit (simulated via
+        # the pre-exec hook), the transaction aborts and re-decides instead of
+        # clobbering the new owner.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _NoEvalRedis()
+        replica_a = RedisIdempotencyStore(backend)
+        replica_b = RedisIdempotencyStore(backend)
+
+        assert replica_a.reserve("k") is True
+        a_key = replica_a._redis_key("k")
+
+        # On A's first commit attempt, B reclaims the key (its own token),
+        # forcing the watched transaction to abort; A must then no-op.
+        def _reclaim_once():
+            backend.store[a_key] = replica_b._token
+            backend._on_before_exec = None  # only interfere once
+
+        backend._on_before_exec = _reclaim_once
+        replica_a.record("k")
+
+        # B's live claim is intact — A did not overwrite it with ``recorded``.
+        assert backend.store[a_key] == replica_b._token
+
+    def test_noeval_record_fallback_commits_when_owner(self):
+        # The non-Lua fallback still commits normally when we remain the owner.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _NoEvalRedis()
+        s = RedisIdempotencyStore(backend)
+        assert s.reserve("k") is True
+        s.record("k")
+        assert backend.store[s._redis_key("k")] == RedisIdempotencyStore._RECORDED
+
+    def test_noeval_release_fallback_only_drops_own_claim(self):
+        # The non-Lua release fallback must be owner-checked too: replica B's
+        # release is a no-op while A owns the key.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _NoEvalRedis()
+        replica_a = RedisIdempotencyStore(backend)
+        replica_b = RedisIdempotencyStore(backend)
+        assert replica_a.reserve("k") is True
+        replica_b.release("k")  # not owner -> no-op
+        assert replica_b.reserve("k") is False  # still held by A
+        replica_a.release("k")  # owner -> drops
+        assert replica_b.reserve("k") is True

@@ -57,6 +57,29 @@ _DEFAULT_TTL_SECONDS = 86_400.0  # 24h, matching the in-memory default
 # ``inflight`` rows are reclaimed; a ``recorded`` key dedups until its TTL.
 _DEFAULT_INFLIGHT_LEASE_SECONDS = 900.0  # 15 min
 
+# Bounded retries for the non-Lua ``WATCH``/``MULTI`` fallback so a persistently
+# contended key can never spin forever; on exhaustion the caller treats it as a
+# degraded fact (the claim self-heals via the inflight lease).
+_WATCH_RETRIES = 8
+
+
+class _NoWatchError(Exception):
+    """Stable sentinel used in place of ``redis.WatchError`` when the redis
+    package is unavailable, so a real connection error inside the watched-
+    transaction fallback is *not* misread as a transaction abort and retried."""
+
+
+def _watch_error_type():
+    """The ``redis.WatchError`` type when redis is installed, else the stable
+    :class:`_NoWatchError` sentinel (one shared class so ``except`` in the store
+    and a raise in tests reference the same type)."""
+    try:
+        from redis import WatchError
+
+        return WatchError
+    except Exception:  # pragma: no cover - redis present in this package's deps
+        return _NoWatchError
+
 
 class SqliteIdempotencyStore:
     """SQLite-backed durable :class:`IdempotencyStoreProtocol`.
@@ -279,7 +302,7 @@ class RedisIdempotencyStore:
         until Redis recovers, but ingress keeps working instead of wedging.
         """
         try:
-            return bool(
+            admitted = bool(
                 self._client.set(
                     self._redis_key(key),
                     self._token,
@@ -287,6 +310,8 @@ class RedisIdempotencyStore:
                     px=self._inflight_ms,
                 )
             )
+            self._mark_runtime_recovered()
+            return admitted
         except Exception as e:
             self._mark_runtime_degraded("reserve", e)
             return True
@@ -310,19 +335,56 @@ class RedisIdempotencyStore:
                 self._RECORDED,
                 self._ttl_ms,
             )
+            self._mark_runtime_recovered()
         except Exception as e:
-            # Fallback for clients without ``eval``: best-effort compare-and-set
-            # (still owner-aware). A raw Redis outage here is swallowed as a
-            # degraded fact — a missed ``record`` self-heals via the inflight
-            # lease expiring, after which a redelivery re-runs.
-            try:
-                current = self._client.get(redis_key)
-                if current in (None, self._token, self._RECORDED):
-                    self._client.set(
-                        redis_key, self._RECORDED, px=self._ttl_ms
-                    )
-            except Exception:
+            # Fallback for clients without ``eval``: an *atomic* owner-checked
+            # compare-and-set via a ``WATCH``/``MULTI`` optimistic transaction,
+            # so a concurrent reclaim between the ownership read and the write
+            # aborts the commit (``WatchError``) instead of clobbering the new
+            # owner. A raw Redis outage is swallowed as a degraded fact — a
+            # missed ``record`` self-heals via the inflight lease expiring,
+            # after which a redelivery re-runs.
+            if self._record_via_watch(redis_key):
+                self._mark_runtime_recovered()
+            else:
                 self._mark_runtime_degraded("record", e)
+
+    def _record_via_watch(self, redis_key: str) -> bool:
+        """Owner-checked commit without Lua, atomic via ``WATCH``/``MULTI``.
+
+        Returns ``True`` when the commit completed (or was a legitimate no-op
+        because another owner reclaimed the key), ``False`` when the client
+        cannot support a watched transaction or Redis is unreachable — the
+        caller then treats it as a runtime-degraded fact. The optimistic
+        transaction guarantees the same exactly-once safety as ``_RECORD_LUA``:
+        if the value changes under us between ``WATCH`` and ``EXEC`` the
+        transaction aborts, so we never overwrite a replica that reclaimed the
+        key after our lease expired.
+        """
+        pipeline = getattr(self._client, "pipeline", None)
+        if pipeline is None:
+            return False
+        WatchError = _watch_error_type()
+        try:
+            with pipeline() as pipe:
+                for _ in range(_WATCH_RETRIES):
+                    try:
+                        pipe.watch(redis_key)
+                        current = pipe.get(redis_key)
+                        if current not in (None, self._token, self._RECORDED):
+                            # Another owner reclaimed the key: legitimate no-op.
+                            pipe.unwatch()
+                            return True
+                        pipe.multi()
+                        pipe.set(redis_key, self._RECORDED, px=self._ttl_ms)
+                        pipe.execute()
+                        return True
+                    except WatchError:
+                        # Value changed under us; re-read and re-decide.
+                        continue
+        except Exception:
+            return False
+        return False
 
     def release(self, key: str) -> None:
         """Drop our in-flight claim so a failed delivery can be retried.
@@ -335,13 +397,71 @@ class RedisIdempotencyStore:
         redis_key = self._redis_key(key)
         try:
             self._client.eval(self._RELEASE_LUA, 1, redis_key, self._token)
+            self._mark_runtime_recovered()
         except Exception as e:
-            # Fallback for clients without ``eval``: best-effort compare-and-del.
-            try:
-                if self._client.get(redis_key) == self._token:
-                    self._client.delete(redis_key)
-            except Exception:
+            # Fallback for clients without ``eval``: an *atomic* owner-checked
+            # compare-and-del via a ``WATCH``/``MULTI`` optimistic transaction,
+            # so a concurrent reclaim between the ownership read and the delete
+            # aborts instead of dropping the new owner's live claim.
+            if self._release_via_watch(redis_key):
+                self._mark_runtime_recovered()
+            else:
                 self._mark_runtime_degraded("release", e)
+
+    def _release_via_watch(self, redis_key: str) -> bool:
+        """Owner-checked delete without Lua, atomic via ``WATCH``/``MULTI``.
+
+        Returns ``True`` when the delete completed (or was a legitimate no-op
+        because we no longer own the key), ``False`` when the client cannot
+        support a watched transaction or Redis is unreachable. Like
+        :meth:`_record_via_watch`, the optimistic transaction aborts if the
+        value changes under us, so we never delete a claim a replica reclaimed
+        after our lease expired.
+        """
+        pipeline = getattr(self._client, "pipeline", None)
+        if pipeline is None:
+            return False
+        WatchError = _watch_error_type()
+        try:
+            with pipeline() as pipe:
+                for _ in range(_WATCH_RETRIES):
+                    try:
+                        pipe.watch(redis_key)
+                        if pipe.get(redis_key) != self._token:
+                            pipe.unwatch()
+                            return True  # not ours: legitimate no-op
+                        pipe.multi()
+                        pipe.delete(redis_key)
+                        pipe.execute()
+                        return True
+                    except WatchError:
+                        continue
+        except Exception:
+            return False
+        return False
+
+    def _mark_runtime_recovered(self) -> None:
+        """Clear a prior *runtime* degradation after a successful Redis op.
+
+        The build-time / runtime degraded fact must not stick after Redis
+        recovers, or ``gateway status`` / ``doctor`` would keep reporting
+        best-effort dedup indefinitely and a later outage would emit no fresh
+        warning (Greptile P2). A successful ``reserve``/``record``/``release``
+        proves the client is reachable again, so we reset the flag and clear the
+        registry entry (idempotent — a no-op when never degraded).
+        """
+        if not getattr(self, "_runtime_degraded", False):
+            return
+        self._runtime_degraded = False
+        logger.info(
+            "Redis idempotency store recovered; cross-replica dedup restored."
+        )
+        try:
+            from ._session import clear_durability_degraded
+
+            clear_durability_degraded("idempotency")
+        except Exception as e:  # pragma: no cover - registry is best-effort
+            logger.debug("Failed to clear idempotency runtime degradation: %s", e)
 
     def _mark_runtime_degraded(self, op: str, error: Exception) -> None:
         """Record a *runtime* Redis outage once (Issue #5154 fail-open).
