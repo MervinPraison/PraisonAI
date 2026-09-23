@@ -4156,12 +4156,31 @@ Summary:"""
                     except Exception:
                         pass
 
+        # Gate every code-mode tool call through the SAME PolicyEngine,
+        # permission deny-rules and per-tool ``input_guardrails`` the direct
+        # tool-call loop runs. The approval framework the proxy already honours
+        # does not cover these, so without this hook a model could reach an
+        # allow-listed tool from code and bypass a guardrail that blocks the
+        # same call on the normal path. The hook returns a denial reason string
+        # (block) or ``None`` (allow) and only runs in the tool-capable modes.
+        policy_hook = None
+        if code_tools and code_execution_mode in _tool_capable:
+            def policy_hook(name, arguments):
+                deny = self._check_permission_manager_deny(name, arguments)
+                if isinstance(deny, dict):
+                    return deny.get("error", "denied by permission policy")
+                verdict = self._check_tool_policy_and_guardrails(name, arguments)
+                if isinstance(verdict, dict):
+                    return verdict.get("error", "denied by policy")
+                return None
+
         # An unknown code_mode raises out of here rather than silently
         # producing nothing, which is the failure this whole change is about.
         new_tools = build_code_execution_tools(
             code_mode=code_execution_mode,
             allowed_tools=allowed if code_tools else [],
             registry=scoped_registry,
+            policy_hook=policy_hook,
         )
 
         existing = {getattr(t, "__name__", None) for t in (self.tools or [])}
