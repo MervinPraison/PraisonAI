@@ -30,10 +30,13 @@ from .protocols import (
     RoundRobinRoomPlanner,
     extract_mentions,
 )
+from .runtime import Room, RoomConfig
 
 __all__ = [
     "RoomEvent",
     "RoomTurnPlannerProtocol",
     "RoundRobinRoomPlanner",
     "extract_mentions",
+    "RoomConfig",
+    "Room",
 ]
