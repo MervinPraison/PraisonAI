@@ -498,6 +498,43 @@ class BotChannel:
 
 
 @dataclass
+class QuotedRef:
+    """Resolved content of a message a user replied to or quoted.
+
+    Chat platforms carry only the *id* of a quoted message on the admission
+    path; the referenced text/media must be resolved and attached so the agent
+    can honour the referent ("do the second one", "why?"). This is that
+    resolved reference, rendered into the prompt as a compact quoted block.
+
+    Attributes:
+        message_id: Platform-specific id of the quoted message.
+        text: Resolved text of the quoted message ("" if unavailable).
+        author: ``"bot"`` when quoting the bot's own message, else ``"user"``.
+    """
+
+    message_id: str = ""
+    text: str = ""
+    author: str = ""  # "bot" | "user"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "message_id": self.message_id,
+            "text": self.text,
+            "author": self.author,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "QuotedRef":
+        """Create from dictionary."""
+        return cls(
+            message_id=data.get("message_id", ""),
+            text=data.get("text", ""),
+            author=data.get("author", ""),
+        )
+
+
+@dataclass
 class BotMessage:
     """Represents a message in a messaging platform.
     
@@ -511,6 +548,11 @@ class BotMessage:
         reply_to: ID of message being replied to
         thread_id: Thread identifier (for threaded conversations)
         attachments: List of attachment URLs or data
+        quoted: Resolved reply/quote context (see :class:`QuotedRef`). When a
+            user replies to or quotes an earlier message the adapter resolves
+            the referenced content and attaches it here so the agent sees the
+            referent instead of answering context-blind. Rendered into the
+            prompt as a quoted block by :meth:`prompt_text`.
         metadata: Additional platform-specific metadata
         allow_control: Control-trust primitive. ``True`` (the default) only for
             interactive human turns; producers set it ``False`` for content of
@@ -531,6 +573,7 @@ class BotMessage:
     reply_to: Optional[str] = None
     thread_id: Optional[str] = None
     attachments: List[Dict[str, Any]] = field(default_factory=list)
+    quoted: Optional[QuotedRef] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     allow_control: bool = True
     
@@ -546,6 +589,7 @@ class BotMessage:
             "reply_to": self.reply_to,
             "thread_id": self.thread_id,
             "attachments": self.attachments,
+            "quoted": self.quoted.to_dict() if self.quoted else None,
             "metadata": self.metadata,
             "allow_control": self.allow_control,
         }
@@ -572,6 +616,7 @@ class BotMessage:
             reply_to=data.get("reply_to"),
             thread_id=data.get("thread_id"),
             attachments=data.get("attachments", []),
+            quoted=QuotedRef.from_dict(data["quoted"]) if data.get("quoted") else None,
             metadata=data.get("metadata", {}),
             allow_control=data.get("allow_control", True),
         )
@@ -582,6 +627,31 @@ class BotMessage:
         if isinstance(self.content, str):
             return self.content
         return self.content.get("text", "")
+
+    @property
+    def prompt_text(self) -> str:
+        """Text for the agent turn, with any resolved quote rendered inline.
+
+        When the user replied to or quoted an earlier message, the resolved
+        reference (:attr:`quoted`) is rendered as a compact quoted block above
+        the new text so the model can honour the referent, e.g.::
+
+            [In reply to: "Here are three options: 1) …  2) …  3) …"]
+            do the second one
+
+        With no quote this is identical to :attr:`text`. The quoted content is
+        injected as context only, never as a control frame — consistent with
+        the ``allow_control`` primitive.
+        """
+        body = self.text
+        quoted = self.quoted
+        if not quoted or not quoted.text.strip():
+            return body
+        snippet = " ".join(quoted.text.split())
+        if len(snippet) > 500:
+            snippet = snippet[:497] + "…"
+        block = f'[In reply to: "{snippet}"]'
+        return f"{block}\n{body}" if body else block
     
     @property
     def is_command(self) -> bool:
