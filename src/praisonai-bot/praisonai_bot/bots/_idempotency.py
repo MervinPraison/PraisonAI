@@ -228,6 +228,20 @@ class RedisIdempotencyStore:
         "return redis.call('del', KEYS[1]) else return 0 end"
     )
 
+    # Lua: commit ``recorded`` only if the key is still our in-flight token *or*
+    # is already this same ``recorded`` value (idempotent re-record) *or* is
+    # gone. If another replica reclaimed the key after our lease expired (its
+    # own token), we must NOT overwrite its live claim — doing so would admit a
+    # second run for the same delivery and break exactly-once. In that case the
+    # commit is a no-op and this replica's now-orphaned run does not clobber the
+    # replica that legitimately took over.
+    _RECORD_LUA = (
+        "local v = redis.call('get', KEYS[1]); "
+        "if v == false or v == ARGV[1] or v == ARGV[2] then "
+        "redis.call('set', KEYS[1], ARGV[2], 'PX', ARGV[3]); return 1 "
+        "else return 0 end"
+    )
+
     def __init__(
         self,
         client,
@@ -257,31 +271,109 @@ class RedisIdempotencyStore:
         by any replica — the ``NX`` insert fails, rejecting both a redelivery and
         a concurrent duplicate. A claim orphaned by a crash expires after the
         inflight lease, after which a retry's ``reserve`` succeeds again.
+
+        A *runtime* Redis outage (the client was reachable at build time but has
+        since dropped) must not 500 the inbound hook path. It **fails open** —
+        admits the delivery and records the degraded fact — mirroring the
+        turn-lock's fail-open: cross-replica dedup is temporarily best-effort
+        until Redis recovers, but ingress keeps working instead of wedging.
         """
-        return bool(
-            self._client.set(
-                self._redis_key(key), self._token, nx=True, px=self._inflight_ms
+        try:
+            return bool(
+                self._client.set(
+                    self._redis_key(key),
+                    self._token,
+                    nx=True,
+                    px=self._inflight_ms,
+                )
             )
-        )
+        except Exception as e:
+            self._mark_runtime_degraded("reserve", e)
+            return True
 
     def record(self, key: str) -> None:
-        """Commit ``key`` as processed (long-lived ``recorded`` value, TTL)."""
-        self._client.set(self._redis_key(key), self._RECORDED, px=self._ttl_ms)
+        """Commit ``key`` as processed (long-lived ``recorded`` value, TTL).
+
+        Owner-checked: only overwrites the key when it is still our in-flight
+        token, already this same ``recorded`` value, or gone. If our inflight
+        lease expired and another replica reclaimed the key (its token), the
+        commit is a no-op so we never clobber the replica that took over — the
+        exactly-once fix for the stale-owner race.
+        """
+        redis_key = self._redis_key(key)
+        try:
+            self._client.eval(
+                self._RECORD_LUA,
+                1,
+                redis_key,
+                self._token,
+                self._RECORDED,
+                self._ttl_ms,
+            )
+        except Exception as e:
+            # Fallback for clients without ``eval``: best-effort compare-and-set
+            # (still owner-aware). A raw Redis outage here is swallowed as a
+            # degraded fact — a missed ``record`` self-heals via the inflight
+            # lease expiring, after which a redelivery re-runs.
+            try:
+                current = self._client.get(redis_key)
+                if current in (None, self._token, self._RECORDED):
+                    self._client.set(
+                        redis_key, self._RECORDED, px=self._ttl_ms
+                    )
+            except Exception:
+                self._mark_runtime_degraded("record", e)
 
     def release(self, key: str) -> None:
         """Drop our in-flight claim so a failed delivery can be retried.
 
         Compare-and-del on our owner token: a ``recorded`` value or a claim a
         replica reclaimed after our lease expired is a harmless no-op, never
-        another replica's live claim.
+        another replica's live claim. A runtime Redis outage is swallowed as a
+        degraded fact — the orphaned claim self-heals via the inflight lease.
         """
         redis_key = self._redis_key(key)
         try:
             self._client.eval(self._RELEASE_LUA, 1, redis_key, self._token)
-        except Exception:
+        except Exception as e:
             # Fallback for clients without ``eval``: best-effort compare-and-del.
-            if self._client.get(redis_key) == self._token:
-                self._client.delete(redis_key)
+            try:
+                if self._client.get(redis_key) == self._token:
+                    self._client.delete(redis_key)
+            except Exception:
+                self._mark_runtime_degraded("release", e)
+
+    def _mark_runtime_degraded(self, op: str, error: Exception) -> None:
+        """Record a *runtime* Redis outage once (Issue #5154 fail-open).
+
+        Distinct from the build-time fallback in :func:`build_idempotency_store`:
+        the client was reachable at construction but has since dropped. Rather
+        than propagating the error through the HTTP hook path (a 500, or a
+        processed-but-unrecorded run that the provider retries into a duplicate),
+        we degrade to best-effort dedup and surface the fact via the durability
+        registry so ``gateway status`` / ``doctor`` report it — never silent.
+        """
+        if getattr(self, "_runtime_degraded", False):
+            return
+        self._runtime_degraded = True
+        logger.warning(
+            "Redis idempotency store degraded at runtime during %s (%s); "
+            "inbound dedup is best-effort until Redis recovers.",
+            op,
+            error,
+        )
+        try:
+            from ._session import record_durability_degraded
+
+            record_durability_degraded(
+                "idempotency",
+                reason=(
+                    "redis idempotency backend unreachable at runtime "
+                    "(dedup best-effort until it recovers)"
+                ),
+            )
+        except Exception as e:  # pragma: no cover - registry is best-effort
+            logger.debug("Failed to record idempotency runtime degradation: %s", e)
 
 
 def _build_redis_client(redis_config, url):

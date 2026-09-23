@@ -380,8 +380,11 @@ class _FakeRedis:
     """Minimal in-memory stand-in for the sync ``redis.Redis`` client (#5154).
 
     Supports the subset ``RedisIdempotencyStore`` uses: ``set(nx=,px=)``,
-    ``get``, ``delete``, ``eval`` (for the compare-and-del release Lua), and
-    ``ping``. TTLs are ignored (tests exercise claim semantics, not expiry).
+    ``get``, ``delete``, ``eval`` (for the compare-and-del *release* Lua and the
+    owner-checked *record* Lua), and ``ping``. TTLs are ignored (tests exercise
+    claim semantics, not expiry). The two Lua scripts are distinguished by their
+    arg count: release passes 1 arg (token), record passes 3 (token, recorded,
+    ttl_ms).
     """
 
     def __init__(self):
@@ -404,11 +407,38 @@ class _FakeRedis:
         return 1
 
     def eval(self, script, numkeys, key, *args):
+        if len(args) >= 3:
+            # Owner-checked record: set ``recorded`` only if key is our token,
+            # already ``recorded``, or gone; never overwrite another owner.
+            token, recorded, _ttl = args[0], args[1], args[2]
+            current = self.store.get(key)
+            if current is None or current == token or current == recorded:
+                self.store[key] = recorded
+                return 1
+            return 0
+        # Compare-and-del release.
         token = args[0]
         if self.store.get(key) == token:
             self.store.pop(key, None)
             return 1
         return 0
+
+
+class _FailingRedis(_FakeRedis):
+    """A client that was reachable at build (``ping`` ok) but drops at runtime:
+    every data op raises, exercising the runtime fail-open path (#5154)."""
+
+    def set(self, *a, **k):
+        raise ConnectionError("redis down")
+
+    def get(self, *a, **k):
+        raise ConnectionError("redis down")
+
+    def delete(self, *a, **k):
+        raise ConnectionError("redis down")
+
+    def eval(self, *a, **k):
+        raise ConnectionError("redis down")
 
 
 class TestRedisIdempotencyStore:
@@ -482,4 +512,59 @@ class TestRedisIdempotencyStore:
             o.owner_id == "durability:idempotency"
             for o in durability_degraded_owners()
         )
+        clear_durability_degraded("idempotency")
+
+    def test_record_does_not_overwrite_reclaimed_claim(self):
+        # Stale-owner race (Greptile P1): replica A's inflight lease expired and
+        # replica B reclaimed the key. A's late ``record`` must NOT clobber B's
+        # live claim — otherwise both replicas were admitted for one delivery.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _FakeRedis()
+        replica_a = RedisIdempotencyStore(backend)
+        replica_b = RedisIdempotencyStore(backend)
+
+        assert replica_a.reserve("k") is True
+        # Simulate A's lease expiring and B reclaiming the key.
+        backend.store.pop(replica_a._redis_key("k"))
+        assert replica_b.reserve("k") is True  # B now owns the claim
+        b_key = replica_b._redis_key("k")
+        b_owns = backend.store[b_key]
+
+        # A's late record must be a no-op — B's token still owns the key.
+        replica_a.record("k")
+        assert backend.store[b_key] == b_owns  # unchanged, B still owns it
+
+        # A well-behaved record by the current owner still commits.
+        replica_b.record("k")
+        assert backend.store[b_key] == RedisIdempotencyStore._RECORDED
+
+    def test_reserve_fails_open_on_runtime_redis_outage(self):
+        # A runtime Redis drop must not 500 the hook path: reserve fails open
+        # (admits) and records a degraded fact rather than raising.
+        from praisonai_bot.bots import RedisIdempotencyStore
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+
+        clear_durability_degraded("idempotency")
+        s = RedisIdempotencyStore(_FailingRedis())
+        assert s.reserve("k") is True  # fail-open admit, no exception
+        assert any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        clear_durability_degraded("idempotency")
+
+    def test_record_and_release_swallow_runtime_redis_outage(self):
+        # record/release must not propagate a runtime Redis error into the hook
+        # path; the orphaned claim self-heals via the inflight lease.
+        from praisonai_bot.bots import RedisIdempotencyStore
+        from praisonai_bot.bots._session import clear_durability_degraded
+
+        clear_durability_degraded("idempotency")
+        s = RedisIdempotencyStore(_FailingRedis())
+        s.record("k")  # must not raise
+        s.release("k")  # must not raise
         clear_durability_degraded("idempotency")
