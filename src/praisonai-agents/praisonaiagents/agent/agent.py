@@ -4161,18 +4161,31 @@ Summary:"""
         # tool-call loop runs. The approval framework the proxy already honours
         # does not cover these, so without this hook a model could reach an
         # allow-listed tool from code and bypass a guardrail that blocks the
-        # same call on the normal path. The hook returns a denial reason string
-        # (block) or ``None`` (allow) and only runs in the tool-capable modes.
+        # same call on the normal path.
+        #
+        # Contract (mirrors the direct path in ``_check_tool_approval_sync``):
+        #   returns ``(denial_reason, arguments)`` where ``denial_reason`` is a
+        #   string to block or ``None`` to allow, and ``arguments`` is the
+        #   possibly-guardrail-rewritten kwargs dict the tool must run with. The
+        #   proxy uses the returned args so a sanitising guardrail's rewrite is
+        #   honoured (not discarded) exactly as on the direct path. BYPASS mode
+        #   skips the permission-deny gate, matching the direct contract, so a
+        #   call permitted directly is not rejected only in code mode. Only runs
+        #   in the tool-capable modes.
         policy_hook = None
         if code_tools and code_execution_mode in _tool_capable:
             def policy_hook(name, arguments):
-                deny = self._check_permission_manager_deny(name, arguments)
-                if isinstance(deny, dict):
-                    return deny.get("error", "denied by permission policy")
+                if not self._is_bypass_mode():
+                    deny = self._check_permission_manager_deny(name, arguments)
+                    if isinstance(deny, dict):
+                        return deny.get("error", "denied by permission policy"), arguments
                 verdict = self._check_tool_policy_and_guardrails(name, arguments)
                 if isinstance(verdict, dict):
-                    return verdict.get("error", "denied by policy")
-                return None
+                    return verdict.get("error", "denied by policy"), arguments
+                # ``verdict`` is ``(None, rewritten_args)`` when allowed; hand the
+                # possibly-rewritten args back so the proxy dispatches with them.
+                _, rewritten = verdict
+                return None, rewritten
 
         # An unknown code_mode raises out of here rather than silently
         # producing nothing, which is the failure this whole change is about.
