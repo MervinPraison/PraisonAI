@@ -21,12 +21,16 @@ parameter and would fail fixture resolution.
 import asyncio
 import logging
 import threading
+import time
 import unittest
 import weakref
 
 from praisonai._async_bridge import (
     _BG,
+    AsyncBridge,
     DispatchKind,
+    async_scoped_bridge,
+    current_bridge,
     dispatch_maybe_awaitable,
     run_sync,
 )
@@ -261,6 +265,98 @@ class TestDispatchMaybeAwaitable(unittest.TestCase):
             logging.getLogger("praisonai._async_bridge").setLevel(logging.NOTSET)
         # The failure was logged, not propagated to the caller — reaching here
         # without an exception is the assertion.
+
+
+class TestAsyncScopedBridge(unittest.TestCase):
+    """Contract of the async-safe scoped bridge used by the async generator.
+
+    The async twin of ``scoped_bridge`` must (1) bind a per-scope bridge that
+    ``current_bridge()`` resolves to, (2) tear a scope-owned bridge down on exit
+    without blocking the caller's event loop, and (3) poison the bridge so a
+    leaked context cannot resurrect it.
+    """
+
+    def test_binds_scoped_bridge_in_context(self):
+        async def _outer():
+            outside = current_bridge()
+            async with async_scoped_bridge() as scoped:
+                inside = current_bridge()
+                return outside, scoped, inside
+
+        outside, scoped, inside = asyncio.run(_outer())
+        self.assertIs(inside, scoped, "scope must bind its own bridge")
+        self.assertIsNot(inside, outside, "scope must override the default")
+
+    def test_teardown_does_not_block_event_loop(self):
+        """A slow ``shutdown`` must not park the loop; other loop work proceeds.
+
+        We bind a scope whose owned bridge has a deliberately slow ``shutdown``
+        and confirm the event loop keeps ticking a concurrent task while the
+        (off-loop) teardown runs, i.e. the loop is never pinned by the join.
+        """
+        ticks = []
+
+        class _SlowBridge(AsyncBridge):
+            def shutdown(self, timeout: float = 5.0, *, permanent: bool = False):
+                # Simulate the blocking cancel+join teardown.
+                time.sleep(0.3)
+                super().shutdown(timeout=timeout, permanent=permanent)
+
+        async def _ticker():
+            # If the loop were parked by teardown, these ticks would not
+            # advance while the scope exits.
+            for _ in range(30):
+                ticks.append(time.monotonic())
+                await asyncio.sleep(0.01)
+
+        async def _outer():
+            t = asyncio.ensure_future(_ticker())
+            async with async_scoped_bridge(_SlowBridge()):
+                await asyncio.sleep(0.01)
+            # Exiting the scope triggers the off-loop teardown. Give the ticker
+            # room to keep advancing across the teardown window.
+            await asyncio.sleep(0.3)
+            await t
+            return ticks
+
+        result = asyncio.run(_outer())
+        # The ticker must have advanced through the teardown window; a pinned
+        # loop would produce a large gap around scope exit.
+        gaps = [b - a for a, b in zip(result, result[1:])]
+        self.assertTrue(gaps, "ticker must have produced ticks")
+        self.assertLess(
+            max(gaps),
+            0.25,
+            "event loop was parked during off-loop teardown (max tick gap too large)",
+        )
+
+    def test_owned_bridge_is_poisoned_on_exit(self):
+        """A scope-owned bridge must be permanently shut down on exit."""
+        captured = {}
+
+        async def _outer():
+            async with async_scoped_bridge() as scoped:
+                captured["bridge"] = scoped
+
+        asyncio.run(_outer())
+        self.assertTrue(
+            captured["bridge"]._closed,
+            "scope-owned bridge must be poisoned (permanent shutdown) on exit",
+        )
+
+    def test_caller_provided_bridge_not_shut_down(self):
+        """A caller-provided bridge is left untouched (caller owns lifecycle)."""
+        owned = AsyncBridge()
+
+        async def _outer():
+            async with async_scoped_bridge(owned) as scoped:
+                self.assertIs(scoped, owned)
+
+        asyncio.run(_outer())
+        self.assertFalse(
+            owned._closed,
+            "caller-provided bridge must not be poisoned by the scope",
+        )
 
 
 if __name__ == "__main__":

@@ -307,6 +307,47 @@ def scoped_bridge(bridge: Optional[AsyncBridge] = None) -> Iterator[AsyncBridge]
             bridge.shutdown(permanent=True)
 
 
+@contextlib.asynccontextmanager
+async def async_scoped_bridge(
+    bridge: Optional[AsyncBridge] = None,
+) -> "contextlib.AbstractAsyncContextManager[AsyncBridge]":
+    """Async-safe sibling of :func:`scoped_bridge` for ``async def`` callers.
+
+    Identical binding semantics to :func:`scoped_bridge`, but the teardown of a
+    scope-owned bridge is offloaded to a worker thread with
+    :func:`asyncio.to_thread` so the blocking :meth:`AsyncBridge.shutdown`
+    (which waits up to ``timeout`` for in-flight tasks to cancel and then joins
+    the background thread) never runs on the caller's event loop. Using the sync
+    :func:`scoped_bridge` from inside an ``async def`` would park the loop thread
+    for up to ~10s on scope exit (normal, error, or cancellation) — the exact
+    "one stuck tenant stalls every other tenant" pathology this bridge exists to
+    prevent (see AGENTS.md §4.5, async-safe).
+
+    Args:
+        bridge: An existing bridge to bind. When ``None`` a fresh bridge is
+            created for the scope and shut down off-loop on exit. A caller-
+            provided bridge is left untouched (the caller owns its lifecycle).
+    """
+    owns = bridge is None
+    if bridge is None:
+        bridge = AsyncBridge()
+    token = _bridge_var.set(bridge)
+    try:
+        yield bridge
+    finally:
+        _bridge_var.reset(token)
+        if owns:
+            # Offload the blocking cancel+join teardown so it cannot pin the
+            # caller's event loop. ``permanent=True`` poisons the bridge so a
+            # context that copied the ContextVar inside this block cannot
+            # resurrect it after we exit. ``asyncio.shield`` keeps the teardown
+            # running to completion even when the surrounding scope is being
+            # cancelled, so we neither leak the loop+thread nor block the loop.
+            await asyncio.shield(
+                asyncio.to_thread(bridge.shutdown, permanent=True)
+            )
+
+
 def _shutdown_default() -> None:
     """Private process-exit hook: tear down the shared default bridge.
 

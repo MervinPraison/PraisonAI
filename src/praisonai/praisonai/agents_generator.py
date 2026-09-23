@@ -1443,6 +1443,7 @@ class AgentsGenerator:
         config = await self._aload_config()
         import asyncio
         from .observability.hooks import observability_session
+        from ._async_bridge import async_scoped_bridge
         if self._is_workflow_yaml(config):
             # Bracket the async workflow run in the same observability session
             # the sequential/hierarchical path uses so AgentOps init/finalize
@@ -1453,8 +1454,15 @@ class AgentsGenerator:
             workflow_label = self._adapter_registry.resolve_or_default(
                 self.framework or config.get('framework')
             ).lower()
+            # Isolate sync→async fan-out (tools, delivery router, blueprint
+            # dispatch) onto this run's own loop+thread, matching the sync path
+            # so a stuck coroutine in one tenant does not park the shared default
+            # bridge for the rest. ``async_scoped_bridge`` tears the per-run
+            # bridge down off-loop so scope exit never parks the event loop for
+            # other tenants.
             with observability_session(workflow_label):
-                return await self._arun_yaml_workflow(config)
+                async with async_scoped_bridge():
+                    return await self._arun_yaml_workflow(config)
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
         prep = await self._aprepare_for_run(config)
@@ -1463,20 +1471,27 @@ class AgentsGenerator:
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
         # paired for every adapter (the CM finalizes on success and error alike).
+        # Isolate this run's sync→async work (adapter internals, tools, delivery
+        # router and blueprint dispatch call run_sync) onto its own loop+thread,
+        # matching generate_crew_and_kickoff, so a stuck coroutine in one
+        # agent/tenant does not park the shared default loop for the rest.
+        # ``async_scoped_bridge`` tears the per-run bridge down off-loop so scope
+        # exit never parks the event loop for other tenants.
         with observability_session(prep['adapter'].name):
-            # Run setup INSIDE the session (off the event loop, as it may block)
-            # so setup events and any setup/import failure are recorded and
-            # finalized, not dropped outside observability.
-            await asyncio.to_thread(self._run_adapter_setup, prep['adapter'])
-            return await prep['adapter'].arun(
-                prep['config'],
-                self.config_list,
-                prep['topic'],
-                tools_dict=prep['tools_dict'],
-                agent_callback=getattr(self, 'agent_callback', None),
-                task_callback=getattr(self, 'task_callback', None),
-                cli_config=getattr(self, 'cli_config', None),
-            )
+            async with async_scoped_bridge():
+                # Run setup INSIDE the session (off the event loop, as it may
+                # block) so setup events and any setup/import failure are
+                # recorded and finalized, not dropped outside observability.
+                await asyncio.to_thread(self._run_adapter_setup, prep['adapter'])
+                return await prep['adapter'].arun(
+                    prep['config'],
+                    self.config_list,
+                    prep['topic'],
+                    tools_dict=prep['tools_dict'],
+                    agent_callback=getattr(self, 'agent_callback', None),
+                    task_callback=getattr(self, 'task_callback', None),
+                    cli_config=getattr(self, 'cli_config', None),
+                )
 
 
     def _build_yaml_workflow(self, config):
