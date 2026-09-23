@@ -285,7 +285,10 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
                 "is_available() raised for adapter %r; will retry after %.0fs",
                 name, _NEG_CACHE_TTL, exc_info=True,
             )
-            ok, expires_at = False, now + _NEG_CACHE_TTL
+            # Anchor the cooldown to *now* (post-probe), not the pre-probe
+            # timestamp: a probe that itself blocks for >= _NEG_CACHE_TTL would
+            # otherwise write an already-expired deadline and defeat the cooldown.
+            ok, expires_at = False, time.monotonic() + _NEG_CACHE_TTL
 
         with self._avail_lock:
             self._avail_cache[key] = (ok, expires_at)

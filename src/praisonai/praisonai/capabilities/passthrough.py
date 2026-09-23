@@ -5,11 +5,12 @@ Provides generic API passthrough functionality for provider-specific endpoints.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 from urllib.parse import urlparse
 import asyncio
 import ipaddress
 import threading
+import weakref
 
 
 # Shared HTTP clients for the httpx fallback path (used when litellm's
@@ -24,8 +25,33 @@ _sync_client: Any = None
 # (it is dropped, never ``aclose()``d) and (b) crashes callers that resume on
 # their own loop but find the slot swapped to another. Keying by loop keeps each
 # loop's client isolated and lets us close each one from within its own loop.
-_async_clients: Dict[int, Any] = {}
+#
+# Each entry also carries a weakref to its owning loop so the cache is
+# self-healing for the ``asyncio.run(apassthrough(...))``-in-a-hot-path pattern:
+# a throwaway loop that tears down without calling ``aclose_clients()`` would
+# otherwise leave its client pinned here forever (leaking sockets), and a reused
+# ``id(loop)`` could hand a caller a client bound to a now-dead loop. On the
+# next lookup we detect the collected/closed loop, evict the orphan, and drain
+# its transport synchronously via ``_release_orphan`` so nothing leaks.
+_async_clients: Dict[int, Tuple["weakref.ref", Any]] = {}
 _client_lock = threading.Lock()
+
+
+def _release_orphan(client: Any) -> None:
+    """Best-effort synchronous socket release for a foreign-loop client.
+
+    The owning loop is gone, so ``aclose()`` cannot be awaited. Close the
+    underlying transport directly to free the pooled sockets; swallow any error
+    since this is opportunistic cleanup, never on the request's success path.
+    """
+    try:
+        transport = getattr(client, "_transport", None)
+        pool = getattr(transport, "_pool", None)
+        closer = getattr(pool, "close", None)
+        if callable(closer):
+            closer()
+    except Exception:
+        pass
 
 
 def _get_sync_client() -> Any:
@@ -51,12 +77,24 @@ def _get_async_client() -> Any:
 
     loop = asyncio.get_running_loop()
     key = id(loop)
+    orphan = None
     with _client_lock:
-        client = _async_clients.get(key)
-        if client is None:
-            client = httpx.AsyncClient()
-            _async_clients[key] = client
-        return client
+        entry = _async_clients.get(key)
+        if entry is not None:
+            loop_ref, cached = entry
+            owner = loop_ref()
+            # Same live loop -> reuse. Otherwise the id was reused by a new loop
+            # (old one collected) or the owner was closed: evict + release the
+            # stale client so its pool doesn't outlive its loop.
+            if owner is loop and not loop.is_closed():
+                return cached
+            del _async_clients[key]
+            orphan = cached
+        client = httpx.AsyncClient()
+        _async_clients[key] = (weakref.ref(loop), client)
+    if orphan is not None:
+        _release_orphan(orphan)
+    return client
 
 
 def close_clients() -> None:
@@ -76,7 +114,10 @@ def close_clients() -> None:
                 _sync_client.close()
             finally:
                 _sync_client = None
+        orphans = [client for _ref, client in _async_clients.values()]
         _async_clients.clear()
+    for client in orphans:
+        _release_orphan(client)
 
 
 async def aclose_clients() -> None:
@@ -94,7 +135,9 @@ async def aclose_clients() -> None:
     client = None
     with _client_lock:
         if key is not None:
-            client = _async_clients.pop(key, None)
+            entry = _async_clients.pop(key, None)
+            if entry is not None:
+                client = entry[1]
         if _sync_client is not None:
             try:
                 _sync_client.close()

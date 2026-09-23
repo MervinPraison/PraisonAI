@@ -964,18 +964,81 @@ class TestIssue5150WrapperGaps:
         pytest.importorskip("httpx")
         from praisonai.capabilities import passthrough as P
 
-        ids = []
+        # Retain the actual client objects (not their ``id()``) across both
+        # loops. Comparing ``id()`` after a client is freed is flaky: CPython
+        # can reuse the freed address, yielding equal ids for genuinely distinct
+        # objects. Holding both references keeps their identities stable, so
+        # ``is not`` is a sound per-loop-isolation assertion. The pooled sockets
+        # are drained explicitly at the end from each object.
+        captured = []
 
         async def grab():
             client = P._get_async_client()
-            ids.append(id(client))
-            assert P._get_async_client() is client
-            await P.aclose_clients()
+            assert P._get_async_client() is client  # cached within one loop
+            captured.append(client)
+            # Detach from the module map without awaiting (we close below),
+            # mirroring the sync ``close_clients`` drop path so the next loop
+            # starts clean and the final map-empty assertion holds.
+            P._async_clients.pop(id(asyncio.get_running_loop()), None)
 
         asyncio.run(grab())
         asyncio.run(grab())
-        assert ids[0] != ids[1]
+
+        first, second = captured
+        assert first is not second  # distinct client per event loop
         assert P._async_clients == {}
+
+        async def _drain():
+            await first.aclose()
+            await second.aclose()
+
+        asyncio.run(_drain())
+
+    def test_async_client_cache_self_heals_on_reused_loop_id(self):
+        # The throwaway-loop hot path (``asyncio.run(apassthrough(...))`` in a
+        # loop) tears the loop down without ``aclose_clients()``, leaving a
+        # client pinned in the module map. If a *new* loop is later handed the
+        # same ``id()`` (CPython reuses collected loop ids), the cache must NOT
+        # return the stale client bound to the dead loop — it must evict it and
+        # bind a fresh client to the live loop.
+        import weakref
+
+        pytest.importorskip("httpx")
+        import httpx
+        from praisonai.capabilities import passthrough as P
+
+        P.close_clients()  # start from a clean map
+        released = []
+        try:
+            async def probe():
+                import asyncio
+
+                live_loop = asyncio.get_running_loop()
+                key = id(live_loop)
+
+                # Plant a stale entry under the SAME id as the live loop, but
+                # owned by a *different* (already-collected) loop object, and a
+                # client whose orphan-release we can observe.
+                dead_loop = asyncio.new_event_loop()
+                dead_loop.close()
+                stale = httpx.AsyncClient()
+                released.append(stale)
+                P._async_clients[key] = (weakref.ref(dead_loop), stale)
+
+                fresh = P._get_async_client()
+                # Distinct fresh client, now bound to the live loop.
+                assert fresh is not stale
+                assert P._get_async_client() is fresh
+                await P.aclose_clients()
+
+            import asyncio
+            asyncio.run(probe())
+            assert P._async_clients == {}
+        finally:
+            # Make sure the stale client's sockets are released even if asserts
+            # short-circuit (the impl already drains it via _release_orphan).
+            for c in released:
+                P._release_orphan(c)
 
     def test_transient_availability_failure_reprobes_after_ttl(self, monkeypatch):
         import praisonai.framework_adapters.registry as registry_mod
