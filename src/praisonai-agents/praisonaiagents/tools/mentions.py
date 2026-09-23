@@ -47,10 +47,21 @@ class MentionsParser:
     # Bare ``@path`` mention (no ``type:`` prefix), matching the interactive
     # TUI form (e.g. ``@src/app.py``). Processed last and only inlined when the
     # value resolves to an existing workspace file, so unrelated ``@handle`` /
-    # ``@email`` tokens are left untouched. The negative lookahead skips the
-    # already-prefixed forms handled above (``@file:``/``@web:``/...).
+    # ``@email`` tokens are left untouched.
+    #
+    # Boundaries:
+    # - ``(?:^|(?<=\s))`` requires the ``@`` to start a standalone token (start
+    #   of string or after whitespace) so a filename embedded in an email
+    #   address (``alice@app.py``) is NOT treated as a file reference.
+    # - The negative lookahead skips the already-prefixed forms handled above
+    #   (``@file:``/``@web:``/...).
+    # - Trailing sentence punctuation (``,`` ``.`` ``;`` ``:`` ``!`` ``?`` and
+    #   closing brackets/quotes) is excluded from the captured path so a common
+    #   prompt like ``Explain @app.py, then...`` resolves ``app.py`` rather than
+    #   the literal ``app.py,``.
     BARE_FILE_PATTERN = re.compile(
-        r'@(?!(?:file|web|doc|rule|url):)([^\s]+)'
+        r'(?:^|(?<=\s))@(?!(?:file|web|doc|rule|url):)'
+        r'([^\s]*[^\s,.;:!?)\]}>"\'])'
     )
     
     # Default max file chars: 500K (~125K tokens) - fits GPT-4o (128K), Claude 3.5 (200K)

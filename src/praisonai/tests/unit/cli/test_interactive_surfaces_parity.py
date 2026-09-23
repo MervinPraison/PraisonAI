@@ -114,6 +114,21 @@ def test_run_surface_expands_bare_at_mentions(tmp_path):
     # Path traversal is refused for the bare form too.
     assert not parser.has_mentions("@../secret.txt")
 
+    # Punctuation-adjacent mention: a trailing ``,`` (or ``.``/``)`` etc.) must
+    # not be treated as part of the path, so ``@app.py,`` still resolves the
+    # real ``app.py`` file (greptile P1).
+    assert parser.has_mentions("Explain @app.py, then suggest a fix")
+    ctx3, _ = parser.process("Explain @app.py, then suggest a fix")
+    assert "SENTINEL_RUN_BODY" in ctx3
+
+    # A filename embedded in an email address must NOT be expanded: only
+    # standalone ``@`` tokens (start-of-string or after whitespace) count, so
+    # ``alice@app.py`` leaks nothing (greptile P1 security).
+    assert not parser.has_mentions("email alice@app.py please")
+    ctx4, cleaned4 = parser.process("email alice@app.py please")
+    assert ctx4 == ""
+    assert "alice@app.py" in cleaned4
+
 
 def test_tui_and_run_share_the_same_resolver(tmp_path):
     """The TUI's ``_process_file_mentions`` must delegate to the shared
