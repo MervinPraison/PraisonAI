@@ -190,12 +190,6 @@ def enable(plugins: list = None, options_by_name: dict = None) -> None:
     # registered *after* enable() default to disabled unless allow-listed.
     # Setting it only here keeps standalone managers unrestricted.
     manager.set_registration_allow_list(target_plugins)
-    
-    def _plugin_name(plugin_info):
-        """Read a plugin name from either PluginInfo or legacy dict data."""
-        if isinstance(plugin_info, dict):
-            return plugin_info.get("name", "")
-        return getattr(plugin_info, "name", "")
 
     # Enable specific plugins or all.  Registration defaults each plugin to
     # enabled, so a selective call must also disable discovered plugins that
