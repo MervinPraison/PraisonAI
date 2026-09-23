@@ -200,16 +200,29 @@ class FileScheduleStore:
                 if lease_until > now and lease_owner != owner_id:
                     continue
                 if not _is_due(job, now):
+                    # A job past its ``until`` end instant is not due, but must
+                    # still be retired (not left lingering in listings) and
+                    # never fired. It is removed here without being claimed so
+                    # there is no final stale send.
+                    if job.should_retire(now):
+                        auto_removed.append(self._jobs.pop(job.id))
+                        changed = True
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
+                # Count the fire here (needed so ``should_retire()`` can drop a
+                # spent job before a competitor reclaims it) and flag it so the
+                # later ``mark_run`` does not double-count the same fire.
+                job.run_count += 1
+                job._run_counted = True
                 job._lease_until = now + lease_seconds
                 job._lease_owner = owner_id
                 self._held_leases[job.id] = owner_id
                 claimed.append(job)
                 changed = True
-                if job.delete_after_run:
-                    # One-shot: remove now so no competitor re-claims it.
+                if job.should_retire(now):
+                    # Spent (one-shot, run-count met, or past ``until``): remove
+                    # now so no competitor re-claims it.
                     auto_removed.append(self._jobs.pop(job.id))
             if changed:
                 if not self._save():

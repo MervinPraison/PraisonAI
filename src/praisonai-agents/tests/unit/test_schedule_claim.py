@@ -150,6 +150,100 @@ class TestClaimDue:
         assert "lease_owner" not in d
 
 
+class TestBoundedRetirement:
+    """Stop-condition (``max_runs`` / ``until``) lifecycle across claim+run."""
+
+    def _make_bounded(self, **kw):
+        return ScheduleJob(
+            name="bounded",
+            schedule=Schedule(kind="every", every_seconds=1),
+            message="hi",
+            **kw,
+        )
+
+    def test_claim_then_mark_run_counts_once(self):
+        # Regression: claim_due increments run_count AND mark_run must not
+        # double-count the same fire.
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = self._make_bounded(max_runs=3)
+            store.add(job)
+            runner = ScheduleRunner(store)
+            claimed = runner.claim_due_jobs(owner_id="A")
+            assert len(claimed) == 1
+            runner.mark_run(claimed[0], status="succeeded")
+            assert store.get(job.id).run_count == 1
+
+    def test_max_runs_two_fires_exactly_twice(self):
+        # A max_runs=2 job must survive the first fire and retire after the
+        # second (it previously retired after one due to double counting).
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = self._make_bounded(max_runs=2)
+            store.add(job)
+            runner = ScheduleRunner(store)
+            fires = 0
+            t = time.time()
+            for i in range(5):
+                claimed = store.claim_due(t + i, owner_id="A", lease_seconds=0.5)
+                for c in claimed:
+                    fires += 1
+                    runner.mark_run(c, status="succeeded")
+            assert fires == 2
+            assert store.get(job.id) is None
+
+    def test_delete_after_run_equals_max_runs_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = self._make_bounded(delete_after_run=True)
+            store.add(job)
+            runner = ScheduleRunner(store)
+            claimed = runner.claim_due_jobs(owner_id="A")
+            assert len(claimed) == 1
+            runner.mark_run(claimed[0], status="succeeded")
+            assert store.get(job.id) is None
+
+    def test_expired_until_retires_without_firing(self):
+        # A job whose ``until`` has already passed must be actively removed by
+        # the claim path (not linger) and must NOT fire.
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            past = "2000-01-01T00:00:00+00:00"
+            job = self._make_bounded(until=past)
+            store.add(job)
+            claimed = store.claim_due(time.time(), owner_id="A")
+            assert claimed == []
+            assert store.get(job.id) is None
+
+    def test_future_until_still_fires(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            future = "2999-01-01T00:00:00+00:00"
+            job = self._make_bounded(until=future)
+            store.add(job)
+            claimed = store.claim_due(time.time(), owner_id="A")
+            assert len(claimed) == 1
+            assert store.get(job.id) is not None
+
+    def test_invalid_until_fails_safe_and_retires(self):
+        # A malformed ``until`` must not run forever: the job is not fired and
+        # is retired by the claim path.
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = self._make_bounded(until="not-a-timestamp")
+            store.add(job)
+            claimed = store.claim_due(time.time(), owner_id="A")
+            assert claimed == []
+            assert store.get(job.id) is None
+
+    def test_unbounded_job_persists_no_new_keys(self):
+        job = _make_job()
+        d = job.to_dict()
+        assert "max_runs" not in d
+        assert "until" not in d
+        assert "run_count" not in d
+
+
 class TestRunnerClaim:
     def test_runner_supports_atomic_claim(self):
         with tempfile.TemporaryDirectory() as d:
