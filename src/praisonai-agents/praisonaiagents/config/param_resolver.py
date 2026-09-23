@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, Union
 import inspect
 
 from .parse_utils import (
+    canonical_preset_key,
     detect_url_scheme,
     is_path_like,
     make_preset_error,
@@ -316,12 +317,12 @@ def _resolve_string(
     if presets:
         # Case-insensitive lookup, whitespace-tolerant and treating -/_ as
         # interchangeable so the accepted spellings match the closed-set guard
-        # in validate_preset_string (which uses the same normalization). Without
-        # this, a value that passed construction-time validation (e.g.
-        # " sliding_window " or "sliding-window") would be rejected here.
-        value_norm = value.strip().lower().replace("-", "_")
+        # in validate_preset_string. Both go through canonical_preset_key, the
+        # single source of truth for the spelling rule, so validation and
+        # resolution cannot disagree about what counts as the same preset.
+        value_norm = canonical_preset_key(value)
         for preset_key in presets:
-            if preset_key.strip().lower().replace("-", "_") == value_norm:
+            if canonical_preset_key(preset_key) == value_norm:
                 return _apply_preset(preset_key, presets, config_class)
         
         # Not a valid preset - raise helpful error
