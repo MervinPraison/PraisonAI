@@ -35,7 +35,7 @@ def register_extended_capability_tools() -> None:
     @register_tool("praisonai.videos.generate")
     def videos_generate(
         prompt: str,
-        model: str = "runway-gen3",
+        model: str = "openai/sora-2",
         duration: int = 4,
     ) -> str:
         """Generate video from text prompt."""

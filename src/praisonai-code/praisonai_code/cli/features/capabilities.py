@@ -1007,7 +1007,7 @@ class CapabilitiesHandler:
         """Handle video generation."""
         parser = argparse.ArgumentParser(prog="praisonai videos")
         parser.add_argument("prompt", help="Video description")
-        parser.add_argument("--model", "-m", default="sora", help="Model to use")
+        parser.add_argument("--model", "-m", default="openai/sora-2", help="Model to use")
         parser.add_argument("--output", "-o", help="Output file path")
         
         try:
