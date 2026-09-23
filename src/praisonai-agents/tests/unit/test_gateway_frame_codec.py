@@ -207,6 +207,28 @@ def test_message_attachment_without_carrier_rejected():
         })
 
 
+def test_message_attachment_with_both_carriers_rejected():
+    """An attachment carrying BOTH inline data and a store ref_id is rejected.
+
+    Requiring exactly one carrier keeps the wire contract unambiguous so two
+    clients/stores can never select different payloads for the same attachment.
+    """
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message",
+            "content": "x",
+            "attachments": [
+                {
+                    "filename": "c",
+                    "mime": "text/plain",
+                    "size": 1,
+                    "data": "AA==",
+                    "ref_id": "r1",
+                },
+            ],
+        })
+
+
 def test_message_attachment_missing_filename_rejected():
     with pytest.raises(FrameDecodeError):
         decode_client_frame({

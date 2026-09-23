@@ -642,6 +642,17 @@ class AttachmentRef:
                     next_step=ConnectRecoveryStep.DO_NOT_RETRY,
                 )
             )
+        if inline is not None and ref_id is not None:
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message=(
+                        "An attachment must carry exactly one of inline 'data' "
+                        "(base64) or a store 'ref_id', not both"
+                    ),
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
         return cls(
             filename=filename,
             mime=mime,
