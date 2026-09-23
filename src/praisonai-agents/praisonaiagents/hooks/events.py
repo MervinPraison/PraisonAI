@@ -389,6 +389,42 @@ class MessageUndeliveredInput(HookInput):
 
 
 @dataclass
+class PlatformEventInput(HookInput):
+    """Input for inbound platform-event hooks (Issue #5161).
+
+    Carries a normalised, non-message platform event — a reaction, edit,
+    deletion, membership change or thread creation — to
+    ``REACTION_RECEIVED`` / ``MESSAGE_EDITED`` / ``MESSAGE_DELETED`` /
+    ``MEMBER_JOINED`` / ``MEMBER_LEFT`` / ``THREAD_CREATED`` hooks. Fields mirror
+    :class:`~praisonaiagents.bots.protocols.PlatformEvent`; the ``kind`` field
+    disambiguates reaction add vs remove within ``REACTION_RECEIVED``. Emitted
+    by ``MessageHookMixin.fire_platform_event`` (praisonai-bot).
+    """
+    kind: str = ""
+    platform: str = ""
+    chat_id: str = ""
+    user_id: str = ""
+    message_id: Optional[str] = None
+    emoji: Optional[str] = None
+    new_text: Optional[str] = None
+    thread_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "kind": self.kind,
+            "platform": self.platform,
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "message_id": self.message_id,
+            "emoji": self.emoji,
+            "new_text": self.new_text[:500] if self.new_text else None,
+            "thread_id": self.thread_id,
+        })
+        return base
+
+
+@dataclass
 class GatewayStartInput(HookInput):
     """Input for GATEWAY_START hooks (gateway/BotOS started)."""
     platforms: List[str] = field(default_factory=list)

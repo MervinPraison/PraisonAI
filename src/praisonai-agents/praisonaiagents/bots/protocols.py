@@ -21,6 +21,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Protocol,
@@ -618,6 +619,76 @@ class BotMessage:
         text = self.text
         parts = text.split()
         return parts[1:] if len(parts) > 1 else []
+
+
+# Normalised inbound platform-event kinds. Mirrors how ``MessageType`` normalises
+# inbound messages: a small, portable vocabulary every adapter maps its native
+# event onto (Telegram ``MessageReactionUpdated`` / Discord ``on_raw_reaction_add``
+# / Slack ``reaction_added`` all become ``"reaction_added"``), so hooks/plugins
+# have one uniform surface to subscribe to (Issue #5161).
+PlatformEventKind = Literal[
+    "reaction_added",
+    "reaction_removed",
+    "message_edited",
+    "message_deleted",
+    "member_joined",
+    "member_left",
+    "thread_created",
+]
+
+
+@dataclass
+class PlatformEvent:
+    """A normalised inbound platform event that is not a text/media message.
+
+    Reactions, edits, deletions, membership changes and thread lifecycle are
+    delivered by the platform SDK but are not messages. This is the single
+    shared, protocol-only contract every adapter emits into and every hook or
+    plugin consumes — the inbound counterpart to the outbound ``ReactionResult``
+    / message-action surface the bot already ships.
+
+    Adapters build one of these from the native event and emit it via
+    ``MessageHookMixin.fire_platform_event`` (praisonai-bot), which routes it to
+    the matching :class:`~praisonaiagents.hooks.types.HookEvent`
+    (``REACTION_RECEIVED``/``MESSAGE_EDITED``/``MESSAGE_DELETED``/
+    ``MEMBER_JOINED``/``MEMBER_LEFT``/``THREAD_CREATED``). Platforms that cannot
+    deliver a given event simply never build one — graceful, capability-gated,
+    exactly like the outbound ``capabilities["reactions"]`` gate.
+
+    Attributes:
+        kind: Which normalised event this is (see :data:`PlatformEventKind`).
+        platform: Emitting platform name (``"telegram"``/``"discord"``/…).
+        chat_id: Channel/chat the event occurred in.
+        user_id: The user who caused the event (reactor, editor, joiner, …).
+        message_id: The message the event targets (reactions/edits/deletes).
+        emoji: The reaction emoji, for reaction add/remove.
+        new_text: The new content, for an edit.
+        thread_id: The thread identifier, for thread creation / threaded events.
+        raw: Escape hatch to the native SDK payload for adapter-specific needs.
+    """
+
+    kind: PlatformEventKind
+    platform: str
+    chat_id: str
+    user_id: str
+    message_id: Optional[str] = None
+    emoji: Optional[str] = None
+    new_text: Optional[str] = None
+    thread_id: Optional[str] = None
+    raw: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (native ``raw`` payload intentionally omitted)."""
+        return {
+            "kind": self.kind,
+            "platform": self.platform,
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "message_id": self.message_id,
+            "emoji": self.emoji,
+            "new_text": self.new_text,
+            "thread_id": self.thread_id,
+        }
 
 
 @runtime_checkable

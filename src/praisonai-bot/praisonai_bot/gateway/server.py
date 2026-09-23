@@ -7887,6 +7887,17 @@ class WebSocketGateway:
                 except Exception:  # pragma: no cover — defensive
                     pass
 
+            # Carry the inbound platform-event opt-in (Issue #5161) through the
+            # same metadata passthrough so ``events: [reactions, edits, …]`` in
+            # gateway.yaml actually reaches the adapter's ``_event_classes()``.
+            # Off by default; BotConfig has no native field for it.
+            _raw_events = ch_cfg.get("events")
+            if _raw_events is not None:
+                try:
+                    config.metadata["events"] = _raw_events
+                except Exception:  # pragma: no cover — defensive
+                    pass
+
             # Warn if no allowlist is configured. Issue #2855: the message must
             # reflect the effective ``unknown_user_policy`` — an empty allowlist
             # with the default ``deny`` policy SILENTLY DROPS unknown DMs, so the
@@ -9457,6 +9468,16 @@ class WebSocketGateway:
         if _raw_voice is not None:
             try:
                 config.metadata["voice"] = _raw_voice
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        # Issue #5161: carry the inbound platform-event opt-in through metadata
+        # on hot-reload too, so a reloaded channel keeps subscribing to the same
+        # ``events: [...]`` classes as start_channels().
+        _raw_events = ch_cfg.get("events")
+        if _raw_events is not None:
+            try:
+                config.metadata["events"] = _raw_events
             except Exception:  # pragma: no cover — defensive
                 pass
 
