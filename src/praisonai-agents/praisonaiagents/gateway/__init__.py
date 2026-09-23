@@ -37,6 +37,8 @@ _LAZY_IMPORTS = {
     "GATEWAY_METHODS": ("praisonaiagents.gateway.protocols", "GATEWAY_METHODS"),
     "register_gateway_method": ("praisonaiagents.gateway.protocols", "register_gateway_method"),
     "resolve_required_scope": ("praisonaiagents.gateway.protocols", "resolve_required_scope"),
+    "authorize_method": ("praisonaiagents.gateway.protocols", "authorize_method"),
+    "GatewayUnauthorized": ("praisonaiagents.gateway.protocols", "GatewayUnauthorized"),
     # Config hot-reload observability (Issue #3049)
     "ReloadStatus": ("praisonaiagents.gateway.protocols", "ReloadStatus"),
     "compute_config_revision": ("praisonaiagents.gateway.protocols", "compute_config_revision"),
@@ -368,6 +370,8 @@ __all__ = [
     "GATEWAY_METHODS",
     "register_gateway_method",
     "resolve_required_scope",
+    "authorize_method",
+    "GatewayUnauthorized",
     # Config hot-reload observability (Issue #3049)
     "ReloadStatus",
     "compute_config_revision",

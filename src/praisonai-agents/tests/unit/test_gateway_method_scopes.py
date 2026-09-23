@@ -11,6 +11,8 @@ from praisonaiagents.gateway import (
     OperatorScope,
     register_gateway_method,
     resolve_required_scope,
+    authorize_method,
+    GatewayUnauthorized,
     GATEWAY_METHODS,
 )
 
@@ -106,6 +108,113 @@ def test_descriptor_collections_are_immutable_after_construction():
     assert "mutate" not in desc.safe_fields
     # Unknown structural field still fails closed.
     assert desc.resolve({"text": "hi", "mutate": True}) == OperatorScope.ADMIN
+
+
+def test_authorize_method_allows_when_scope_held():
+    """A classified method passes when the caller holds the required scope."""
+    authorize_method("message", {OperatorScope.WRITE})
+    authorize_method("session.status", {OperatorScope.READ})
+    # ADMIN implies all -> satisfies any classified method.
+    authorize_method("channels.control", {OperatorScope.ADMIN})
+    authorize_method("message", {OperatorScope.ADMIN})
+
+
+def test_authorize_method_denies_when_scope_missing():
+    """A caller lacking the required scope is denied with the required scope."""
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("message", {OperatorScope.READ})
+    assert exc.value.method == "message"
+    assert exc.value.required == OperatorScope.WRITE
+
+
+def test_authorize_method_default_denies_unknown_method():
+    """An unclassified method is ADMIN-only by omission (fail closed)."""
+    scopes = {OperatorScope.READ, OperatorScope.WRITE, OperatorScope.APPROVALS}
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("totally.new.unwired.method", scopes)
+    assert exc.value.required == OperatorScope.ADMIN
+    # Only ADMIN can reach it until it is classified.
+    authorize_method("totally.new.unwired.method", {OperatorScope.ADMIN})
+
+
+def test_authorize_method_gates_plugin_registered_method():
+    """A plugin method registered via the registry is gated automatically."""
+    name = "test.plugin.authz.5166"
+    try:
+        register_gateway_method(name, scope=OperatorScope.APPROVALS, owner="plugin")
+        # WRITE alone does not satisfy an APPROVALS method.
+        with pytest.raises(GatewayUnauthorized):
+            authorize_method(name, {OperatorScope.WRITE})
+        # The declared scope does.
+        authorize_method(name, {OperatorScope.APPROVALS})
+        # ADMIN implies it too.
+        authorize_method(name, {OperatorScope.ADMIN})
+    finally:
+        GATEWAY_METHODS.pop(name, None)
+
+
+def test_authorize_method_honours_field_escalation():
+    """authorize_method resolves per-field escalation via the descriptor."""
+    name = "test.plugin.escalate.5166"
+    try:
+        register_gateway_method(
+            name,
+            scope=OperatorScope.WRITE,
+            escalate_fields={"config": OperatorScope.ADMIN},
+            owner="plugin",
+        )
+        # Baseline field set -> WRITE suffices.
+        authorize_method(name, {OperatorScope.WRITE}, {"text": "hi"})
+        # Escalating field present -> now needs ADMIN.
+        with pytest.raises(GatewayUnauthorized) as exc:
+            authorize_method(name, {OperatorScope.WRITE}, {"config": {}})
+        assert exc.value.required == OperatorScope.ADMIN
+    finally:
+        GATEWAY_METHODS.pop(name, None)
+
+
+def test_authorize_method_read_lifecycle_allows_any_operator():
+    """READ-classified lifecycle is reachable by any provisioned operator.
+
+    READ is the baseline observe/lifecycle scope: an operator holding any
+    actionable scope (WRITE/APPROVALS/PAIRING) can still complete
+    hello/join/leave/status — matching pre-guard behaviour, where those frames
+    carried no per-endpoint scope check. Regression guard for #5166 (a
+    WRITE-only client must not be locked out of the session lifecycle).
+    """
+    for method in ("hello", "join", "leave", "session.status"):
+        assert resolve_required_scope(method) == OperatorScope.READ
+        authorize_method(method, {OperatorScope.WRITE})
+        authorize_method(method, {OperatorScope.APPROVALS})
+        authorize_method(method, {OperatorScope.PAIRING})
+        authorize_method(method, {OperatorScope.READ})
+    # An empty scope set still cannot reach even the READ baseline.
+    with pytest.raises(GatewayUnauthorized):
+        authorize_method("hello", set())
+
+
+def test_authorize_method_read_does_not_leak_to_write():
+    """The READ baseline does not grant WRITE/ADMIN surface."""
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("message", {OperatorScope.READ})
+    assert exc.value.required == OperatorScope.WRITE
+    with pytest.raises(GatewayUnauthorized):
+        authorize_method("channels.control", {OperatorScope.READ})
+
+
+def test_authorize_method_non_string_method_fails_closed():
+    """A malformed (non-string/unhashable) method fails closed, not TypeError.
+
+    A valid JSON frame such as ``{"type": []}`` must not raise ``TypeError``
+    out of the guard (which would tear down the connection). It is treated as
+    unclassified -> ADMIN, yielding a deterministic denial. Regression guard
+    for #5166 P2.
+    """
+    for bad in ([], {}, 123, None):
+        assert resolve_required_scope(bad) == OperatorScope.ADMIN  # type: ignore[arg-type]
+        with pytest.raises(GatewayUnauthorized) as exc:
+            authorize_method(bad, {OperatorScope.WRITE})  # type: ignore[arg-type]
+        assert exc.value.required == OperatorScope.ADMIN
 
 
 def test_register_gateway_method_and_resolve():
