@@ -328,3 +328,88 @@ def test_gateway_create_bot_wires_webhook(monkeypatch):
     assert type(bot).__name__ == "WebhookBot"
     assert bot._path == "/hooks/github"
     assert bot.webhook_verifier is not None
+
+
+# ── Shared-listener ingress (Issue #5146) ───────────────────────────
+
+
+def test_shared_listener_mode_default_when_no_port():
+    """No explicit ``webhook_port`` → shared-listener mode (no private port)."""
+    bot = WebhookBot(agent=object())
+    assert bot.uses_shared_listener is True
+    assert bot._webhook_port is None
+
+
+def test_explicit_port_opts_out_of_shared_listener():
+    """Setting ``webhook_port`` keeps the standalone server (opt-out)."""
+    bot = WebhookBot(agent=object(), webhook_port=9001)
+    assert bot.uses_shared_listener is False
+    assert bot._webhook_port == 9001
+
+
+@pytest.mark.asyncio
+async def test_shared_mounted_start_binds_no_socket(monkeypatch):
+    """Once a gateway mounts it, ``start`` marks running without a TCPSite."""
+    bot = _make_bot(monkeypatch)  # no webhook_port → shared intent
+    bot.mark_shared_mounted()
+    await bot.start()
+    assert bot.is_running is True
+    assert bot._site is None
+    assert bot._runner is None
+    await bot.stop()
+    assert bot.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_handle_shared_request_dispatches(monkeypatch):
+    monkeypatch.setenv("PRAISONAI_INSECURE_WEBHOOKS", "true")
+    bot = _make_bot(
+        monkeypatch,
+        routes=[
+            WebhookRoute(
+                when={"field": "payload.action", "equals": "opened"},
+                prompt="issue {{ payload.issue.number }}",
+            )
+        ],
+    )
+    status, text = await bot.handle_shared_request(
+        raw_body=json.dumps(_event()["payload"]).encode(),
+        headers={"X-GitHub-Event": "issues"},
+        query={},
+    )
+    assert status == 200 and text == "OK"
+    bot._session_mgr.chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_shared_request_rejects_bad_signature(monkeypatch):
+    monkeypatch.delenv("PRAISONAI_INSECURE_WEBHOOKS", raising=False)
+    bot = _make_bot(
+        monkeypatch, verify={"hmac": {"header": "X-Sig", "secret": "s3cr3t"}}
+    )
+    status, _ = await bot.handle_shared_request(
+        raw_body=b'{"action":"opened"}',
+        headers={"X-Sig": "sha256=bad"},
+    )
+    assert status == 401
+    bot._session_mgr.chat.assert_not_awaited()
+
+
+def test_gateway_mounts_shared_webhook(monkeypatch):
+    """A shared-mode webhook adapter is registered on ``/webhooks/<channel>``;
+    an unknown channel is never mounted (404 isolation)."""
+    from praisonai_bot.gateway import server as S
+
+    gw = S.WebSocketGateway.__new__(S.WebSocketGateway)
+    gw._webhook_channels = {}
+
+    shared_bot = WebhookBot(agent=object())  # shared mode
+    gw._maybe_mount_shared_webhook("billing", shared_bot)
+    assert gw._webhook_channels["billing"] is shared_bot
+    # Mounting flips the adapter to socket-free start.
+    assert shared_bot._shared_mounted is True
+
+    # Explicit-port adapter opts out — never mounted on the shared listener.
+    standalone = WebhookBot(agent=object(), webhook_port=8080)
+    gw._maybe_mount_shared_webhook("legacy", standalone)
+    assert "legacy" not in gw._webhook_channels

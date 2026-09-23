@@ -129,8 +129,12 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         else:
             self._mode = "poll"
         
-        # Resolve webhook port
-        self._webhook_port = webhook_port or self.config.webhook_port
+        # Resolve webhook port. Issue #5146 made the shared ``webhook_port``
+        # config default None (shared-listener mode for generic webhook/WhatsApp
+        # channels); AgentMail always binds its own webhook server, so fall back
+        # to the historical 8080 default when neither an explicit arg nor config
+        # value is set — preserving prior behaviour.
+        self._webhook_port = webhook_port or self.config.webhook_port or 8080
         
         # Command and message handlers
         self._command_handlers: Dict[str, Callable] = {}

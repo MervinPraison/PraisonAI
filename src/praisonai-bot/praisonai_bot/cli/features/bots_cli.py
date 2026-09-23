@@ -334,7 +334,11 @@ class BotHandler:
                 token=token or None,
                 phone_number_id=channel.phone_number_id or None,
                 verify_token=channel.verify_token or None,
-                webhook_port=channel.webhook_port,
+                # Issue #5146: the shared ``webhook_port`` default is now None
+                # (shared-listener mode). The standalone ``bot start`` WhatsApp
+                # path always binds its own server, so keep the historical 8080
+                # default when unset — preserving prior CLI behaviour.
+                webhook_port=channel.webhook_port or 8080,
                 agent_file=None,
                 capabilities=capabilities,
                 agent_config_dict=agent_config_dict,

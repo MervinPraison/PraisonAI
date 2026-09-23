@@ -1079,6 +1079,13 @@ class WebSocketGateway:
         
         # Multi-bot lifecycle
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
+        # Issue #5146: shared webhook ingress. Adapters that report
+        # ``accepts_webhooks`` and are configured with no explicit
+        # ``webhook_port`` are mounted here (``channel_name -> adapter``) and
+        # served through the gateway's single Starlette listener at
+        # ``/webhooks/<channel>`` — one port, one public URL, routed by path —
+        # instead of each binding its own private ``TCPSite``.
+        self._webhook_channels: Dict[str, Any] = {}
         # Issue #3159: channels configured but skipped at startup because their
         # credential was unavailable (empty token) are tracked here so they stay
         # visible in ``health()`` as ``degraded`` instead of vanishing — a
@@ -2195,9 +2202,53 @@ class WebSocketGateway:
             status = 200 if ok else 500
             return JSONResponse(result, status_code=status)
 
+        async def webhooks_handler(request) -> "JSONResponse":
+            """{GET,POST} /webhooks/{channel} — shared platform-webhook ingress.
+
+            Issue #5146: serve every ``mode: webhook`` channel that runs in
+            shared-listener mode (no explicit ``webhook_port``) through this one
+            listener, routed by path, instead of each adapter binding its own
+            private port. Verification is delegated to the adapter's own
+            ``handle_shared_request`` (which enforces the
+            ``WebhookVerifierProtocol`` fail-closed); an unknown path returns
+            404 so it can never fall through to another channel's handler.
+            """
+            from starlette.responses import PlainTextResponse
+
+            channel = request.path_params.get("channel", "")
+            adapter = self._webhook_channels.get(channel)
+            if adapter is None:
+                return JSONResponse({"error": "webhook not found"}, status_code=404)
+
+            raw_body = await request.body()
+            handler = getattr(adapter, "handle_shared_request", None)
+            if not callable(handler):
+                return JSONResponse(
+                    {"error": "webhook not available"}, status_code=404
+                )
+            try:
+                status, text = await handler(
+                    raw_body=raw_body,
+                    headers=dict(request.headers),
+                    query=dict(request.query_params),
+                )
+            except Exception:  # noqa: BLE001
+                logger.error(
+                    "Shared webhook dispatch failed for channel %r",
+                    channel,
+                    exc_info=True,
+                )
+                return PlainTextResponse("Dispatch failed", status_code=500)
+            return PlainTextResponse(text, status_code=status)
+
         routes = [
             Route("/", magic_link_handler, methods=["GET"]),
             Route("/hooks/{path:path}", hook_handler, methods=["POST"]),
+            Route(
+                "/webhooks/{channel}",
+                webhooks_handler,
+                methods=["GET", "POST"],
+            ),
             Route("/health", health, methods=["GET"]),
             Route("/ready", ready, methods=["GET"]),
             Route("/live", live, methods=["GET"]),
@@ -8006,6 +8057,12 @@ class WebSocketGateway:
                 # so polling/socket transports silently lost in-flight messages.
                 self._replay_inbound_journal(bot)
                 self._channel_bots[channel_name] = bot
+                # Issue #5146: mount webhook-bearing channels that run in
+                # shared-listener mode (no explicit ``webhook_port``) onto the
+                # gateway's single Starlette listener at ``/webhooks/<channel>``
+                # so several webhook bots share one port/public URL. A channel
+                # that set ``webhook_port`` keeps its standalone server (below).
+                self._maybe_mount_shared_webhook(channel_name, bot)
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
                 logger.error(f"Failed to create bot for '{channel_name}': {e}")
@@ -8029,6 +8086,44 @@ class WebSocketGateway:
                 # for the next boot rather than blocking startup.
                 self._schedule_outbound_recovery(bot)
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _maybe_mount_shared_webhook(self, channel_name: str, bot: Any) -> None:
+        """Register a webhook adapter on the gateway's shared listener.
+
+        Issue #5146: a ``mode: webhook`` channel whose adapter reports
+        ``accepts_webhooks`` and is in shared-listener mode (it exposes
+        ``uses_shared_listener`` truthy — i.e. no explicit ``webhook_port``) is
+        added to ``_webhook_channels`` so the ``/webhooks/{channel}`` route
+        dispatches to its ``handle_shared_request``. Any channel that opted out
+        by setting ``webhook_port`` is left to bind its own server as before.
+        No-op for adapters that don't expose the seam, so non-webhook channels
+        are unaffected.
+        """
+        if not getattr(bot, "uses_shared_listener", False):
+            return
+        if not callable(getattr(bot, "handle_shared_request", None)):
+            return
+        # Confirm the adapter genuinely accepts webhooks via the core capability
+        # contract (``PlatformCapabilities.accepts_webhooks``) before mounting an
+        # ingress for it — fail-closed on ambiguity. ``default_capabilities`` is
+        # the classmethod all adapters expose (Issue #5146).
+        try:
+            caps = bot.default_capabilities()
+            if not getattr(caps, "accepts_webhooks", False):
+                return
+        except Exception:  # noqa: BLE001 — missing/odd capabilities: don't mount
+            return
+        self._webhook_channels[channel_name] = bot
+        # Tell the adapter a gateway owns its ingress so its own ``start`` is a
+        # socket-free no-op (a standalone bot would still bind a default port).
+        mark = getattr(bot, "mark_shared_mounted", None)
+        if callable(mark):
+            mark()
+        logger.info(
+            "Channel '%s' mounted on shared webhook listener at /webhooks/%s",
+            channel_name,
+            channel_name,
+        )
 
     def _schedule_outbound_recovery(self, bot: Any) -> None:
         """Fire-and-forget the boot-time outbound reply redelivery (Issue #3862).
@@ -9417,6 +9512,9 @@ class WebSocketGateway:
             
             # Remove from tracking
             del self._channel_bots[channel_name]
+            # Issue #5146: drop any shared-listener webhook mount so a reloaded
+            # or removed channel doesn't leave a stale handler on /webhooks/.
+            self._webhook_channels.pop(channel_name, None)
             
             # Clean up supervisor state
             self._channel_supervisor.cleanup(channel_name)

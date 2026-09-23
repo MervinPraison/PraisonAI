@@ -232,7 +232,7 @@ class WebhookBot:
         config: Optional[BotConfig] = None,
         *,
         path: str = "/webhook",
-        webhook_port: int = 8080,
+        webhook_port: Optional[int] = None,
         verify: Any = None,
         routes: Optional[List[Any]] = None,
         **kwargs: Any,
@@ -241,7 +241,11 @@ class WebhookBot:
         self._agent = agent
         self.config = config or BotConfig(token=token, mode="webhook")
         self._path = path if path.startswith("/") else f"/{path}"
-        self._webhook_port = int(webhook_port)
+        # Issue #5146: ``webhook_port is None`` selects shared-listener mode —
+        # the gateway mounts this adapter on its single HTTP server via
+        # :meth:`handle_shared_request` and never binds a private port. An
+        # explicit port keeps the standalone ``TCPSite`` (backward-compatible).
+        self._webhook_port = int(webhook_port) if webhook_port is not None else None
         self._verifier = _build_verifier_from_config(verify)
 
         self._routes: List[WebhookRoute] = []
@@ -259,6 +263,10 @@ class WebhookBot:
         self._started_at: Optional[float] = None
         self._runner: Any = None
         self._site: Any = None
+        # Issue #5146: set True by the gateway when it mounts this adapter on
+        # its shared listener. Standalone ``bot start`` never mounts it, so a
+        # lone webhook bot with no explicit port still binds a default server.
+        self._shared_mounted = False
 
         from ._session import build_session_manager
 
@@ -287,12 +295,65 @@ class WebhookBot:
     def webhook_verifier(self) -> Optional[Any]:
         return self._verifier
 
+    @property
+    def webhook_path(self) -> str:
+        """The per-channel path this adapter handles (e.g. ``/webhook``)."""
+        return self._path
+
+    @property
+    def uses_shared_listener(self) -> bool:
+        """Whether this channel is served by the gateway's single listener.
+
+        True when no explicit ``webhook_port`` was configured (Issue #5146):
+        the gateway mounts :meth:`handle_shared_request` on its own HTTP server
+        and this adapter never binds a private ``TCPSite``.
+        """
+        return self._webhook_port is None
+
+    def mark_shared_mounted(self) -> None:
+        """Record that a gateway is serving this channel via its shared listener.
+
+        Issue #5146: called by the gateway when it mounts the adapter's
+        :meth:`handle_shared_request` on ``/webhooks/<channel>`` so that a later
+        :meth:`start` becomes a socket-free no-op. Absent this (standalone
+        ``bot start``), a port-less webhook bot still binds a default server so
+        a lone webhook bot keeps working exactly as before.
+        """
+        self._shared_mounted = True
+
     # ── Lifecycle ───────────────────────────────────────────────────
 
+    #: Default port a *standalone* (non-gateway) webhook bot binds when no
+    #: ``webhook_port`` is configured — preserves pre-#5146 behaviour.
+    _STANDALONE_DEFAULT_PORT = 8080
+
     async def start(self) -> None:
-        """Start the webhook HTTP server."""
+        """Start the webhook HTTP server.
+
+        When a gateway has mounted this channel on its shared listener
+        (:meth:`mark_shared_mounted`, Issue #5146) there is no private server to
+        bind: the gateway serves it via :meth:`handle_shared_request`. ``start``
+        just marks the channel running so the supervisor's running-flag poll
+        keeps it alive. A standalone (un-mounted) port-less bot falls back to
+        binding the historical default port so ``bot start`` still listens.
+        """
         if self._is_running:
             return
+
+        if self._shared_mounted:
+            self._is_running = True
+            self._started_at = time.time()
+            logger.info(
+                "Webhook channel served via shared gateway listener at %s",
+                self._path,
+            )
+            return
+
+        bind_port = (
+            self._webhook_port
+            if self._webhook_port is not None
+            else self._STANDALONE_DEFAULT_PORT
+        )
 
         try:
             from aiohttp import web
@@ -305,19 +366,23 @@ class WebhookBot:
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        self._site = web.TCPSite(self._runner, "0.0.0.0", self._webhook_port)
+        self._site = web.TCPSite(self._runner, "0.0.0.0", bind_port)
         await self._site.start()
 
         self._is_running = True
         self._started_at = time.time()
         logger.info(
             "Webhook channel listening on http://0.0.0.0:%s%s",
-            self._webhook_port,
+            bind_port,
             self._path,
         )
 
     async def stop(self) -> None:
-        """Stop the webhook HTTP server."""
+        """Stop the webhook HTTP server.
+
+        In shared-listener mode there is no private ``TCPSite``/runner to tear
+        down (the gateway owns the listener); this just clears the running flag.
+        """
         if not self._is_running:
             return
         if self._site:
@@ -328,25 +393,27 @@ class WebhookBot:
         self._started_at = None
         logger.info("Webhook channel stopped")
 
-    # ── HTTP handlers ───────────────────────────────────────────────
+    # ── Transport-neutral core ──────────────────────────────────────
 
-    async def _handle_health(self, request: Any) -> Any:
-        from aiohttp import web
+    async def handle_shared_request(
+        self,
+        *,
+        raw_body: bytes,
+        headers: Mapping[str, str],
+        query: Optional[Mapping[str, str]] = None,
+    ) -> tuple[int, str]:
+        """Verify, route and dispatch one inbound webhook delivery.
 
-        return web.Response(status=200, text="Webhook endpoint")
-
-    async def _handle_webhook(self, request: Any) -> Any:
-        from aiohttp import web
+        The single transport-neutral entry point reused by both the standalone
+        aiohttp server (:meth:`_handle_webhook`) and the gateway's shared
+        Starlette listener (Issue #5146). Returns an ``(http_status, body)``
+        pair so the caller's own framework can build the response.
+        """
         from praisonai_bot.bots.webhook_security import (
             enforce_webhook_verification,
         )
 
-        try:
-            raw_body = await request.read()
-        except Exception:  # noqa: BLE001
-            return web.Response(status=400, text="Bad request")
-
-        headers = dict(request.headers)
+        headers = dict(headers)
         if not enforce_webhook_verification(
             accepts_webhooks=True,
             verifier=self._verifier,
@@ -354,7 +421,7 @@ class WebhookBot:
             raw_body=raw_body,
             platform="webhook",
         ):
-            return web.Response(status=401, text="Invalid signature")
+            return 401, "Invalid signature"
 
         try:
             payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
@@ -364,15 +431,15 @@ class WebhookBot:
         event = {
             "payload": payload,
             "headers": headers,
-            "query": dict(request.query),
+            "query": dict(query or {}),
         }
 
         route = self._match_route(event)
         if route is None:
             # No route matched — acknowledge and drop (nothing to trigger).
-            return web.Response(status=200, text="No matching route")
+            return 200, "No matching route"
         if route.silent:
-            return web.Response(status=200, text="OK")
+            return 200, "OK"
 
         try:
             await self._dispatch(route, event, raw_body)
@@ -380,8 +447,30 @@ class WebhookBot:
             # Fail loud on dispatch: surface a 5xx so the sender retries the
             # delivery instead of a false 200 ack that silently drops the event.
             logger.error("Webhook agent dispatch failed", exc_info=True)
-            return web.Response(status=500, text="Dispatch failed")
-        return web.Response(status=200, text="OK")
+            return 500, "Dispatch failed"
+        return 200, "OK"
+
+    # ── HTTP handlers ───────────────────────────────────────────────
+
+    async def _handle_health(self, request: Any) -> Any:
+        from aiohttp import web
+
+        return web.Response(status=200, text="Webhook endpoint")
+
+    async def _handle_webhook(self, request: Any) -> Any:
+        from aiohttp import web
+
+        try:
+            raw_body = await request.read()
+        except Exception:  # noqa: BLE001
+            return web.Response(status=400, text="Bad request")
+
+        status, text = await self.handle_shared_request(
+            raw_body=raw_body,
+            headers=dict(request.headers),
+            query=dict(request.query),
+        )
+        return web.Response(status=status, text=text)
 
     def _match_route(self, event: Mapping[str, Any]) -> Optional[WebhookRoute]:
         """Return the first route whose filter matches, or None."""
