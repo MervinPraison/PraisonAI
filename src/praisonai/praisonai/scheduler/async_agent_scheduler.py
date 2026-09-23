@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
-from .shared import ScheduleParser, ScheduleTicker, backoff_delay, safe_call
+from .shared import ScheduleParser, ScheduleTicker, backoff_delay, safe_call, safe_call_async
 from ._base_scheduler import (
     _BaseAgentScheduler,
     _compute_run_cost,
@@ -591,8 +591,18 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             # since the shared delivery helper uses the sync bridge. Mirrors the
             # scheduled-loop success path so a one-time async run is not silently
             # undelivered.
+            delivered_ok = True
             if self.deliver:
-                await asyncio.to_thread(self._deliver_result, result)
+                delivered_ok = await asyncio.to_thread(self._finalize_delivery, result)
+
+            if delivered_ok:
+                await safe_call_async(self.on_success, result)
+            else:
+                logger.error(
+                    "One-time async run executed but its result could not be "
+                    "delivered to the configured target"
+                )
+                await safe_call_async(self.on_failure, "scheduled result could not be delivered")
 
             return result
         except Exception as e:
