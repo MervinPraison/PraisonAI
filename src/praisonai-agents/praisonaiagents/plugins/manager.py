@@ -237,10 +237,13 @@ class PluginManager:
         Returns:
             True if unregistered successfully
         """
-        if name not in self._plugins:
-            return False
-        
-        plugin = self._plugins[name]
+        with self._lock:
+            plugin = self._plugins.get(name)
+            if plugin is None:
+                return False
+            del self._plugins[name]
+            self._enabled.pop(name, None)
+
         try:
             plugin.on_shutdown()
         except Exception as e:
@@ -249,18 +252,16 @@ class PluginManager:
         # Counterpart to the ON_INIT emit in register(): the plugin is going
         # away, and a listener that saw it arrive must be able to see it leave.
         _emit_plugin_shutdown(plugin)
-        
-        del self._plugins[name]
-        del self._enabled[name]
-        
+
         logger.info(f"Unregistered plugin: {name}")
         return True
     
     def enable(self, name: str) -> bool:
         """Enable a plugin."""
-        if name in self._enabled:
-            self._enabled[name] = True
-            return True
+        with self._lock:
+            if name in self._enabled:
+                self._enabled[name] = True
+                return True
         return False
     
     def disable(self, name: str) -> bool:
@@ -270,14 +271,15 @@ class PluginManager:
         hook registry, so disabling actually stops its lifecycle methods from
         firing during subsequent agent execution.
         """
-        if name in self._enabled:
+        with self._lock:
+            if name not in self._enabled:
+                return False
             self._enabled[name] = False
-            try:
-                self.unwire_from_hook_registry(name)
-            except Exception as e:
-                logger.debug(f"Failed to unwire plugin '{name}': {e}")
-            return True
-        return False
+        try:
+            self.unwire_from_hook_registry(name)
+        except Exception as e:
+            logger.debug(f"Failed to unwire plugin '{name}': {e}")
+        return True
     
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
@@ -410,11 +412,19 @@ class PluginManager:
             The result (may be modified by plugins)
         """
         result = args[0] if args else None
-        
-        for name, plugin in self._plugins.items():
-            if not self._enabled.get(name, False):
-                continue
-            
+
+        # Snapshot the enabled (name, plugin) pairs under the lock so a
+        # concurrent register/unregister cannot mutate the dict mid-iteration
+        # (which would raise RuntimeError and crash the firing hook point for
+        # every agent sharing this manager).
+        with self._lock:
+            enabled_plugins = [
+                (name, plugin)
+                for name, plugin in self._plugins.items()
+                if self._enabled.get(name, False)
+            ]
+
+        for name, plugin in enabled_plugins:
             if hook not in plugin.info.hooks:
                 continue
             
