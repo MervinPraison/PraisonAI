@@ -2034,6 +2034,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/media/capabilities":
             self._json({"ok": True, **self._media().capabilities()})
             return
+        if self.path == "/media/video/models":
+            self._json({"ok": True, "models": self._media().list_video_models()})
+            return
         if self.path.startswith("/media/recent?"):
             from urllib.parse import parse_qs, urlparse
             kind = (parse_qs(urlparse(self.path).query).get("kind") or ["image"])[0]
@@ -2257,6 +2260,7 @@ class Handler(BaseHTTPRequestHandler):
                 out = self._media().generate_video(
                     str(payload.get("prompt") or ""),
                     settings=load_settings(),
+                    model=str(payload.get("model") or "replicate/minimax/video-01"),
                 )
             except (ValueError, RuntimeError) as exc:
                 self._json({"ok": False, "error": str(exc)}, 400)

@@ -758,6 +758,10 @@ body.view-video #video{display:block}
         </div>
         <div class="tcard">
           <div class="tf">
+            <label for="vidModel">Model</label>
+            <select id="vidModel"></select>
+          </div>
+          <div class="tf">
             <label for="vidPrompt">Prompt</label>
             <textarea id="vidPrompt" rows="3" placeholder="A drone shot over coastal cliffs at golden hour"></textarea>
           </div>
@@ -3331,6 +3335,7 @@ const imgPrompt=document.getElementById('imgPrompt'),
       imgPreview=document.getElementById('imgPreview'),
       imgRecent=document.getElementById('imgRecent'),
       vidPrompt=document.getElementById('vidPrompt'),
+      vidModel=document.getElementById('vidModel'),
       vidGen=document.getElementById('vidGen'),
       vidError=document.getElementById('vidError'),
       vidPreview=document.getElementById('vidPreview'),
@@ -3356,7 +3361,19 @@ async function refreshVideo(){
   vidError.textContent='';
   try{
     const c=await (await fetch(`http://127.0.0.1:${PORT}/media/capabilities`)).json();
-    if(!c.video&&vidHint) vidHint.textContent=c.video_hint||vidHint.textContent;
+    if(vidHint) vidHint.textContent=c.video_hint||vidHint.textContent;
+    if(vidModel){
+      vidModel.textContent='';
+      (c.video_models||[]).forEach(m=>{
+        const o=document.createElement('option');
+        o.value=m.id;
+        o.textContent=m.display_name+(m.configured?'':' (key needed)');
+        o.disabled=!m.configured;
+        vidModel.appendChild(o);
+      });
+      const first=(c.video_models||[]).find(m=>m.configured);
+      if(first) vidModel.value=first.id;
+    }
   }catch{}
 }
 imgGen.addEventListener('click',async()=>{
@@ -3384,10 +3401,11 @@ vidGen.addEventListener('click',async()=>{
   try{
     const r=await fetch(`http://127.0.0.1:${PORT}/media/video`,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({prompt})});
+      body:JSON.stringify({prompt,model:vidModel&&vidModel.value?vidModel.value:undefined})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||j.ok===false){ vidError.textContent=j.error||'Generation failed'; return; }
-    if(j.url){ vidPreview.hidden=false; vidPreview.src=j.url; }
+    const src=j.url||j.data_url;
+    if(src){ vidPreview.hidden=false; vidPreview.src=src; }
     toast('Video saved to '+ (j.path||'media folder'));
   }catch{ vidError.textContent='Engine unreachable'; }
   finally{ vidGen.disabled=false; vidGen.textContent='Generate video'; }
