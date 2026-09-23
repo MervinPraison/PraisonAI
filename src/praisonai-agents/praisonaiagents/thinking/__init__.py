@@ -33,6 +33,8 @@ Usage:
     agent = Agent(instructions="...", reasoning_effort="high")
 """
 
+from .._lazy import create_lazy_getattr
+
 __all__ = [
     # Core classes
     "ThinkingBudget",
@@ -47,26 +49,14 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name == "ThinkingBudget":
-        from .budget import ThinkingBudget
-        return ThinkingBudget
-    
-    if name == "ThinkingConfig":
-        from .config import ThinkingConfig
-        return ThinkingConfig
-    
-    if name == "ThinkingUsage":
-        from .tracker import ThinkingUsage
-        return ThinkingUsage
-    
-    if name == "ThinkingTracker":
-        from .tracker import ThinkingTracker
-        return ThinkingTracker
+_LAZY_IMPORTS = {
+    "ThinkingBudget": ("praisonaiagents.thinking.budget", "ThinkingBudget"),
+    "ThinkingConfig": ("praisonaiagents.thinking.config", "ThinkingConfig"),
+    "ThinkingUsage": ("praisonaiagents.thinking.tracker", "ThinkingUsage"),
+    "ThinkingTracker": ("praisonaiagents.thinking.tracker", "ThinkingTracker"),
+    "resolve_reasoning_params": ("praisonaiagents.thinking.effort", "resolve_reasoning_params"),
+    "normalize_effort": ("praisonaiagents.thinking.effort", "normalize_effort"),
+    "EFFORT_LEVELS": ("praisonaiagents.thinking.effort", "EFFORT_LEVELS"),
+}
 
-    if name in ("resolve_reasoning_params", "normalize_effort", "EFFORT_LEVELS"):
-        from . import effort
-        return getattr(effort, name)
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
