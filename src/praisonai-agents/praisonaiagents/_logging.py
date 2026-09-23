@@ -28,8 +28,10 @@ def _configure_environment():
         "PYDANTIC_WARNINGS_ENABLED": "False",
     }
     
+    # Use setdefault so a value the host exported before launch is preserved
+    # (and not leaked/overwritten into subprocesses spawned afterwards).
     for key, value in env_vars.items():
-        os.environ[key] = value
+        os.environ.setdefault(key, value)
 
 
 # ========================================================================
@@ -48,7 +50,11 @@ def _get_all_noisy_loggers() -> List[str]:
         # Markdown
         "markdown_it", "rich.markdown",
         # System
-        "asyncio", "selector_events", "pydantic",
+        # NOTE: "asyncio" is intentionally NOT suppressed here — it is the host
+        # application's own logger, not a PraisonAI dependency's. Forcing it to
+        # CRITICAL hides unrelated host errors (e.g. "Task exception was never
+        # retrieved").
+        "selector_events", "pydantic",
         "praisonaiagents.telemetry.telemetry",
     ]
 
