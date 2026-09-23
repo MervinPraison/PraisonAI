@@ -471,8 +471,18 @@ def create_tool_registry_with_overrides(
                     # Try as a Python module path
                     tools = loader.load_from_module(source)
                     registry.update(tools)
+            except PermissionError as exc:
+                # A denied opt-in must not vanish silently: the agent would
+                # then run without a tool it explicitly declared. Surface the
+                # remediation (set PRAISONAI_ALLOW_LOCAL_TOOLS=true) at warning
+                # level so the operator sees why the source was skipped.
+                logger.warning(
+                    "skipping tools_source %r: %s", source, exc,
+                )
             except Exception:
-                pass
+                logger.debug(
+                    "failed to load tools_source %r", source, exc_info=True,
+                )
     
     # 2. Add override directories (CLI --tools-dir)
     if override_dirs:

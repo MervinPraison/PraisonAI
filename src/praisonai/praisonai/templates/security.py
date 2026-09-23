@@ -91,7 +91,7 @@ class TemplateSecurity:
         try:
             import yaml
             with open(config_path) as f:
-                data = yaml.safe_load(f) or {}
+                data = yaml.safe_load(f)
         except Exception as exc:
             # Fail CLOSED: never fall through to permissive defaults when a
             # hardened config cannot be read/parsed. Silently reverting would
@@ -101,6 +101,20 @@ class TemplateSecurity:
                 f"Refusing to start: security config {config_path} could not be "
                 f"parsed: {exc}"
             ) from exc
+
+        # An empty file parses to None -> documented defaults are correct.
+        if data is None:
+            return SecurityConfig()
+
+        # Any other non-mapping value (e.g. `false`, `[]`, a bare scalar) is a
+        # malformed hardened config. Fail CLOSED rather than coercing it to `{}`
+        # and silently re-enabling the permissive `allow_local` /
+        # `allow_any_github` defaults the operator meant to override.
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"Refusing to start: security config {config_path} must be a "
+                f"mapping, got {type(data).__name__}."
+            )
 
         return SecurityConfig(
             allowed_sources=set(data.get("allowed_sources", [])),
