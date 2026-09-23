@@ -6,6 +6,7 @@ import warnings
 import re
 import inspect
 import asyncio
+import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -213,6 +214,22 @@ class LLM:
     
     # Class-level flag for one-time logging configuration
     _logging_configured = False
+
+    # Current agent name for per-call token/cost attribution.
+    #
+    # ContextVar, not an instance attribute: a single LLM instance can back two
+    # different Agents (Agent(llm=<shared LLM>) is supported), and
+    # PraisonAIAgents.arun_all_tasks dispatches tasks concurrently via
+    # asyncio.gather on one thread. With a plain attribute, task A sets
+    # "Researcher", awaits the network call, task B sets "Writer" on the SAME
+    # object, and when A's response returns it reads "Writer" -- A's tokens get
+    # attributed to B. A ContextVar is copied per task at gather/create_task
+    # time, so each concurrently-gathered coroutine keeps its own value across
+    # the await (same reasoning as _tools_scope_depths in agents/agents.py).
+    _current_agent_name: "contextvars.ContextVar[Optional[str]]" = contextvars.ContextVar(
+        "praisonai_current_agent_name", default=None
+    )
+
     
     # Class-level cache for LiteLLM module (avoids repeated import overhead)
     _litellm_module = None
@@ -572,7 +589,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # current_agent_name is backed by a ContextVar (see class attribute
+        # _current_agent_name and the current_agent_name property); no per-
+        # instance state is stored here so concurrent tasks stay isolated.
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6263,9 +6282,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Current agent name for token attribution (ContextVar-backed).
+
+        Reads from a ContextVar so concurrently-gathered tasks that share this
+        LLM instance each observe the agent name set within their own context,
+        rather than the last writer's value.
+        """
+        return type(self)._current_agent_name.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        type(self)._current_agent_name.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
-        self.current_agent_name = agent_name
+        """Set the current agent name for token tracking (ContextVar-backed)."""
+        type(self)._current_agent_name.set(agent_name)
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.

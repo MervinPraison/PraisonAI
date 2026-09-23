@@ -2654,13 +2654,23 @@ class OpenAIClient:
                                 tool_result, messages, _tool_call_id, function_name,
                                 history_sink=deferred_history_sink,
                             )
-                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                         except ToolExecutionError:
                             raise
                         except Exception as e:
-                            results_str = f"Error executing function: {str(e)}"
+                            tool_result = {"error": str(e)}
                             if verbose:
                                 yield f"\n[Function error: {str(e)}]"
+                        # Serialize the result separately from execution so a tool
+                        # that SUCCEEDS but returns a non-JSON-serializable value
+                        # (datetime, set, bytes, DataFrame, custom object) is not
+                        # misreported as an execution error -- parity with the
+                        # sync/async non-streaming loops' (TypeError, ValueError)
+                        # fallback.
+                        try:
+                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        except (TypeError, ValueError):
+                            tool_result = {"result": str(tool_result)}
+                            results_str = json.dumps(tool_result)
                         
                         # Trigger callback with result
                         display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=None)
