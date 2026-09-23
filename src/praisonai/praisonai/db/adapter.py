@@ -1584,7 +1584,12 @@ class TursoDB(PraisonAIDB):
         # the shared **options bag would leak it into an unrelated state/knowledge
         # store factory as an unexpected kwarg.
         conversation_options = dict(options.pop("conversation_options", None) or {})
-        conversation_options["auth_token"] = token
+        # Only override when we actually resolved a token, and never clobber a
+        # token the caller already placed in conversation_options — otherwise a
+        # None from the (turso_auth_token / TURSO_AUTH_TOKEN) lookup would wipe
+        # an explicitly-supplied credential.
+        if token is not None:
+            conversation_options["auth_token"] = token
         super().__init__(
             database_url=url,
             conversation_options=conversation_options,
