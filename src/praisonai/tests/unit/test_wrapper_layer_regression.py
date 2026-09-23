@@ -580,6 +580,82 @@ class TestIssue3251WrapperGaps:
             "workflow build must resolve tool_timeout to warn when unenforceable"
         )
 
+    def test_sync_workflow_start_runs_on_scoped_bridge(self):
+        """``_run_yaml_workflow`` must drive ``workflow.start`` inside a
+        ``scoped_bridge()`` so a stuck workflow-tool coroutine parks only this
+        run's loop, never the process-wide default bridge that every other
+        tenant's ``run_sync`` submission shares. Observe the bound bridge during
+        ``start`` and assert it is reset afterwards (also on error).
+        """
+        import logging
+        from unittest.mock import patch
+
+        from praisonai.agents_generator import AgentsGenerator
+        from praisonai import _async_bridge
+
+        gen = AgentsGenerator.__new__(AgentsGenerator)
+        gen.logger = logging.getLogger(__name__)
+
+        outer = _async_bridge._bridge_var.get()
+
+        class _FakeWorkflow:
+            name = "wf"
+
+            def start(self, input_data):
+                # A scoped bridge must be bound here, distinct from whatever
+                # (if anything) was bound before entering _run_yaml_workflow.
+                bound = _async_bridge._bridge_var.get()
+                assert bound is not None
+                assert bound is not outer
+                _FakeWorkflow.observed = bound
+                return "done"
+
+        with patch.object(
+            AgentsGenerator,
+            "_build_yaml_workflow",
+            return_value=(_FakeWorkflow(), "topic"),
+        ), patch.object(
+            AgentsGenerator,
+            "_finalise_workflow_result",
+            side_effect=lambda r: r,
+        ):
+            result = gen._run_yaml_workflow({"process": "workflow"})
+
+        assert result == "done"
+        # The scope-owned bridge must be torn down / unbound after the block.
+        assert _async_bridge._bridge_var.get() is outer
+
+    def test_sync_workflow_bridge_unbinds_when_start_raises(self):
+        """If ``workflow.start`` raises, the scoped bridge must still be unbound
+        on exit — no leaked binding into the caller's context."""
+        import logging
+        from unittest.mock import patch
+
+        from praisonai.agents_generator import AgentsGenerator
+        from praisonai import _async_bridge
+
+        gen = AgentsGenerator.__new__(AgentsGenerator)
+        gen.logger = logging.getLogger(__name__)
+
+        outer = _async_bridge._bridge_var.get()
+
+        class _BoomWorkflow:
+            name = "wf"
+
+            def start(self, input_data):
+                assert _async_bridge._bridge_var.get() is not None
+                raise RuntimeError("boom")
+
+        with patch.object(
+            AgentsGenerator,
+            "_build_yaml_workflow",
+            return_value=(_BoomWorkflow(), "topic"),
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                gen._run_yaml_workflow({"process": "workflow"})
+
+        assert _async_bridge._bridge_var.get() is outer
+
 
 class TestIssue3402YamlTeamSessionContinuity:
     """Regression tests for issue #3402: CLI session continuity for YAML/team runs.

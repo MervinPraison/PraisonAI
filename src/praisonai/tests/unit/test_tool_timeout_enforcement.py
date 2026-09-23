@@ -145,8 +145,10 @@ def test_build_tools_dict_clears_stale_wrap_state_on_reuse():
         # Run 1: uniform CLI timeout -> uniform wrap set, resolver cleared.
         gen.cli_config = {"tool_timeout": 5}
         gen._build_tools_dict({"roles": {"a": {}}})
-        assert callable(gen.cli_config.get("_tool_timeout_wrap"))
-        assert gen.cli_config.get("_agent_tool_wrap_resolver") is None
+        assert callable(gen._run_ctx.get("_tool_timeout_wrap"))
+        assert gen._run_ctx.get("_agent_tool_wrap_resolver") is None
+        # Private closures must NOT leak onto the user-facing cli_config dict.
+        assert "_tool_timeout_wrap" not in gen.cli_config
 
         # Run 2: heterogeneous per-agent timeouts -> resolver set, stale uniform
         # wrap MUST be cleared so adapters don't reuse run 1's budget.
@@ -154,16 +156,66 @@ def test_build_tools_dict_clears_stale_wrap_state_on_reuse():
         gen._build_tools_dict(
             {"roles": {"a": {"tool_timeout": 10}, "b": {"tool_timeout": 30}}}
         )
-        assert gen.cli_config.get("_tool_timeout_wrap") is None
-        assert callable(gen.cli_config.get("_agent_tool_wrap_resolver"))
+        assert gen._run_ctx.get("_tool_timeout_wrap") is None
+        assert callable(gen._run_ctx.get("_agent_tool_wrap_resolver"))
 
         # Run 3: no timeout at all -> both keys cleared.
         gen.cli_config = {}
         gen._build_tools_dict({"roles": {"a": {}}})
-        assert gen.cli_config.get("_tool_timeout_wrap") is None
-        assert gen.cli_config.get("_agent_tool_wrap_resolver") is None
+        assert gen._run_ctx.get("_tool_timeout_wrap") is None
+        assert gen._run_ctx.get("_agent_tool_wrap_resolver") is None
     finally:
         gen.close()
+
+
+def test_dispatch_cli_config_merges_run_ctx_without_mutating_user_config():
+    # The dispatch contract adapters rely on: the merged cli_config they receive
+    # carries the user overrides PLUS the private per-run closures, while the
+    # caller-owned ``self.cli_config`` stays "user overrides only". If dispatch
+    # stopped merging, adapters would silently lose timeout enforcement; if it
+    # mutated ``self.cli_config`` the closures would leak across runs/tenants.
+    gen = _make_generator()
+
+    def sentinel():
+        return "ok"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"plain": sentinel}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    try:
+        user_cfg = {"tool_timeout": 5, "framework": "praisonai"}
+        gen.cli_config = user_cfg
+        gen._build_tools_dict({"roles": {"a": {}}})
+
+        dispatched = gen._dispatch_cli_config()
+        # Adapter-facing config carries user overrides untouched...
+        assert dispatched["tool_timeout"] == 5
+        assert dispatched["framework"] == "praisonai"
+        # ...plus the private per-run closures merged in.
+        assert callable(dispatched["_tool_timeout_wrap"])
+        assert "_agent_tool_wrap_resolver" in dispatched
+
+        # The caller-owned dict must NOT be mutated or stamped with closures,
+        # and dispatch must return a fresh object (never the same instance).
+        assert dispatched is not user_cfg
+        assert "_tool_timeout_wrap" not in user_cfg
+        assert "_agent_tool_wrap_resolver" not in user_cfg
+        assert user_cfg == {"tool_timeout": 5, "framework": "praisonai"}
+    finally:
+        gen.close()
+
+
+def test_dispatch_cli_config_returns_base_when_no_run_ctx():
+    # Before any _build_tools_dict call there is no per-run context; dispatch
+    # must return the user config unchanged rather than fabricating closure keys.
+    gen = _make_generator()
+    gen.cli_config = {"framework": "praisonai"}
+    gen._run_ctx = {}
+    assert gen._dispatch_cli_config() == {"framework": "praisonai"}
 
 
 def test_timeout_proxy_preserves_isinstance_and_schema():
@@ -429,7 +481,7 @@ def test_heterogeneous_per_agent_timeouts_honoured_end_to_end():
         # Shared dict is NOT uniformly wrapped (heterogeneous budgets).
         assert tools_dict["scrape_page"] is _blocking
         # A per-agent resolver was exposed for adapters to apply.
-        resolver = gen.cli_config.get("_agent_tool_wrap_resolver")
+        resolver = gen._run_ctx.get("_agent_tool_wrap_resolver")
         assert callable(resolver)
 
         # The fast agent's tools get a tight 0.3s guard.
