@@ -146,6 +146,7 @@ class BotOS:
         max_concurrent_runs: int = 0,
         queue_depth: int = 0,
         overflow_policy: str = "reject",
+        max_concurrent_runs_per_scope: int = 0,
         admission_policy: Optional[Any] = None,
         max_rss_mb: float = 0.0,
         reliability: Optional[str] = None,
@@ -220,6 +221,7 @@ class BotOS:
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
             policy=admission_policy,
             resource_policy=build_memory_pressure_policy(max_rss_mb),
         )
@@ -1710,6 +1712,15 @@ class BotOS:
             raw.get("overflow_policy", gateway_cfg.get("overflow_policy", "reject"))
             or "reject"
         )
+        # Issue #5168: optional per-tenant/per-scope concurrency sub-limit within
+        # the global ceiling. Default 0 disables it (global-only behaviour).
+        max_concurrent_runs_per_scope = int(
+            raw.get(
+                "max_concurrent_runs_per_scope",
+                gateway_cfg.get("max_concurrent_runs_per_scope", 0),
+            )
+            or 0
+        )
         # Issue #3445: opt-in memory-aware admission (hard RSS ceiling in MiB).
         # Default 0 disables it, preserving concurrency-only admission.
         max_rss_mb = float(
@@ -1729,6 +1740,7 @@ class BotOS:
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
             max_rss_mb=max_rss_mb,
             reliability=reliability,
         )

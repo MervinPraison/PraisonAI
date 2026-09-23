@@ -161,9 +161,18 @@ class AdmissionGate:
         self._max = int(getattr(policy, "max_concurrent_runs", 0) or 0)
         self._queue_depth = int(getattr(policy, "queue_depth", 0) or 0)
         self._overflow = str(getattr(policy, "overflow_policy", "reject") or "reject")
+        # Issue #5168: per-tenant/per-scope sub-limit within the global ceiling.
+        # 0 (the default) disables per-scope fairness so behaviour is unchanged.
+        self._max_per_scope = int(
+            getattr(policy, "max_concurrent_runs_per_scope", 0) or 0
+        )
         # Live counters.
         self._in_flight = 0
         self._queued = 0
+        # Live per-scope counters (only populated when the sub-limit is active),
+        # keyed by the caller-supplied scope (the session_id at the call sites).
+        self._scope_in_flight: "Dict[str, int]" = {}
+        self._scope_queued: "Dict[str, int]" = {}
         # Cumulative observability.
         self.admitted = 0
         self.rejected = 0
@@ -209,6 +218,7 @@ class AdmissionGate:
         """Return a snapshot of admission counters for health/metrics."""
         return {
             "max_concurrent_runs": self._max,
+            "max_concurrent_runs_per_scope": self._max_per_scope,
             "queue_depth": self._queue_depth,
             "in_flight": self._in_flight,
             "queued": self._queued,
@@ -252,7 +262,12 @@ class AdmissionGate:
             yield
             return
 
-        decision = self._decide(session_id=session_id)
+        # Issue #5168: the scope key is the caller-supplied session_id (the
+        # per-user/per-tenant storage key at the call sites). Only tracked when
+        # a per-scope sub-limit is active, so the unscoped path is unchanged.
+        scope = session_id if self._max_per_scope > 0 else ""
+
+        decision = self._decide(session_id=session_id, scope=scope)
 
         # Local import keeps core optional and avoids a hard import cycle.
         from praisonaiagents.gateway import AdmissionDecision
@@ -285,6 +300,8 @@ class AdmissionGate:
                     self.rejected += 1
                     raise AdmissionRejected()
             self._queued += 1
+            if scope:
+                self._scope_queued[scope] = self._scope_queued.get(scope, 0) + 1
             ticket = next(self._ticket)
             shed_event = asyncio.Event()
             self._waiters[ticket] = shed_event
@@ -319,14 +336,29 @@ class AdmissionGate:
             if ticket is not None:
                 self._waiters.pop(ticket, None)
                 self._queued -= 1
+                if scope:
+                    self._dec_scope(self._scope_queued, scope)
 
         self._in_flight += 1
+        if scope:
+            self._scope_in_flight[scope] = self._scope_in_flight.get(scope, 0) + 1
         self.admitted += 1
         try:
             yield
         finally:
             self._in_flight -= 1
+            if scope:
+                self._dec_scope(self._scope_in_flight, scope)
             sem.release()
+
+    @staticmethod
+    def _dec_scope(counter: "Dict[str, int]", scope: str) -> None:
+        """Decrement a per-scope counter, pruning the key at zero (no leak)."""
+        remaining = counter.get(scope, 0) - 1
+        if remaining > 0:
+            counter[scope] = remaining
+        else:
+            counter.pop(scope, None)
 
     def _shed_oldest_waiter(self) -> bool:
         """Signal the oldest in-progress waiter to shed, freeing a queue slot.
@@ -343,7 +375,7 @@ class AdmissionGate:
                 return True
         return False
 
-    def _decide(self, *, session_id: str):
+    def _decide(self, *, session_id: str, scope: str = ""):
         from praisonaiagents.gateway import AdmissionDecision
 
         decision = AdmissionDecision.ADMIT
@@ -354,6 +386,9 @@ class AdmissionGate:
                     in_flight=self._in_flight,
                     queued=self._queued,
                     session_id=session_id,
+                    scope=scope,
+                    scope_in_flight=self._scope_in_flight.get(scope, 0),
+                    scope_queued=self._scope_queued.get(scope, 0),
                 )
             except Exception as e:  # pragma: no cover — defensive: never block on policy error
                 logger.warning(
@@ -428,6 +463,7 @@ def build_admission_gate(
     overflow_policy: str = "reject",
     policy: Optional[object] = None,
     resource_policy: Optional[object] = None,
+    max_concurrent_runs_per_scope: int = 0,
 ) -> Optional[AdmissionGate]:
     """Construct an :class:`AdmissionGate` from config, or return ``None``.
 
@@ -470,5 +506,6 @@ def build_admission_gate(
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
         )
     return AdmissionGate(policy, resource_policy=resource_policy)

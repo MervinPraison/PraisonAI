@@ -400,3 +400,104 @@ def test_rss_sampler_never_raises_without_resource_module():
         assert sample.rss_mb is None
     finally:
         adm.resource = original
+
+
+# ---------------------------------------------------------------------------
+# Issue #5168: per-tenant/per-scope fairness in the live admission gate.
+# ---------------------------------------------------------------------------
+
+
+def test_build_admission_gate_wires_per_scope_limit():
+    gate = build_admission_gate(
+        max_concurrent_runs=8, max_concurrent_runs_per_scope=2
+    )
+    assert gate is not None
+    assert gate.stats()["max_concurrent_runs_per_scope"] == 2
+
+
+@pytest.mark.skipif(BotOS is None, reason="BotOS optional dependency not installed")
+def test_botos_wires_per_scope_limit_from_kwarg():
+    botos = BotOS(max_concurrent_runs=8, max_concurrent_runs_per_scope=3)
+    assert botos._admission_gate is not None
+    assert botos.admission_stats["max_concurrent_runs_per_scope"] == 3
+
+
+@pytest.mark.skipif(BotOS is None, reason="BotOS optional dependency not installed")
+def test_botos_from_config_reads_per_scope_limit(tmp_path):
+    pytest.importorskip("yaml")
+    cfg = tmp_path / "botos.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  max_concurrent_runs: 8\n"
+        "  max_concurrent_runs_per_scope: 2\n"
+    )
+    botos = BotOS.from_config(str(cfg))
+    assert botos.admission_stats["max_concurrent_runs_per_scope"] == 2
+
+
+def test_noisy_tenant_shed_when_global_slot_free():
+    # A tenant at its per-scope sub-limit is shed even though the global ceiling
+    # (8) has free slots — proving a single tenant cannot occupy every slot.
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=8,
+            queue_depth=0,
+            overflow_policy="reject",
+            max_concurrent_runs_per_scope=2,
+        )
+        release = asyncio.Event()
+        held = []
+        rejected = []
+
+        async def run(scope):
+            try:
+                async with gate.admit(session_id=scope):
+                    held.append(scope)
+                    await release.wait()
+            except AdmissionRejected:
+                rejected.append(scope)
+
+        # Two turns for tenant "A" occupy its whole slice.
+        a1 = asyncio.create_task(run("A"))
+        a2 = asyncio.create_task(run("A"))
+        while gate.in_flight < 2:
+            await asyncio.sleep(0)
+        # A third "A" turn must be shed despite 6 free global slots.
+        await run("A")
+        assert rejected == ["A"]
+        # A different tenant "B" is admitted concurrently (fairness preserved).
+        b = asyncio.create_task(run("B"))
+        while "B" not in held:
+            await asyncio.sleep(0)
+        assert "B" in held
+        release.set()
+        await asyncio.gather(a1, a2, b)
+
+    asyncio.run(main())
+
+
+def test_per_scope_counters_pruned_after_completion():
+    # After turns complete, per-scope counters must be pruned (no unbounded
+    # dict growth across many distinct tenants).
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=8, max_concurrent_runs_per_scope=2
+        )
+        async with gate.admit(session_id="tenant-x"):
+            assert gate._scope_in_flight.get("tenant-x") == 1
+        assert "tenant-x" not in gate._scope_in_flight
+        assert gate._scope_in_flight == {}
+
+    asyncio.run(main())
+
+
+def test_unscoped_gate_ignores_scope_state():
+    # With no per-scope sub-limit, the gate never tracks per-scope counters and
+    # behaviour is byte-for-byte the global-only path.
+    async def main():
+        gate = build_admission_gate(max_concurrent_runs=2)
+        async with gate.admit(session_id="anyone"):
+            assert gate._scope_in_flight == {}
+            assert gate.in_flight == 1
+
+    asyncio.run(main())
