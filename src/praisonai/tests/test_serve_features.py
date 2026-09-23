@@ -41,7 +41,8 @@ class TestRateLimiting:
         limiter = create_rate_limiter(requests_per_minute=10)
         client_ip = "127.0.0.1"
         
-        # Should allow 10 requests
+        # Should allow 10 requests. ``check`` is the backward-compatible sync API
+        # (returns (allowed, retry_after) tuple) — must keep working.
         for _ in range(10):
             allowed, _ = limiter.check(client_ip)
             assert allowed is True
@@ -75,6 +76,44 @@ class TestRateLimiting:
         # Client 2 should still be allowed
         allowed, _ = limiter.check("client2")
         assert allowed is True
+
+    def test_rate_limiter_check_sync_alias(self):
+        """check_sync remains available as an alias of check (compat)."""
+        from praisonai.recipe.serve import create_rate_limiter
+
+        limiter = create_rate_limiter(requests_per_minute=3)
+        assert limiter.check_sync.__func__ is limiter.check.__func__
+        for _ in range(3):
+            allowed, _ = limiter.check_sync("c")
+            assert allowed is True
+        allowed, retry_after = limiter.check_sync("c")
+        assert allowed is False
+        assert retry_after > 0
+
+    def test_rate_limiter_async_concurrent_burst_enforced(self):
+        """Concurrent async check_async calls never exceed the limit (race closed)."""
+        import asyncio
+        from praisonai.recipe.serve import create_rate_limiter
+
+        limiter = create_rate_limiter(requests_per_minute=5)
+
+        async def run():
+            results = await asyncio.gather(
+                *[limiter.check_async("burst") for _ in range(100)]
+            )
+            return sum(1 for allowed, _ in results if allowed)
+
+        allowed_count = asyncio.run(run())
+        assert allowed_count == 5, f"expected exactly 5 allowed, got {allowed_count}"
+
+    def test_per_worker_rate_limit_split(self):
+        """Aggregate limit is divided across workers (no quota multiplication)."""
+        from praisonai.recipe.serve import _per_worker_rate_limit
+
+        assert _per_worker_rate_limit(100, 4) == 25
+        assert _per_worker_rate_limit(100, 1) == 100  # single worker unchanged
+        assert _per_worker_rate_limit(0, 4) == 0       # disabled stays disabled
+        assert _per_worker_rate_limit(3, 8) == 1       # never floored below 1
     
     def test_rate_limit_middleware_returns_429(self):
         """Test rate limit middleware returns 429 with proper error."""
