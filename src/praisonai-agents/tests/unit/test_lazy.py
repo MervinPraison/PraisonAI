@@ -208,6 +208,18 @@ class TestLazyGetattrWithFallbackImportErrors:
             getattr_fn("Target")
         assert "pydantic" in str(exc_info.value)
 
+    def test_broken_pyyaml_is_surfaced(self):
+        """PyYAML is a declared *core* dependency (import root ``yaml``); a
+        broken/missing install must raise rather than mask as None (Greptile P1).
+        """
+        err = ImportError("No module named 'yaml'")
+        err.name = "yaml"
+        getattr_fn = self._make_getattr("praisonaiagents._fake_target_yaml", err)
+
+        with pytest.raises(ImportError) as exc_info:
+            getattr_fn("Target")
+        assert "yaml" in str(exc_info.value)
+
     def test_missing_optional_integration_sdk_stays_none(self):
         """An optional integration whose own optional SDK is absent keeps the
         graceful None fallback (must NOT raise)."""

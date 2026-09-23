@@ -49,6 +49,8 @@ _CORE_REQUIRED_DEPENDENCIES = frozenset({
     "openai",
     "posthog",
     "aiohttp",
+    "yaml",       # PyYAML — core dep; import root differs from the package name
+    "croniter",
 })
 
 

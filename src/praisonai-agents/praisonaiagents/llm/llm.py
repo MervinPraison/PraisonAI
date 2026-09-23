@@ -930,7 +930,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription required", "subscription expired",
+            "plan limit"
         ]):
             return "billing"
         
@@ -956,17 +957,27 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "model_not_found"
         
-        # Empty or malformed responses
+        # Format errors (checked before empty_response so "malformed response"
+        # and "*parse error*" are classified as format rather than empty output)
+        if any(indicator in error_str for indicator in [
+            "validation error", "invalid format", "parse error", "parsing error",
+            "malformed", "invalid json", "schema error", "decode error"
+        ]):
+            return "format_error"
+        
+        # Empty or missing response content
         if any(indicator in error_str for indicator in [
             "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "unexpected end of json", "no content", "blank output",
+            "null response"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "try again later", "server busy",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -976,13 +987,6 @@ Respond with ONLY a valid JSON tool call in this format:
             "request timeout", "deadline exceeded"
         ]):
             return "idle_timeout"
-        
-        # Format errors
-        if any(indicator in error_str for indicator in [
-            "validation error", "invalid format", "parse error",
-            "malformed", "invalid json", "schema error"
-        ]):
-            return "format_error"
         
         # Default fallback
         return "unknown"
@@ -1066,13 +1070,22 @@ Respond with ONLY a valid JSON tool call in this format:
                 is_retryable=True
             )
         
-        # Auth errors - try profile rotation if available
-        if error_kind == "auth" and self._failover_manager:
+        # Auth errors - try profile rotation if available, else surface.
+        # Without a failover manager there is no alternate credential to try,
+        # so blind retries would just replay the same rejected credential;
+        # surface the auth failure immediately instead.
+        if error_kind == "auth":
+            if self._failover_manager:
+                return FailoverDecision(
+                    action="rotate_profile",
+                    reason=error_kind,
+                    backoff_ms=1000,  # Brief delay before trying new profile
+                    is_retryable=True
+                )
             return FailoverDecision(
-                action="rotate_profile",
+                action="surface_error",
                 reason=error_kind,
-                backoff_ms=1000,  # Brief delay before trying new profile
-                is_retryable=True
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
