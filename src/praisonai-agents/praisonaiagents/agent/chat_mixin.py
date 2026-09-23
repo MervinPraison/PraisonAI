@@ -3606,41 +3606,48 @@ Your Goal: {self.goal}"""
             )
             
 
+            # Track messages THIS turn appends so a failure rolls back only our
+            # own messages, never a concurrent turn's (see memory_mixin). The
+            # default (OpenAI) path used to skip this, so its positional rollback
+            # ``del chat_history[n:]`` erased a concurrent turn's interleaved
+            # messages and corrupted the shared transcript.
+            _turn_token = self._begin_turn_tracking()
+
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
-            
-            # Normalize original_prompt for consistent chat history storage
-            normalized_content = original_prompt
-            if isinstance(original_prompt, list):
-                # Extract text from multimodal prompts
-                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
-            
-            # Add user message to chat history BEFORE LLM call so handoffs can
-            # access it. Use atomic check-then-act to prevent TOCTOU races: an
-            # unatomic read of chat_history[-1] followed by a separate append
-            # lets a concurrent turn's user message be mistaken for this turn's
-            # own duplicate, silently dropping this user turn from the record.
-            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
-                # Persist user message to DB (OpenAI path)
-                self._persist_message("user", normalized_content)
 
-            reflection_count = 0
-            start_time = time.time()
-            
-            # Apply context management before LLM call (auto-compaction)
-            # Zero overhead when context=False
-            system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
-            processed_messages, context_result = self._apply_context_management(
-                messages=messages,
-                system_prompt=system_prompt_content,
-                tools=tools,
-            )
-            # Use processed messages for the LLM call
-            messages = processed_messages
-            
-            
-            # Wrap entire while loop in try-except for rollback on any failure
+            # Wrap entire turn in try/finally so per-turn tracking is always
+            # ended (the finally reads the ownership list during rollback).
             try:
+                # Normalize original_prompt for consistent chat history storage
+                normalized_content = original_prompt
+                if isinstance(original_prompt, list):
+                    # Extract text from multimodal prompts
+                    normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
+
+                # Add user message to chat history BEFORE LLM call so handoffs can
+                # access it. Use atomic check-then-act to prevent TOCTOU races: an
+                # unatomic read of chat_history[-1] followed by a separate append
+                # lets a concurrent turn's user message be mistaken for this turn's
+                # own duplicate, silently dropping this user turn from the record.
+                if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
+                    # Persist user message to DB (OpenAI path)
+                    self._persist_message("user", normalized_content)
+
+                reflection_count = 0
+                start_time = time.time()
+
+                # Apply context management before LLM call (auto-compaction)
+                # Zero overhead when context=False
+                system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
+                processed_messages, context_result = self._apply_context_management(
+                    messages=messages,
+                    system_prompt=system_prompt_content,
+                    tools=tools,
+                )
+                # Use processed messages for the LLM call
+                messages = processed_messages
+
                 while True:
                     try:
                         if self.verbose:
@@ -3858,6 +3865,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Rollback chat history
                 self._rollback_chat_history_to(chat_history_length)
                 return None
+            finally:
+                # End per-turn tracking after any rollback has run (rollback
+                # reads the ownership list, so this must come last).
+                self._end_turn_tracking(_turn_token)
 
     def clean_json_output(self, output: str) -> str:
         """Clean JSON output while preserving the legacy agent method."""
@@ -4250,6 +4261,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if durable_context is not None:
                 messages = await durable_context.arestore_messages(messages)
             
+            # Track messages THIS turn appends so a failure rolls back only our
+            # own messages, never a concurrent turn's (see memory_mixin). The
+            # default (OpenAI) path used to skip this, so its positional rollback
+            # ``del chat_history[n:]`` erased a concurrent turn's interleaved
+            # messages. Each achat() turn runs in its own task/context and
+            # _clear_turn_tracking() ran at the top of this turn, so this list is
+            # cleaned up when the next turn on this task starts.
+            self._begin_turn_tracking()
+
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
             
