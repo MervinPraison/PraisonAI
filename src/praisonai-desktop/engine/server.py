@@ -118,6 +118,9 @@ LOCK_PATH = DATA_DIR / "engine.lock"
 # Built on first use: importing the training module costs nothing until someone
 # opens the tab, and the engine must stay fast to start for chat.
 _TRAINER = None
+_BOTS = None
+_KNOWLEDGE = None
+_MEDIA = None
 LOCK_FORMAT_VERSION = 2
 
 
@@ -785,7 +788,66 @@ DEFAULT_SETTINGS = {
     "confirm_delete": True,
     "launch_at_login": False,
     "check_updates": True,
+    "onboarding_complete": False,
 }
+
+
+def api_key_configured() -> bool:
+    """Whether a provider key exists (settings keychain or environment)."""
+    if str(os.environ.get("OPENAI_API_KEY") or "").strip():
+        return True
+    key = str(load_settings().get("api_key") or "").strip()
+    return len(key) >= 20
+
+
+def _onboarding_knowledge_snapshot() -> tuple[bool, int]:
+    if _KNOWLEDGE is not None:
+        st = _KNOWLEDGE.status()
+        return bool(st.get("ready")), len(st.get("paths") or [])
+    cfg_path = DATA_DIR / "knowledge" / "knowledge.json"
+    if not cfg_path.is_file():
+        return False, 0
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        paths = data.get("paths") or []
+        ready = bool(data.get("indexed_at")) and bool(paths)
+        return ready, len(paths)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False, 0
+
+
+def _onboarding_channels_count() -> int:
+    if _BOTS is not None:
+        return len(_BOTS.list_channels())
+    path = DATA_DIR / "bots" / "channels.json"
+    if not path.is_file():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return len(data) if isinstance(data, list) else 0
+    except (OSError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def onboarding_payload() -> dict:
+    cfg = load_settings()
+    knowledge_ready, knowledge_paths = _onboarding_knowledge_snapshot()
+    channels_count = _onboarding_channels_count()
+    return {
+        "complete": bool(cfg.get("onboarding_complete")),
+        "api_key_set": api_key_configured(),
+        "knowledge_ready": knowledge_ready,
+        "knowledge_paths": knowledge_paths,
+        "channels_count": channels_count,
+        "channel_platforms": ["telegram", "slack", "discord"],
+        "env_hints": {
+            "openai": "OPENAI_API_KEY",
+            "telegram": "TELEGRAM_BOT_TOKEN",
+            "slack_bot": "SLACK_BOT_TOKEN",
+            "slack_app": "SLACK_APP_TOKEN",
+            "discord": "DISCORD_BOT_TOKEN",
+        },
+    }
 
 
 # --- keychain ---------------------------------------------------------------
@@ -1728,7 +1790,14 @@ def redacted(cfg: dict) -> dict:
 # would need the Rust shell to carry one). Requests with NO Origin are allowed:
 # that is cli.py, the tests and curl -- local processes that already have the
 # user's filesystem, so a token would protect nothing.
-ALLOWED_ORIGIN_HOSTS = {"tauri.localhost", "localhost", "127.0.0.1", "[::1]", "::1"}
+ALLOWED_ORIGIN_HOSTS = {
+    "tauri.localhost",
+    "asset.localhost",  # some WebView2 builds use this for embedded assets
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "::1",
+}
 
 
 def origin_allowed(origin: str) -> bool:
@@ -1764,6 +1833,11 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin_allowed(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
+        # WebView2/Chromium preflight requires Allow-Methods or POST/DELETE fail
+        # with a network error while GET (no preflight) still works.
+        self.send_header(
+            "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+        )
         self.send_header("Access-Control-Allow-Headers", "content-type")
 
     def _origin_ok(self) -> bool:
@@ -1841,6 +1915,38 @@ class Handler(BaseHTTPRequestHandler):
             _TRAINER = Trainer(DATA_DIR, sys.executable)
         return _TRAINER
 
+    def _bots(self):
+        """Channel bots and gateway supervisor."""
+        global _BOTS
+        if _BOTS is None:
+            from bots import BotSupervisor
+            cfg = load_settings()
+            _BOTS = BotSupervisor(
+                DATA_DIR,
+                sys.executable,
+                model=str(cfg.get("model") or "gpt-4o-mini"),
+            )
+        return _BOTS
+
+    def _knowledge(self):
+        """Folder indexing and retrieval for desktop RAG."""
+        global _KNOWLEDGE
+        if _KNOWLEDGE is None:
+            from knowledge import KnowledgeSupervisor
+            cfg = load_settings()
+            _KNOWLEDGE = KnowledgeSupervisor(
+                DATA_DIR,
+                model=str(cfg.get("model") or "gpt-4o-mini"),
+            )
+        return _KNOWLEDGE
+
+    def _media(self):
+        global _MEDIA
+        if _MEDIA is None:
+            from media import MediaSupervisor
+            _MEDIA = MediaSupervisor(DATA_DIR)
+        return _MEDIA
+
     def _train_progress(self, run, cursor):
         """Replay from `cursor`, then follow. Not a subscription: a client that
         reconnects after a closed lid gets what it missed, which is the whole
@@ -1917,6 +2023,35 @@ class Handler(BaseHTTPRequestHandler):
                 self._train_progress(run, cursor)
             except (BrokenPipeError, ConnectionResetError):
                 pass          # the window closed; the run keeps going
+            return
+
+        if self.path == "/onboarding":
+            self._json({"ok": True, **onboarding_payload()})
+            return
+        if self.path == "/knowledge/status":
+            self._json({"ok": True, **self._knowledge().status()})
+            return
+        if self.path == "/media/capabilities":
+            self._json({"ok": True, **self._media().capabilities()})
+            return
+        if self.path.startswith("/media/recent?"):
+            from urllib.parse import parse_qs, urlparse
+            kind = (parse_qs(urlparse(self.path).query).get("kind") or ["image"])[0]
+            self._json({"ok": True, "items": self._media().list_recent(kind)})
+            return
+        if self.path == "/bots/channels":
+            self._json({"channels": self._bots().list_channels()})
+            return
+        if self.path == "/bots/gateway":
+            self._json(self._bots().gateway_status())
+            return
+        if self.path.startswith("/bots/logs?"):
+            from urllib.parse import parse_qs, urlparse
+            target = (parse_qs(urlparse(self.path).query).get("target") or [""])[0]
+            try:
+                self._json(self._bots().logs(target))
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
             return
 
         if self.path == "/train/runs":
@@ -2017,8 +2152,36 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_PUT(self):
+        if not self._origin_ok():
+            return
+        route = urlparse(self.path).path
+        if route.startswith("/bots/channels/"):
+            channel_id = route.rsplit("/", 1)[-1]
+            payload = self._body()
+            try:
+                ch = self._bots().update_channel(channel_id, payload)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+        self.send_error(404)
+
     def do_DELETE(self):
         if not self._origin_ok():
+            return
+        route = urlparse(self.path).path
+        if route.startswith("/bots/channels/"):
+            channel_id = route.rsplit("/", 1)[-1]
+            ok = self._bots().delete_channel(channel_id)
+            if not ok:
+                self._json({"ok": False, "error": "no such channel"}, 404)
+                return
+            self._json({"ok": True})
             return
         if not self.path.startswith("/chats/"):
             self.send_error(404)
@@ -2038,6 +2201,138 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._origin_ok():
             return
+        route = urlparse(self.path).path
+
+        if route == "/knowledge/configure":
+            payload = self._body() or {}
+            try:
+                st = self._knowledge().configure(payload.get("paths") or [])
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, **st})
+            return
+
+        if route == "/knowledge/reindex":
+            try:
+                st = self._knowledge().reindex()
+            except (ValueError, RuntimeError) as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, **st})
+            return
+
+        if route == "/knowledge/query":
+            payload = self._body() or {}
+            q = str(payload.get("query") or "").strip()
+            if not q:
+                self._json({"ok": False, "error": "query required"}, 400)
+                return
+            try:
+                ctx = self._knowledge().query(q)
+            except (ValueError, RuntimeError) as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, "context": ctx})
+            return
+
+        if route == "/media/image":
+            payload = self._body() or {}
+            try:
+                out = self._media().generate_image(
+                    str(payload.get("prompt") or ""),
+                    settings=load_settings(),
+                    model=str(payload.get("model") or "dall-e-3"),
+                    size=str(payload.get("size") or "1024x1024"),
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, **out})
+            return
+
+        if route == "/media/video":
+            payload = self._body() or {}
+            try:
+                out = self._media().generate_video(
+                    str(payload.get("prompt") or ""),
+                    settings=load_settings(),
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, **out})
+            return
+
+        if route == "/onboarding/complete":
+            save_settings({"onboarding_complete": True})
+            self._json({"ok": True, **onboarding_payload()})
+            return
+
+        if route == "/onboarding/test":
+            payload = self._body() or {}
+            prompt = str(payload.get("prompt") or "Hi").strip() or "Hi"
+            try:
+                agent = _get_agent("onboarding-test", tools=False)
+                reply = str(agent.start(prompt) or "")
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, "reply": reply[:500]})
+            return
+
+        if route == "/bots/channels":
+            payload = self._body()
+            try:
+                ch = self._bots().add_channel(payload)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, "channel": ch}, 201)
+            return
+
+        if route.startswith("/bots/channels/") and route.endswith("/start"):
+            channel_id = route.split("/")[3]
+            try:
+                ch = self._bots().start_channel(channel_id)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+
+        if route.startswith("/bots/channels/") and route.endswith("/stop"):
+            channel_id = route.split("/")[3]
+            try:
+                ch = self._bots().stop_channel(channel_id)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 404)
+                return
+            self._json({"ok": True, "channel": ch})
+            return
+
+        if route == "/bots/gateway/start":
+            payload = self._body() or {}
+            port = int(payload.get("port") or 8765)
+            try:
+                status = self._bots().start_gateway(port)
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "gateway": status})
+            return
+
+        if route == "/bots/gateway/stop":
+            status = self._bots().stop_gateway()
+            self._json({"ok": True, "gateway": status})
+            return
+
         if self.path == "/train/start":
             payload = self._body()
             config = payload.get("config") or {}
@@ -2305,6 +2600,11 @@ class Handler(BaseHTTPRequestHandler):
             chat_id = payload.get("chat_id") or session
             regenerate_of = payload.get("regenerate_of")
             tools_on = payload.get("tools", True) is not False
+            use_knowledge = payload.get("use_knowledge") is True
+            # Knowledge turns answer from injected document text; web tools
+            # otherwise hijack the turn (e.g. web_search when Tavily is unset).
+            if use_knowledge:
+                tools_on = False
             # Images arrive as data: URIs and go to the agent as attachments= so a
             # vision model actually sees them; text-like files keep being folded
             # into the prompt as before. Nothing binary is ever stringified.
@@ -2336,6 +2636,19 @@ class Handler(BaseHTTPRequestHandler):
         proj_text = project_instructions(proj)
         if proj_text:
             turn_prompt = f"{proj_text}\n\n{prompt}"
+        if use_knowledge:
+            try:
+                ctx = self._knowledge().query(turn_prompt)
+                if ctx:
+                    turn_prompt = (
+                        "Answer using the user's indexed documents below. "
+                        "If the answer appears in the excerpt, state it plainly "
+                        "(including codes or secrets stored in those files).\n\n"
+                        f"--- Retrieved knowledge ---\n{ctx}\n\n"
+                        f"--- User question ---\n{turn_prompt}"
+                    )
+            except (ValueError, RuntimeError):
+                pass
 
         self.send_response(200)
         self._cors()

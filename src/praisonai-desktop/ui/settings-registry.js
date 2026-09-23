@@ -203,6 +203,10 @@ const SETTINGS = [
   { key: "logs_link", section: "about", label: "Engine log",
     control: { kind: "action", verb: "Open" }, action: "logs" },
 
+  { key: "engine_restart", section: "about", label: "Restart engine",
+    description: "Loads new engine code after an update. Chat may pause briefly.",
+    control: { kind: "action", verb: "Restart" }, action: "engine_restart" },
+
   { key: "check_now", section: "about", label: "Check for updates",
     control: { kind: "action", verb: "Check" }, action: "update" },
 

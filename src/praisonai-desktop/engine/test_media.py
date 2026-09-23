@@ -1,0 +1,35 @@
+"""Tests for media supervisor (no network)."""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+import media
+
+
+class MediaSupervisorTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="desktop-media-"))
+        self.sup = media.MediaSupervisor(self.home)
+
+    def test_capabilities(self):
+        caps = self.sup.capabilities()
+        self.assertTrue(caps["image"])
+        self.assertIn("dall-e-3", caps["image_models"])
+
+    def test_generate_image_requires_key(self):
+        import os
+
+        old = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            with self.assertRaises(ValueError):
+                self.sup.generate_image("a cat", settings={})
+        finally:
+            if old is not None:
+                os.environ["OPENAI_API_KEY"] = old
+
+
+if __name__ == "__main__":
+    unittest.main()

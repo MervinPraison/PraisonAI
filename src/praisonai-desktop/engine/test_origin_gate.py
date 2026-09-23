@@ -48,7 +48,7 @@ class OriginPredicate(unittest.TestCase):
 
     def test_the_webview_origin_is_allowed_on_every_platform(self):
         for origin in ("tauri://localhost", "http://tauri.localhost",
-                       "https://tauri.localhost"):
+                       "https://tauri.localhost", "https://asset.localhost"):
             self.assertTrue(server.origin_allowed(origin), origin)
 
     def test_localhost_dev_server_is_allowed(self):
@@ -142,6 +142,21 @@ class OriginGateOverHttp(unittest.TestCase):
             status, acao = self.call(method, path, body, origin=APP)
             self.assertIn(status, (200, 204), f"{method} {path}")
             self.assertEqual(acao, APP, f"{method} {path} lost its CORS header")
+
+    def test_preflight_allows_post_and_delete(self):
+        req = urllib.request.Request(
+            self.base + "/bots/channels",
+            method="OPTIONS",
+            headers={
+                "Origin": APP,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            methods = resp.headers.get("Access-Control-Allow-Methods") or ""
+            self.assertIn("POST", methods)
+            self.assertIn("DELETE", methods)
 
     def test_the_reply_never_carries_a_wildcard(self):
         _, acao = self.call("GET", "/chats", origin=APP)
