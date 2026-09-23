@@ -904,3 +904,182 @@ class TestIssue3492WrapperGaps:
         }
         with pytest.raises(ValueError, match="Cannot verify runtime-feature support"):
             generator._validate_cli_backend_compatibility(config, 'no_such_framework_xyz')
+
+
+class TestIssue5150WrapperGaps:
+    """Regression tests for issue #5150 wrapper-layer defects."""
+
+    def test_bind_session_fails_loudly_when_chat_history_reset_raises(self):
+        """A swallowed chat_history reset would leak one session's history into
+        another; bind_session must raise instead of silently continuing."""
+        from praisonai.api.agent_invoke import bind_session
+
+        class LeakyAgent:
+            _session_id = None
+
+            @property
+            def chat_history(self):
+                return ["tenant-A secret"]
+
+            @chat_history.setter
+            def chat_history(self, value):
+                raise RuntimeError("history store busy")
+
+        with pytest.raises(RuntimeError, match="Cannot reset chat_history"):
+            bind_session(LeakyAgent(), "tenant-B")
+
+    def test_bind_session_wipes_and_binds(self):
+        from praisonai.api.agent_invoke import bind_session
+
+        class Agent:
+            def __init__(self):
+                self.chat_history = ["old turn"]
+                self._session_id = None
+                self._history_session_id = None
+                self._session_store_initialized = True
+
+        agent = bind_session(Agent(), "s1")
+        assert agent.chat_history == []
+        assert agent._session_id == "s1"
+        assert agent._history_session_id == "s1"
+        assert agent._session_store_initialized is False
+
+    def test_bind_session_clears_binding_without_session_id(self):
+        from praisonai.api.agent_invoke import bind_session
+
+        class Agent:
+            def __init__(self):
+                self.chat_history = ["old turn"]
+                self._session_id = "stale"
+                self._history_session_id = "stale"
+
+        agent = bind_session(Agent(), None)
+        assert agent.chat_history == []
+        assert agent._session_id is None
+        assert agent._history_session_id is None
+
+    def test_async_client_cached_per_loop_and_distinct_across_loops(self):
+        import asyncio
+
+        pytest.importorskip("httpx")
+        from praisonai.capabilities import passthrough as P
+
+        # Retain the actual client objects (not their ``id()``) across both
+        # loops. Comparing ``id()`` after a client is freed is flaky: CPython
+        # can reuse the freed address, yielding equal ids for genuinely distinct
+        # objects. Holding both references keeps their identities stable, so
+        # ``is not`` is a sound per-loop-isolation assertion. The pooled sockets
+        # are drained explicitly at the end from each object.
+        captured = []
+
+        async def grab():
+            client = P._get_async_client()
+            assert P._get_async_client() is client  # cached within one loop
+            captured.append(client)
+            # Detach from the module map without awaiting (we close below),
+            # mirroring the sync ``close_clients`` drop path so the next loop
+            # starts clean and the final map-empty assertion holds.
+            P._async_clients.pop(id(asyncio.get_running_loop()), None)
+
+        asyncio.run(grab())
+        asyncio.run(grab())
+
+        first, second = captured
+        assert first is not second  # distinct client per event loop
+        assert P._async_clients == {}
+
+        async def _drain():
+            await first.aclose()
+            await second.aclose()
+
+        asyncio.run(_drain())
+
+    def test_async_client_cache_self_heals_on_reused_loop_id(self):
+        # The throwaway-loop hot path (``asyncio.run(apassthrough(...))`` in a
+        # loop) tears the loop down without ``aclose_clients()``, leaving a
+        # client pinned in the module map. If a *new* loop is later handed the
+        # same ``id()`` (CPython reuses collected loop ids), the cache must NOT
+        # return the stale client bound to the dead loop — it must evict it and
+        # bind a fresh client to the live loop.
+        import weakref
+
+        pytest.importorskip("httpx")
+        import httpx
+        from praisonai.capabilities import passthrough as P
+
+        P.close_clients()  # start from a clean map
+        released = []
+        try:
+            async def probe():
+                import asyncio
+
+                live_loop = asyncio.get_running_loop()
+                key = id(live_loop)
+
+                # Plant a stale entry under the SAME id as the live loop, but
+                # owned by a *different* (already-collected) loop object, and a
+                # client whose orphan-release we can observe.
+                dead_loop = asyncio.new_event_loop()
+                dead_loop.close()
+                stale = httpx.AsyncClient()
+                released.append(stale)
+                P._async_clients[key] = (weakref.ref(dead_loop), stale)
+
+                fresh = P._get_async_client()
+                # Distinct fresh client, now bound to the live loop.
+                assert fresh is not stale
+                assert P._get_async_client() is fresh
+                await P.aclose_clients()
+
+            import asyncio
+            asyncio.run(probe())
+            assert P._async_clients == {}
+        finally:
+            # Make sure the stale client's sockets are released even if asserts
+            # short-circuit (the impl already drains it via _release_orphan).
+            for c in released:
+                P._release_orphan(c)
+
+    def test_transient_availability_failure_reprobes_after_ttl(self, monkeypatch):
+        import praisonai.framework_adapters.registry as registry_mod
+        from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+        # Drive the clock deterministically so the test never races the TTL.
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(registry_mod.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(registry_mod, "_NEG_CACHE_TTL", 60.0)
+        registry = FrameworkAdapterRegistry(discover_entry_points=False)
+
+        calls = {"n": 0}
+
+        class Flaky:
+            def is_available(self):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("transient boot race")
+                return True
+
+        registry.create = lambda name, *a, **k: Flaky()
+
+        assert registry.is_available("x") is False
+        assert registry.is_available("x") is False  # cached within TTL
+        assert calls["n"] == 1
+        clock["t"] += 61.0  # advance past the negative-cache TTL
+        assert registry.is_available("x") is True  # reprobed after TTL
+
+    def test_structural_unavailable_cached_for_process(self):
+        from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+        registry = FrameworkAdapterRegistry(discover_entry_points=False)
+        calls = {"n": 0}
+
+        class Missing:
+            def is_available(self):
+                calls["n"] += 1
+                raise ImportError("optional dep not installed")
+
+        registry.create = lambda name, *a, **k: Missing()
+
+        assert registry.is_available("y") is False
+        assert registry.is_available("y") is False
+        assert calls["n"] == 1  # probed once, cached forever
