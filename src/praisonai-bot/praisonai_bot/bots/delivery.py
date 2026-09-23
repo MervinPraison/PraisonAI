@@ -25,16 +25,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _redact_outbound_text(text: str) -> str:
+def _redact_outbound_text(text: str, bot: Any = None) -> str:
     """Scrub registered secrets + credential-shaped tokens before dispatch.
 
     Shared safe-by-default helper for the proactive/scheduled delivery path
-    (Issue #5055). Best-effort — a scrubber error (or core predating the
-    primitive) leaves the text unchanged rather than blocking delivery.
+    (Issue #5055). When ``bot`` is supplied the same controls as the mixin seam
+    apply: an injected ``_outbound_redactor`` (e.g. a PII policy) takes
+    precedence and ``_redact_secrets_outbound = False`` opts out, so one
+    consistent redaction policy governs every outbound seam. Best-effort — a
+    scrubber error (or core predating the primitive) leaves the text unchanged
+    rather than blocking delivery.
     """
     if not text or not isinstance(text, str):
         return text
+    if bot is not None and not getattr(bot, "_redact_secrets_outbound", True):
+        return text
+    redactor = getattr(bot, "_outbound_redactor", None) if bot is not None else None
     try:
+        if redactor is not None:
+            masked = redactor.redact(text)
+            # Only honour a well-behaved injected redactor (returns a str) so a
+            # stray/mock attribute cannot yield a coroutine or drop the scrub.
+            if isinstance(masked, str):
+                return masked
         from praisonaiagents.secrets import redact_outbound
 
         return redact_outbound(text)
@@ -760,8 +773,9 @@ class DeliveryRouter:
             # through an adapter's ``fire_message_sending`` reply seam, so scrub
             # registered secrets + credential-shaped tokens here before dispatch.
             # Safe-by-default and best-effort — a scrubber error leaves the text
-            # unchanged rather than blocking delivery.
-            text = _redact_outbound_text(text)
+            # unchanged rather than blocking delivery. The resolved bot carries
+            # any injected redactor / opt-out so one policy governs every seam.
+            text = _redact_outbound_text(text, bot)
 
             # Idempotency short-circuit (issue #2578): suppress a duplicate
             # proactive send whose caller-stable key we have already delivered,

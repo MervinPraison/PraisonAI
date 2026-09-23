@@ -176,3 +176,129 @@ def test_delivery_router_leaves_ordinary_text_unchanged():
         assert bot.last == "meeting at 3pm room 42"
 
     asyncio.run(run())
+
+
+# ── RelayAdapter seam (Issue #5055 gap: relay replies bypassed redaction) ──
+
+
+class _FakeTransport:
+    def __init__(self):
+        self.sent = []
+
+    async def send_outbound(self, target, message):
+        self.sent.append(message.content)
+        return {"ok": True}
+
+
+def test_relay_adapter_scrubs_registered_secret_before_dispatch():
+    from praisonai_bot.bots._relay_adapter import RelayAdapter
+
+    async def run():
+        register_secret_for_redaction("sk-relay-registered-9999")
+        transport = _FakeTransport()
+        adapter = RelayAdapter(transport, "telegram")
+        await adapter.send_message("chan", "key sk-relay-registered-9999 done")
+        assert transport.sent[-1] == "key [REDACTED] done"
+
+    asyncio.run(run())
+
+
+def test_relay_adapter_scrubs_credential_shape_before_dispatch():
+    from praisonai_bot.bots._relay_adapter import RelayAdapter
+
+    async def run():
+        transport = _FakeTransport()
+        adapter = RelayAdapter(transport, "telegram")
+        await adapter.send_message("chan", "id AKIAIOSFODNN7EXAMPLE here")
+        assert "AKIA" not in transport.sent[-1]
+        assert "[REDACTED]" in transport.sent[-1]
+
+    asyncio.run(run())
+
+
+def test_relay_adapter_leaves_ordinary_text_unchanged():
+    from praisonai_bot.bots._relay_adapter import RelayAdapter
+
+    async def run():
+        transport = _FakeTransport()
+        adapter = RelayAdapter(transport, "telegram")
+        await adapter.send_message("chan", "see you at 3pm in room 42")
+        assert transport.sent[-1] == "see you at 3pm in room 42"
+
+    asyncio.run(run())
+
+
+def test_relay_adapter_opt_out_disables_redaction():
+    from praisonai_bot.bots._relay_adapter import RelayAdapter
+
+    async def run():
+        register_secret_for_redaction("sk-relay-optout-9999")
+        transport = _FakeTransport()
+        adapter = RelayAdapter(transport, "telegram")
+        adapter._redact_secrets_outbound = False
+        await adapter.send_message("chan", "key sk-relay-optout-9999 done")
+        assert transport.sent[-1] == "key sk-relay-optout-9999 done"
+
+    asyncio.run(run())
+
+
+# ── One consistent policy across all seams (injected redactor honoured) ────
+
+
+class _UpperRedactor:
+    """A stand-in for an injected policy (e.g. a PII redactor)."""
+
+    def redact(self, text: str) -> str:
+        return text.upper()
+
+
+def test_injected_redactor_governs_relay_seam():
+    from praisonai_bot.bots._relay_adapter import RelayAdapter
+
+    async def run():
+        transport = _FakeTransport()
+        adapter = RelayAdapter(transport, "telegram")
+        adapter._outbound_redactor = _UpperRedactor()
+        await adapter.send_message("chan", "hello relay")
+        assert transport.sent[-1] == "HELLO RELAY"
+
+    asyncio.run(run())
+
+
+def test_injected_redactor_governs_streaming_seam():
+    async def run():
+        adapter = _FakeAdapter()
+        adapter._outbound_redactor = _UpperRedactor()
+        cfg = StreamingConfig(mode=StreamingMode.DRAFT, min_interval=0, min_delta=0)
+        streamer = DraftStreamer(adapter, "chan", cfg)
+        await streamer.start()
+        streamer._content_buffer = "streamed body"
+        assert streamer._render_content() == "STREAMED BODY"
+
+    asyncio.run(run())
+
+
+def test_injected_redactor_governs_delivery_seam():
+    async def run():
+        bot = _RouterBot()
+        bot._outbound_redactor = _UpperRedactor()
+        router = _bare_router(bot)
+        ok = await router.deliver("telegram:123", "proactive body")
+        assert ok is True
+        assert bot.last == "PROACTIVE BODY"
+
+    asyncio.run(run())
+
+
+def test_streaming_opt_out_disables_redaction():
+    async def run():
+        register_secret_for_redaction("sk-stream-optout-9999")
+        adapter = _FakeAdapter()
+        adapter._redact_secrets_outbound = False
+        cfg = StreamingConfig(mode=StreamingMode.DRAFT, min_interval=0, min_delta=0)
+        streamer = DraftStreamer(adapter, "chan", cfg)
+        await streamer.start()
+        streamer._content_buffer = "key sk-stream-optout-9999 done"
+        assert "sk-stream-optout-9999" in streamer._render_content()
+
+    asyncio.run(run())
