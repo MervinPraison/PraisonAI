@@ -54,16 +54,26 @@ class PraisonAIDB:
         database_url: Optional[str] = None,
         state_url: Optional[str] = None,
         knowledge_url: Optional[str] = None,
+        *,
+        conversation_options: Optional[Dict[str, Any]] = None,
+        state_options: Optional[Dict[str, Any]] = None,
+        knowledge_options: Optional[Dict[str, Any]] = None,
         **options
     ):
         """
         Initialize PraisonDB adapter.
-        
+
         Args:
             database_url: URL for conversation storage (postgres, mysql, sqlite)
             state_url: URL for state storage (redis, etc.)
             knowledge_url: URL for knowledge/vector storage (qdrant, etc.)
-            **options: Additional backend-specific options
+            conversation_options: Backend-specific kwargs for the conversation store
+            state_options: Backend-specific kwargs for the state store
+            knowledge_options: Backend-specific kwargs for the knowledge store
+            **options: Deprecated. Backend-specific options broadcast to EVERY
+                configured store. This corrupts multi-backend setups because one
+                backend's kwarg (e.g. Postgres ``ssl_mode``) is also handed to an
+                unrelated store (e.g. Redis). Prefer the per-store dicts above.
         """
         self._database_url = database_url
         self._state_url = state_url
@@ -71,6 +81,30 @@ class PraisonAIDB:
         # Pop adapter-level options before forwarding the rest to the backend
         # store factories, so they are never passed through as backend kwargs.
         init_retry_cooldown = options.pop("init_retry_cooldown", 30.0)
+
+        # Per-store options keep backend-specific kwargs from colliding across
+        # unrelated stores (mirrors persistence.config.PersistenceConfig).
+        self._conversation_options: Dict[str, Any] = dict(conversation_options or {})
+        self._state_options: Dict[str, Any] = dict(state_options or {})
+        self._knowledge_options: Dict[str, Any] = dict(knowledge_options or {})
+
+        if options:
+            # Legacy broadcast path: kept for back-compat but warns, because
+            # sharing one dict across three factories cross-contaminates backends.
+            import warnings
+            warnings.warn(
+                "PraisonAIDB(**options) applies the same kwargs to every backend, "
+                "which corrupts multi-backend setups. Pass per-store dicts instead: "
+                "conversation_options=..., state_options=..., knowledge_options=...",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            for key, value in options.items():
+                self._conversation_options.setdefault(key, value)
+                self._state_options.setdefault(key, value)
+                self._knowledge_options.setdefault(key, value)
+
+        # Retained for back-compat with any external references to ._options.
         self._options = options
         
         # Lazy-loaded stores
@@ -123,6 +157,9 @@ class PraisonAIDB:
         self._state_url = None
         self._knowledge_url = None
         self._options = {}
+        self._conversation_options = {}
+        self._state_options = {}
+        self._knowledge_options = {}
         self._conversation_store = conversation_store
         self._state_store = state_store
         self._knowledge_store = knowledge_store
@@ -149,21 +186,21 @@ class PraisonAIDB:
         if self._database_url:
             backend = self._detect_backend(self._database_url)
             self._conversation_store = create_conversation_store(
-                backend, url=self._database_url, **self._options
+                backend, url=self._database_url, **self._conversation_options
             )
 
         # Initialize state store
         if self._state_url:
             backend = self._detect_backend(self._state_url)
             self._state_store = create_state_store(
-                backend, url=self._state_url, **self._options
+                backend, url=self._state_url, **self._state_options
             )
 
         # Initialize knowledge store
         if self._knowledge_url:
             backend = self._detect_backend(self._knowledge_url)
             self._knowledge_store = create_knowledge_store(
-                backend, url=self._knowledge_url, **self._options
+                backend, url=self._knowledge_url, **self._knowledge_options
             )
 
     # DBAPI/driver exception class names that indicate a *transient* connection
@@ -1543,8 +1580,16 @@ class TursoDB(PraisonAIDB):
             raise ValueError(
                 "Turso database URL required. Provide database_url or set TURSO_DATABASE_URL."
             )
-        options["auth_token"] = token
-        super().__init__(database_url=url, **options)
+        # Scope the auth token to the conversation store only. Stuffing it into
+        # the shared **options bag would leak it into an unrelated state/knowledge
+        # store factory as an unexpected kwarg.
+        conversation_options = dict(options.pop("conversation_options", None) or {})
+        conversation_options["auth_token"] = token
+        super().__init__(
+            database_url=url,
+            conversation_options=conversation_options,
+            **options,
+        )
 
 
 # Backward-compatible aliases

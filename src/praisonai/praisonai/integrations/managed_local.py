@@ -28,6 +28,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -257,6 +258,15 @@ class LocalManagedAgent(ManagedBackendBase):
 
         # Internal agent (lazy)
         self._inner_agent: Any = None
+
+        # Guards check-then-create of the inner agent and the session (which
+        # mutates _session_history and writes it to disk via _persist_state()).
+        # execute() offloads the sync body to a thread-pool executor, so a shared
+        # instance can be entered concurrently; without this two threads both
+        # build an inner Agent, or both mutate _session_history mid-serialisation
+        # and corrupt the persisted JSON. threading.Lock is non-reentrant, so
+        # _ensure_session resolves the agent before taking the lock.
+        self._resource_lock = threading.Lock()
 
         # Session store: explicit > db-adapter > lazy default
         self._session_store: Any = None
@@ -721,40 +731,44 @@ class LocalManagedAgent(ManagedBackendBase):
             raise RuntimeError(f"pip install error in compute for {pip_pkgs}: {e}") from e
 
     def _ensure_agent(self) -> Any:
-        """Create or return the inner PraisonAI Agent."""
+        """Create or return the inner PraisonAI Agent (double-checked locking)."""
         if self._inner_agent is not None:
             return self._inner_agent
 
-        self._install_packages()
+        with self._resource_lock:
+            if self._inner_agent is not None:
+                return self._inner_agent
 
-        from praisonaiagents import Agent
+            self._install_packages()
 
-        model = self._resolve_model()
-        tools = self._resolve_tools()
-        system = self._cfg.get("system", self.instructions)
-        name = self._cfg.get("name", "Agent")
+            from praisonaiagents import Agent
 
-        agent_kwargs: Dict[str, Any] = {
-            "name": name,
-            "instructions": system,
-            "llm": model,
-            "tools": tools,
-        }
+            model = self._resolve_model()
+            tools = self._resolve_tools()
+            system = self._cfg.get("system", self.instructions)
+            name = self._cfg.get("name", "Agent")
 
-        # Pass API key and base directly to the inner agent instead of mutating
-        # the process-global environment. os.environ.setdefault() would let the
-        # first agent's credentials win for the whole process and leak into every
-        # subprocess spawned thereafter, cross-contaminating other tenants.
-        if self.api_key:
-            agent_kwargs["api_key"] = self.api_key
-        if self.api_base:
-            agent_kwargs["base_url"] = self.api_base
+            agent_kwargs: Dict[str, Any] = {
+                "name": name,
+                "instructions": system,
+                "llm": model,
+                "tools": tools,
+            }
 
-        self._inner_agent = Agent(**agent_kwargs)
-        self.agent_id = self.agent_id or f"agent_{uuid.uuid4().hex[:12]}"
-        self.environment_id = self.environment_id or f"env_{uuid.uuid4().hex[:12]}"
-        logger.info("[local_managed] agent created: %s model=%s", self.agent_id, model)
-        return self._inner_agent
+            # Pass API key and base directly to the inner agent instead of mutating
+            # the process-global environment. os.environ.setdefault() would let the
+            # first agent's credentials win for the whole process and leak into every
+            # subprocess spawned thereafter, cross-contaminating other tenants.
+            if self.api_key:
+                agent_kwargs["api_key"] = self.api_key
+            if self.api_base:
+                agent_kwargs["base_url"] = self.api_base
+
+            self._inner_agent = Agent(**agent_kwargs)
+            self.agent_id = self.agent_id or f"agent_{uuid.uuid4().hex[:12]}"
+            self.environment_id = self.environment_id or f"env_{uuid.uuid4().hex[:12]}"
+            logger.info("[local_managed] agent created: %s model=%s", self.agent_id, model)
+            return self._inner_agent
 
     def _ensure_session(self) -> str:
         """Create a session ID if not set.
@@ -768,17 +782,22 @@ class LocalManagedAgent(ManagedBackendBase):
         """
         if self._session_id:
             return self._session_id
+        # Build the inner agent *before* taking the lock: _ensure_agent acquires
+        # _resource_lock itself and threading.Lock is non-reentrant.
         self._ensure_agent()
-        self._session_id = f"session_{uuid.uuid4().hex[:12]}"
-        self._session_history.append({
-            "id": self._session_id,
-            "status": "idle",
-            "title": self._cfg.get("session_title", "PraisonAI local session"),
-            "created_at": time.time(),
-        })
-        self._persist_state()
-        logger.info("[local_managed] session created: %s", self._session_id)
-        return self._session_id
+        with self._resource_lock:
+            if self._session_id:
+                return self._session_id
+            self._session_id = f"session_{uuid.uuid4().hex[:12]}"
+            self._session_history.append({
+                "id": self._session_id,
+                "status": "idle",
+                "title": self._cfg.get("session_title", "PraisonAI local session"),
+                "created_at": time.time(),
+            })
+            self._persist_state()
+            logger.info("[local_managed] session created: %s", self._session_id)
+            return self._session_id
 
     # ------------------------------------------------------------------
     # execute() — ManagedBackendProtocol
