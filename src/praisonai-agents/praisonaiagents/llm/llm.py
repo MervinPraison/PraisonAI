@@ -6,6 +6,7 @@ import warnings
 import re
 import inspect
 import asyncio
+import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -213,6 +214,24 @@ class LLM:
     
     # Class-level flag for one-time logging configuration
     _logging_configured = False
+
+    # Current agent name for per-call token/cost attribution is stored in a
+    # PER-INSTANCE ContextVar (see __init__: self._current_agent_name_var).
+    #
+    # ContextVar, not a plain attribute: a single LLM instance can back two
+    # different Agents (Agent(llm=<shared LLM>) is supported), and
+    # PraisonAIAgents.arun_all_tasks dispatches tasks concurrently via
+    # asyncio.gather on one thread. With a plain attribute, task A sets
+    # "Researcher", awaits the network call, task B sets "Writer" on the SAME
+    # object, and when A's response returns it reads "Writer" -- A's tokens get
+    # attributed to B. A ContextVar is copied per task at gather/create_task
+    # time, so each concurrently-gathered coroutine keeps its own value across
+    # the await (same reasoning as _tools_scope_depths in agents/agents.py).
+    #
+    # Per-instance (not class-level): two distinct LLM instances -- including an
+    # original and its clone -- must keep independent attribution state within
+    # the same context, otherwise the last writer's agent name leaks across LLMs.
+
     
     # Class-level cache for LiteLLM module (avoids repeated import overhead)
     _litellm_module = None
@@ -572,7 +591,13 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # current_agent_name is backed by a PER-INSTANCE ContextVar (see the
+        # current_agent_name property). Per-instance so distinct LLMs -- and an
+        # original vs. its clone -- keep independent attribution; ContextVar so
+        # concurrently-gathered tasks sharing one LLM stay isolated across await.
+        self._current_agent_name_var: "contextvars.ContextVar[Optional[str]]" = (
+            contextvars.ContextVar("praisonai_current_agent_name", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6262,10 +6287,62 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self.verbose:
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
-    
+
+    def __deepcopy__(self, memo):
+        """Deep-copy safely: give the clone fresh non-copyable primitives.
+
+        Two kinds of attribute cannot be deep-copied and must be rebuilt on the
+        clone rather than shared with the original:
+
+        * ``_current_agent_name_var`` is a ``contextvars.ContextVar`` (``TypeError:
+          cannot pickle '_contextvars.ContextVar' object``). It also carries
+          runtime, task-local state, so the clone gets a brand-new one and starts
+          with independent (empty) attribution.
+        * ``threading`` locks (e.g. a lock-bearing subclass such as
+          :class:`~praisonaiagents.model_harness.ScriptedModel`, whose
+          ``_script_lock`` is an ``RLock``) also cannot be deep-copied
+          (``TypeError: cannot pickle '_thread.RLock' object``). Each is replaced
+          with a fresh lock of the same kind so the clone is independently
+          synchronised, mirroring ``Agent.__deepcopy__``.
+        """
+        import threading
+
+        lock_type = type(threading.Lock())
+        rlock_type = type(threading.RLock())
+
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for key, value in self.__dict__.items():
+            if key == "_current_agent_name_var":
+                new.__dict__[key] = contextvars.ContextVar(
+                    "praisonai_current_agent_name", default=None
+                )
+            elif isinstance(value, rlock_type):
+                new.__dict__[key] = threading.RLock()
+            elif isinstance(value, lock_type):
+                new.__dict__[key] = threading.Lock()
+            else:
+                new.__dict__[key] = copy.deepcopy(value, memo)
+        return new
+
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Current agent name for token attribution (ContextVar-backed).
+
+        Reads from a ContextVar so concurrently-gathered tasks that share this
+        LLM instance each observe the agent name set within their own context,
+        rather than the last writer's value.
+        """
+        return self._current_agent_name_var.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        self._current_agent_name_var.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
-        self.current_agent_name = agent_name
+        """Set the current agent name for token tracking (ContextVar-backed)."""
+        self._current_agent_name_var.set(agent_name)
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
