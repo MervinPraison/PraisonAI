@@ -17,8 +17,10 @@ the planner guarantees the identical schedule resumes.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional, Sequence
 
 from .protocols import RoomEvent, RoomTurnPlannerProtocol, RoundRobinRoomPlanner
 
@@ -90,11 +92,30 @@ class RoomConfig:
         """
         data = data or {}
         roster = data.get("roster")
+        key = "roster"
         if roster is None:
             roster = data.get("agents", [])
+            key = "agents"
+        if roster is None:
+            roster = []
+        # A roster must be a sequence of ids. Reject a bare string (which would
+        # silently split into character-sized entries, e.g. "researcher" ->
+        # ['r','e','s',...]) and mappings, with an actionable error instead of a
+        # room that is silently unusable.
+        if isinstance(roster, (str, bytes)) or isinstance(roster, Mapping):
+            raise ValueError(
+                f"RoomConfig {name!r}: {key!r} must be a list of agent ids, "
+                f"got {type(roster).__name__}; "
+                f"use a YAML list, e.g. {key}: [researcher, critic]"
+            )
+        if not isinstance(roster, Sequence):
+            raise ValueError(
+                f"RoomConfig {name!r}: {key!r} must be a list of agent ids, "
+                f"got {type(roster).__name__}"
+            )
         return cls(
             name=name,
-            roster=[str(a) for a in (roster or [])],
+            roster=[str(a) for a in roster],
             planner=str(data.get("planner", "round_robin")),
             max_rounds=int(data.get("max_rounds", 3)),
             max_messages=int(data.get("max_messages", 20)),
@@ -133,6 +154,10 @@ class Room:
         self.planner = planner or config.build_planner()
         self._render = render or self._default_render
         self.transcript: List[RoomEvent] = []
+        # Serialize the whole append-and-drain per room: concurrent
+        # ``on_message`` calls must not interleave against the shared transcript,
+        # or two drains could schedule and execute the same agent twice.
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def _default_render(transcript: List[RoomEvent]) -> str:
@@ -141,15 +166,29 @@ class Room:
             f"{ev.speaker}: {ev.content}" for ev in transcript if ev.content
         )
 
+    def _current_round(self) -> int:
+        """The round currently being filled in the active (post-human) slice."""
+        roster_set = set(self.config.roster)
+        last_human = -1
+        for idx, ev in enumerate(self.transcript):
+            if ev.speaker not in roster_set:
+                last_human = idx
+        activity = self.transcript[last_human:] if last_human >= 0 else []
+        return max((ev.round for ev in activity), default=0)
+
     def _scheduled_round(self, speaker: str) -> int:
         """Round the planner scheduled ``speaker`` into for the current activity.
 
-        Mirrors :class:`RoundRobinRoomPlanner`: round 0 admits every rostered
-        agent; a later round admits only agents ``@``-mentioned during the
-        previous round. The scheduled round is the smallest round at/after the
-        activity's current round where ``speaker`` is admitted and has not yet
-        spoken — the same round the planner is filling when it returns them.
+        Only :class:`RoundRobinRoomPlanner` defines round semantics (round 0
+        fan-out, later rounds admitted by ``@``-mentions). For any other custom
+        planner the round taxonomy is unknown, so we simply tag turns with the
+        activity's current round rather than inventing round-robin admission —
+        imposing round-robin rules on a custom planner would mislabel its turns
+        and could feed it an event that makes it re-select and loop unbounded.
         """
+        if not isinstance(self.planner, RoundRobinRoomPlanner):
+            return self._current_round()
+
         from .protocols import extract_mentions
 
         roster_set = set(self.config.roster)
@@ -159,8 +198,9 @@ class Room:
                 last_human = idx
         activity = self.transcript[last_human:] if last_human >= 0 else []
         current_round = max((ev.round for ev in activity), default=0)
+        max_rounds = getattr(self.planner, "max_rounds", self.config.max_rounds)
 
-        for rnd in range(current_round, self.config.max_rounds):
+        for rnd in range(current_round, max_rounds):
             spoken = {ev.speaker for ev in activity if ev.round == rnd}
             if rnd == 0:
                 admitted = set(roster_set)
@@ -183,21 +223,22 @@ class Room:
         planner scopes its accounting to messages since that last human turn, so
         a settled room reliably restarts when the next human speaks.
         """
-        self.transcript.append(event)
-        produced: List[RoomEvent] = []
-        while True:
-            nxt = self.planner.plan_next(self.config.roster, self.transcript)
-            if nxt is None:
-                break
-            rnd = self._scheduled_round(nxt)
-            reply = self.agents.get(nxt)
-            if reply is None:
-                # Unknown roster id: record a pass so the planner advances
-                # instead of re-scheduling the same missing agent forever.
-                turn = RoomEvent(speaker=nxt, content="", round=rnd, passed=True)
-            else:
-                content = await reply(self._render(self.transcript))
-                turn = RoomEvent(speaker=nxt, content=content or "", round=rnd)
-            self.transcript.append(turn)
-            produced.append(turn)
-        return produced
+        async with self._lock:
+            self.transcript.append(event)
+            produced: List[RoomEvent] = []
+            while True:
+                nxt = self.planner.plan_next(self.config.roster, self.transcript)
+                if nxt is None:
+                    break
+                rnd = self._scheduled_round(nxt)
+                reply = self.agents.get(nxt)
+                if reply is None:
+                    # Unknown roster id: record a pass so the planner advances
+                    # instead of re-scheduling the same missing agent forever.
+                    turn = RoomEvent(speaker=nxt, content="", round=rnd, passed=True)
+                else:
+                    content = await reply(self._render(self.transcript))
+                    turn = RoomEvent(speaker=nxt, content=content or "", round=rnd)
+                self.transcript.append(turn)
+                produced.append(turn)
+            return produced

@@ -106,3 +106,62 @@ def test_room_transcript_replay_is_deterministic():
     room2.transcript = list(room1.transcript)
     nxt = room2.planner.plan_next(cfg.roster, room2.transcript)
     assert nxt is None  # already settled -> no double-execution
+
+
+def test_room_from_dict_rejects_scalar_roster():
+    # A bare string must NOT split into character-sized roster entries.
+    with pytest.raises(ValueError):
+        RoomConfig.from_dict("r", {"agents": "researcher"})
+    with pytest.raises(ValueError):
+        RoomConfig.from_dict("r", {"roster": "solo"})
+    with pytest.raises(ValueError):
+        RoomConfig.from_dict("r", {"agents": {"a": 1}})
+
+
+def test_room_concurrent_messages_do_not_duplicate_turns():
+    # Two overlapping human messages must not interleave into the shared
+    # transcript and execute the same agent twice for one activity.
+    calls = {"a": 0}
+
+    async def slow_reply(prompt: str) -> str:
+        await asyncio.sleep(0)
+        calls["a"] += 1
+        return "done"
+
+    cfg = RoomConfig(name="r", roster=["a"], max_rounds=1)
+    room = Room(cfg, {"a": slow_reply})
+
+    async def drive():
+        await asyncio.gather(
+            room.on_message(RoomEvent(speaker="user", content="one")),
+            room.on_message(RoomEvent(speaker="user", content="two")),
+        )
+
+    asyncio.run(drive())
+
+    # Each human message opens exactly one round-0 activity for the single
+    # rostered agent -> exactly two executions, never duplicated within one.
+    assert calls["a"] == 2
+    agent_turns = [e for e in room.transcript if e.speaker == "a"]
+    assert len(agent_turns) == 2
+
+
+def test_room_custom_planner_gets_current_round_not_roundrobin_labels():
+    # A custom planner has unknown round semantics; the runtime must tag turns
+    # with the activity's current round rather than inventing round-robin rules.
+    class OneShotPlanner:
+        def __init__(self):
+            self._done = False
+
+        def plan_next(self, roster, transcript):
+            if self._done:
+                return None
+            self._done = True
+            return roster[0]
+
+    cfg = RoomConfig(name="r", roster=["a", "b"])
+    room = Room(cfg, _echo_agents("a", "b"), planner=OneShotPlanner())
+    produced = asyncio.run(room.on_message(RoomEvent(speaker="user", content="go")))
+
+    assert [e.speaker for e in produced] == ["a"]
+    assert all(e.round == 0 for e in produced)
