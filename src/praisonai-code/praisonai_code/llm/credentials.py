@@ -67,6 +67,7 @@ def inject_credentials_into_env() -> bool:
             "groq": "GROQ_API_KEY",
             "cohere": "COHERE_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
+            "edenai": "EDENAI_API_KEY",
         }
 
         for provider in providers:
