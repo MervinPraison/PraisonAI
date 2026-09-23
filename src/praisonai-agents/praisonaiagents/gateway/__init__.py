@@ -209,6 +209,9 @@ _LAZY_IMPORTS = {
     "ConnectRecoveryStep": ("praisonaiagents.gateway.protocols", "ConnectRecoveryStep"),
     "is_recoverable": ("praisonaiagents.gateway.protocols", "is_recoverable"),
     "MessageParams": ("praisonaiagents.gateway.protocols", "MessageParams"),
+    # First-class attachment contract (Issue #5207)
+    "AttachmentRef": ("praisonaiagents.gateway.protocols", "AttachmentRef"),
+    "AttachmentStoreProtocol": ("praisonaiagents.gateway.protocols", "AttachmentStoreProtocol"),
     "LeaveParams": ("praisonaiagents.gateway.protocols", "LeaveParams"),
     "JoinParams": ("praisonaiagents.gateway.protocols", "JoinParams"),
     "FrameDecodeError": ("praisonaiagents.gateway.protocols", "FrameDecodeError"),
@@ -246,6 +249,8 @@ _LAZY_IMPORTS = {
     "SessionConfig": ("praisonaiagents.gateway.config", "SessionConfig"),
     "ApiConfig": ("praisonaiagents.gateway.config", "ApiConfig"),
     "EmergencyStopConfig": ("praisonaiagents.gateway.config", "EmergencyStopConfig"),
+    # Attachment ceilings config (Issue #5207)
+    "AttachmentConfig": ("praisonaiagents.gateway.config", "AttachmentConfig"),
     "ChannelRouteConfig": ("praisonaiagents.gateway.config", "ChannelRouteConfig"),
     "MultiChannelGatewayConfig": ("praisonaiagents.gateway.config", "MultiChannelGatewayConfig"),
     # Config version stamp + doctor-driven migration (Issue #3841)
@@ -534,6 +539,9 @@ __all__ = [
     "ConnectRecoveryStep",
     "is_recoverable",
     "MessageParams",
+    # First-class attachment contract (Issue #5207)
+    "AttachmentRef",
+    "AttachmentStoreProtocol",
     "LeaveParams",
     "JoinParams",
     "FrameDecodeError",
@@ -571,6 +579,8 @@ __all__ = [
     "SessionConfig",
     "ApiConfig",
     "EmergencyStopConfig",
+    # Attachment ceilings config (Issue #5207)
+    "AttachmentConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
     # Config version stamp + doctor-driven migration (Issue #3841)

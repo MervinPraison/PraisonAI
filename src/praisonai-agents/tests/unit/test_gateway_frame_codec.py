@@ -153,6 +153,110 @@ def test_message_invalid_content_type_rejected():
 
 
 # --------------------------------------------------------------------------- #
+# message attachments (Issue #5207)
+# --------------------------------------------------------------------------- #
+def test_message_without_attachments_defaults_empty():
+    """A message frame with no attachments decodes exactly as before."""
+    frame = decode_client_frame({"type": "message", "content": "hi"})
+    assert frame.attachments == []
+
+
+def test_message_inline_attachment():
+    frame = decode_client_frame({
+        "type": "message",
+        "content": "analyse this",
+        "attachments": [
+            {"filename": "a.png", "mime": "image/png", "size": 3, "data": "AAA="},
+        ],
+    })
+    assert len(frame.attachments) == 1
+    att = frame.attachments[0]
+    assert att.filename == "a.png"
+    assert att.mime == "image/png"
+    assert att.size == 3
+    assert att.data == "AAA="
+    assert att.ref_id is None
+    assert att.to_dict() == {
+        "filename": "a.png", "mime": "image/png", "size": 3, "data": "AAA=",
+    }
+
+
+def test_message_ref_attachment():
+    frame = decode_client_frame({
+        "type": "message",
+        "content": "summarise",
+        "attachments": [
+            {"filename": "b.pdf", "mime": "application/pdf", "size": 100, "ref_id": "r1"},
+        ],
+    })
+    att = frame.attachments[0]
+    assert att.ref_id == "r1"
+    assert att.data is None
+    assert att.to_dict() == {
+        "filename": "b.pdf", "mime": "application/pdf", "size": 100, "ref_id": "r1",
+    }
+
+
+def test_message_attachment_without_carrier_rejected():
+    """An attachment carrying neither inline data nor a store ref_id is rejected."""
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message",
+            "content": "x",
+            "attachments": [{"filename": "c", "mime": "text/plain", "size": 1}],
+        })
+
+
+def test_message_attachment_with_both_carriers_rejected():
+    """An attachment carrying BOTH inline data and a store ref_id is rejected.
+
+    Requiring exactly one carrier keeps the wire contract unambiguous so two
+    clients/stores can never select different payloads for the same attachment.
+    """
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message",
+            "content": "x",
+            "attachments": [
+                {
+                    "filename": "c",
+                    "mime": "text/plain",
+                    "size": 1,
+                    "data": "AA==",
+                    "ref_id": "r1",
+                },
+            ],
+        })
+
+
+def test_message_attachment_missing_filename_rejected():
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message",
+            "content": "x",
+            "attachments": [{"mime": "text/plain", "size": 1, "data": "AA=="}],
+        })
+
+
+def test_message_attachments_not_a_list_rejected():
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message", "content": "x", "attachments": "notalist",
+        })
+
+
+def test_message_attachment_negative_size_rejected():
+    with pytest.raises(FrameDecodeError):
+        decode_client_frame({
+            "type": "message",
+            "content": "x",
+            "attachments": [
+                {"filename": "c", "mime": "text/plain", "size": -1, "data": "AA=="},
+            ],
+        })
+
+
+# --------------------------------------------------------------------------- #
 # leave
 # --------------------------------------------------------------------------- #
 def test_leave_valid():

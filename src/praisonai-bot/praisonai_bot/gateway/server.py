@@ -3711,6 +3711,13 @@ class WebSocketGateway:
                 "max_queued_frames": getattr(self.config, 'max_queued_frames', 1000),
                 "heartbeat_ms": heartbeat_ms,
             }
+            # Issue #5207: fold the attachment ceilings into the advertised policy
+            # so any /ws client can self-limit/chunk before sending. Only adds
+            # keys when attachments are enabled, so a gateway with attachments
+            # disabled advertises exactly today's policy shape (backward compatible).
+            attachments = getattr(self.config, 'attachments', None)
+            if attachments is not None and hasattr(attachments, 'to_policy'):
+                policy.update(attachments.to_policy())
             
             # Send successful handshake response
             result = HelloResult(

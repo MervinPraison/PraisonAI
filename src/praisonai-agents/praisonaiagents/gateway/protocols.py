@@ -48,6 +48,7 @@ MIN_CLIENT_PROTOCOL_VERSION = 1
 
 if TYPE_CHECKING:
     import asyncio
+    from typing import BinaryIO
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
@@ -375,14 +376,18 @@ class HelloResult:
     Attributes:
         protocol: The negotiated protocol version
         features: Supported methods and events
-        policy: Gateway policy limits (max_payload, heartbeat_ms, etc.)
+        policy: Gateway policy limits (max_payload, heartbeat_ms, and — Issue
+            #5207 — attachment ceilings max_attachment_bytes / max_attachments /
+            chunk_bytes so a client self-limits and chunks before sending). The
+            optional ``allowed_attachment_types`` list, when present, is carried
+            here too.
         session_id: The session ID for this connection
         resumed: Whether an existing session was resumed
         cursor: Current event cursor position
     """
     protocol: int
     features: Dict[str, List[str]]  # {"methods": [...], "events": [...]}
-    policy: Dict[str, int]  # {"max_payload": ..., "heartbeat_ms": ...}
+    policy: Dict[str, Any]  # {"max_payload": ..., "heartbeat_ms": ..., "max_attachment_bytes": ...}
     session_id: str
     resumed: bool
     cursor: int
@@ -544,6 +549,149 @@ def _require_str(value: Any, *, field_name: str) -> str:
 
 
 @dataclass
+class AttachmentRef:
+    """A first-class attachment reference on the gateway wire protocol (Issue #5207).
+
+    The gateway is the control plane every custom ``/ws`` client builds on, yet
+    the ``message`` frame carried only text or a free-form dict — a client had
+    no supported, size-bounded, validated way to hand the agent a file or to
+    receive an agent-generated artefact back. ``AttachmentRef`` is that missing
+    typed contract: one shape every client and gateway implementation agrees on,
+    additive and backward-compatible (no existing frame changes shape).
+
+    An attachment is carried one of two ways:
+
+    * **Inline** — ``data`` holds base64 for a small file, bounded by the
+      advertised ``max_attachment_bytes`` policy so a well-behaved client
+      self-limits before sending rather than discovering the limit by being
+      disconnected.
+    * **By reference** — ``ref_id`` names an entry the gateway materialised in
+      its attachment store (see :class:`AttachmentStoreProtocol`), used for
+      larger files streamed via chunked upload instead of a single frame.
+
+    The same shape is reused outbound: agent-generated files surface as
+    ``AttachmentRef`` entries a generic client can fetch over the same
+    connection, instead of relying on platform (Telegram/Slack/…) delivery.
+
+    Attributes:
+        filename: Client-facing file name (display / download target).
+        mime: MIME type of the payload (e.g. ``image/png``, ``application/pdf``).
+        size: Declared size in bytes (used to validate against policy ceilings).
+        data: Inline base64 payload for a small file, or ``None`` when the
+            attachment is carried by ``ref_id``.
+        ref_id: Identifier in the gateway attachment store for a chunked / large
+            file, or ``None`` for a purely inline attachment.
+    """
+
+    filename: str
+    mime: str
+    size: int
+    data: Optional[str] = None      # inline base64 for small files
+    ref_id: Optional[str] = None    # id in the gateway attachment store (chunked/large)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a wire dict, omitting the unused carrier field."""
+        frame: Dict[str, Any] = {
+            "filename": self.filename,
+            "mime": self.mime,
+            "size": self.size,
+        }
+        if self.data is not None:
+            frame["data"] = self.data
+        if self.ref_id is not None:
+            frame["ref_id"] = self.ref_id
+        return frame
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AttachmentRef":
+        """Validate a raw attachment dict into a typed ref.
+
+        Rejects a malformed attachment deterministically with the same
+        structured ``HelloError`` envelope the rest of the inbound codec uses,
+        so handlers keep receiving already-validated objects.
+        """
+        if not isinstance(data, dict):
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message="Each attachment must be an object",
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        filename = _require_str(data.get("filename"), field_name="attachment.filename")
+        mime = _require_str(data.get("mime"), field_name="attachment.mime")
+        size = _coerce_int(data.get("size"), field_name="attachment.size", default=0)
+        if size < 0:
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message="Field 'attachment.size' must be >= 0",
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        inline = _as_opt_str(data.get("data"))
+        ref_id = _as_opt_str(data.get("ref_id"))
+        if inline is None and ref_id is None:
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message=(
+                        "An attachment must carry either inline 'data' (base64) "
+                        "or a store 'ref_id'"
+                    ),
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        if inline is not None and ref_id is not None:
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message=(
+                        "An attachment must carry exactly one of inline 'data' "
+                        "(base64) or a store 'ref_id', not both"
+                    ),
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        return cls(
+            filename=filename,
+            mime=mime,
+            size=size,
+            data=inline,
+            ref_id=ref_id,
+        )
+
+
+@runtime_checkable
+class AttachmentStoreProtocol(Protocol):
+    """Seam for a gateway-managed attachment store (Issue #5207).
+
+    Large files cannot ride inline inside a single ``message`` frame (bounded by
+    ``max_payload``), so they are streamed as chunks into a store keyed by a
+    reserved ``ref_id`` (reserve → put chunk at offset → close), then referenced
+    from :class:`AttachmentRef`. The contract lives in core so every client and
+    implementation agree on one shape; the concrete durable store (filesystem /
+    object store) is a wrapper/bot concern, kept out of the dependency-free core.
+    """
+
+    def reserve(self, filename: str, mime: str, size: int) -> str:
+        """Reserve an entry for an incoming file and return its ``ref_id``."""
+        ...
+
+    def put_chunk(self, ref_id: str, offset: int, data: bytes) -> None:
+        """Write ``data`` at ``offset`` for the reserved ``ref_id``."""
+        ...
+
+    def close(self, ref_id: str) -> AttachmentRef:
+        """Finalize the upload and return the resulting :class:`AttachmentRef`."""
+        ...
+
+    def open(self, ref_id: str) -> "BinaryIO":
+        """Open the stored attachment for reading (outbound download)."""
+        ...
+
+
+@dataclass
 class MessageParams:
     """Validated ``message`` frame — a client turn sent to the agent.
 
@@ -559,6 +707,10 @@ class MessageParams:
             ``request_id`` — a request queued while reconnecting and flushed on
             reconnect runs the turn exactly once instead of being lost or
             double-run. Absent keeps the legacy fire-and-forget behaviour.
+        attachments: Optional list of :class:`AttachmentRef` (Issue #5207) — a
+            first-class, size-bounded way for any ``/ws`` client (not just
+            platform bots) to hand the agent files. Defaults to empty, so a
+            frame without attachments decodes exactly as before.
         metadata: Optional additional message metadata.
     """
 
@@ -566,6 +718,7 @@ class MessageParams:
     session_id: Optional[str] = None
     message_id: Optional[str] = None
     request_id: Optional[str] = None
+    attachments: List[AttachmentRef] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     type: str = field(default="message", init=False)
@@ -593,11 +746,24 @@ class MessageParams:
         metadata = data.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
+        raw_attachments = data.get("attachments")
+        attachments: List[AttachmentRef] = []
+        if raw_attachments is not None:
+            if not isinstance(raw_attachments, (list, tuple)):
+                raise FrameDecodeError(
+                    HelloError(
+                        code=ConnectErrorCode.CONFIGURATION_ERROR,
+                        message="Field 'attachments' must be an array",
+                        next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                    )
+                )
+            attachments = [AttachmentRef.from_dict(a) for a in raw_attachments]
         return cls(
             content=content,
             session_id=_as_opt_str(data.get("session_id")),
             message_id=_as_opt_str(data.get("message_id")),
             request_id=_as_opt_str(data.get("request_id")),
+            attachments=attachments,
             metadata=metadata,
         )
 

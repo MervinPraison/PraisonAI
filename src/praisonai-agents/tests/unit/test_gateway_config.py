@@ -558,3 +558,81 @@ class TestConfigVersionMigration:
 
         assert Exported is ConfigVersionError
         assert issubclass(ConfigVersionError, ValueError)
+
+
+class TestAttachmentConfig:
+    """Tests for the attachment ceilings config (Issue #5207)."""
+
+    def test_defaults(self):
+        from praisonaiagents.gateway import AttachmentConfig
+
+        ac = AttachmentConfig()
+        assert ac.max_attachment_bytes == 10 * 1024 * 1024
+        assert ac.max_attachments == 10
+        assert ac.chunk_bytes == 256 * 1024
+        assert ac.allowed_types == []
+        assert ac.enabled is True
+
+    def test_to_policy_advertises_ceilings(self):
+        from praisonaiagents.gateway import AttachmentConfig
+
+        policy = AttachmentConfig().to_policy()
+        assert policy["max_attachment_bytes"] == 10 * 1024 * 1024
+        assert policy["max_attachments"] == 10
+        assert policy["chunk_bytes"] == 256 * 1024
+        # No allow-list configured -> key omitted.
+        assert "allowed_attachment_types" not in policy
+
+    def test_to_policy_includes_allowed_types_when_configured(self):
+        from praisonaiagents.gateway import AttachmentConfig
+
+        policy = AttachmentConfig(allowed_types=["image/", "application/pdf"]).to_policy()
+        assert policy["allowed_attachment_types"] == ["image/", "application/pdf"]
+
+    def test_disabled_advertises_empty_policy(self):
+        """When attachments are disabled the policy shape is exactly today's."""
+        from praisonaiagents.gateway import AttachmentConfig
+
+        ac = AttachmentConfig(max_attachment_bytes=0)
+        assert ac.enabled is False
+        assert ac.to_policy() == {}
+
+    def test_invalid_values_rejected(self):
+        import pytest
+
+        from praisonaiagents.gateway import AttachmentConfig
+
+        with pytest.raises(ValueError):
+            AttachmentConfig(max_attachment_bytes=-1)
+        with pytest.raises(ValueError):
+            AttachmentConfig(max_attachments=-1)
+        with pytest.raises(ValueError):
+            AttachmentConfig(chunk_bytes=0)
+
+    def test_from_dict_tolerant_of_none(self):
+        from praisonaiagents.gateway import AttachmentConfig
+
+        assert AttachmentConfig.from_dict(None).max_attachments == 10
+
+    def test_gateway_config_has_attachments_default(self):
+        from praisonaiagents.gateway import GatewayConfig
+
+        gc = GatewayConfig()
+        assert gc.attachments.enabled is True
+        assert "attachments" in gc.to_dict()
+
+    def test_multichannel_from_dict_wires_attachments(self):
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict({
+            "gateway": {
+                "attachments": {
+                    "max_attachments": 3,
+                    "max_attachment_bytes": 2048,
+                    "allowed_types": ["image/"],
+                }
+            }
+        })
+        assert m.gateway.attachments.max_attachments == 3
+        assert m.gateway.attachments.max_attachment_bytes == 2048
+        assert m.gateway.attachments.allowed_types == ["image/"]
