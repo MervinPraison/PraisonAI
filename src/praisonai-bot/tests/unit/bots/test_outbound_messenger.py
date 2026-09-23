@@ -654,6 +654,43 @@ def test_messenger_still_satisfies_protocol_with_edit_delete():
     assert isinstance(messenger, OutboundMessengerProtocol)
 
 
+def test_production_adapters_declare_delete_capability():
+    """Regression for #5054: an adapter with a real ``delete_message`` MUST
+    declare ``supports_delete=True`` in its default capabilities, otherwise the
+    router's capability gate returns ``unsupported`` before ever calling the
+    primitive — silently disabling delete on every real channel.
+
+    The prior fake-adapter tests set ``supports_delete`` directly and so missed
+    this production-wiring gap. Telegram/Discord/Slack all ship a working
+    ``chat_delete``/``delete``/``delete_message`` transport call.
+    """
+    checks = []
+    try:
+        from praisonai_bot.bots.telegram import TelegramBot as _TG
+        checks.append(("telegram", _TG))
+    except Exception:  # pragma: no cover - optional dep import guard
+        pass
+    try:
+        from praisonai_bot.bots.discord import DiscordBot as _DC
+        checks.append(("discord", _DC))
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        from praisonai_bot.bots.slack import SlackBot as _SL
+        checks.append(("slack", _SL))
+    except Exception:  # pragma: no cover
+        pass
+
+    assert checks, "expected at least one production adapter to import"
+
+    for name, cls in checks:
+        caps = cls.default_capabilities()
+        assert caps.supports_delete is True, (
+            f"{name} implements delete_message but does not declare "
+            f"supports_delete=True — the router gate will report 'unsupported'"
+        )
+
+
 class TestSessionManagerRegistration:
     """BotSessionManager registers/clears the messenger per turn (#2372)."""
 
