@@ -11,6 +11,7 @@ import pytest
 
 from praisonai_bot.bots._session import BotSessionManager
 from praisonai_bot.gateway.memory_pressure import CgroupMemoryPressure
+from praisonai_bot.gateway.server import GatewaySession, WebSocketGateway
 
 
 class _Store:
@@ -230,3 +231,183 @@ def test_sweep_skips_cache_when_last_store_write_failed():
     mp = _Pressure(100.0, [1000.0])
     assert mgr.sweep_under_pressure(mp) == 0
     assert "a" in mgr._histories
+
+
+# ---------------------------------------------------------------------------
+# WebSocketGateway live-session pressure shedding (Issue #5153)
+#
+# The gateway server is the primary layer that owns ``WebSocketGateway._sessions``
+# and must call the core planner on its housekeeping tick. These tests exercise
+# ``_sweep_sessions_under_pressure`` directly on a bare gateway wired with only
+# the attributes the method (and ``close_session``) touch.
+# ---------------------------------------------------------------------------
+
+
+class _SessionStore:
+    """Minimal SessionStore: records that a session's state was persisted."""
+
+    def __init__(self):
+        self.persisted = {}
+
+    def add_message(self, session_id, role, content, metadata=None):
+        self.persisted[session_id] = metadata
+
+
+def _bare_gateway(store, budget, rss_samples, headroom=0.9):
+    """A ``WebSocketGateway`` with just enough state to run the pressure sweep."""
+    gw = WebSocketGateway.__new__(WebSocketGateway)
+    gw._session_store = store
+    gw._sessions = {}
+    gw._clients = {}
+    gw._client_sessions = {}
+    gw._session_ttls = {}
+    gw._memory_pressure = _Pressure(budget, rss_samples)
+    gw._pressure_headroom = headroom
+
+    class _SC:
+        resume_window = 3600
+    class _Cfg:
+        session_config = _SC()
+    gw.config = _Cfg()
+    return gw
+
+
+def _add_session(gw, sid, last_activity, executing=False):
+    session = GatewaySession(_session_id=sid, _agent_id="agent")
+    session._last_activity = last_activity
+    session._is_executing = executing
+    gw._sessions[sid] = session
+    return session
+
+
+def test_gateway_sheds_coldest_session_first_until_within_budget():
+    store = _SessionStore()
+    # Budget 1000 MiB, target 900; start over at 1000, drop to 850 after the
+    # first (coldest) eviction so exactly one session is shed.
+    gw = _bare_gateway(store, 1000.0, [1000.0, 850.0])
+    _add_session(gw, "cold", 1.0)
+    _add_session(gw, "warm", 100.0)
+    evicted = gw._sweep_sessions_under_pressure()
+    assert evicted == 1
+    assert "cold" not in gw._sessions   # coldest dropped from memory
+    assert "warm" in gw._sessions       # warmest kept live
+    assert "cold" in store.persisted    # transcript left durable
+
+
+def test_gateway_never_evicts_executing_session():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 100.0, [1000.0])
+    _add_session(gw, "busy", 1.0, executing=True)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "busy" in gw._sessions
+
+
+def test_gateway_noop_without_session_store():
+    # No durable store ⇒ nothing rebuildable ⇒ never shed (would lose data).
+    gw = _bare_gateway(None, 100.0, [1000.0])
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_no_cgroup_budget():
+    store = _SessionStore()
+    gw = _bare_gateway(store, None, [1000.0])  # host without a cgroup limit
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_within_budget():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [500.0])  # RSS well under the 900 target
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_no_sessions():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0])
+    assert gw._sweep_sessions_under_pressure() == 0
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (PR #5237): never strand a bound client, never lose a session on
+# a failed persist, and shed even when liveness ping/reap is disabled.
+# ---------------------------------------------------------------------------
+
+
+def test_gateway_never_evicts_session_with_live_client():
+    """A session a live WebSocket is bound to is never shed (would strand it).
+
+    Ordinary ``message`` frames look the session up in ``_sessions`` directly and
+    are silently dropped if it is gone (only ``hello``/``join`` rehydrate), so a
+    connected client must keep its session in memory.
+    """
+    store = _SessionStore()
+    gw = _bare_gateway(store, 100.0, [1000.0])
+    _add_session(gw, "bound", 1.0)
+    gw._client_sessions["client-1"] = "bound"  # a live connection holds it
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "bound" in gw._sessions
+    assert "bound" not in store.persisted
+
+
+def test_gateway_sheds_disconnected_but_keeps_bound_session():
+    """Under pressure, only the disconnected cold session is shed."""
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0, 850.0])
+    _add_session(gw, "cold", 1.0)     # coldest, no client → evictable
+    _add_session(gw, "bound", 2.0)    # colder than warm but has a client
+    gw._client_sessions["client-1"] = "bound"
+    evicted = gw._sweep_sessions_under_pressure()
+    assert evicted == 1
+    assert "cold" not in gw._sessions
+    assert "bound" in gw._sessions    # protected despite being cold
+
+
+def test_gateway_keeps_session_when_persist_fails():
+    """A failed final-persist must leave the session in memory (no data loss)."""
+
+    class _FlakyStore(_SessionStore):
+        def add_message(self, session_id, role, content, metadata=None):
+            raise RuntimeError("store backend down")
+
+    store = _FlakyStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0, 1000.0])
+    _add_session(gw, "cold", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "cold" in gw._sessions        # retained — its only copy is in memory
+    assert "cold" not in store.persisted
+
+
+def test_gateway_keeps_session_when_store_returns_false():
+    """A falsy ``add_message`` result (failed write, no exception) retains it.
+
+    ``SessionStoreProtocol.add_message`` returns ``bool`` and both built-in
+    stores return ``False`` when a write fails; treating that as success would
+    drop the session's only current copy under pressure (Greptile P1).
+    """
+
+    class _FalsyStore(_SessionStore):
+        def add_message(self, session_id, role, content, metadata=None):
+            return False  # write failed but did not raise
+
+    store = _FalsyStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0, 1000.0])
+    _add_session(gw, "cold", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "cold" in gw._sessions        # retained — the write did not persist
+    assert "cold" not in gw._session_ttls
+    assert gw._evict_persisted_session("cold") is False
+
+
+def test_gateway_evict_persisted_session_sets_resume_ttl():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0])
+    _add_session(gw, "cold", 1.0)
+    assert gw._evict_persisted_session("cold") is True
+    assert "cold" not in gw._sessions
+    assert "cold" in store.persisted
+    assert "cold" in gw._session_ttls    # resumable window stamped
