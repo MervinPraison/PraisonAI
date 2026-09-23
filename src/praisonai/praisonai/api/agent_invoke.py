@@ -317,12 +317,25 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str],
             f"Failed to isolate agent '{agent_id}' for session: {e}"
         ) from e
 
-    # Reset per-request conversation state so the clone starts clean and
-    # (re)loads the requested session's history lazily on first chat.
+    return bind_session(agent, session_id)
+
+
+def bind_session(agent: Any, session_id: Optional[str]) -> Any:
+    """Wipe conversation state on a cloned agent and bind ``session_id``.
+
+    Single source of truth for the session-isolation contract shared by the
+    ``/invoke`` router and the agentos chat host: reset ``chat_history`` so the
+    clone starts clean and (re)loads the requested session's history lazily on
+    first chat. The reset MUST fail loudly — a swallowed reset means the clone
+    still holds the template's history and the next ``chat()`` leaks it to
+    whoever ``session_id`` belongs to.
+    """
     try:
         agent.chat_history = []
-    except Exception:
-        pass
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot reset chat_history for session isolation: {e}"
+        ) from e
     if hasattr(agent, "_session_store_initialized"):
         agent._session_store_initialized = False
     if session_id:

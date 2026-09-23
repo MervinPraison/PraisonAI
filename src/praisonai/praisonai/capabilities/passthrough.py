@@ -18,8 +18,13 @@ import threading
 # a socket per agent call. Timeout is applied per-request, so a single client
 # safely serves callers with different ``timeout`` values.
 _sync_client: Any = None
-_async_client: Any = None
-_async_client_loop: Any = None
+# One async client per owning event loop, keyed by ``id(loop)``. ``httpx``
+# binds a client's connection pool to the loop that first uses it, so sharing a
+# single module-level slot across loops both (a) leaks the previous loop's pool
+# (it is dropped, never ``aclose()``d) and (b) crashes callers that resume on
+# their own loop but find the slot swapped to another. Keying by loop keeps each
+# loop's client isolated and lets us close each one from within its own loop.
+_async_clients: Dict[int, Any] = {}
 _client_lock = threading.Lock()
 
 
@@ -35,56 +40,61 @@ def _get_sync_client() -> Any:
 
 
 def _get_async_client() -> Any:
-    """Return the shared async httpx client for the running event loop.
+    """Return the async httpx client for the *current* event loop.
 
-    ``httpx.AsyncClient`` binds its connection pool to the event loop that first
-    used it, so a client cached across separate ``asyncio.run()`` lifecycles (or
-    reused from a different loop) fails with a loop-closed error. We therefore
-    key the cached client to its owning loop and rebuild it whenever the current
-    loop differs from the one that created it.
+    The client is cached per running loop so its connection pool is never reused
+    from a different loop (which raises loop-closed / wrong-loop errors) and is
+    never silently replaced (which would leak the previous loop's sockets). Each
+    loop's client is drained via :func:`aclose_clients` from within that loop.
     """
-    global _async_client, _async_client_loop
     import httpx
 
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
-
+    loop = asyncio.get_running_loop()
+    key = id(loop)
     with _client_lock:
-        if _async_client is None or _async_client_loop is not current_loop:
-            _async_client = httpx.AsyncClient()
-            _async_client_loop = current_loop
-        return _async_client
+        client = _async_clients.get(key)
+        if client is None:
+            client = httpx.AsyncClient()
+            _async_clients[key] = client
+        return client
 
 
 def close_clients() -> None:
-    """Close the cached sync client and clear the sync/async globals.
+    """Close the cached sync client and drop the per-loop async clients.
 
     Provided as an explicit shutdown hook for long-lived hosts that want to
-    release the pooled sockets deterministically. The async client cannot be
-    awaited from this sync helper, so it is dropped (and rebuilt per-loop on next
-    use); the sync client is closed here.
+    release the pooled sockets deterministically. An ``AsyncClient`` cannot be
+    awaited from this sync helper, so the per-loop async clients are dropped
+    (and rebuilt per-loop on next use); the sync client is closed here. Prefer
+    :func:`aclose_clients` from within an event loop to close the async pool
+    cleanly.
     """
-    global _sync_client, _async_client, _async_client_loop
+    global _sync_client
     with _client_lock:
         if _sync_client is not None:
             try:
                 _sync_client.close()
             finally:
                 _sync_client = None
-        _async_client = None
-        _async_client_loop = None
+        _async_clients.clear()
 
 
 async def aclose_clients() -> None:
-    """Await-close the cached async client (in its own loop) and the sync one."""
-    global _sync_client, _async_client, _async_client_loop
+    """Await-close the current loop's async client and the shared sync one.
+
+    Only the running loop's client can be awaited here; clients owned by other
+    loops must be closed from within their own loop (call this on each loop
+    before it tears down), so they are left in place rather than dropped.
+    """
+    global _sync_client
+    try:
+        key = id(asyncio.get_running_loop())
+    except RuntimeError:
+        key = None
     client = None
     with _client_lock:
-        client = _async_client
-        _async_client = None
-        _async_client_loop = None
+        if key is not None:
+            client = _async_clients.pop(key, None)
         if _sync_client is not None:
             try:
                 _sync_client.close()

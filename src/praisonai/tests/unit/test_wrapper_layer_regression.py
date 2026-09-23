@@ -904,3 +904,119 @@ class TestIssue3492WrapperGaps:
         }
         with pytest.raises(ValueError, match="Cannot verify runtime-feature support"):
             generator._validate_cli_backend_compatibility(config, 'no_such_framework_xyz')
+
+
+class TestIssue5150WrapperGaps:
+    """Regression tests for issue #5150 wrapper-layer defects."""
+
+    def test_bind_session_fails_loudly_when_chat_history_reset_raises(self):
+        """A swallowed chat_history reset would leak one session's history into
+        another; bind_session must raise instead of silently continuing."""
+        from praisonai.api.agent_invoke import bind_session
+
+        class LeakyAgent:
+            _session_id = None
+
+            @property
+            def chat_history(self):
+                return ["tenant-A secret"]
+
+            @chat_history.setter
+            def chat_history(self, value):
+                raise RuntimeError("history store busy")
+
+        with pytest.raises(RuntimeError, match="Cannot reset chat_history"):
+            bind_session(LeakyAgent(), "tenant-B")
+
+    def test_bind_session_wipes_and_binds(self):
+        from praisonai.api.agent_invoke import bind_session
+
+        class Agent:
+            def __init__(self):
+                self.chat_history = ["old turn"]
+                self._session_id = None
+                self._history_session_id = None
+                self._session_store_initialized = True
+
+        agent = bind_session(Agent(), "s1")
+        assert agent.chat_history == []
+        assert agent._session_id == "s1"
+        assert agent._history_session_id == "s1"
+        assert agent._session_store_initialized is False
+
+    def test_bind_session_clears_binding_without_session_id(self):
+        from praisonai.api.agent_invoke import bind_session
+
+        class Agent:
+            def __init__(self):
+                self.chat_history = ["old turn"]
+                self._session_id = "stale"
+                self._history_session_id = "stale"
+
+        agent = bind_session(Agent(), None)
+        assert agent.chat_history == []
+        assert agent._session_id is None
+        assert agent._history_session_id is None
+
+    def test_async_client_cached_per_loop_and_distinct_across_loops(self):
+        import asyncio
+
+        pytest.importorskip("httpx")
+        from praisonai.capabilities import passthrough as P
+
+        ids = []
+
+        async def grab():
+            client = P._get_async_client()
+            ids.append(id(client))
+            assert P._get_async_client() is client
+            await P.aclose_clients()
+
+        asyncio.run(grab())
+        asyncio.run(grab())
+        assert ids[0] != ids[1]
+        assert P._async_clients == {}
+
+    def test_transient_availability_failure_reprobes_after_ttl(self, monkeypatch):
+        import praisonai.framework_adapters.registry as registry_mod
+        from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+        # Drive the clock deterministically so the test never races the TTL.
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(registry_mod.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(registry_mod, "_NEG_CACHE_TTL", 60.0)
+        registry = FrameworkAdapterRegistry(discover_entry_points=False)
+
+        calls = {"n": 0}
+
+        class Flaky:
+            def is_available(self):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("transient boot race")
+                return True
+
+        registry.create = lambda name, *a, **k: Flaky()
+
+        assert registry.is_available("x") is False
+        assert registry.is_available("x") is False  # cached within TTL
+        assert calls["n"] == 1
+        clock["t"] += 61.0  # advance past the negative-cache TTL
+        assert registry.is_available("x") is True  # reprobed after TTL
+
+    def test_structural_unavailable_cached_for_process(self):
+        from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+        registry = FrameworkAdapterRegistry(discover_entry_points=False)
+        calls = {"n": 0}
+
+        class Missing:
+            def is_available(self):
+                calls["n"] += 1
+                raise ImportError("optional dep not installed")
+
+        registry.create = lambda name, *a, **k: Missing()
+
+        assert registry.is_available("y") is False
+        assert registry.is_available("y") is False
+        assert calls["n"] == 1  # probed once, cached forever

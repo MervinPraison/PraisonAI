@@ -12,11 +12,18 @@ from typing import Type, Optional
 import inspect
 import logging
 import threading
+import time
 
 from .base import FrameworkAdapter
 from .._registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
+
+# Cool-down for transient availability-probe failures. A durable "not installed"
+# result is cached for the whole process, but a probe that raises for a transient
+# reason (racing entry-point scan, network healthcheck timeout at boot, config
+# write in flight) is only cached this long before the next call reprobes.
+_NEG_CACHE_TTL = 60.0
 
 
 def _praisonai_loader():
@@ -60,7 +67,10 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         # in tests), and protocol validation runs once per adapter class rather
         # than on every create()/run()/arun(). Both are guarded by a lock so
         # multi-tenant/threaded callers don't race.
-        self._avail_cache: dict[str, bool] = {}
+        # Maps name -> (available, expires_at). Positive probes are cached for
+        # the whole process (expires_at == inf); transient failures get a short
+        # TTL so one flaky probe doesn't pin a framework to "unavailable".
+        self._avail_cache: dict[str, tuple[bool, float]] = {}
         self._avail_lock = threading.Lock()
         self._validated_classes: set[type] = set()
         # Capability probes (SUPPORTS_WORKFLOW / SUPPORTS_RUNTIME_FEATURES / ...)
@@ -245,10 +255,15 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         # is_available("CrewAI") and invalidate_availability("crewai") would key
         # different cache entries, leaving the documented escape hatch inert.
         key = name.lower()
+        now = time.monotonic()
         with self._avail_lock:
             cached = self._avail_cache.get(key)
         if cached is not None:
-            return cached
+            ok, expires_at = cached
+            # Positives (and structural "not installed" negatives) are cached
+            # for the process; only transient negatives expire and reprobe.
+            if ok or now < expires_at:
+                return ok
 
         try:
             adapter = self.create(name)
@@ -257,14 +272,23 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             # framework as simply unavailable rather than leaking a raw import
             # error to callers (CLI validation, doctor checks, pick_default).
             ok = bool(adapter.is_available())
+            expires_at = float("inf")  # positive: cache for the process
         except (ValueError, TypeError, ImportError):
-            ok = False
+            # Structural "not installed" — durable; cache for the process.
+            ok, expires_at = False, float("inf")
         except Exception:
-            logger.warning("is_available() raised for adapter %r", name, exc_info=True)
-            ok = False
+            # Transient — the probe raised on something that isn't a durable
+            # "unavailable" signal (a racing entry-point scan, a network probe
+            # that timed out at boot, a config write still in flight). Cache
+            # briefly so the next call reprobes instead of pinning it forever.
+            logger.warning(
+                "is_available() raised for adapter %r; will retry after %.0fs",
+                name, _NEG_CACHE_TTL, exc_info=True,
+            )
+            ok, expires_at = False, now + _NEG_CACHE_TTL
 
         with self._avail_lock:
-            self._avail_cache[key] = ok
+            self._avail_cache[key] = (ok, expires_at)
         return ok
 
     def invalidate_availability(self, name: Optional[str] = None) -> None:
