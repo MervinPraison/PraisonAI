@@ -268,6 +268,12 @@ _LAZY_IMPORTS = {
     # Reload scope classification (Issue #3440)
     "ReloadScope": ("praisonaiagents.gateway.config", "ReloadScope"),
     "classify_reload": ("praisonaiagents.gateway.config", "classify_reload"),
+    # Candidate validation + rollback contract (Issue #5144)
+    "CandidateReport": ("praisonaiagents.gateway.config", "CandidateReport"),
+    "ReloadValidationProtocol": (
+        "praisonaiagents.gateway.config",
+        "ReloadValidationProtocol",
+    ),
 }
 
 # Lazy loading cache (shared with wrapper-backed implementations below)
@@ -583,6 +589,8 @@ __all__ = [
     "is_hot_appliable",
     "ReloadScope",
     "classify_reload",
+    "CandidateReport",
+    "ReloadValidationProtocol",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",

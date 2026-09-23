@@ -18,7 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -9547,6 +9547,157 @@ class WebSocketGateway:
             error=error,
         )
 
+    async def validate_candidate(
+        self, new_config: "Mapping[str, Any]"
+    ) -> "CandidateReport":
+        """Public :class:`ReloadValidationProtocol` entry point (Issue #5144).
+
+        Build/pre-flight the candidate from ``new_config`` *without* stopping or
+        mutating the live runtime, so ``isinstance(gateway,
+        ReloadValidationProtocol)`` holds and every reload entry point (SIGHUP,
+        ``gateway reload``/``restart``) honours the same "never cut over to an
+        unvalidated candidate" contract. Delegates to the synchronous
+        :meth:`_validate_candidate`, which does no blocking I/O (it only
+        constructs Agent objects), so it is safe to await directly.
+        """
+        return self._validate_candidate(dict(new_config))
+
+    def _validate_candidate(self, new_cfg: Dict[str, Any]) -> "CandidateReport":
+        """Build candidate agents from ``new_cfg`` *without* activating them live.
+
+        Issue #5144: a structural (full-restart) reload tears the live channels
+        down before the new config is proven to work, and on a build/start
+        failure there is no rollback — a schema-valid but runtime-invalid edit
+        (bad tool/model/guardrails wiring) takes a healthy always-on gateway
+        offline. This performs the agent-build pre-flight *first*, so the
+        highest-risk step is proven before any live channel is drained.
+
+        Crucially, the candidate agents are built into an *isolated* registry
+        and returned via :attr:`CandidateReport.candidate` — the live
+        ``self._agents`` map is snapshotted and restored, so traffic in-flight
+        during the drain window can never observe the not-yet-committed
+        candidate. The caller activates the candidate with
+        :meth:`_activate_candidate` only after ingress is quiesced
+        (``stop_channels``). ``_create_agents_from_config`` writes into
+        ``self._agents``, so this temporarily borrows it, captures the built
+        maps, then restores the live snapshot exactly.
+
+        Returns a :class:`CandidateReport`; ``ok=False`` means the caller must
+        keep the previous config serving and never drain the live channels.
+        """
+        from praisonaiagents.gateway.config import CandidateReport
+
+        agents_cfg = new_cfg.get("agents", {})
+        if not agents_cfg:
+            # Nothing to build/prove for agents; channel start remains
+            # per-channel fault-tolerant, so the candidate is trivially ok.
+            return CandidateReport(ok=True, candidate={"agents": {}, "shell": {}})
+
+        provider_cfg = new_cfg.get("provider", {})
+        default_model = provider_cfg.get("model") if provider_cfg else None
+        guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+        durable_runs = self._durable_runs_from_config(new_cfg)
+
+        # Borrow the live registries to reuse the existing builder, but always
+        # restore them so the live runtime is byte-for-byte untouched until the
+        # caller explicitly activates the candidate after ingress is quiesced.
+        prev_agents = dict(self._agents)
+        prev_shell = dict(self._shell_routed_agents)
+        try:
+            self._agents.clear()
+            self._shell_routed_agents.clear()
+            self._create_agents_from_config(
+                agents_cfg,
+                default_model=default_model,
+                guardrails_cfg=guardrails_cfg,
+                durable_runs=durable_runs,
+            )
+            candidate = {
+                "agents": dict(self._agents),
+                "shell": dict(self._shell_routed_agents),
+            }
+        except Exception as e:
+            logger.error(f"Candidate reload rejected — agent build failed: {e}")
+            return CandidateReport(
+                ok=False, failures=[f"agent build failed: {e}"]
+            )
+        finally:
+            # Restore live agents so no cutover has happened yet — the candidate
+            # only goes live via _activate_candidate() after stop_channels().
+            self._agents.clear()
+            self._agents.update(prev_agents)
+            self._shell_routed_agents.clear()
+            self._shell_routed_agents.update(prev_shell)
+        return CandidateReport(ok=True, candidate=candidate)
+
+    def _activate_candidate(self, candidate: Optional[Dict[str, Any]]) -> None:
+        """Install a validated candidate agent registry as the live one.
+
+        Called only after ``stop_channels`` has quiesced ingress, so the swap
+        from the previous agents to the proven candidate is atomic from the
+        perspective of any new turn. ``None``/empty candidate is a no-op (the
+        no-agents-config case), leaving the existing agents in place.
+        """
+        if not candidate:
+            return
+        agents = candidate.get("agents")
+        if not agents:
+            return
+        self._agents.clear()
+        self._agents.update(agents)
+        self._shell_routed_agents.clear()
+        self._shell_routed_agents.update(candidate.get("shell", {}))
+
+    async def _restore_previous_config(
+        self, error: str, changed_paths: Set[str]
+    ) -> None:
+        """Last-resort restore of the last-known-good config after a failed swap.
+
+        Issue #5144: if a full-restart cutover has already drained the live
+        channels and the new channels fail to start, bring the previous working
+        config back up so the gateway is never left down. The previous config +
+        agents are still stored in ``self._loaded_config``, so this rebuilds
+        agents and restarts channels from it, and records a ``rolled_back``-style
+        ``failed`` outcome (with the original error) via ``health()``.
+        """
+        prev_cfg = self._loaded_config
+        if not prev_cfg:
+            self._record_reload_status(
+                "failed",
+                changed_paths=tuple(sorted(changed_paths)),
+                error=error,
+            )
+            return
+        try:
+            prev_agents_cfg = prev_cfg.get("agents", {})
+            if prev_agents_cfg:
+                provider_cfg = prev_cfg.get("provider", {})
+                default_model = provider_cfg.get("model") if provider_cfg else None
+                guardrails_cfg = (prev_cfg.get("guardrails") or {}).get("registry")
+                durable_runs = self._durable_runs_from_config(prev_cfg)
+                self._agents.clear()
+                self._shell_routed_agents.clear()
+                self._create_agents_from_config(
+                    prev_agents_cfg,
+                    default_model=default_model,
+                    guardrails_cfg=guardrails_cfg,
+                    durable_runs=durable_runs,
+                )
+            prev_channels_cfg = prev_cfg.get("channels", {})
+            if prev_channels_cfg:
+                await self.start_channels(prev_channels_cfg)
+            logger.info("Restored previous config after failed reload")
+        except Exception as restore_err:  # pragma: no cover - defensive
+            logger.error(
+                f"Failed to restore previous config after reload failure: "
+                f"{restore_err}"
+            )
+        self._record_reload_status(
+            "failed",
+            changed_paths=tuple(sorted(changed_paths)),
+            error=error,
+        )
+
     async def _reload_config_locked(self, config_path: str) -> None:
         """Perform the actual hot-reload. Callers must hold ``_reload_lock``."""
         logger.info(f"Hot-reloading gateway config from {config_path}...")
@@ -9629,30 +9780,69 @@ class WebSocketGateway:
         # Execute reload plan
         if plan.full_restart:
             logger.info("Performing full restart due to structural changes")
+            # Issue #5144: validate the candidate (build the new agents) BEFORE
+            # draining the live channels. If the build fails, the previous
+            # config keeps serving — a schema-valid but runtime-invalid edit is
+            # a *rejected* reload, not an outage. The candidate is built into an
+            # isolated registry and is NOT yet live: in-flight turns during the
+            # drain window keep resolving the previous agents until the cutover
+            # commits.
+            report = self._validate_candidate(new_cfg)
+            if not report.ok:
+                error = "; ".join(report.failures) or "candidate validation failed"
+                logger.error(f"Reload rejected — {error}; keeping previous config")
+                self._record_reload_status(
+                    "failed",
+                    changed_paths=tuple(sorted(changed_paths)),
+                    error=error,
+                )
+                return
+
+            # Candidate proved; drain live channels first so ingress is quiesced,
+            # then atomically activate the candidate agents and bring the new
+            # channels up. If channel start raises OR every configured channel
+            # fails to start, restore the previous working config so the gateway
+            # is never left down.
             # Issue #2533: drain in-flight turns before bouncing all channels.
             await self.stop_channels(drain_timeout=self._reload_drain_timeout)
-            
-            # Recreate agents
-            agents_cfg = new_cfg.get("agents", {})
-            provider_cfg = new_cfg.get("provider", {})
-            default_model = provider_cfg.get("model") if provider_cfg else None
-            guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
-            durable_runs = self._durable_runs_from_config(new_cfg)
-            if agents_cfg:
-                self._agents.clear()
-                # Recreating agents invalidates id()-keyed shell clones.
-                self._shell_routed_agents.clear()
-                self._create_agents_from_config(
-                    agents_cfg,
-                    default_model=default_model,
-                    guardrails_cfg=guardrails_cfg,
-                    durable_runs=durable_runs,
-                )
-            
-            # Restart all channels
+
+            # Cutover point: candidate agents become live only now that no
+            # channel is accepting turns (greptile #1 — never expose the
+            # candidate before the cutover commits).
+            self._activate_candidate(report.candidate)
+
             channels_cfg = new_cfg.get("channels", {})
-            if channels_cfg:
-                await self.start_channels(channels_cfg)
+            try:
+                if channels_cfg:
+                    await self.start_channels(channels_cfg)
+            except Exception as e:
+                logger.error(
+                    f"Channel start failed during full restart: {e}; "
+                    "restoring previous config"
+                )
+                await self._restore_previous_config(str(e), changed_paths)
+                return
+
+            # Issue #5144 (greptile #3): start_channels() is per-channel
+            # fault-tolerant — missing credentials / adapter-construction
+            # failures are marked *degraded* and skipped rather than raised. So
+            # a wholly-broken replacement set returns normally, leaving the old
+            # channels stopped while the reload would otherwise commit as ``ok``.
+            # If channels were configured but none came up live, treat the
+            # cutover as failed and restore the previous config.
+            if channels_cfg and not self._channel_bots:
+                degraded = "; ".join(
+                    f"{name}: {reason}"
+                    for name, reason in self._degraded_channels.items()
+                ) or "no channels started"
+                logger.error(
+                    f"All configured channels failed to start ({degraded}); "
+                    "restoring previous config"
+                )
+                await self._restore_previous_config(
+                    f"all channels failed to start ({degraded})", changed_paths
+                )
+                return
         else:
             # Selective reload
             if plan.reload_agents:
