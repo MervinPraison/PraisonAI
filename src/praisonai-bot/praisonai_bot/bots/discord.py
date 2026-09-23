@@ -539,6 +539,13 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
             @self._client.event
             async def on_raw_reaction_remove(payload):
+                # Ignore the bot's own reaction removals (e.g. ack/done cleanup)
+                # so internal acknowledgement housekeeping is never mistaken for
+                # an inbound user reaction — symmetric with the add handler.
+                if str(getattr(payload, "user_id", "")) == str(
+                    getattr(self._client.user, "id", "")
+                ):
+                    return
                 self.fire_platform_event(_reaction_event(payload, "reaction_removed"))
 
         if "edits" in event_classes:

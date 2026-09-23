@@ -84,3 +84,74 @@ def test_fire_platform_event_is_noop_without_runner():
     _Adapter().fire_platform_event(
         PlatformEvent(kind="reaction_added", platform="discord", chat_id="c", user_id="u")
     )
+
+
+# --- Discord adapter handler wiring (Issue #5161) ----------------------------
+
+class _FakeClient:
+    """Minimal stand-in for a discord.py client used to capture handlers."""
+
+    def __init__(self, bot_id="999"):
+        self.user = type("U", (), {"id": bot_id})()
+        self.handlers = {}
+
+    def event(self, coro):
+        self.handlers[coro.__name__] = coro
+        return coro
+
+
+def _discord_bot_with_reactions():
+    """Build a DiscordBot with only the reaction handlers registered."""
+    from praisonai_bot.bots.discord import DiscordBot
+
+    bot = DiscordBot(token="x")
+    fired = []
+    bot.fire_platform_event = lambda evt: fired.append(evt)  # type: ignore
+    bot._client = _FakeClient()
+    bot._register_platform_event_handlers({"reactions"})
+    return bot, fired
+
+
+class _RawReaction:
+    def __init__(self, user_id, channel_id="c1", message_id="m1", emoji="✅"):
+        self.user_id = user_id
+        self.channel_id = channel_id
+        self.message_id = message_id
+        self.emoji = emoji
+
+
+@pytest.mark.asyncio
+async def test_discord_reaction_remove_ignores_bot_own_removal():
+    # A bot's own ack/done cleanup removal must NOT surface as an inbound event.
+    bot, fired = _discord_bot_with_reactions()
+    handler = bot._client.handlers["on_raw_reaction_remove"]
+    await handler(_RawReaction(user_id="999"))  # 999 == bot user id
+    assert fired == []
+
+
+@pytest.mark.asyncio
+async def test_discord_reaction_remove_surfaces_user_removal():
+    bot, fired = _discord_bot_with_reactions()
+    handler = bot._client.handlers["on_raw_reaction_remove"]
+    await handler(_RawReaction(user_id="42"))
+    assert len(fired) == 1
+    assert fired[0].kind == "reaction_removed"
+    assert fired[0].user_id == "42"
+
+
+@pytest.mark.asyncio
+async def test_discord_reaction_add_ignores_bot_own_reaction():
+    bot, fired = _discord_bot_with_reactions()
+    handler = bot._client.handlers["on_raw_reaction_add"]
+    await handler(_RawReaction(user_id="999"))
+    assert fired == []
+
+
+def test_discord_event_classes_read_from_metadata():
+    from praisonaiagents.bots import BotConfig
+    from praisonai_bot.bots.discord import DiscordBot
+
+    cfg = BotConfig(token="x")
+    cfg.metadata["events"] = ["reactions", "edits"]
+    bot = DiscordBot(token="x", config=cfg)
+    assert bot._event_classes() == {"reactions", "edits"}
