@@ -39,13 +39,19 @@ def _strict_validation_enabled() -> bool:
     return os.getenv("PRAISONAI_VALIDATE_STRICT", "false").lower() == "true"
 
 
-def _list_to_dict(entries: list, prefix: str, kind: str) -> dict:
+def _list_to_dict(entries: list, prefix: str, kind: str, strict: bool | None = None) -> dict:
     """Convert a list of named entries to a dict, preserving duplicates.
 
     Duplicate ``name`` keys would otherwise silently clobber each other. Instead
-    we raise under ``PRAISONAI_VALIDATE_STRICT`` or warn loudly and keep both by
-    suffixing the colliding key, so a multi-agent YAML never quietly shrinks.
+    we raise under strict validation or warn loudly and keep both by suffixing
+    the colliding key, so a multi-agent YAML never quietly shrinks.
+
+    ``strict`` is the per-run resolved strictness (arg / cli_config first). When
+    ``None`` (module-level callers with no instance) we fall back to the
+    process-global env var so behaviour is unchanged.
     """
+    if strict is None:
+        strict = _strict_validation_enabled()
     normalized: dict = {}
     duplicates: list = []
     for i, entry in enumerate(entries):
@@ -58,20 +64,28 @@ def _list_to_dict(entries: list, prefix: str, kind: str) -> dict:
         normalized[key] = entry
     if duplicates:
         msg = f"Duplicate {kind} name(s) in YAML: {sorted(set(duplicates))}"
-        if _strict_validation_enabled():
+        if strict:
             raise ValueError(msg)
         logger.warning("%s — kept both by suffixing keys; rename to silence.", msg)
     return normalized
 
 
-def _normalize_yaml_config(config: dict) -> dict:
-    """Normalise list-format agents/tasks YAML to dict format expected by merge/run."""
+def _normalize_yaml_config(config: dict, strict: bool | None = None) -> dict:
+    """Normalise list-format agents/tasks YAML to dict format expected by merge/run.
+
+    ``strict`` carries the per-run strictness so normalization and downstream
+    ``ConfigValidator`` agree within a single run. When ``None`` we fall back to
+    the process-global env var (module-level callers / backward compatibility).
+    """
     if not isinstance(config, dict):
         return config
 
+    if strict is None:
+        strict = _strict_validation_enabled()
+
     agents = config.get("agents")
     if isinstance(agents, list):
-        config["agents"] = _list_to_dict(agents, "agent", "agent")
+        config["agents"] = _list_to_dict(agents, "agent", "agent", strict=strict)
 
     for bucket_key in ("agents", "roles"):
         bucket = config.get(bucket_key)
@@ -82,7 +96,7 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     roles = config.get("roles")
     if isinstance(roles, list):
-        config["roles"] = _list_to_dict(roles, "role", "role")
+        config["roles"] = _list_to_dict(roles, "role", "role", strict=strict)
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
@@ -103,7 +117,7 @@ def _normalize_yaml_config(config: dict) -> dict:
                     f"Task {task.get('name', f'task_{i}')!r} references "
                     f"unknown agent {agent_key!r}; skipping."
                 )
-                if _strict_validation_enabled():
+                if strict:
                     raise ValueError(msg)
                 logger.warning(msg)
                 continue
@@ -113,7 +127,7 @@ def _normalize_yaml_config(config: dict) -> dict:
                 dup_msg = (
                     f"Duplicate task name {task_name!r} for agent {agent_key!r} in YAML"
                 )
-                if _strict_validation_enabled():
+                if strict:
                     raise ValueError(dup_msg)
                 logger.warning("%s — kept both by suffixing keys; rename to silence.", dup_msg)
                 task_name = f"{task_name}__dup_{i}"
@@ -1360,7 +1374,10 @@ class AgentsGenerator:
             with open(self.agent_file, 'r') as f:
                 config = _yaml_safe_load(f)
 
-        config = _normalize_yaml_config(config or {})
+        # Pass the per-run strictness so YAML normalization and the downstream
+        # ConfigValidator agree within one run (multi-tenant isolation). See
+        # _is_strict(); module-level callers still fall back to the env var.
+        config = _normalize_yaml_config(config or {}, strict=self._is_strict())
 
         # Apply CLI config overrides to both paths (agent_yaml and agent_file)
         if self.cli_config:
