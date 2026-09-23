@@ -6,6 +6,7 @@ import warnings
 import re
 import inspect
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -35,6 +36,12 @@ from ..tools.schema import build_tool_definition
 # with the WRONG arguments and report success. Callers must detect this sentinel
 # and surface a tool-error so the model can re-emit the call instead.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+# ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
+# process-global lists shared by every LLM instance. Guard the read-modify-write
+# in ``_setup_event_tracking`` so concurrent instances don't corrupt them.
+_EVENT_TRACKING_LOCK = threading.Lock()
 
 
 def _ollama_tool_result_is_successful(tool_result: Any) -> bool:
@@ -573,6 +580,9 @@ Respond with ONLY a valid JSON tool call in this format:
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
         self.current_agent_name: Optional[str] = None
+        # Stable per-instance identity for token accounting, so unrelated agents
+        # sharing a display name don't merge into one cost bucket.
+        self.current_agent_id: Optional[str] = None
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6048,11 +6058,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def _setup_event_tracking(self, events: List[Any]) -> None:
         """Setup callback functions for tracking model usage.
 
-        ``litellm.callbacks`` is a process-global list shared by every LLM
-        instance. Overwriting it wipes callbacks registered by other concurrent
-        agents, so we merge into it instead: only the callbacks *this* instance
-        previously registered are removed, and unrelated instances' callbacks
-        are never touched. An empty ``events`` list is a no-op.
+        ``litellm.success_callback``, ``litellm._async_success_callback`` and
+        ``litellm.callbacks`` are process-global lists shared by every LLM
+        instance. Overwriting (or type-based stripping of) them wipes callbacks
+        registered by other concurrent agents — or by the application itself via
+        litellm's documented ``litellm.success_callback.append(...)`` extension
+        point. So we merge into each list instead: only the callbacks *this*
+        instance previously registered are removed, and unrelated instances'
+        callbacks are never touched. An empty ``events`` list is a no-op. The
+        whole read-modify-write is guarded by a module-level lock so concurrent
+        instances can't corrupt the shared lists.
         """
         if not events:
             return
@@ -6065,29 +6080,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
 
-        event_types = [type(event) for event in events]
-        
-        # Remove old events of same type
-        for event in litellm.success_callback[:]:
-            if type(event) in event_types:
-                litellm.success_callback.remove(event)
-                
-        for event in litellm._async_success_callback[:]:
-            if type(event) in event_types:
-                litellm._async_success_callback.remove(event)
+        with _EVENT_TRACKING_LOCK:
+            # Only remove the success callbacks *this* instance registered on a
+            # prior call — never strip by type, which would delete another
+            # instance's or the application's own callbacks of the same class
+            # (e.g. an app-registered ``litellm.success_callback.append(...)``).
+            for cb in getattr(self, "_registered_success_callbacks", []):
+                if cb in litellm.success_callback:
+                    litellm.success_callback.remove(cb)
+            for cb in getattr(self, "_registered_async_success_callbacks", []):
+                if cb in litellm._async_success_callback:
+                    litellm._async_success_callback.remove(cb)
+            for event in events:
+                if event not in litellm.success_callback:
+                    litellm.success_callback.append(event)
+                if event not in litellm._async_success_callback:
+                    litellm._async_success_callback.append(event)
+            self._registered_success_callbacks = list(events)
+            self._registered_async_success_callbacks = list(events)
 
-        # Merge into the global list rather than replacing it. Only remove the
-        # callbacks this instance registered on a prior call, then append the
-        # current ones, preserving other instances' callbacks.
-        if litellm.callbacks is None:
-            litellm.callbacks = []
-        for cb in getattr(self, "_registered_callbacks", []):
-            if cb in litellm.callbacks:
-                litellm.callbacks.remove(cb)
-        for event in events:
-            if event not in litellm.callbacks:
-                litellm.callbacks.append(event)
-        self._registered_callbacks = list(events)
+            # Merge into the global list rather than replacing it. Only remove the
+            # callbacks this instance registered on a prior call, then append the
+            # current ones, preserving other instances' callbacks.
+            if litellm.callbacks is None:
+                litellm.callbacks = []
+            for cb in getattr(self, "_registered_callbacks", []):
+                if cb in litellm.callbacks:
+                    litellm.callbacks.remove(cb)
+            for event in events:
+                if event not in litellm.callbacks:
+                    litellm.callbacks.append(event)
+            self._registered_callbacks = list(events)
 
     def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
@@ -6169,7 +6192,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 metadata={
                     "provider": provider,
                     "stream": False
-                }
+                },
+                agent_id=self.current_agent_id,
             )
             
             return metrics
@@ -6263,9 +6287,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
-    def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
+    def set_current_agent(self, agent_name: Optional[str], agent_id: Optional[str] = None):
+        """Set the current agent name (and optional stable id) for token tracking.
+
+        ``agent_id`` is a stable per-instance identity used as the token
+        aggregation key so unrelated agents sharing a display name are not
+        merged into one cost bucket.
+        """
         self.current_agent_name = agent_name
+        self.current_agent_id = agent_id
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.

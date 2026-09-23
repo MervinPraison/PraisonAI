@@ -220,9 +220,23 @@ def create_lazy_getattr_with_fallback(
                 _cache[name] = None
                 return None
             except ImportError as exc:
-                # Optional module not available: preserve the graceful None
-                # fallback, but record why so real import failures remain
-                # diagnosable instead of surfacing later as NoneType errors.
+                # Distinguish "optional integration not installed" from
+                # "required transitive dependency is broken". When the failing
+                # module is the target module itself (or its top-level package),
+                # treat it as an intentionally-absent optional feature and keep
+                # the graceful None fallback. When the failure came from a
+                # *different* module — i.e. a required dependency of the target
+                # failed to import — surface it instead of masking it as a
+                # later NoneType error.
+                failing = getattr(exc, "name", None)
+                top_level = module_path.split(".")[0]
+                if failing is not None and failing not in (module_path, top_level):
+                    raise ImportError(
+                        f"Failed to load {name!r} because importing {module_path!r} "
+                        f"raised: {exc}. This usually means a required dependency is "
+                        f"missing or broken, not that {name!r} is an optional feature "
+                        f"you chose not to install."
+                    ) from exc
                 _logger.debug(
                     "Lazy import of %r (%s.%s) failed: %s",
                     name, module_path, attr_name, exc,

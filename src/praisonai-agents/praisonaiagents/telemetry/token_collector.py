@@ -63,11 +63,28 @@ class SessionTokenMetrics:
     """Aggregated token metrics for a session."""
     total_interactions: int = 0
     metrics_by_model: Dict[str, TokenMetrics] = field(default_factory=dict)
-    metrics_by_agent: Dict[str, TokenMetrics] = field(default_factory=dict)
+    # Aggregated per agent *identity* (a stable per-instance key such as an
+    # Agent's ``_approval_scope_id``), not the bare display name. Two unrelated
+    # agents that happen to share a name (e.g. the default ``"Agent"``) must not
+    # merge into one cost bucket, which would make per-tenant accounting
+    # unrecoverable. Each entry carries the display name for reporting.
+    metrics_by_agent_id: Dict[str, Dict] = field(default_factory=dict)
     total_metrics: TokenMetrics = field(default_factory=TokenMetrics)
     
-    def add_interaction(self, model: str, agent: Optional[str], metrics: TokenMetrics):
-        """Add a new interaction's metrics."""
+    def add_interaction(
+        self,
+        model: str,
+        agent: Optional[str],
+        metrics: TokenMetrics,
+        agent_id: Optional[str] = None,
+    ):
+        """Add a new interaction's metrics.
+
+        ``agent`` is the display name; ``agent_id`` is a stable per-instance
+        identity used as the aggregation key so name collisions between
+        unrelated agents never merge their usage. When ``agent_id`` is omitted
+        the display name is used as the key (backward-compatible fallback).
+        """
         self.total_interactions += 1
         
         # Update total metrics
@@ -78,14 +95,33 @@ class SessionTokenMetrics:
             self.metrics_by_model[model] = TokenMetrics()
         self.metrics_by_model[model] = self.metrics_by_model[model] + metrics
         
-        # Update agent-specific metrics
-        if agent:
-            if agent not in self.metrics_by_agent:
-                self.metrics_by_agent[agent] = TokenMetrics()
-            self.metrics_by_agent[agent] = self.metrics_by_agent[agent] + metrics
+        # Update agent-specific metrics, keyed by identity (not display name).
+        key = agent_id or agent
+        if key:
+            bucket = self.metrics_by_agent_id.get(key)
+            if bucket is None:
+                bucket = {"name": agent, "metrics": TokenMetrics()}
+                self.metrics_by_agent_id[key] = bucket
+            bucket["metrics"] = bucket["metrics"] + metrics
     
     def get_summary(self) -> Dict:
-        """Get a summary of session token usage."""
+        """Get a summary of session token usage.
+
+        ``by_agent`` is keyed by display name for readability (metrics for
+        same-named agents are summed only for display); ``by_agent_id`` keeps
+        the collision-free per-identity breakdown that callers use to scope
+        usage to a specific instance/tenant.
+        """
+        by_agent: Dict[str, TokenMetrics] = {}
+        by_agent_id: Dict[str, Dict] = {}
+        for key, bucket in self.metrics_by_agent_id.items():
+            name = bucket.get("name") or key
+            agent_metrics = bucket["metrics"]
+            if name in by_agent:
+                by_agent[name] = by_agent[name] + agent_metrics
+            else:
+                by_agent[name] = agent_metrics
+            by_agent_id[key] = {"name": name, "metrics": agent_metrics.to_dict()}
         return {
             "total_interactions": self.total_interactions,
             "total_tokens": self.total_metrics.total_tokens,
@@ -95,9 +131,10 @@ class SessionTokenMetrics:
                 for model, metrics in self.metrics_by_model.items()
             },
             "by_agent": {
-                agent: metrics.to_dict() 
-                for agent, metrics in self.metrics_by_agent.items()
-            }
+                name: metrics.to_dict()
+                for name, metrics in by_agent.items()
+            },
+            "by_agent_id": by_agent_id,
         }
 
 
@@ -128,18 +165,25 @@ class TokenCollector:
         model: str, 
         agent: Optional[str], 
         metrics: TokenMetrics,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        agent_id: Optional[str] = None,
     ):
-        """Track token usage for an interaction."""
+        """Track token usage for an interaction.
+
+        ``agent`` is the display name; ``agent_id`` is an optional stable
+        per-instance identity used as the aggregation key so unrelated agents
+        that share a name never merge into one cost bucket.
+        """
         with self._lock:
             # Add to session metrics
-            self._session_metrics.add_interaction(model, agent, metrics)
+            self._session_metrics.add_interaction(model, agent, metrics, agent_id=agent_id)
             
             # Track recent interaction
             interaction = {
                 "timestamp": datetime.now().isoformat(),
                 "model": model,
                 "agent": agent,
+                "agent_id": agent_id,
                 "metrics": metrics.to_dict(),
                 "metadata": metadata or {}
             }
