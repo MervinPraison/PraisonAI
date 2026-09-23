@@ -26,21 +26,29 @@ def _atomic_write(path: str, content: str) -> None:
     target_dir = os.path.dirname(os.path.abspath(path)) or "."
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=target_dir)
     try:
-        # Preserve the existing file's mode so a replaced file stays readable
-        # (mkstemp creates 0600 by default).
+        # Atomic replace swaps in a fresh inode, so carry over the metadata that
+        # matters for a replaced file: mode (mkstemp creates 0600 by default) and
+        # ownership (uid/gid) so editing a group-/shared-owned file does not
+        # silently change its owner. Hard-link identity and xattrs/ACLs cannot be
+        # preserved through an inode swap and are out of scope for this tool.
         try:
-            existing_mode = os.stat(path).st_mode
+            existing_stat = os.stat(path)
         except OSError:
-            existing_mode = None
+            existing_stat = None
         with os.fdopen(fd, "w") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())  # durability before rename
-        if existing_mode is not None:
+        if existing_stat is not None:
             try:
-                os.chmod(tmp_path, existing_mode)
+                os.chmod(tmp_path, existing_stat.st_mode)
             except OSError:
                 pass  # best-effort
+            if hasattr(os, "chown"):
+                try:
+                    os.chown(tmp_path, existing_stat.st_uid, existing_stat.st_gid)
+                except (OSError, AttributeError):
+                    pass  # best-effort (needs privilege; no-op on Windows)
         os.replace(tmp_path, path)  # atomic on POSIX + Windows
     except BaseException:
         try:

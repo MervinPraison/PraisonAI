@@ -94,24 +94,33 @@ _SERVE_CONFIG_ENV = "PRAISONAI_RECIPE_SERVE_CONFIG"
 class RateLimiter:
     """In-memory sliding-window rate limiter.
 
-    The sliding window is guarded by an ``asyncio.Lock`` so overlapping requests
-    for the same client cannot both pass the length check before either appends
-    (the classic check-then-act race that lets a small burst exceed the limit in
-    a single worker). ``check`` is awaitable; a sync ``check_sync`` is retained
-    for non-async callers / tests.
+    The classic check-then-act race (two overlapping requests for the same
+    client both pass the length check before either appends, letting a small
+    burst exceed the limit) is closed two ways:
+
+    * ``check`` — the original **synchronous** public API — is guarded by a
+      ``threading.Lock`` so it stays safe *and* backward compatible for the
+      sync callers/tests that unpack its ``(allowed, retry_after)`` tuple.
+    * ``check_async`` wraps the same critical section in an ``asyncio.Lock``
+      for the async middleware hot path so it never blocks the event loop on
+      contention.
+
+    ``check_sync`` is kept as an alias of ``check``.
+
+    Note: state is per-process and in-memory. With ``workers > 1`` each worker
+    holds an independent limiter; :func:`serve` compensates by dividing the
+    configured limit across workers (see ``_per_worker_rate_limit``).
     """
 
     def __init__(self, requests_per_minute: int = DEFAULT_RATE_LIMIT):
         self.requests_per_minute = requests_per_minute
         self.window_seconds = 60
         self._requests: Dict[str, List[float]] = defaultdict(list)
-        self._lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
 
-    def check_sync(self, client_id: str) -> Tuple[bool, int]:
-        """Check if request is allowed (no locking; for tests / sync callers)."""
-        if self.requests_per_minute <= 0:
-            return True, 0
-
+    def _check_locked(self, client_id: str) -> Tuple[bool, int]:
+        """Sliding-window decision. Callers must hold a lock."""
         now = time.time()
         window_start = now - self.window_seconds
 
@@ -128,9 +137,8 @@ class RateLimiter:
         bucket.append(now)
         return True, 0
 
-    async def check(self, client_id: str) -> Tuple[bool, int]:
-        """
-        Check if request is allowed.
+    def check(self, client_id: str) -> Tuple[bool, int]:
+        """Check if request is allowed (synchronous, thread-safe).
 
         Returns:
             Tuple of (allowed, retry_after_seconds)
@@ -138,8 +146,23 @@ class RateLimiter:
         if self.requests_per_minute <= 0:
             return True, 0
 
-        async with self._lock:
-            return self.check_sync(client_id)
+        with self._sync_lock:
+            return self._check_locked(client_id)
+
+    # Backward-compatible alias.
+    check_sync = check
+
+    async def check_async(self, client_id: str) -> Tuple[bool, int]:
+        """Async variant used by the middleware hot path.
+
+        Returns:
+            Tuple of (allowed, retry_after_seconds)
+        """
+        if self.requests_per_minute <= 0:
+            return True, 0
+
+        async with self._async_lock:
+            return self._check_locked(client_id)
 
 
 def create_rate_limiter(requests_per_minute: int = DEFAULT_RATE_LIMIT) -> RateLimiter:
@@ -812,7 +835,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
             else:
                 client_id = "anonymous"
             
-            allowed, retry_after = await rate_limiter.check(client_id)
+            allowed, retry_after = await rate_limiter.check_async(client_id)
             if not allowed:
                 return JSONResponse(
                     {"error": {"code": "rate_limited", "message": "Too many requests"}},
@@ -867,6 +890,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
     return Starlette(routes=routes, middleware=middleware)
 
 
+def _per_worker_rate_limit(rate_limit: int, workers: int) -> int:
+    """Split an aggregate per-minute limit across independent worker processes.
+
+    The in-memory limiter is per-process, so N workers would otherwise permit
+    ~N× the configured quota (each worker sees only the fraction of traffic the
+    OS load-balances to it, yet enforces the full limit locally). Dividing the
+    limit by the worker count keeps the *aggregate* rate close to the configured
+    value. This is best-effort: a shared store (e.g. Redis) is required for exact
+    cross-process enforcement, but that is out of scope for the built-in limiter.
+
+    A floor of 1 is applied so a positive limit is never silently disabled.
+    """
+    if rate_limit <= 0 or workers <= 1:
+        return rate_limit
+    return max(1, rate_limit // workers)
+
+
 def _app_factory():
     """Uvicorn app-factory used when ``serve(workers>1)`` spawns workers.
 
@@ -918,7 +958,25 @@ def serve(
         # multiple worker processes; passing the app object silently degrades
         # to a single worker. Hand it an app-factory import string and ship the
         # config to each worker via the environment.
-        os.environ[_SERVE_CONFIG_ENV] = json.dumps(config or {})
+        worker_config = dict(config or {})
+        # Each worker owns an independent in-memory limiter, so without this the
+        # effective quota would be ~workers× the configured limit. Split the
+        # aggregate limit across workers (best-effort) and warn that exact
+        # cross-process enforcement needs a shared store.
+        configured_limit = worker_config.get("rate_limit", 0) or 0
+        if configured_limit > 0:
+            import warnings
+            per_worker = _per_worker_rate_limit(configured_limit, workers)
+            worker_config["rate_limit"] = per_worker
+            warnings.warn(
+                "Recipe serve uses a per-process in-memory rate limiter; with "
+                f"workers={workers} the configured rate_limit={configured_limit} "
+                f"is split to {per_worker}/worker to approximate the aggregate "
+                "limit. For exact cross-process limiting use a shared store "
+                "(e.g. a reverse proxy or Redis-backed limiter).",
+                stacklevel=2,
+            )
+        os.environ[_SERVE_CONFIG_ENV] = json.dumps(worker_config)
         uvicorn.run(
             "praisonai.recipe.serve:_app_factory",
             host=host,

@@ -151,6 +151,29 @@ class TestMultieditTool:
             os.unlink(filepath)
 
 
+    def test_multiedit_atomic_write_preserves_mode(self):
+        """Atomic replace keeps the original file mode (not mkstemp's 0600)."""
+        import stat as _stat
+        from praisonai.tools.multiedit import multiedit
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("value = 1\n")
+            filepath = f.name
+
+        try:
+            os.chmod(filepath, 0o644)
+            edits = [{"old": "value = 1", "new": "value = 2"}]
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
+
+            assert result["success"] is True
+            mode = _stat.S_IMODE(os.stat(filepath).st_mode)
+            assert mode == 0o644, f"mode not preserved: {oct(mode)}"
+            with open(filepath) as f:
+                assert "value = 2" in f.read()
+        finally:
+            os.unlink(filepath)
+
+
 class TestMultieditValidation:
     """Tests for multiedit input validation."""
     
