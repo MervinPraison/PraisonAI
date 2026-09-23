@@ -22,6 +22,31 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+# Lifecycle hooks that carry the user's prompt / conversation content and can
+# rewrite it (transform-style). Dispatching these to an arbitrary pip-installed
+# entry-point plugin lets a transitively-installed dependency read or tamper
+# with every user's messages, so they are gated behind an explicit grant.
+CONVERSATION_HOOKS = frozenset({
+    PluginHook.MESSAGE_RECEIVED,
+    PluginHook.BEFORE_LLM,
+    PluginHook.AFTER_LLM,
+    PluginHook.BEFORE_AGENT,
+    PluginHook.AFTER_AGENT,
+})
+
+
+def _is_first_party(plugin: Plugin) -> bool:
+    """True for plugins bundled inside the framework itself.
+
+    First-party plugins live under the ``praisonaiagents`` package namespace;
+    they are shipped and reviewed with the framework, so they are trusted with
+    conversation content. Any plugin loaded from another distribution (e.g. a
+    pip package's ``praisonai.plugins`` entry point) is third-party.
+    """
+    module = getattr(type(plugin), "__module__", "") or ""
+    return module == "praisonaiagents" or module.startswith("praisonaiagents.")
+
+
 def _env_plugins_suppressed() -> bool:
     """Return True when external plugins are suppressed via env for this run.
 
@@ -282,6 +307,27 @@ class PluginManager:
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
         return self._enabled.get(name, False)
+
+    def _granted_conversation_access(self, name: str) -> bool:
+        """Whether a plugin may receive conversation-content hooks.
+
+        Least-privilege, safe-by-default: a plugin sees ``before_llm`` /
+        ``after_llm`` / ``before_agent`` / ``after_agent`` / ``message_received``
+        (which carry — and can rewrite — the user's prompt/messages) only when
+
+        - it is **first-party** (bundled in the framework), or
+        - the operator **granted** it in the per-plugin config options map via
+          ``allow_conversation: true`` (e.g. ``plugins.<name>.allow_conversation``).
+
+        Any other plugin — notably an auto-discovered ``praisonai.plugins``
+        entry point from an arbitrary pip package — is denied these hooks by
+        default while still receiving its tool/channel/utility hooks.
+        """
+        plugin = self._plugins.get(name)
+        if plugin is not None and _is_first_party(plugin):
+            return True
+        options = self._plugin_options.get(name) or {}
+        return options.get("allow_conversation") is True
     
     def get_plugin(self, name: str) -> Optional[Plugin]:
         """Get a plugin by name."""
@@ -416,6 +462,12 @@ class PluginManager:
                 continue
             
             if hook not in plugin.info.hooks:
+                continue
+
+            # Least-privilege gate: conversation-content hooks are default-deny
+            # for third-party/ungranted plugins so a pip-installed dependency
+            # cannot silently read or rewrite every user's prompt/messages.
+            if hook in CONVERSATION_HOOKS and not self._granted_conversation_access(name):
                 continue
             
             try:
@@ -704,8 +756,16 @@ class PluginManager:
                 if getattr(plugin, "_wired_into_registry", None) is registry:
                     # Avoid double-registration on repeated enable() calls
                     continue
+                allow_conversation = self._granted_conversation_access(name)
                 hook_ids: List[str] = []
                 for event, func in _adapt_plugin_hooks(plugin):
+                    # Same least-privilege gate as execute_hook(): never bridge
+                    # a conversation-content hook of an ungranted plugin into the
+                    # runtime the Agent actually consults, so a third-party
+                    # entry-point plugin cannot read/rewrite prompts even though
+                    # its tool/channel hooks still wire in.
+                    if event in CONVERSATION_HOOKS and not allow_conversation:
+                        continue
                     hook_id = registry.register_function(
                         event=event,
                         func=func,

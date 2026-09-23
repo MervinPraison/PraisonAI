@@ -154,6 +154,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         assert mgr.wire_into_hook_registry(reg) == 1
         assert reg.has_hooks(HookEvent.AFTER_LLM)
 
@@ -161,6 +162,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         mgr.wire_into_hook_registry(reg)
 
         runner = HookRunner(registry=reg, cwd=os.getcwd())
@@ -288,6 +290,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         mgr.disable("pii")
         assert mgr.wire_into_hook_registry(reg) == 0
         assert not reg.has_hooks(HookEvent.AFTER_LLM)
@@ -299,6 +302,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         assert mgr.wire_into_hook_registry(reg) == 1
         assert mgr.wire_into_hook_registry(reg) == 0
 
@@ -306,6 +310,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         assert mgr.wire_into_hook_registry(reg) == 1
         assert reg.has_hooks(HookEvent.AFTER_LLM)
 
@@ -322,6 +327,7 @@ class TestBridge:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(PIIPlugin())
+        mgr.set_plugin_options({"pii": {"allow_conversation": True}})
         mgr.wire_into_hook_registry(reg)
         mgr.disable("pii")
         assert not reg.has_hooks(HookEvent.AFTER_LLM)
@@ -541,6 +547,7 @@ class TestDecisionPropagation:
         reg = HookRegistry()
         mgr = PluginManager()
         mgr.register(BlockMessagePlugin())
+        mgr.set_plugin_options({"blockmsg": {"allow_conversation": True}})
         mgr.wire_into_hook_registry(reg)
 
         runner = HookRunner(registry=reg, cwd=os.getcwd())
@@ -610,6 +617,10 @@ def _runner_with(plugin):
     reg = HookRegistry()
     mgr = PluginManager()
     mgr.register(plugin)
+    # These bridge tests exercise trusted guardrail/redaction plugins, so grant
+    # the conversation-content capability (as an operator would) before wiring
+    # — otherwise the least-privilege gate withholds before_llm/message_received.
+    mgr.set_plugin_options({plugin.info.name: {"allow_conversation": True}})
     mgr.wire_into_hook_registry(reg)
     return HookRunner(registry=reg, cwd=os.getcwd())
 

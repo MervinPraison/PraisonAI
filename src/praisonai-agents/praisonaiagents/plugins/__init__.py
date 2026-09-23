@@ -388,10 +388,16 @@ def get_plugin_registry() -> list:
         if not name or name in seen:
             continue
         seen.add(name)
+        declared = getattr(info, "hooks", None) or []
         hooks = [
             h.value if hasattr(h, "value") else str(h)
-            for h in (getattr(info, "hooks", None) or [])
+            for h in declared
         ]
+        # Surface the least-privilege conversation boundary so an operator can
+        # see, per plugin, whether it *requested* prompt/message access
+        # (declared a conversation hook) and whether it is *granted*.
+        from .manager import CONVERSATION_HOOKS
+
         entries.append({
             "name": name,
             "version": getattr(info, "version", "1.0.0"),
@@ -399,6 +405,8 @@ def get_plugin_registry() -> list:
             "source": "registered",
             "enabled": manager.is_enabled(name) or _config_says_enabled(name),
             "hooks": hooks,
+            "requests_conversation": any(h in CONVERSATION_HOOKS for h in declared),
+            "conversation_granted": manager._granted_conversation_access(name),
         })
 
     # 2. Entry-point plugins present on the system but not yet loaded, so
