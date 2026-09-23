@@ -173,6 +173,50 @@ def test_authorize_method_honours_field_escalation():
         GATEWAY_METHODS.pop(name, None)
 
 
+def test_authorize_method_read_lifecycle_allows_any_operator():
+    """READ-classified lifecycle is reachable by any provisioned operator.
+
+    READ is the baseline observe/lifecycle scope: an operator holding any
+    actionable scope (WRITE/APPROVALS/PAIRING) can still complete
+    hello/join/leave/status — matching pre-guard behaviour, where those frames
+    carried no per-endpoint scope check. Regression guard for #5166 (a
+    WRITE-only client must not be locked out of the session lifecycle).
+    """
+    for method in ("hello", "join", "leave", "session.status"):
+        assert resolve_required_scope(method) == OperatorScope.READ
+        authorize_method(method, {OperatorScope.WRITE})
+        authorize_method(method, {OperatorScope.APPROVALS})
+        authorize_method(method, {OperatorScope.PAIRING})
+        authorize_method(method, {OperatorScope.READ})
+    # An empty scope set still cannot reach even the READ baseline.
+    with pytest.raises(GatewayUnauthorized):
+        authorize_method("hello", set())
+
+
+def test_authorize_method_read_does_not_leak_to_write():
+    """The READ baseline does not grant WRITE/ADMIN surface."""
+    with pytest.raises(GatewayUnauthorized) as exc:
+        authorize_method("message", {OperatorScope.READ})
+    assert exc.value.required == OperatorScope.WRITE
+    with pytest.raises(GatewayUnauthorized):
+        authorize_method("channels.control", {OperatorScope.READ})
+
+
+def test_authorize_method_non_string_method_fails_closed():
+    """A malformed (non-string/unhashable) method fails closed, not TypeError.
+
+    A valid JSON frame such as ``{"type": []}`` must not raise ``TypeError``
+    out of the guard (which would tear down the connection). It is treated as
+    unclassified -> ADMIN, yielding a deterministic denial. Regression guard
+    for #5166 P2.
+    """
+    for bad in ([], {}, 123, None):
+        assert resolve_required_scope(bad) == OperatorScope.ADMIN  # type: ignore[arg-type]
+        with pytest.raises(GatewayUnauthorized) as exc:
+            authorize_method(bad, {OperatorScope.WRITE})  # type: ignore[arg-type]
+        assert exc.value.required == OperatorScope.ADMIN
+
+
 def test_register_gateway_method_and_resolve():
     name = "test.plugin.method.3206"
     try:

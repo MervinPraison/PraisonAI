@@ -7053,8 +7053,12 @@ def resolve_required_scope(
 
     Default-deny: an unclassified/unknown method requires ``ADMIN`` so new
     control surface is closed until explicitly classified — the omission fails
-    **closed** rather than open.
+    **closed** rather than open. A non-string (or unhashable) ``method`` is
+    likewise treated as unclassified and requires ``ADMIN``, so a malformed
+    frame fails closed deterministically instead of raising ``TypeError``.
     """
+    if not isinstance(method, str):
+        return OperatorScope.ADMIN
     desc = GATEWAY_METHODS.get(method)
     if desc is None:
         return OperatorScope.ADMIN
@@ -7080,15 +7084,29 @@ class GatewayUnauthorized(PermissionError):
 def _scope_satisfies(
     held: "Set[OperatorScope]", required: OperatorScope
 ) -> bool:
-    """Whether the ``held`` scopes satisfy ``required`` (ADMIN implies all).
+    """Whether the ``held`` scopes satisfy ``required``.
 
-    A caller is authorised when it holds the exact required scope or ``ADMIN``
-    (the top of the lattice). This mirrors the wrapper's long-standing
-    ``ADMIN implies all`` rule so wiring the registry into dispatch does not
-    change behaviour for already-classified methods.
+    Two implication rules, matching the wrapper's long-standing behaviour so
+    wiring the registry into dispatch does not regress already-classified
+    methods:
+
+    - ``ADMIN`` implies every scope (top of the lattice).
+    - ``READ`` is the baseline lifecycle/observation scope that every
+      authorised operator implicitly holds. An operator provisioned with any
+      actionable scope (``WRITE``/``APPROVALS``/``PAIRING``/``ADMIN``) can
+      therefore still complete the READ-classified session lifecycle
+      (``hello``/``join``/``leave``/status) — exactly as it could before this
+      guard existed, when those frames carried no per-endpoint scope check.
+
+    Otherwise a caller is authorised only when it holds the exact required
+    scope.
     """
     if OperatorScope.ADMIN in held:
         return True
+    if required == OperatorScope.READ:
+        # Any authorised operator (holding at least one scope) may perform the
+        # read-only lifecycle/observation surface.
+        return bool(held)
     return required in held
 
 
