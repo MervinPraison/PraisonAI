@@ -10470,6 +10470,17 @@ class WebSocketGateway:
                 f"(max_concurrent_runs/queue_depth must be integers): {e}"
             ) from e
         _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
+        # Issue #5168: optional per-tenant/per-scope concurrency sub-limit within
+        # the global ceiling (0 = disabled, global-only behaviour).
+        try:
+            _max_runs_per_scope = int(
+                gw_cfg.get("max_concurrent_runs_per_scope", 0) or 0
+            )
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid gateway admission config "
+                f"(max_concurrent_runs_per_scope must be an integer): {e}"
+            ) from e
 
         # Issue #2531: single reliability posture. A ``reliability`` preset
         # (CLI ``--reliability`` override wins over ``gateway.reliability``)
@@ -10503,12 +10514,14 @@ class WebSocketGateway:
             max_concurrent_runs=_max_runs,
             queue_depth=_queue_depth,
             overflow_policy=_overflow,
+            max_concurrent_runs_per_scope=_max_runs_per_scope,
         )
         if self._admission_gate is not None:
             logger.info(
                 "Gateway admission control enabled "
-                "(max_concurrent_runs=%d queue_depth=%d overflow=%s)",
-                _max_runs, _queue_depth, _overflow,
+                "(max_concurrent_runs=%d queue_depth=%d overflow=%s "
+                "per_scope=%d)",
+                _max_runs, _queue_depth, _overflow, _max_runs_per_scope,
             )
 
         # Parse health monitoring configuration
