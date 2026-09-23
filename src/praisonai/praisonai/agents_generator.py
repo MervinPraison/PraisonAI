@@ -554,6 +554,10 @@ class AgentsGenerator:
         self.agent_yaml = agent_yaml
         self.tools = tools or []  # Store tool class names as a list
         self.cli_config = cli_config or {}  # Store CLI configuration overrides
+        # Private per-run context for internal closures (tool-timeout wrap /
+        # resolver). Kept separate from the user-facing cli_config so those
+        # instance-bound closures never leak back into a caller's config dict.
+        self._run_ctx = {}
         # Use namespaced logger - no hot-path basicConfig calls
         from ._logging import get_logger
         self.logger = get_logger("agents_generator")
@@ -948,14 +952,34 @@ class AgentsGenerator:
         # Expose the per-run wrap so adapters that inject *more* tools after this
         # point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the same
         # timeout guard instead of silently bypassing it; expose the per-agent
-        # resolver for heterogeneous budgets. Both keys are written every time so
-        # the inactive path is cleared rather than left holding a prior closure.
-        self.cli_config = {
-            **(self.cli_config or {}),
+        # resolver for heterogeneous budgets. These are private per-run closures
+        # (bound to this generator's timeout executor), NOT user configuration —
+        # keep them off the user-facing ``self.cli_config`` dict so a caller who
+        # passed a shared cli_config template never gets it back stamped with
+        # instance-bound lambdas (cross-run / cross-tenant leak). They are merged
+        # into the cli_config kwarg only at dispatch (see _dispatch_cli_config)
+        # so adapters still read them via the same keys. Both are written every
+        # time so the inactive path is cleared rather than left holding a prior
+        # closure.
+        self._run_ctx = {
             "_tool_timeout_wrap": wrap,
             "_agent_tool_wrap_resolver": resolver,
         }
         return tools_dict
+
+    def _dispatch_cli_config(self):
+        """Merge the private per-run context onto the user cli_config for adapters.
+
+        Adapters read ``_tool_timeout_wrap`` / ``_agent_tool_wrap_resolver`` off
+        their ``cli_config`` kwarg. Build a fresh merged dict at dispatch so the
+        closures reach the adapter without persisting onto the caller-owned
+        ``self.cli_config`` (which stays "user overrides only").
+        """
+        base = self.cli_config or {}
+        run_ctx = getattr(self, "_run_ctx", None)
+        if not run_ctx:
+            return base
+        return {**base, **run_ctx}
 
     def _resolve_effective_tool_timeout(self, config):
         """Resolve the effective per-tool timeout in seconds.
@@ -1435,7 +1459,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
     async def _aload_config(self):
@@ -1504,7 +1528,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
 
@@ -1689,7 +1713,14 @@ class AgentsGenerator:
         workflow, input_data = self._build_yaml_workflow(config)
 
         self.logger.debug(f"Running workflow: {workflow.name}")
-        result = workflow.start(input_data)
+        # Isolate this sync run's sync→async work onto its own loop+thread,
+        # mirroring generate_crew_and_kickoff. workflow.start(...) drives async
+        # internals through run_sync on the process-wide shared bridge; without
+        # scoped_bridge() a stuck workflow-tool coroutine would park the shared
+        # default loop for every other tenant's run_sync submission.
+        from ._async_bridge import scoped_bridge
+        with scoped_bridge():
+            result = workflow.start(input_data)
 
         return self._finalise_workflow_result(result)
 
