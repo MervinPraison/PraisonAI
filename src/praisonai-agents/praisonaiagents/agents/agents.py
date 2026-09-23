@@ -24,12 +24,6 @@ try:
 except ImportError:
     get_token_collector = None
 
-# Import async utility for hot-path usage
-try:
-    from ..approval.utils import run_coroutine_safely
-except ImportError:
-    run_coroutine_safely = None
-
 # Guards lazy creation of each AgentTeam's per-instance _run_lock so two threads
 # that first reach start()/astart() concurrently observe the same lock object
 # (double-checked locking) rather than each minting and acquiring its own.
