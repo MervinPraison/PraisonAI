@@ -23,7 +23,7 @@
 | Metric | Count |
 |--------|-------|
 | Python Core Features | 421 |
-| Python Wrapper Features | 21 |
+| Python Wrapper Features | 20 |
 | TypeScript Features | 2087 |
 | **Gap Count** | **4** |
 | Stub Exported (parity shim only) | 0 |

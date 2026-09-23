@@ -40,7 +40,6 @@ Features:
 - thinking: Thinking budget management
 - compaction: Context compaction settings
 - output_style: Output style configuration
-- ollama: Ollama provider and Weak-Model-Proof execution
 """
 
 # Type hints available for IDE support
