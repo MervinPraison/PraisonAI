@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
-| ✅ Gateway | 7 | 89 | 34028 |
+| ✅ Gateway | 7 | 89 | 34188 |
 | ✅ Guardrails | 5 | 4 | 2529 |
 | ✅ Handoffs | 11 | 6 | 2748 |
 | ✅ Hooks | 2 | 9 | 4990 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 20 | 6184 |
 | ✅ LLM | 3 | 15 | 5946 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 64 | 15064 |
+| ✅ MCP | 1 | 64 | 15068 |
 | ✅ Memory | 6 | 21 | 8186 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
@@ -69,9 +69,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1046 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3712 |
-| ✅ Security | 1 | 3 | 3605 |
-| ✅ Sessions | 4 | 20 | 8065 |
-| ✅ Skills | 6 | 16 | 5984 |
+| ✅ Security | 1 | 3 | 3607 |
+| ✅ Sessions | 4 | 21 | 8285 |
+| ✅ Skills | 6 | 16 | 5988 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 9 | 1859 |
