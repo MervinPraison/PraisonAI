@@ -133,6 +133,14 @@ def _advertised_tool_names(tools: List[Dict[str, Any]]) -> set:
     return names
 
 
+_FENCE_RE = re.compile(
+    r"(?P<fence>`{3,}|~{3,})"   # opening fence: >=3 backticks or tildes
+    r"[\s\S]*?"                  # body (lazy)
+    r"(?:(?P=fence)|\Z)",       # matching closing fence OR end-of-string
+    re.MULTILINE,
+)
+
+
 def _mask_protected_ranges(text: str) -> str:
     """Blank out fenced code blocks so a call *shown* as an example is not run.
 
@@ -140,10 +148,14 @@ def _mask_protected_ranges(text: str) -> str:
     are preserved, so nothing outside a fence shifts. Legitimate prose that
     merely contains angle brackets is untouched because it is not a tool-call
     dialect; the fence guard specifically protects documentation of a call.
+
+    Both Markdown fence styles are recognised (``` and ~~~), and an *unclosed*
+    fence is treated as running to end-of-text: a truncated example that opens
+    a fence and names a real tool must not slip through as an executable call.
     """
     def blank(match):
         return " " * len(match.group(0))
-    return re.sub(r"```[\s\S]*?```", blank, text)
+    return _FENCE_RE.sub(blank, text)
 
 
 def _make_tool_call(name: str, arguments: Any, seed: str, idx: int) -> Dict[str, Any]:
@@ -204,14 +216,21 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
         pass
 
     # Embedded dialects: only scan when a marker is present, and only outside
-    # fenced code so an example call in documentation is never run.
-    if not any(marker in response_text for marker in ("<tool_call>", "<function=")):
+    # fenced code so an example call in documentation is never run. The marker
+    # probe is case-insensitive to match the tag regexes -- a model that emits
+    # <TOOL_CALL> or <FUNCTION=...> must recover just like the lowercase form.
+    lowered = response_text.lower()
+    if not any(marker in lowered for marker in ("<tool_call>", "<function=")):
         return None
 
     scan_text = _mask_protected_ranges(response_text)
-    salvaged: List[Dict[str, Any]] = []
 
-    for idx, match in enumerate(_TOOL_CALL_TAG_RE.finditer(scan_text)):
+    # Scan both dialects in a single pass ordered by position in the text, so a
+    # model that interleaves <tool_call> and <function=> blocks yields calls in
+    # the order it actually wrote them -- a dependent or side-effecting call is
+    # never reordered ahead of one it relies on.
+    matches = []
+    for match in _TOOL_CALL_TAG_RE.finditer(scan_text):
         try:
             data = json.loads(match.group(1))
         except (json.JSONDecodeError, TypeError):
@@ -220,7 +239,7 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
             name = data.get("name") or data.get("tool")
             if name in allowed:
                 args = data.get("arguments", data.get("parameters", {}))
-                salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
+                matches.append((match.start(), name, args))
 
     for match in _FUNCTION_TAG_RE.finditer(scan_text):
         name = match.group(1)
@@ -229,7 +248,13 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
                 args = json.loads(match.group(2))
             except (json.JSONDecodeError, TypeError):
                 continue
-            salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
+            matches.append((match.start(), name, args))
+
+    matches.sort(key=lambda m: m[0])
+    salvaged = [
+        _make_tool_call(name, args, response_text, idx)
+        for idx, (_, name, args) in enumerate(matches)
+    ]
 
     return salvaged if salvaged else None
 
