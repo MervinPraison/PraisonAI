@@ -90,6 +90,116 @@ def test_async_tui_expands_at_mentions():
         os.unlink(temp_path)
 
 
+def test_bare_at_mention_expands_non_interactively():
+    """The shared ``MentionsParser`` must inline a bare ``@path`` when it
+    resolves to a workspace file.
+
+    This is what gives ``praisonai run``, YAML and Python the same inline-file
+    behaviour that interactive chat has — the non-interactive surfaces call this
+    parser (``direct_prompt.py`` gates on ``has_mentions`` then ``process``).
+    Unrelated ``@handle`` tokens and ``@../secret`` traversal must be left in
+    the prompt untouched.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "app.py"), "w") as f:
+        f.write("SENTINEL_BARE_BODY")
+
+    parser = MentionsParser(workspace_path=workspace)
+
+    assert parser.has_mentions("explain @app.py")
+    context, cleaned = parser.process("explain @app.py")
+    assert "SENTINEL_BARE_BODY" in context
+    assert "@app.py" not in cleaned
+
+    # A plain @handle is not a file, so nothing is inlined or stripped.
+    assert not parser.has_mentions("ping @someuser")
+    context2, cleaned2 = parser.process("ping @someuser about @../secret")
+    assert context2 == ""
+    assert "@someuser" in cleaned2
+    assert "@../secret" in cleaned2
+
+
+def test_embedded_at_token_does_not_leak_file():
+    """A ``@`` embedded inside another token (``ops@.env``) must NOT be treated
+    as a file reference, even when the workspace contains that file.
+
+    The bare pattern is anchored to the start of a token, so an email-like or
+    handle-like token can never smuggle a workspace file's contents into the
+    prompt context sent to the model.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, ".env"), "w") as f:
+        f.write("SECRET=should-not-leak")
+
+    parser = MentionsParser(workspace_path=workspace)
+
+    assert not parser.has_mentions("email ops@.env now")
+    context, cleaned = parser.process("email ops@.env now")
+    assert context == ""
+    assert "should-not-leak" not in context
+    assert "ops@.env" in cleaned
+
+
+def test_trailing_punctuation_after_reference_is_ignored():
+    """A bare ``@path`` followed by sentence punctuation (``@app.py,``) must
+    still resolve to the file — the comma/period is not part of the filename.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "app.py"), "w") as f:
+        f.write("SENTINEL_PUNCT_BODY")
+
+    parser = MentionsParser(workspace_path=workspace)
+
+    assert parser.has_mentions("see @app.py, please")
+    context, _ = parser.process("see @app.py, please")
+    assert "SENTINEL_PUNCT_BODY" in context
+
+
+def test_multiline_prompt_formatting_is_preserved():
+    """Expanding a mention inside a multiline prompt must NOT flatten paragraph
+    breaks, Markdown structure or code indentation.
+    """
+    from praisonaiagents.tools.mentions import MentionsParser
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "app.py"), "w") as f:
+        f.write("SENTINEL_MULTILINE")
+
+    parser = MentionsParser(workspace_path=workspace)
+
+    prompt = "First paragraph.\n\n    indented reference to @app.py\nlast line"
+    context, cleaned = parser.process(prompt)
+
+    assert "SENTINEL_MULTILINE" in context
+    # Newlines and interior indentation survive.
+    assert "\n\n" in cleaned
+    assert "    indented reference to" in cleaned
+    assert "last line" in cleaned
+
+
+def test_tui_delegates_to_shared_mentions_parser():
+    """The async TUI must expand ``@file`` via the shared core parser, not a
+    private regex, so interactive and non-interactive surfaces cannot drift.
+    """
+    from praisonai.cli.interactive.async_tui import AsyncTUI
+
+    workspace = tempfile.mkdtemp()
+    with open(os.path.join(workspace, "notes.md"), "w") as f:
+        f.write("SENTINEL_TUI_SHARED")
+
+    tui = AsyncTUI()
+    tui.config.workspace = workspace
+
+    processed = tui._process_file_mentions("summarise @notes.md")
+    assert "SENTINEL_TUI_SHARED" in processed
+
+
 # ---------------------------------------------------------------------------
 # Defect 2: /stats available on all REPL surfaces
 # ---------------------------------------------------------------------------
