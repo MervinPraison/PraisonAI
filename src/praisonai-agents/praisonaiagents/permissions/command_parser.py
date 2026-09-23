@@ -23,6 +23,8 @@ POSIX parsing is byte-for-byte unchanged (the wrapper unwrap only triggers for
 the ``powershell``/``pwsh``/``cmd`` executables).
 """
 
+import base64
+import binascii
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -408,41 +410,154 @@ def _strip_quotes(tok: str) -> str:
     return tok
 
 
-# ``powershell``/``pwsh -Command|-c <inner>`` and ``cmd /c|/k <inner>`` wrappers.
-# The inner command is captured verbatim from the *raw* segment (before shlex
-# tokenization) so backslash path separators are preserved. Matched
-# case-insensitively; an optional ``.exe`` suffix is tolerated.
-_WRAPPER_RE = re.compile(
-    r"""^\s*
-        (?P<exe>powershell|pwsh|cmd)(?:\.exe)?
-        \s+
-        (?P<flag>-command|-c|-encodedcommand|/c|/k)
-        \s+
-        (?P<inner>.+)$
-    """,
-    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+# Leading ``powershell``/``pwsh``/``cmd`` executable of a wrapper segment.
+# Matched case-insensitively; an optional ``.exe`` suffix is tolerated. The
+# switches and the command flag that follow are parsed separately (below) so
+# option-prefixed forms such as ``powershell -NoProfile -Command "…"`` or
+# ``cmd /d /c "…"`` are recognised, not just the flag-immediately-after form.
+_WRAPPER_EXE_RE = re.compile(
+    r"^\s*(?P<exe>powershell|pwsh|cmd)(?:\.exe)?\s+(?P<rest>.+)$",
+    re.IGNORECASE | re.DOTALL,
 )
+
+# PowerShell command flags whose operand is the inner command string.
+_PS_COMMAND_FLAGS = ("-command", "-c", "-encodedcommand", "-e", "-ec")
+# ``cmd`` command flags whose operand is the inner command string.
+_CMD_COMMAND_FLAGS = ("/c", "/k")
+# PowerShell base64 flags whose operand is a UTF-16LE base64 payload.
+_PS_ENCODED_FLAGS = ("-encodedcommand", "-e", "-ec")
+
+
+def _decode_powershell_encoded(payload: str) -> Optional[str]:
+    """Decode a PowerShell ``-EncodedCommand`` base64 UTF-16LE *payload*.
+
+    Returns the decoded inner command string, or ``None`` if the payload is not
+    valid base64 / UTF-16LE so the caller can fail closed (treat the wrapper as
+    an opaque, un-inspectable op) rather than exposing the base64 token as a
+    bogus executable that a deny rule can never match.
+    """
+    token = payload.strip().strip("'\"")
+    if not token:
+        return None
+    try:
+        raw = base64.b64decode(token, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    try:
+        decoded = raw.decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+    return decoded.strip() or None
+
+
+# Leading PowerShell call-operator/scriptblock scaffolding (``& { … }`` /
+# ``. { … }``) that hides the real cmdlet behind a ``{`` token when tokenized.
+_PS_SCRIPTBLOCK_RE = re.compile(r"^\s*[&.]\s*\{(?P<body>.*)\}\s*$", re.DOTALL)
+
+
+def _strip_powershell_scaffolding(inner: str) -> str:
+    """Strip a leading call-operator + scriptblock wrapper from *inner*.
+
+    PowerShell's ``& { <cmd> }`` / ``. { <cmd> }`` invocation would otherwise
+    tokenize with ``{`` as the executable, demoting the real cmdlet to an
+    argument and letting a command-specific deny slip through. Unwrap the
+    scriptblock body so the inner cmdlet surfaces as the executable. Returns
+    *inner* unchanged when no such wrapper is present.
+    """
+    stripped = inner.strip()
+    match = _PS_SCRIPTBLOCK_RE.match(stripped)
+    if match is not None:
+        return match.group("body").strip()
+    # Bare leading call operator (``& Remove-Item …``) without a scriptblock.
+    if stripped[:1] in ("&", ".") and stripped[1:2].isspace():
+        return stripped[1:].strip()
+    return stripped
+
+
+def _split_wrapper_flag(rest: str, dialect: str) -> Optional[tuple]:
+    """Split a wrapper's post-executable *rest* into (flag, operand).
+
+    Skips leading switches (``-NoProfile``, ``/d``, …) until the command flag
+    (``-Command``/``-c``/``-EncodedCommand`` for PowerShell, ``/c``/``/k`` for
+    ``cmd``) is found, then returns that flag plus the verbatim remainder as the
+    inner command operand. Returns ``None`` if no command flag is present.
+    """
+    command_flags = (
+        _CMD_COMMAND_FLAGS if dialect == DIALECT_CMD else _PS_COMMAND_FLAGS
+    )
+    remaining = rest
+    # Walk whitespace-separated leading tokens; the command flag's operand is
+    # everything after it (captured verbatim to preserve backslash paths).
+    while remaining:
+        stripped = remaining.lstrip()
+        parts = stripped.split(None, 1)
+        token = parts[0]
+        if token.lower() in command_flags:
+            operand = parts[1] if len(parts) > 1 else ""
+            return token.lower(), operand
+        # Not the command flag: skip this switch and continue. A bare
+        # ``powershell script.ps1`` (no command flag) yields ``None`` so the
+        # wrapper stays opaque (fail-closed) instead of misparsing a filename.
+        if not token.startswith("-") and not token.startswith("/"):
+            return None
+        if len(parts) == 1:
+            return None
+        remaining = parts[1]
+    return None
+
+
+def _opaque_wrapper_op(segment: str, dialect: str) -> List[ShellOp]:
+    """Fail-closed op for an un-inspectable wrapper (e.g. undecodable base64).
+
+    Preserves the original ``powershell``/``pwsh``/``cmd`` executable so a
+    command-specific deny/allow still applies to the wrapper itself, and no
+    broad wildcard silently authorises an opaque payload.
+    """
+    return [_fallback_op(segment, dialect)]
 
 
 def _unwrap_shell_wrapper(segment: str) -> Optional[List[ShellOp]]:
     """Return ops for the inner command of a ``powershell``/``cmd`` wrapper.
 
-    Detects ``powershell -Command "…"`` / ``pwsh -c "…"`` / ``cmd /c "…"`` in the
-    *raw* segment and parses the (verbatim) inner command string in the matching
-    dialect so the inner cmdlet/built-in and its paths are gated rather than the
-    opaque wrapper. Returns ``None`` when *segment* is not such a wrapper, so
-    callers fall back to normal per-segment parsing. Detection is
-    executable-name based, so a POSIX command never triggers this path.
+    Detects ``powershell -Command "…"`` / ``pwsh -c "…"`` / ``cmd /c "…"`` —
+    including option-prefixed forms (``powershell -NoProfile -Command "…"`` /
+    ``cmd /d /c "…"``), ``-EncodedCommand`` base64 payloads, and ``& { … }``
+    scriptblock invocations — in the *raw* segment and parses the inner command
+    string in the matching dialect so the inner cmdlet/built-in and its paths
+    are gated rather than the opaque wrapper. Returns ``None`` when *segment* is
+    not such a wrapper, so callers fall back to normal per-segment parsing.
+    Detection is executable-name based, so a POSIX command never triggers this
+    path.
     """
-    match = _WRAPPER_RE.match(segment)
+    match = _WRAPPER_EXE_RE.match(segment)
     if match is None:
         return None
     exe = match.group("exe").lower()
-    inner_dialect = DIALECT_CMD if exe == "cmd" else DIALECT_POWERSHELL
-    inner = _strip_quotes(match.group("inner").strip()).strip()
+    dialect = DIALECT_CMD if exe == "cmd" else DIALECT_POWERSHELL
+
+    split = _split_wrapper_flag(match.group("rest"), dialect)
+    if split is None:
+        return None
+    flag, operand = split
+
+    inner = _strip_quotes(operand.strip()).strip()
+    if flag in _PS_ENCODED_FLAGS:
+        # Base64 UTF-16LE payload: decode so the real cmdlet is inspected;
+        # fail closed to an opaque wrapper op if it cannot be decoded.
+        decoded = _decode_powershell_encoded(inner)
+        if decoded is None:
+            return _opaque_wrapper_op(segment, dialect)
+        inner = decoded
+
     if not inner:
         return None
-    return parse_command(inner, dialect=inner_dialect)
+
+    if dialect == DIALECT_POWERSHELL:
+        inner = _strip_powershell_scaffolding(inner)
+        if not inner:
+            return None
+
+    return parse_command(inner, dialect=dialect)
 
 
 def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:

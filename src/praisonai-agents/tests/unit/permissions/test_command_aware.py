@@ -185,6 +185,67 @@ class TestPowerShellParser:
         assert not is_mutating_executable("Remove-Item")
         assert not is_mutating_executable("rm")
 
+    def test_option_prefixed_powershell_wrapper_unwrapped(self):
+        # Switches before -Command (``-NoProfile``) must not defeat unwrap.
+        ops = parse_command(
+            'powershell -NoProfile -Command "Remove-Item C:\\outside\\x"'
+        )
+        rm = next(op for op in ops if op.executable == "Remove-Item")
+        assert rm.dialect == DIALECT_POWERSHELL
+        assert "C:\\outside\\x" in rm.path_args
+
+    def test_option_prefixed_cmd_wrapper_unwrapped(self):
+        # ``cmd /d /c`` (switch before /c) must still unwrap the inner command.
+        ops = parse_command('cmd /d /c "del C:\\outside\\x"')
+        d = next(op for op in ops if op.executable == "del")
+        assert d.dialect == DIALECT_CMD
+        assert "C:\\outside\\x" in d.path_args
+
+    def test_powershell_scriptblock_surfaces_cmdlet(self):
+        # ``& { Remove-Item … }`` must not leave ``{`` as the executable.
+        ops = parse_command(
+            'powershell -Command "& { Remove-Item .\\protected.txt }"'
+        )
+        execs = [op.executable for op in ops]
+        assert "Remove-Item" in execs
+        assert "{" not in execs
+        rm = next(op for op in ops if op.executable == "Remove-Item")
+        assert ".\\protected.txt" in rm.path_args
+
+    def test_powershell_bare_call_operator_surfaces_cmdlet(self):
+        ops = parse_command('powershell -Command "& Remove-Item .\\x"')
+        assert any(op.executable == "Remove-Item" for op in ops)
+
+    def test_encoded_command_decoded_and_inspected(self):
+        import base64
+
+        inner = "Remove-Item C:\\outside\\x"
+        payload = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
+        ops = parse_command(f"powershell -EncodedCommand {payload}")
+        rm = next(op for op in ops if op.executable == "Remove-Item")
+        assert rm.dialect == DIALECT_POWERSHELL
+        assert "C:\\outside\\x" in rm.path_args
+
+    def test_encoded_command_abbreviation_decoded(self):
+        import base64
+
+        inner = "New-Item .\\out.txt"
+        payload = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
+        ops = parse_command(f"pwsh -e {payload}")
+        assert any(op.executable == "New-Item" for op in ops)
+
+    def test_undecodable_encoded_command_fails_closed(self):
+        # An undecodable payload must stay an opaque wrapper op (exe preserved),
+        # never expose the base64 token as a bogus executable.
+        ops = parse_command("powershell -EncodedCommand not!valid!base64")
+        assert ops[0].executable.lower() == "powershell"
+
+    def test_powershell_script_file_not_misparsed(self):
+        # No command flag: ``powershell script.ps1`` stays a normal (opaque) op
+        # rather than treating the filename as a command flag operand.
+        ops = parse_command("powershell script.ps1")
+        assert ops[0].executable.lower() == "powershell"
+
 
 class TestPowerShellBoundary:
     def test_external_powershell_mutation_asks(self):
@@ -214,6 +275,66 @@ class TestPowerShellBoundary:
             target = f'bash:powershell -Command "Set-Content {inside} hi"'
             result = mgr.check(target)
             assert result.is_allowed
+
+    def test_option_prefixed_external_mutation_asks(self):
+        # ``-NoProfile`` before -Command must not let the external write slip
+        # past the boundary gate under a broad ``bash:*`` allow.
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as outside:
+                mgr = PermissionManager(
+                    storage_dir=workspace, workspace_root=workspace
+                )
+                mgr.add_rule(
+                    PermissionRule(
+                        pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+                    )
+                )
+                target = (
+                    "bash:powershell -NoProfile -Command "
+                    f'"Remove-Item {outside}\\\\secret.txt"'
+                )
+                assert mgr.check(target).needs_approval
+
+    def test_encoded_external_mutation_asks(self):
+        # A base64 -EncodedCommand external mutation must be decoded and gated.
+        import base64
+
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as outside:
+                mgr = PermissionManager(
+                    storage_dir=workspace, workspace_root=workspace
+                )
+                mgr.add_rule(
+                    PermissionRule(
+                        pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+                    )
+                )
+                inner = f"Remove-Item {outside}\\secret.txt"
+                payload = base64.b64encode(
+                    inner.encode("utf-16-le")
+                ).decode("ascii")
+                target = f"bash:powershell -EncodedCommand {payload}"
+                assert mgr.check(target).needs_approval
+
+    def test_scriptblock_denied_cmdlet_still_blocked(self):
+        # A cmdlet-specific deny must still fire when hidden in a scriptblock.
+        with tempfile.TemporaryDirectory() as workspace:
+            mgr = PermissionManager(storage_dir=workspace, workspace_root=workspace)
+            mgr.add_rule(
+                PermissionRule(
+                    pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+                )
+            )
+            mgr.add_rule(
+                PermissionRule(
+                    pattern="bash:Remove-Item *",
+                    action=PermissionAction.DENY,
+                    description="Block Remove-Item",
+                    priority=100,
+                )
+            )
+            target = 'bash:powershell -Command "& { Remove-Item .\\x }"'
+            assert mgr.check(target).is_denied
 
 
 class TestCommandAwareDeny:
