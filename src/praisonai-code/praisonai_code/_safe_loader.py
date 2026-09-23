@@ -89,9 +89,17 @@ def load_user_module(
     sys.modules[qualified] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
+    finally:
+        # Whether exec succeeds or raises, drop the registration once execution
+        # is done: it is only needed *during* module execution (so decorators/
+        # dataclasses that consult ``sys.modules[__name__]`` resolve). Every
+        # reachable caller binds the returned module object and none read
+        # ``sys.modules[qualified]`` afterwards, so popping here keeps a
+        # long-lived, multi-tenant ``praisonai serve`` process from
+        # accumulating one dead module (and its globals) per reload — while a
+        # failed exec still removes only *its own* entry, never another
+        # tenant's live module. The returned object stays fully live.
         sys.modules.pop(qualified, None)
-        raise
     return module
 
 
@@ -139,7 +147,10 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
     sys.modules[qualified] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
+    finally:
+        # See load_user_module: pop after execution completes (success or
+        # failure) so long-lived processes don't accumulate dead modules and a
+        # failed exec only removes its own entry. Callers bind the returned
+        # object, never sys.modules[qualified].
         sys.modules.pop(qualified, None)
-        raise
     return module
