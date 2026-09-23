@@ -181,7 +181,12 @@ class ImageAgent(Agent):
                 logging.error(error_msg)
                 raise
     async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
-        """Offload the synchronous generation path to keep the event loop responsive."""
+        """Generate an image without blocking the event loop.
+
+        The underlying litellm image providers expose only synchronous APIs, so the
+        call is offloaded to a worker thread via ``asyncio.to_thread`` to keep other
+        async tasks responsive.
+        """
         return await asyncio.to_thread(self.generate_image, prompt, **kwargs)
     
     # Aliases for consistency with other agents
@@ -303,7 +308,11 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Offload the synchronous editing path to keep the event loop responsive."""
+        """Edit an image without blocking the event loop.
+
+        ``litellm.image_edit`` is synchronous, so it runs in a worker thread via
+        ``asyncio.to_thread`` to keep concurrent async tasks responsive.
+        """
         return await asyncio.to_thread(self.edit, image, prompt, mask, n, size, **kwargs)
 
     def variation(
@@ -373,5 +382,9 @@ class ImageAgent(Agent):
         size: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Offload the synchronous variation path to keep the event loop responsive."""
+        """Generate image variations without blocking the event loop.
+
+        ``litellm.image_variation`` is synchronous, so it runs in a worker thread via
+        ``asyncio.to_thread`` to keep concurrent async tasks responsive.
+        """
         return await asyncio.to_thread(self.variation, image, n, size, **kwargs)
