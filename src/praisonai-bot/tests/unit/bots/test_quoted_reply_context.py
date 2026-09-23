@@ -9,6 +9,7 @@ Telegram inbound resolver and the core prompt-rendering helper.
 from types import SimpleNamespace
 
 from praisonaiagents.bots import BotMessage, QuotedRef
+from praisonai_bot.bots._protocol_mixin import MessageHookMixin
 from praisonai_bot.bots.telegram import _resolve_quoted_ref
 
 
@@ -109,3 +110,87 @@ def test_botmessage_quoted_roundtrips_through_dict():
     assert restored.quoted.message_id == "9"
     assert restored.quoted.text == "quoted"
     assert restored.quoted.author == "bot"
+
+
+# ── MESSAGE_RECEIVED hook boundary (Issue #5223 review) ─────────────────────
+# Quoted context must pass through the same inbound gate as ordinary content:
+# a redaction/deny hook has to be able to inspect and veto quoted text too.
+
+
+class _StubOutput:
+    def __init__(self, blocked=False, modified=None):
+        self.blocked = blocked
+        self.modified_input = modified
+
+
+class _StubResult:
+    def __init__(self, output):
+        self.output = output
+
+
+class _StubRunner:
+    """Records the content the hook saw and replays a scripted decision."""
+
+    def __init__(self, *, block=False, redact_to=None):
+        self.block = block
+        self.redact_to = redact_to
+        self.seen_content = None
+
+    def execute_sync(self, event, event_input):
+        self.seen_content = event_input.content
+        out = _StubOutput(
+            blocked=self.block,
+            modified=({"content": self.redact_to}
+                      if self.redact_to is not None else None),
+        )
+        return [_StubResult(out)]
+
+    def is_blocked(self, results):
+        return any(getattr(r.output, "blocked", False) for r in results)
+
+
+class _Host(MessageHookMixin):
+    platform = "telegram"
+
+    def __init__(self, runner):
+        self._agent = SimpleNamespace(_hook_runner=runner, agent_name="bot")
+
+
+def _quoted_msg():
+    return BotMessage(
+        content="do the second one",
+        quoted=QuotedRef(text="secret: hunter2", author="bot"),
+    )
+
+
+def test_hook_sees_quoted_text_in_content():
+    runner = _StubRunner()
+    host = _Host(runner)
+    host.fire_message_received(_quoted_msg())
+    # The rendered turn (content + quoted block) was exposed to the hook.
+    assert "secret: hunter2" in runner.seen_content
+    assert "do the second one" in runner.seen_content
+
+
+def test_hook_can_drop_message_with_quoted_secret():
+    host = _Host(_StubRunner(block=True))
+    result = host.fire_message_received(_quoted_msg())
+    assert result["drop"] is True
+
+
+def test_hook_redaction_clears_quoted_ref():
+    host = _Host(_StubRunner(redact_to="[REDACTED]"))
+    msg = _quoted_msg()
+    result = host.fire_message_received(msg)
+    # Redacted content is authoritative; the separately-resolved quote is
+    # dropped so unredacted quoted text cannot be re-appended post-hook.
+    assert result["content"] == "[REDACTED]"
+    assert msg.quoted is None
+    assert msg.prompt_text == "[REDACTED]"
+
+
+def test_no_quote_leaves_plain_content_to_hook():
+    runner = _StubRunner()
+    host = _Host(runner)
+    host.fire_message_received(BotMessage(content="hello"))
+    assert runner.seen_content == "hello"

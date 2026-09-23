@@ -452,6 +452,18 @@ class MessageHookMixin:
         content = getattr(message, 'content', '')
         if not isinstance(content, str):
             content = str(content)
+        # Resolved reply/quote context (Issue #5223) must pass through the same
+        # inbound gate as ordinary content: a redaction/deny hook has to be able
+        # to inspect (and veto) quoted text too, otherwise quoted secrets or
+        # blocked text bypass the hook and reach the agent. Expose the fully
+        # rendered turn (content + quoted block) to the hook as ``content``.
+        quoted = getattr(message, 'quoted', None)
+        has_quote = bool(quoted is not None and getattr(quoted, 'text', '').strip())
+        hook_content = (
+            message.prompt_text
+            if has_quote and hasattr(message, 'prompt_text')
+            else content
+        )
         result: Dict[str, Any] = {"content": content, "drop": False}
         runner = self._get_hook_runner()
         if runner is None:
@@ -471,7 +483,7 @@ class MessageHookMixin:
                 timestamp=str(time.time()),
                 agent_name=getattr(getattr(self, '_agent', None), 'agent_name', 'bot'),
                 platform=platform,
-                content=content,
+                content=hook_content,
                 sender_id=getattr(sender, 'user_id', '') if sender else '',
                 channel_id=getattr(channel, 'channel_id', '') if channel else '',
                 channel_type=getattr(channel, 'channel_type', '') if channel else '',
@@ -491,6 +503,15 @@ class MessageHookMixin:
                     message.content = new_content
                 except Exception:
                     pass
+                # The hook was shown the rendered turn (content + quoted block)
+                # and rewrote it, so the returned text is now authoritative for
+                # the whole turn. Drop the separately-resolved quoted ref to
+                # avoid re-appending unredacted quoted text after the hook ran.
+                if has_quote:
+                    try:
+                        message.quoted = None
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug(f"MESSAGE_RECEIVED hook error (non-fatal): {e}")
         return result

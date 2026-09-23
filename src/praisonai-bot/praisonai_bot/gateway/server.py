@@ -8542,7 +8542,15 @@ class WebSocketGateway:
                 return  # Message was dropped by security checks
 
             user_id = message.sender.user_id if message.sender else "unknown"
-            message_text = message.content
+            # Render any resolved reply/quote context (Issue #5223) so gateway
+            # agents honour the referent too, matching the standalone adapter.
+            # ``prompt_text`` folds the (post-hook, possibly redacted) quoted
+            # block above the content; with no quote it is just the content.
+            message_text = (
+                message.prompt_text
+                if hasattr(message, "prompt_text")
+                else message.content
+            )
 
             # Determine routing context
             chat_type = update.message.chat.type if update.message.chat else "private"
