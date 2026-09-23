@@ -205,10 +205,21 @@ class MediaSupervisor:
         if not local_path.is_file() or local_path.stat().st_size == 0:
             raise RuntimeError("Video generation reported success but wrote no file")
 
+        # SDK providers return no hosted URL, so the file is the only artifact.
+        # Mirror generate_image()'s data_url so the Video tab can preview it in
+        # place -- without this the UI (which reveals the player only on a url)
+        # showed a "saved" toast and nothing to watch. Reusing the existing
+        # base64 pattern keeps this lightweight: no new route or job store.
+        data_url = (
+            "data:video/mp4;base64,"
+            + base64.b64encode(local_path.read_bytes()).decode()
+        )
+
         return {
             "id": file_id,
             "path": str(local_path),
             "url": None,
+            "data_url": data_url,
             "model": model,
             "prompt": prompt,
         }

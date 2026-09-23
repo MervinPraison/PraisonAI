@@ -3404,7 +3404,8 @@ vidGen.addEventListener('click',async()=>{
       body:JSON.stringify({prompt,model:vidModel&&vidModel.value?vidModel.value:undefined})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||j.ok===false){ vidError.textContent=j.error||'Generation failed'; return; }
-    if(j.url){ vidPreview.hidden=false; vidPreview.src=j.url; }
+    const src=j.url||j.data_url;
+    if(src){ vidPreview.hidden=false; vidPreview.src=src; }
     toast('Video saved to '+ (j.path||'media folder'));
   }catch{ vidError.textContent='Engine unreachable'; }
   finally{ vidGen.disabled=false; vidGen.textContent='Generate video'; }

@@ -63,6 +63,67 @@ class MediaSupervisorTests(unittest.TestCase):
                 "a cat", settings={}, model="replicate/minimax/video-99"
             )
 
+    def test_generate_video_sdk_success_returns_data_url(self):
+        import sys
+        import types
+
+        payload = b"\x00\x00fake-mp4"
+
+        class _FakeAgent:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self, prompt, wait=True, output=None, **k):
+                Path(output).write_bytes(payload)
+                return payload
+
+        fake_mod = types.ModuleType("praisonaiagents")
+        fake_mod.VideoAgent = _FakeAgent
+        saved = sys.modules.get("praisonaiagents")
+        sys.modules["praisonaiagents"] = fake_mod
+        try:
+            res = self.sup.generate_video(
+                "a cat", settings={}, model="openai/sora-2"
+            )
+        finally:
+            if saved is not None:
+                sys.modules["praisonaiagents"] = saved
+            else:
+                sys.modules.pop("praisonaiagents", None)
+
+        self.assertIsNone(res["url"])
+        self.assertTrue(res["data_url"].startswith("data:video/mp4;base64,"))
+        self.assertTrue(Path(res["path"]).is_file())
+
+    def test_generate_video_sdk_failure_raises(self):
+        import sys
+        import types
+
+        class _Status:
+            status = "failed"
+
+        class _FakeAgent:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self, prompt, wait=True, output=None, **k):
+                return _Status()
+
+        fake_mod = types.ModuleType("praisonaiagents")
+        fake_mod.VideoAgent = _FakeAgent
+        saved = sys.modules.get("praisonaiagents")
+        sys.modules["praisonaiagents"] = fake_mod
+        try:
+            with self.assertRaises(RuntimeError):
+                self.sup.generate_video(
+                    "a cat", settings={}, model="openai/sora-2"
+                )
+        finally:
+            if saved is not None:
+                sys.modules["praisonaiagents"] = saved
+            else:
+                sys.modules.pop("praisonaiagents", None)
+
     def test_generate_image_requires_key(self):
         import os
 
