@@ -11,6 +11,7 @@ import pytest
 
 from praisonai_bot.bots._session import BotSessionManager
 from praisonai_bot.gateway.memory_pressure import CgroupMemoryPressure
+from praisonai_bot.gateway.server import GatewaySession, WebSocketGateway
 
 
 class _Store:
@@ -230,3 +231,101 @@ def test_sweep_skips_cache_when_last_store_write_failed():
     mp = _Pressure(100.0, [1000.0])
     assert mgr.sweep_under_pressure(mp) == 0
     assert "a" in mgr._histories
+
+
+# ---------------------------------------------------------------------------
+# WebSocketGateway live-session pressure shedding (Issue #5153)
+#
+# The gateway server is the primary layer that owns ``WebSocketGateway._sessions``
+# and must call the core planner on its housekeeping tick. These tests exercise
+# ``_sweep_sessions_under_pressure`` directly on a bare gateway wired with only
+# the attributes the method (and ``close_session``) touch.
+# ---------------------------------------------------------------------------
+
+
+class _SessionStore:
+    """Minimal SessionStore: records that a session's state was persisted."""
+
+    def __init__(self):
+        self.persisted = {}
+
+    def add_message(self, session_id, role, content, metadata=None):
+        self.persisted[session_id] = metadata
+
+
+def _bare_gateway(store, budget, rss_samples, headroom=0.9):
+    """A ``WebSocketGateway`` with just enough state to run the pressure sweep."""
+    gw = WebSocketGateway.__new__(WebSocketGateway)
+    gw._session_store = store
+    gw._sessions = {}
+    gw._clients = {}
+    gw._session_ttls = {}
+    gw._memory_pressure = _Pressure(budget, rss_samples)
+    gw._pressure_headroom = headroom
+
+    class _SC:
+        resume_window = 3600
+    class _Cfg:
+        session_config = _SC()
+    gw.config = _Cfg()
+    return gw
+
+
+def _add_session(gw, sid, last_activity, executing=False):
+    session = GatewaySession(_session_id=sid, _agent_id="agent")
+    session._last_activity = last_activity
+    session._is_executing = executing
+    gw._sessions[sid] = session
+    return session
+
+
+def test_gateway_sheds_coldest_session_first_until_within_budget():
+    store = _SessionStore()
+    # Budget 1000 MiB, target 900; start over at 1000, drop to 850 after the
+    # first (coldest) eviction so exactly one session is shed.
+    gw = _bare_gateway(store, 1000.0, [1000.0, 850.0])
+    _add_session(gw, "cold", 1.0)
+    _add_session(gw, "warm", 100.0)
+    evicted = gw._sweep_sessions_under_pressure()
+    assert evicted == 1
+    assert "cold" not in gw._sessions   # coldest dropped from memory
+    assert "warm" in gw._sessions       # warmest kept live
+    assert "cold" in store.persisted    # transcript left durable
+
+
+def test_gateway_never_evicts_executing_session():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 100.0, [1000.0])
+    _add_session(gw, "busy", 1.0, executing=True)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "busy" in gw._sessions
+
+
+def test_gateway_noop_without_session_store():
+    # No durable store ⇒ nothing rebuildable ⇒ never shed (would lose data).
+    gw = _bare_gateway(None, 100.0, [1000.0])
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_no_cgroup_budget():
+    store = _SessionStore()
+    gw = _bare_gateway(store, None, [1000.0])  # host without a cgroup limit
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_within_budget():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [500.0])  # RSS well under the 900 target
+    _add_session(gw, "a", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "a" in gw._sessions
+
+
+def test_gateway_noop_when_no_sessions():
+    store = _SessionStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0])
+    assert gw._sweep_sessions_under_pressure() == 0

@@ -1240,6 +1240,15 @@ class WebSocketGateway:
         self._ledger_heartbeat_task: Optional[asyncio.Task] = None
         self._ledger_heartbeat_interval: float = 15.0
 
+        # Issue #5153: shed the coldest *already-persisted* live sessions before
+        # the cgroup memory ceiling OOM-kills the process. Reuses the core
+        # planner (``plan_pressure_evictions``) + the concrete stdlib cgroup
+        # reader that the bot warm-agent cache already uses; folded into the
+        # existing liveness-heartbeat tick, so there is no new task and it is a
+        # no-op on hosts without a cgroup limit or without a session store.
+        self._memory_pressure: Optional[Any] = None
+        self._pressure_headroom: float = 0.9
+
     @property
     def is_running(self) -> bool:
         return self._is_running
@@ -4854,10 +4863,99 @@ class WebSocketGateway:
                         await self._send_to_client(
                             client_id, {"type": EventType.PING.value}
                         )
+                # Issue #5153: on the same housekeeping tick, shed the coldest
+                # already-persisted sessions if the resident set is approaching
+                # the cgroup budget — before the kernel OOM-kills the process.
+                self._sweep_sessions_under_pressure()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Liveness heartbeat/reaper iteration failed")
+
+    def _sweep_sessions_under_pressure(self) -> int:
+        """Soft-evict the coldest already-persisted live sessions under RSS pressure.
+
+        Issue #5153: the gateway's own runtime enactor for the core planner,
+        mirroring ``BotSessionManager.sweep_under_pressure`` (the warm-agent
+        cache). It reads the real container budget/anonymous RSS from a
+        :class:`praisonaiagents.gateway.MemoryPressureProtocol` (the stdlib
+        ``CgroupMemoryPressure`` reader), asks
+        :func:`praisonaiagents.gateway.plan_pressure_evictions` which sessions to
+        shed, and evicts them LRU-first via ``close_session(persist=True)`` — the
+        transcript is left durable so the next ``join`` transparently rehydrates
+        it. It re-samples RSS as it goes and stops as soon as RSS is back within
+        ``headroom`` of the budget, so it sheds the minimum.
+
+        Persistence-gated: a session is only evictable when a session store is
+        configured (its transcript is durable and rebuildable) *and* it is not
+        currently executing a turn (never abort live work). A no-op (returns
+        ``0``) when no store is configured or the platform reports no cgroup
+        budget, preserving today's behaviour exactly.
+        """
+        # No durable store ⇒ nothing is rebuildable ⇒ evicting would lose data.
+        if self._session_store is None or not self._sessions:
+            return 0
+        try:
+            from praisonaiagents.gateway import (
+                WarmSession,
+                plan_pressure_evictions,
+            )
+        except Exception:  # pragma: no cover — old/absent core
+            return 0
+        if self._memory_pressure is None:
+            try:
+                from .memory_pressure import CgroupMemoryPressure
+
+                self._memory_pressure = CgroupMemoryPressure()
+            except Exception:  # pragma: no cover — defensive
+                return 0
+        mp = self._memory_pressure
+        try:
+            budget = mp.cgroup_limit_mb()
+            rss = mp.anon_rss_mb()
+        except Exception:  # pragma: no cover — defensive
+            return 0
+        headroom = self._pressure_headroom
+        warm = [
+            WarmSession(
+                session_id=sid,
+                last_activity=session.last_activity,
+                in_flight=bool(getattr(session, "_is_executing", False)),
+                flushed=True,
+            )
+            for sid, session in self._sessions.items()
+        ]
+        plan = plan_pressure_evictions(budget, rss, warm, headroom_ratio=headroom)
+        if not plan:
+            return 0
+        try:
+            target = float(budget) * float(headroom)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            target = 0.0
+        evicted = 0
+        for sid in plan:
+            session = self._sessions.get(sid)
+            # Re-check at enact time: a turn may have started, or the session
+            # may already be gone, since the plan was computed. Never abort
+            # live work (an executing turn), but an idle session — even one with
+            # a live connection — is safe to shed: its transcript is durable, so
+            # the next message transparently rehydrates it from the store.
+            if session is None or getattr(session, "_is_executing", False):
+                continue
+            if self.close_session(sid, persist=True):
+                evicted += 1
+                try:
+                    if mp.anon_rss_mb() <= target:
+                        break
+                except Exception:  # pragma: no cover — defensive
+                    break
+        if evicted:
+            logger.info(
+                "WebSocketGateway: soft-evicted %d cold session(s) under "
+                "memory pressure (durable, rehydrate on next join)",
+                evicted,
+            )
+        return evicted
 
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to a specific client through its bounded outbound queue."""
