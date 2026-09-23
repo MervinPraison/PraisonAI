@@ -3845,6 +3845,14 @@ class GatewayConcurrencyPolicyProtocol(Protocol):
     A config-driven default (:class:`ConcurrencyLimitPolicy`) is provided for
     the common "N concurrent runs, bounded wait queue, declared overflow"
     case.
+
+    On a shared/multi-tenant gateway the decision may additionally be scoped
+    by a tenant/profile token (Issue #5168), mirroring the ``scope`` axis of
+    :class:`RateLimitPolicyProtocol` / :class:`SpendBudgetPolicyProtocol` — the
+    wrapper passes the caller's ``scope`` plus the live per-scope in-flight and
+    queued counts so a single tenant cannot occupy every global slot. When no
+    per-scope sub-limit is configured the scope arguments are ignored and the
+    global-only decision is returned unchanged (backward compatible).
     """
 
     max_concurrent_runs: int
@@ -3856,6 +3864,9 @@ class GatewayConcurrencyPolicyProtocol(Protocol):
         in_flight: int,
         queued: int,
         session_id: str = "",
+        scope: str = "",
+        scope_in_flight: int = 0,
+        scope_queued: int = 0,
     ) -> AdmissionDecision:
         """Return an :class:`AdmissionDecision` for the supplied facts."""
         ...
@@ -3888,10 +3899,18 @@ class ConcurrencyLimitPolicy:
     A ``max_concurrent_runs`` of ``0`` disables admission control entirely
     (today's behaviour: every inbound turn is admitted immediately).
 
+    On a shared/multi-tenant gateway an optional ``max_concurrent_runs_per_scope``
+    caps concurrency *per tenant/scope* within the global ceiling (Issue #5168):
+    a tenant that already holds its sub-limit is queued/shed against its own
+    slice even when a global slot is notionally free, so a noisy neighbour
+    cannot starve quiet tenants. A value of ``0`` (the default) disables the
+    per-scope sub-limit, preserving the byte-for-byte global-only behaviour.
+
     Example::
 
         ConcurrencyLimitPolicy(max_concurrent_runs=32, queue_depth=128,
-                               overflow_policy="reject")
+                               overflow_policy="reject",
+                               max_concurrent_runs_per_scope=4)
     """
 
     _OVERFLOW = ("reject", "queue", "shed_oldest")
@@ -3901,6 +3920,7 @@ class ConcurrencyLimitPolicy:
         max_concurrent_runs: int = 0,
         queue_depth: int = 0,
         overflow_policy: str = "reject",
+        max_concurrent_runs_per_scope: int = 0,
     ):
         try:
             ceiling = int(max_concurrent_runs)
@@ -3927,9 +3947,22 @@ class ConcurrencyLimitPolicy:
                 f"overflow_policy must be one of {self._OVERFLOW}, "
                 f"got {overflow_policy!r}"
             )
+        try:
+            per_scope = int(max_concurrent_runs_per_scope)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"max_concurrent_runs_per_scope must be an integer, "
+                f"got {max_concurrent_runs_per_scope!r}"
+            )
+        if per_scope < 0:
+            raise ValueError(
+                f"max_concurrent_runs_per_scope must be >= 0, "
+                f"got {max_concurrent_runs_per_scope!r}"
+            )
         self.max_concurrent_runs = ceiling
         self.queue_depth = depth
         self.overflow_policy = overflow
+        self.max_concurrent_runs_per_scope = per_scope
 
     @property
     def enabled(self) -> bool:
@@ -3942,13 +3975,30 @@ class ConcurrencyLimitPolicy:
         in_flight: int,
         queued: int,
         session_id: str = "",
+        scope: str = "",
+        scope_in_flight: int = 0,
+        scope_queued: int = 0,
     ) -> AdmissionDecision:
         # Disabled: preserve legacy always-admit behaviour.
         if self.max_concurrent_runs <= 0:
             return AdmissionDecision.ADMIT
+        # Per-scope fairness (Issue #5168): a tenant already at its sub-limit
+        # is queued/shed against its own slice even when a global slot is free,
+        # so a noisy tenant cannot starve quiet ones. Applied first because it
+        # is the tighter, per-tenant ceiling; the global gate below still caps
+        # aggregate concurrency. ``scope`` must be non-empty for the sub-limit
+        # to apply (an unscoped caller falls through to the global decision).
+        if self.max_concurrent_runs_per_scope > 0 and scope:
+            if scope_in_flight >= self.max_concurrent_runs_per_scope:
+                return self._overflow(scope_queued)
         if in_flight < self.max_concurrent_runs:
             return AdmissionDecision.ADMIT
         # At the ceiling: consult the bounded wait queue.
+        return self._overflow(queued)
+
+    def _overflow(self, queued: int) -> AdmissionDecision:
+        # At a ceiling: queue while the bounded wait queue has room, else apply
+        # the declared overflow behaviour.
         if queued < self.queue_depth:
             return AdmissionDecision.QUEUE
         # Queue is full: declared overflow behaviour.

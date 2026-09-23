@@ -98,6 +98,124 @@ def test_gateway_config_validation():
 
 
 # ---------------------------------------------------------------------------
+# Per-tenant / per-scope concurrency fairness (Issue #5168)
+# ---------------------------------------------------------------------------
+
+
+def test_per_scope_disabled_by_default_matches_global():
+    # No per-scope sub-limit: scope args are ignored, global-only behaviour.
+    policy = ConcurrencyLimitPolicy(max_concurrent_runs=8, queue_depth=32)
+    assert policy.max_concurrent_runs_per_scope == 0
+    # A tenant with many in-flight but global slot free -> ADMIT (unchanged).
+    assert (
+        policy.decide(
+            in_flight=0, queued=0, scope="tenant:acme", scope_in_flight=99
+        )
+        is AdmissionDecision.ADMIT
+    )
+
+
+def test_per_scope_queues_when_scope_at_sublimit_global_free():
+    # Global slot notionally free (in_flight < ceiling) but the scope is at its
+    # own sub-limit -> QUEUE against its slice, protecting quiet tenants.
+    policy = ConcurrencyLimitPolicy(
+        max_concurrent_runs=8,
+        queue_depth=32,
+        max_concurrent_runs_per_scope=3,
+    )
+    assert (
+        policy.decide(
+            in_flight=3,
+            queued=0,
+            scope="tenant:acme",
+            scope_in_flight=3,
+            scope_queued=0,
+        )
+        is AdmissionDecision.QUEUE
+    )
+
+
+def test_per_scope_admits_below_sublimit():
+    policy = ConcurrencyLimitPolicy(
+        max_concurrent_runs=8,
+        queue_depth=32,
+        max_concurrent_runs_per_scope=3,
+    )
+    assert (
+        policy.decide(
+            in_flight=5, queued=0, scope="tenant:acme", scope_in_flight=2
+        )
+        is AdmissionDecision.ADMIT
+    )
+
+
+def test_per_scope_rejects_when_scope_queue_full():
+    policy = ConcurrencyLimitPolicy(
+        max_concurrent_runs=8,
+        queue_depth=1,
+        max_concurrent_runs_per_scope=3,
+        overflow_policy="reject",
+    )
+    assert (
+        policy.decide(
+            in_flight=3,
+            queued=0,
+            scope="tenant:acme",
+            scope_in_flight=3,
+            scope_queued=1,
+        )
+        is AdmissionDecision.REJECT
+    )
+
+
+def test_per_scope_ignored_when_scope_empty():
+    # Sub-limit configured but caller is unscoped -> fall through to global.
+    policy = ConcurrencyLimitPolicy(
+        max_concurrent_runs=8,
+        queue_depth=32,
+        max_concurrent_runs_per_scope=3,
+    )
+    assert (
+        policy.decide(in_flight=0, queued=0, scope="", scope_in_flight=99)
+        is AdmissionDecision.ADMIT
+    )
+
+
+def test_global_ceiling_still_applies_under_sublimit():
+    # A tenant below its sub-limit still queues once the global ceiling is hit.
+    policy = ConcurrencyLimitPolicy(
+        max_concurrent_runs=2,
+        queue_depth=4,
+        max_concurrent_runs_per_scope=5,
+    )
+    assert (
+        policy.decide(
+            in_flight=2, queued=0, scope="tenant:acme", scope_in_flight=1
+        )
+        is AdmissionDecision.QUEUE
+    )
+
+
+@pytest.mark.parametrize("bad", [-1, "x"])
+def test_invalid_max_concurrent_runs_per_scope_raises(bad):
+    with pytest.raises(ValueError):
+        ConcurrencyLimitPolicy(
+            max_concurrent_runs=8, max_concurrent_runs_per_scope=bad
+        )
+
+
+def test_gateway_config_per_scope_default_and_roundtrip():
+    cfg = GatewayConfig()
+    assert cfg.max_concurrent_runs_per_scope == 0
+    cfg2 = GatewayConfig(
+        max_concurrent_runs=8, max_concurrent_runs_per_scope=3
+    )
+    assert cfg2.to_dict()["max_concurrent_runs_per_scope"] == 3
+    with pytest.raises(ValueError):
+        GatewayConfig(max_concurrent_runs_per_scope=-1)
+
+
+# ---------------------------------------------------------------------------
 # Resource-pressure admission (Issue #3445)
 # ---------------------------------------------------------------------------
 

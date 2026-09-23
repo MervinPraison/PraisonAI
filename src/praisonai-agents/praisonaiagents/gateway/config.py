@@ -830,6 +830,10 @@ class GatewayConfig:
     max_concurrent_runs: int = 0  # Aggregate concurrency ceiling (0 = unlimited)
     queue_depth: int = 0  # Bounded wait queue when at the ceiling
     overflow_policy: str = "reject"  # reject | queue | shed_oldest
+    # Issue #5168: per-tenant/per-scope concurrency sub-limit within the global
+    # ceiling so one tenant cannot occupy every run slot. 0 disables the
+    # sub-limit (today's global-only behaviour).
+    max_concurrent_runs_per_scope: int = 0
     # Issue #2620: pre-auth edge protections for internet-exposed deployments.
     # Cap concurrent *unauthenticated* WebSocket connections per source IP so a
     # hostile client cannot park many half-open sockets up to max_connections
@@ -898,6 +902,11 @@ class GatewayConfig:
         if self.overflow_policy not in ("reject", "queue", "shed_oldest"):
             raise ValueError(
                 "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
+            )
+        if self.max_concurrent_runs_per_scope < 0:
+            raise ValueError(
+                "max_concurrent_runs_per_scope must be >= 0 "
+                "(use 0 to disable the per-scope sub-limit)"
             )
         if self.preauth_max_connections_per_ip < 0:
             raise ValueError(
@@ -981,6 +990,7 @@ class GatewayConfig:
             "max_concurrent_runs": self.max_concurrent_runs,
             "queue_depth": self.queue_depth,
             "overflow_policy": self.overflow_policy,
+            "max_concurrent_runs_per_scope": self.max_concurrent_runs_per_scope,
             "preauth_max_connections_per_ip": self.preauth_max_connections_per_ip,
             "max_unauthorized_frames": self.max_unauthorized_frames,
             "push": self.push.to_dict(),
@@ -1177,6 +1187,9 @@ class MultiChannelGatewayConfig:
             max_concurrent_runs=int(gw_data.get("max_concurrent_runs", 0) or 0),
             queue_depth=int(gw_data.get("queue_depth", 0) or 0),
             overflow_policy=str(gw_data.get("overflow_policy", "reject") or "reject"),
+            max_concurrent_runs_per_scope=int(
+                gw_data.get("max_concurrent_runs_per_scope", 0) or 0
+            ),
             preauth_max_connections_per_ip=int(
                 gw_data.get("preauth_max_connections_per_ip", 32)
             ),
