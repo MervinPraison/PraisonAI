@@ -382,6 +382,27 @@ def test_gateway_keeps_session_when_persist_fails():
     assert "cold" not in store.persisted
 
 
+def test_gateway_keeps_session_when_store_returns_false():
+    """A falsy ``add_message`` result (failed write, no exception) retains it.
+
+    ``SessionStoreProtocol.add_message`` returns ``bool`` and both built-in
+    stores return ``False`` when a write fails; treating that as success would
+    drop the session's only current copy under pressure (Greptile P1).
+    """
+
+    class _FalsyStore(_SessionStore):
+        def add_message(self, session_id, role, content, metadata=None):
+            return False  # write failed but did not raise
+
+    store = _FalsyStore()
+    gw = _bare_gateway(store, 1000.0, [1000.0, 1000.0])
+    _add_session(gw, "cold", 1.0)
+    assert gw._sweep_sessions_under_pressure() == 0
+    assert "cold" in gw._sessions        # retained — the write did not persist
+    assert "cold" not in gw._session_ttls
+    assert gw._evict_persisted_session("cold") is False
+
+
 def test_gateway_evict_persisted_session_sets_resume_ttl():
     store = _SessionStore()
     gw = _bare_gateway(store, 1000.0, [1000.0])

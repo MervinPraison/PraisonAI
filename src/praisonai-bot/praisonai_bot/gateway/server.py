@@ -4990,7 +4990,10 @@ class WebSocketGateway:
         enactor refuses to evict a session whose final snapshot could not be
         persisted. Under memory pressure the live session may hold the only copy
         of recent messages/events, so a failed persist must leave it in memory
-        (no data loss) rather than count it as safely shed.
+        (no data loss) rather than count it as safely shed. ``add_message``
+        signals failure two ways — a raised exception *or* a falsy return
+        (``SessionStoreProtocol.add_message`` returns ``bool`` and both built-in
+        stores return ``False`` on a failed write); both must retain the session.
         """
         session = self._sessions.get(session_id)
         if session is None:
@@ -4999,18 +5002,29 @@ class WebSocketGateway:
         if store is None:  # pragma: no cover — guarded by caller
             return False
         try:
-            store.add_message(
+            persisted = store.add_message(
                 session_id=session_id,
                 role="system",
                 content="Session closed",
                 metadata={"session_data": session.to_dict()},
             )
-        except Exception as exc:  # persist failed ⇒ keep session in memory
+        except Exception as exc:  # persist raised ⇒ keep session in memory
             logger.warning(
                 "WebSocketGateway: skipped pressure eviction of %s — "
                 "persistence failed (%s); session retained in memory",
                 session_id,
                 exc,
+            )
+            return False
+        # A store may report a failed write via a falsy return instead of
+        # raising; treat that identically so we never drop the only live copy.
+        # ``None`` (legacy stores with no return) is treated as success to
+        # preserve today's behaviour for stores that persist without reporting.
+        if persisted is False:
+            logger.warning(
+                "WebSocketGateway: skipped pressure eviction of %s — "
+                "store reported a failed write; session retained in memory",
+                session_id,
             )
             return False
         # Durable now: mark resumable, close, and drop from the live set.
