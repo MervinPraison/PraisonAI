@@ -93,8 +93,6 @@ __all__ = [
     'ThinkingHandler',
     'CompactionHandler',
     'OutputStyleHandler',
-    # Ollama + WMP
-    'OllamaHandler',
     # Capabilities (LiteLLM endpoint parity)
     'CapabilitiesHandler',
     # Performance benchmarking
@@ -231,9 +229,6 @@ def __getattr__(name):
     elif name == 'OutputStyleHandler':
         from .output_style import OutputStyleHandler
         return OutputStyleHandler
-    elif name == 'OllamaHandler':
-        from .ollama import OllamaHandler
-        return OllamaHandler
     elif name == 'CapabilitiesHandler':
         from .capabilities import CapabilitiesHandler
         return CapabilitiesHandler
