@@ -142,7 +142,7 @@ Return ONLY the title text, no quotes, no explanation."""
         # Generate with timeout
         try:
             response = await asyncio.wait_for(
-                llm.aget_response(prompt=prompt),
+                llm.get_response_async(prompt=prompt, verbose=False, stream=False),
                 timeout=timeout
             )
             

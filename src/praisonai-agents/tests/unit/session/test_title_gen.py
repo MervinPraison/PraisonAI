@@ -128,6 +128,40 @@ class TestTitleGeneration:
         # Should contain either generated content or fallback
         assert "Test" in title or "sync" in title or "Chat Session" in title
 
+    @pytest.mark.asyncio
+    async def test_generate_title_async_uses_llm_response(self, monkeypatch):
+        """The generator must call the real async LLM API and use its output.
+
+        Regression for the auto-title path (Issue #5141): the helper previously
+        called a nonexistent ``LLM.aget_response`` method, so every eligible
+        exchange silently fell back to the user message instead of a generated
+        title. Stub an ``LLM`` exposing only the supported ``get_response_async``
+        so an incorrect internal API call fails this test.
+        """
+        import praisonaiagents.llm as llm_module
+
+        captured = {}
+
+        class _StubLLM:
+            def __init__(self, model=None, **kwargs):
+                captured["model"] = model
+
+            async def get_response_async(self, prompt=None, **kwargs):
+                captured["prompt"] = prompt
+                return "Generated Session Title"
+
+        monkeypatch.setattr(llm_module, "LLM", _StubLLM)
+
+        title = await generate_title_async(
+            "Help me debug this Python code",
+            "Sure, let's start by reading the traceback",
+            llm_model="stub-model",
+        )
+
+        assert title == "Generated Session Title"
+        assert captured["model"] == "stub-model"
+        assert "Help me debug this Python code" in captured["prompt"]
+
 
 class TestSmallModelResolution:
     """Tests for auxiliary/small model resolution in title generation."""
