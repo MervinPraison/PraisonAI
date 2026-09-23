@@ -162,8 +162,8 @@ class StatusOutput:
         """Record LLM call start."""
         global _ai_call_count
         ts = time.time()
-        self._llm_start_time = ts
         with _output_lock:
+            self._llm_start_time = ts
             _ai_call_count += 1
             call_count = _ai_call_count
         
@@ -195,7 +195,8 @@ class StatusOutput:
         if latency_ms is not None and latency_ms > 0:
             duration_ms = latency_ms
         elif duration_ms is None and hasattr(self, '_llm_start_time'):
-            start_ts = self._llm_start_time
+            with _output_lock:
+                start_ts = self._llm_start_time
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
         
