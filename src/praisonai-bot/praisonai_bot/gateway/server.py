@@ -1204,6 +1204,18 @@ class WebSocketGateway:
         self._drain_marker_task: Optional[asyncio.Task] = None
         self._lifecycle_drain_timeout: Optional[float] = None
 
+        # Issue #5170: opt-in out-of-band idle-session compaction. A background
+        # sweep compacts sessions that have been idle beyond a threshold off the
+        # turn critical path, so a returning user resumes an already-compacted
+        # session with no first-message latency spike and idle transcripts stay
+        # bounded. All off unless ``lifecycle.idle_compaction.enabled`` is set,
+        # so always-on gateways are unchanged. ``_idle_compaction_cooldown`` is a
+        # per-session backoff (session_id -> retry-not-before ts) so a session we
+        # cannot shrink is not re-compacted every sweep.
+        self._idle_compaction_cfg: Optional[Dict[str, Any]] = None
+        self._idle_compaction_task: Optional[asyncio.Task] = None
+        self._idle_compaction_cooldown: Dict[str, float] = {}
+
         # Issue #4603: durable, boot-scoped process-lifecycle ledger. Detects an
         # unclean/OOM death of the *previous* process (which runs no signal
         # handler, so forensics never fire), surfaces memory/disk pressure on
@@ -2638,6 +2650,47 @@ class WebSocketGateway:
                 logger.warning("Invalid scale_to_zero config; disabling: %s", e)
                 self._idle_policy = None
 
+        # Issue #5170: opt-in out-of-band idle-session compaction. Parse the
+        # config into a plain dict of validated numbers; the sweep itself lives
+        # in ``_run_idle_compaction_loop`` beside the other lifecycle loops. Off
+        # unless ``enabled`` is truthy and a durable session store is bound
+        # (nothing to enumerate/persist otherwise).
+        ic = lifecycle_cfg.get("idle_compaction")
+        if isinstance(ic, dict) and _as_bool(ic.get("enabled")):
+            if self._session_store is None:
+                logger.warning(
+                    "Gateway idle_compaction requires a persistent session "
+                    "store; disabling"
+                )
+                self._idle_compaction_cfg = None
+            else:
+                try:
+                    self._idle_compaction_cfg = {
+                        "idle_after_seconds": float(
+                            ic.get("idle_after_seconds", 1800.0)
+                        ),
+                        "min_tokens": int(ic.get("min_tokens", 8000)),
+                        "sweep_interval_seconds": float(
+                            ic.get("sweep_interval_seconds", 300.0)
+                        ),
+                        "cooldown_seconds": float(
+                            ic.get("cooldown_seconds", 3600.0)
+                        ),
+                        "max_per_sweep": int(ic.get("max_per_sweep", 20)),
+                    }
+                    logger.info(
+                        "Gateway idle_compaction enabled "
+                        "(idle_after=%ss, min_tokens=%s, sweep=%ss)",
+                        self._idle_compaction_cfg["idle_after_seconds"],
+                        self._idle_compaction_cfg["min_tokens"],
+                        self._idle_compaction_cfg["sweep_interval_seconds"],
+                    )
+                except (TypeError, ValueError) as e:
+                    logger.warning(
+                        "Invalid idle_compaction config; disabling: %s", e
+                    )
+                    self._idle_compaction_cfg = None
+
         # Epoch-aware external drain marker.
         drain = lifecycle_cfg.get("drain")
         if isinstance(drain, dict) and drain.get("marker_path"):
@@ -2910,6 +2963,164 @@ class WebSocketGateway:
         except asyncio.CancelledError:
             raise
 
+    def _idle_compaction_candidates(
+        self, cfg: Dict[str, Any], now: float
+    ) -> List[str]:
+        """Select persisted session ids eligible for off-path compaction.
+
+        Pure selection over the durable store's session listing: a session is a
+        candidate when it has been idle at least ``idle_after_seconds``, its
+        transcript is at least ``min_tokens``, it is not currently held live and
+        executing in this gateway, and it is not inside its per-session cooldown.
+        Kept separate from the loop so the decision stays testable.
+        """
+        store = self._session_store
+        if store is None or not hasattr(store, "list_sessions"):
+            return []
+        idle_after = cfg["idle_after_seconds"]
+        min_tokens = cfg["min_tokens"]
+        try:
+            listing = store.list_sessions(limit=1000)
+        except Exception as e:
+            logger.debug("idle_compaction list_sessions failed: %s", e)
+            return []
+        candidates: List[str] = []
+        for row in listing:
+            sid = row.get("session_id") or row.get("id")
+            if not sid:
+                continue
+            not_before = self._idle_compaction_cooldown.get(sid)
+            if not_before is not None and now < not_before:
+                continue
+            live = self._sessions.get(sid)
+            if live is not None and getattr(live, "_is_executing", False):
+                continue
+            updated_at = row.get("updated_at")
+            idle_seconds = self._seconds_since_iso(updated_at, now)
+            if idle_seconds is None or idle_seconds < idle_after:
+                continue
+            total_tokens = row.get("total_tokens")
+            if isinstance(total_tokens, (int, float)) and total_tokens < min_tokens:
+                continue
+            candidates.append(sid)
+        return candidates
+
+    @staticmethod
+    def _seconds_since_iso(value: Any, now: float) -> Optional[float]:
+        """Seconds elapsed since an ISO-8601 timestamp, or ``None`` if unparsable."""
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            from datetime import datetime
+
+            ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return now - ts.timestamp()
+        except (ValueError, OverflowError):
+            return None
+
+    async def _run_idle_compaction_loop(self) -> None:
+        """Compact idle sessions out-of-band so returning users pay no penalty.
+
+        Only scheduled when ``lifecycle.idle_compaction.enabled`` is set and a
+        durable session store is bound (Issue #5170). Each sweep selects idle,
+        over-budget sessions, rebuilds their cheap working history (summary +
+        tail), runs the reusable ``ContextCompactor`` off the turn critical
+        path, and persists a compaction checkpoint so the next user message
+        resumes an already-compacted session. A per-session cooldown prevents
+        re-compacting a session that could not be shrunk every sweep.
+        """
+        cfg = self._idle_compaction_cfg
+        store = self._session_store
+        if cfg is None or store is None:
+            return
+        if not hasattr(store, "get_working_history") or not hasattr(
+            store, "append_compaction_checkpoint"
+        ):
+            logger.info(
+                "Gateway idle_compaction: session store lacks working-history/"
+                "checkpoint support; disabling"
+            )
+            return
+        try:
+            from praisonaiagents.compaction.compactor import ContextCompactor
+            from praisonaiagents.compaction.strategy import CompactionStrategy
+        except ImportError as e:
+            logger.warning("Gateway idle_compaction unavailable: %s", e)
+            return
+
+        min_tokens = cfg["min_tokens"]
+        cooldown_seconds = cfg["cooldown_seconds"]
+        max_per_sweep = cfg["max_per_sweep"]
+        # Target a comfortable fraction of the budget so a compacted session
+        # stays under threshold for a while rather than re-tripping next sweep.
+        compactor = ContextCompactor(
+            max_tokens=min_tokens,
+            target_tokens=int(min_tokens * 0.75),
+            strategy=CompactionStrategy.SUMMARIZE,
+        )
+        logger.info("Gateway idle-compaction sweep armed")
+        try:
+            while self._is_running:
+                await asyncio.sleep(cfg["sweep_interval_seconds"])
+                if self._is_dormant:
+                    continue
+                now = time.time()
+                candidates = self._idle_compaction_candidates(cfg, now)
+                processed = 0
+                for sid in candidates:
+                    if processed >= max_per_sweep:
+                        break
+                    try:
+                        messages = store.get_working_history(sid)
+                    except Exception as e:
+                        logger.debug(
+                            "idle_compaction get_working_history(%s) failed: %s",
+                            sid, e,
+                        )
+                        continue
+                    if not compactor.needs_compaction(messages):
+                        continue
+                    processed += 1
+                    try:
+                        _, result = await compactor.compact_async(messages)
+                    except Exception as e:
+                        logger.debug(
+                            "idle_compaction compact(%s) failed: %s", sid, e
+                        )
+                        self._idle_compaction_cooldown[sid] = now + cooldown_seconds
+                        continue
+                    shrank = (
+                        result.compacted_tokens < result.original_tokens
+                        and not result.was_skipped_due_to_low_savings
+                        and bool((result.summary or "").strip())
+                    )
+                    if shrank:
+                        try:
+                            store.append_compaction_checkpoint(
+                                sid,
+                                result.summary,
+                                tokens_before=result.original_tokens,
+                                tokens_after=result.compacted_tokens,
+                                metadata={"source": "idle_compaction"},
+                            )
+                            logger.info(
+                                "[idle-compaction] %s: %s->%s tokens",
+                                sid,
+                                result.original_tokens,
+                                result.compacted_tokens,
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "idle_compaction checkpoint(%s) failed: %s",
+                                sid, e,
+                            )
+                    # Cool the session down either way: if it shrank we do not
+                    # need to revisit it soon; if it could not shrink we must
+                    # not retry it every sweep.
+                    self._idle_compaction_cooldown[sid] = now + cooldown_seconds
+        except asyncio.CancelledError:
+            raise
+
     def _read_drain_marker(self) -> Optional[Dict[str, Any]]:
         """Read + parse the external drain marker file, or ``None`` if absent."""
         path = self._drain_marker_path
@@ -2987,9 +3198,11 @@ class WebSocketGateway:
         # corresponding feature rather than leaving stale state.
         prev_idle = self._idle_policy is not None
         prev_drain = self._drain_marker_policy is not None
+        prev_idle_compaction = self._idle_compaction_cfg is not None
         self._idle_policy = None
         self._drain_marker_policy = None
         self._drain_marker_path = None
+        self._idle_compaction_cfg = None
         self._configure_lifecycle(lifecycle_cfg)
 
         try:
@@ -2999,6 +3212,7 @@ class WebSocketGateway:
 
         now_idle = self._idle_policy is not None
         now_drain = self._drain_marker_policy is not None
+        now_idle_compaction = self._idle_compaction_cfg is not None
 
         if now_idle != prev_idle:
             if self._lifecycle_task is not None:
@@ -3018,6 +3232,16 @@ class WebSocketGateway:
                 self._drain_marker_task = loop.create_task(
                     self._run_drain_marker_watch(self._lifecycle_drain_timeout),
                     name="gateway-drain-marker",
+                )
+
+        if now_idle_compaction != prev_idle_compaction:
+            if self._idle_compaction_task is not None:
+                self._idle_compaction_task.cancel()
+                self._idle_compaction_task = None
+            if now_idle_compaction:
+                self._idle_compaction_task = loop.create_task(
+                    self._run_idle_compaction_loop(),
+                    name="gateway-idle-compaction",
                 )
 
     async def _drain_active_sessions(self, reason: str = "shutdown", timeout: float = 10.0) -> None:
@@ -10078,6 +10302,14 @@ class WebSocketGateway:
                     self._run_drain_marker_watch(drain_timeout_cfg),
                     name="gateway-drain-marker",
                 )
+            # Issue #5170: launch the opt-in idle-session compaction sweep.
+            # No-op when unconfigured; polls on ``_is_running`` after an initial
+            # sleep, so starting it here is safe.
+            if self._idle_compaction_cfg is not None:
+                self._idle_compaction_task = asyncio.create_task(
+                    self._run_idle_compaction_loop(),
+                    name="gateway-idle-compaction",
+                )
             await self.start()
 
         # Issue #2436: crash/shutdown forensics. Capture a fast, non-blocking
@@ -10241,6 +10473,9 @@ class WebSocketGateway:
                     self._lifecycle_task.cancel()
                 if self._drain_marker_task:
                     self._drain_marker_task.cancel()
+                # Issue #5170: stop the idle-compaction sweep on shutdown.
+                if self._idle_compaction_task:
+                    self._idle_compaction_task.cancel()
                 # Issue #2375: drain in-flight agent turns (channel bots) and
                 # websocket sessions before final teardown when a drain timeout
                 # is configured. The configured timeout bounds the *total*
