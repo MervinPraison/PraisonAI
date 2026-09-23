@@ -223,9 +223,10 @@ class TestBuildIdempotencyStore:
         )
 
     def test_redis_backend_falls_back_to_durable_sqlite(self, tmp_path):
-        # #4768: ``redis`` is not implemented, but it must not silently downgrade
-        # to per-process memory. It falls back to the *durable* SQLite store
-        # (still cross-restart dedup, and cross-replica with a shared file).
+        # #4768/#5154: when ``redis`` is selected but no Redis is reachable (no
+        # client, as here), it must not silently downgrade to per-process memory.
+        # It falls back to the *durable* SQLite store (still cross-restart dedup,
+        # and cross-replica with a shared file).
         from praisonai_bot.bots import (
             SqliteIdempotencyStore,
             build_idempotency_store,
@@ -373,3 +374,112 @@ class TestDurabilityDegradation:
             o.owner_id == "durability:session"
             for o in durability_degraded_owners()
         )
+
+
+class _FakeRedis:
+    """Minimal in-memory stand-in for the sync ``redis.Redis`` client (#5154).
+
+    Supports the subset ``RedisIdempotencyStore`` uses: ``set(nx=,px=)``,
+    ``get``, ``delete``, ``eval`` (for the compare-and-del release Lua), and
+    ``ping``. TTLs are ignored (tests exercise claim semantics, not expiry).
+    """
+
+    def __init__(self):
+        self.store = {}
+
+    def ping(self):
+        return True
+
+    def set(self, key, value, nx=False, px=None):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
+    def eval(self, script, numkeys, key, *args):
+        token = args[0]
+        if self.store.get(key) == token:
+            self.store.pop(key, None)
+            return 1
+        return 0
+
+
+class TestRedisIdempotencyStore:
+    """Issue #5154: cluster-wide exactly-once inbound admission."""
+
+    def test_reserve_record_dedup(self):
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        s = RedisIdempotencyStore(_FakeRedis())
+        assert s.reserve("k") is True
+        assert s.reserve("k") is False  # in-flight (SET NX fails)
+        s.record("k")
+        assert s.reserve("k") is False  # recorded
+
+    def test_release_allows_retry(self):
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        s = RedisIdempotencyStore(_FakeRedis())
+        assert s.reserve("k") is True
+        s.release("k")
+        assert s.reserve("k") is True  # failed delivery may retry
+
+    def test_cross_replica_dedup_shares_one_backend(self):
+        # Two replicas (two store instances) sharing one Redis: the second
+        # replica's reserve for the same key is rejected -> admitted exactly once.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _FakeRedis()
+        replica_a = RedisIdempotencyStore(backend)
+        replica_b = RedisIdempotencyStore(backend)
+        assert replica_a.reserve("dup") is True
+        assert replica_b.reserve("dup") is False
+
+    def test_release_only_drops_own_claim(self):
+        # A replica must not release another replica's live claim: replica B's
+        # release is a no-op because the stored owner token is replica A's.
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        backend = _FakeRedis()
+        replica_a = RedisIdempotencyStore(backend)
+        replica_b = RedisIdempotencyStore(backend)
+        assert replica_a.reserve("k") is True
+        replica_b.release("k")  # not the owner -> no-op
+        assert replica_b.reserve("k") is False  # still held by A
+
+    def test_satisfies_protocol(self):
+        from praisonaiagents.gateway import IdempotencyStoreProtocol
+        from praisonai_bot.bots import RedisIdempotencyStore
+
+        assert isinstance(
+            RedisIdempotencyStore(_FakeRedis()), IdempotencyStoreProtocol
+        )
+
+    def test_build_uses_redis_store_when_client_available(self, monkeypatch):
+        # ``store_backend='redis'`` builds the real cluster-wide store when a
+        # Redis client can be constructed (no fallback / degradation).
+        import praisonai_bot.bots._idempotency as idem
+        from praisonai_bot.bots import RedisIdempotencyStore, build_idempotency_store
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+
+        clear_durability_degraded("idempotency")
+        monkeypatch.setattr(
+            idem, "_build_redis_client", lambda cfg, url: _FakeRedis()
+        )
+        store = build_idempotency_store("redis")
+        assert isinstance(store, RedisIdempotencyStore)
+        assert not any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        clear_durability_degraded("idempotency")

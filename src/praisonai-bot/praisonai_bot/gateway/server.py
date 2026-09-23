@@ -5226,11 +5226,17 @@ class WebSocketGateway:
             from pathlib import Path
             from praisonai_bot.bots import build_idempotency_store
 
+            # Reuse the gateway's push ``RedisConfig`` (as ``build_turn_lock``
+            # does) so ``store_backend='redis'`` gets cluster-wide exactly-once
+            # admission (#5154). Non-redis backends ignore it.
+            push = getattr(getattr(self, "config", None), "push", None)
+            redis_config = getattr(push, "redis", None)
             self._hook_idem = build_idempotency_store(
                 backend,
                 path=Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite",
                 max_size=self._hook_idempotency_max,
                 ttl_seconds=self._hook_idempotency_ttl,
+                redis_config=redis_config,
             )
         except Exception as e:  # pragma: no cover - defensive
             from praisonaiagents.gateway import InMemoryIdempotencyStore
