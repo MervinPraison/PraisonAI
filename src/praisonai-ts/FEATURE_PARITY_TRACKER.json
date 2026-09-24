@@ -1,6 +1,6 @@
 {
   "version": "1.7.6",
-  "lastUpdated": "2026-09-17",
+  "lastUpdated": "2026-09-24",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
@@ -1229,6 +1229,8 @@
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
       "ManagedEvent",
+      "ManagedEventType",
+      "ManagedStopReason",
       "MarkdownReader",
       "Memory",
       "MemoryAdapterRegistry",

@@ -1085,11 +1085,12 @@ export type {
 
 // ---- managed ----
 export {
+  ManagedEventType, ManagedStopReason,
   ManagedEvent, AgentMessageEvent, ToolUseEvent, CustomToolUseEvent, ToolConfirmationEvent,
   SessionIdleEvent, SessionRunningEvent, SessionErrorEvent, UsageEvent, isManagedBackend,
 } from './managed';
 export type {
-  ManagedEventType, ManagedStopReason, ManagedEventInit, ManagedContentBlock, AgentMessageEventInit,
+  ManagedEventInit, ManagedContentBlock, AgentMessageEventInit,
   ToolUseEventInit, CustomToolUseEventInit, ToolConfirmationEventInit, SessionIdleEventInit,
   SessionErrorEventInit, UsageEventInit, ManagedBackendProtocol, ManagedBackendKwargs,
 } from './managed';
