@@ -8,6 +8,7 @@ do not kill the interpreter.
 
 import asyncio
 import os
+import sys
 import threading
 import time
 
@@ -486,11 +487,38 @@ def test_startup_extensions_are_bounded():
     sw.report_startup_progress("b")
     # Third report is refused (bound reached); the phase then wedges.
     sw.report_startup_progress("c")
-    assert sw._extensions_used == 2
     thread = sw._thread
     assert thread is not None
     thread.join(timeout=5.0)
     assert sw.expired is True
+    # Budget accounting is done by the watchdog thread (so batched reports never
+    # lose the resets they paid for); it is exact once the thread has drained.
+    assert sw._extensions_used == 2
+
+
+def test_startup_batched_progress_does_not_waste_budget():
+    """Reports batched before a wake each still buy a real deadline reset.
+
+    Regression for the review finding "progress reports lose extensions": with
+    per-call accounting, several reports landing between two wakes would each
+    spend budget but only reset the window once, letting a later legitimate
+    phase exhaust the budget early. With thread-side draining, a single slow
+    boot that stays under the extension bound must survive well past its base
+    deadline.
+    """
+    sw = StartupWatchdog(on_expire="dump_only", max_extensions=6)
+    sw.arm(deadline_s=0.08)
+    # Fire a burst of reports (likely batched) then keep reporting across a
+    # span far longer than the base deadline; must not expire while affordable.
+    sw.report_startup_progress("burst-1")
+    sw.report_startup_progress("burst-2")
+    for _ in range(4):
+        time.sleep(0.05)
+        sw.report_startup_progress("phase")
+    assert sw.expired is False
+    assert sw.armed is True
+    sw.confirm_loop_live()
+    assert sw.expired is False
 
 
 def test_startup_confirm_suppresses_in_flight_exit():
@@ -507,6 +535,61 @@ def test_startup_confirm_suppresses_in_flight_exit():
         os._exit = original_exit
     assert exited == []
     assert sw.expired is False
+
+
+def test_startup_expiry_takes_active_exit_path():
+    """The active exit path (stop NOT set) must dump and call os._exit.
+
+    The in-flight-suppression test only exercises the first stop check; this one
+    covers the real wedge path so a regression that silently stopped exiting
+    would be caught (review: "exit race remains untested").
+    """
+    sw = StartupWatchdog(on_expire="dump_and_exit", exit_code=42)
+    sw._dump_stacks_on_expire = True
+    stop = threading.Event()  # deliberately NOT set: a genuine wedge
+    dumped = []
+    exited = []
+    sw._dump_stacks = lambda: dumped.append(True)
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        sw._on_expire(stop)
+    finally:
+        os._exit = original_exit
+    assert dumped == [True]
+    assert exited == [42]
+    assert sw.expired is True
+
+
+def test_startup_confirm_during_flush_suppresses_exit():
+    """A confirm landing while the pre-exit flush blocks must cancel the exit.
+
+    Simulates a full-pipe stderr.flush() that blocks long enough for
+    confirm_loop_live() to set the stop event; the final re-check before
+    os._exit must then honour it (review: "confirmation cannot prevent late
+    exit").
+    """
+    sw = StartupWatchdog(on_expire="dump_and_exit")
+    sw._dump_stacks_on_expire = False
+    stop = threading.Event()  # NOT set initially: wedge path is taken
+
+    exited = []
+    original_exit = os._exit
+    original_flush = sys.stderr.flush
+
+    def blocking_flush():
+        # The confirm races in "while" the flush is in progress.
+        stop.set()
+
+    os._exit = lambda code: exited.append(code)
+    sys.stderr.flush = blocking_flush
+    try:
+        sw._on_expire(stop)
+    finally:
+        os._exit = original_exit
+        sys.stderr.flush = original_flush
+    assert exited == []  # final re-check honoured the racing confirm
+    assert sw.expired is True
 
 
 def test_startup_dump_stacks_can_be_disabled(tmp_path):

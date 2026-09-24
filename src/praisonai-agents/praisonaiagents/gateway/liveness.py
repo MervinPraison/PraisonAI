@@ -512,6 +512,10 @@ class StartupWatchdog:
         self._wake = threading.Event()
         self._deadline_s = 0.0
         self._extensions_used = 0
+        # Progress reports enqueue here; the watchdog thread drains this under
+        # the lock so budget is spent exactly once per report even when several
+        # reports batch between two wakes.
+        self._pending_progress = 0
         self._expired = False
         self._confirmed = False
         self._lock = threading.Lock()
@@ -548,6 +552,7 @@ class StartupWatchdog:
             self._wake = wake
             self._deadline_s = deadline_s
             self._extensions_used = 0
+            self._pending_progress = 0
             self._expired = False
             self._confirmed = False
             self._dump_stacks_on_expire = dump_stacks
@@ -571,17 +576,22 @@ class StartupWatchdog:
         each phase so it is not killed. Extensions are bounded by
         ``max_extensions`` so a phase that itself wedges still trips the
         deadline. Fail-open and a no-op when not armed.
+
+        Budget accounting is done by the watchdog thread, not here: each report
+        merely enqueues a pending nudge. If several reports land before the
+        thread wakes, each still costs exactly one extension *and* each still
+        earns one fresh deadline window when the thread drains them — so a later
+        slow-but-progressing phase can never find the budget spent on resets it
+        never received (Issue #5265 review: "progress reports lose extensions").
         """
         if not self.armed:
             return
         with self._lock:
-            if self._extensions_used >= self.max_extensions:
-                return
-            self._extensions_used += 1
+            self._pending_progress += 1
             wake = self._wake
-        # Wake the waiting thread so it re-reads the extended deadline. The
-        # thread resets its window on any wake, then clears the event and keeps
-        # waiting against its own (still-unset) stop event.
+        # Wake the waiting thread so it drains the pending nudges, spends budget,
+        # and resets its window once per still-affordable report. The thread
+        # keeps waiting against its own (still-unset) stop event.
         wake.set()
 
     def confirm_loop_live(self) -> None:
@@ -609,8 +619,10 @@ class StartupWatchdog:
         # Wait out the deadline against *this generation's* events. ``stop`` is
         # set (and stays set) by a confirm/disarm — that must break us out and
         # suppress the self-exit. ``wake`` is a transient progress nudge — on
-        # each wake we reset the window and keep waiting. A plain timeout with
-        # neither event set means the startup genuinely wedged.
+        # each wake we drain the queued progress reports, spending one extension
+        # of budget per report and resetting the window each time we can still
+        # afford it. A plain timeout with neither event set (and no affordable
+        # pending progress) means the startup genuinely wedged.
         start = time.monotonic()
         while not stop.is_set():
             remaining = (start + self._deadline_s) - time.monotonic()
@@ -620,8 +632,22 @@ class StartupWatchdog:
                 wake.clear()
                 if stop.is_set():
                     return
-                # A progress report: extend the window and keep waiting.
-                start = time.monotonic()
+                # Drain queued progress reports. Each report costs one extension
+                # and, while budget remains, grants one fresh deadline window —
+                # so batched reports never lose the resets they paid for.
+                extended = False
+                with self._lock:
+                    pending = self._pending_progress
+                    self._pending_progress = 0
+                    for _ in range(pending):
+                        if self._extensions_used >= self.max_extensions:
+                            break
+                        self._extensions_used += 1
+                        extended = True
+                if extended:
+                    start = time.monotonic()
+                # Whether or not budget remained, loop back and re-check the
+                # (possibly unchanged) deadline against this generation's stop.
                 continue
         self._on_expire(stop)
 
@@ -645,6 +671,13 @@ class StartupWatchdog:
                 sys.stderr.flush()
             except Exception:  # pragma: no cover - fail open
                 pass
+            # Final re-check the instant before the irreversible os._exit: the
+            # flush above can block (e.g. a full pipe) long enough for a
+            # concurrent confirm_loop_live() to land. A startup that has just
+            # confirmed a live loop must never be terminated (Issue #5265
+            # review: "confirmation cannot prevent late exit").
+            if stop.is_set():
+                return
             os._exit(self.exit_code)
 
     def _dump_stacks(self) -> None:
