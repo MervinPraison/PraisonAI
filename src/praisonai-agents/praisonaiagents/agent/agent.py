@@ -5339,8 +5339,11 @@ Summary:"""
                         f"response_len={len(response_str)}"
                     )
                 
-                # Auto-save session after each async iteration (memory integration)
-                self._auto_save_session()
+                # Auto-save session after each async iteration (memory integration).
+                # Offloaded to a worker thread so the synchronous FileLock/JSON
+                # write never stalls the shared event loop (mirrors the goal-
+                # completion-judge offload below).
+                await asyncio.to_thread(self._auto_save_session)
 
                 # ─────────────────────────────────────────────────────────────
                 # GOAL COMPLETION JUDGE (opt-in): independent acceptance-criteria
@@ -5480,8 +5483,8 @@ Summary:"""
                 # Yield control to allow other async tasks to run
                 await asyncio.sleep(0)
             
-            # Final auto-save before returning
-            self._auto_save_session()
+            # Final auto-save before returning (offloaded off the event loop).
+            await asyncio.to_thread(self._auto_save_session)
             
             # Max iterations reached
             return AutonomyResult(
