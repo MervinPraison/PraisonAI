@@ -604,10 +604,12 @@ Respond with ONLY a valid JSON tool call in this format:
         # another's mid-await and misattribute token spend (issues #5052/#3933).
         # A ContextVar keeps the value isolated per asyncio task / thread.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar("current_agent_name", default=None)
+            contextvars.ContextVar("praisonai_llm_current_agent", default=None)
         )
+        # Stable per-agent id (task-local, mirrors the name var) so token usage
+        # is aggregated by identity rather than a collidable display name.
         self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar("current_agent_id", default=None)
+            contextvars.ContextVar("praisonai_llm_current_agent_id", default=None)
         )
 
         # Rate limiting and retry settings
@@ -6645,7 +6647,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     @property
     def current_agent_id(self) -> Optional[str]:
-        """Stable per-agent identity for token aggregation (issue #5052)."""
+        """Stable per-agent identity for token aggregation (issue #5052).
+
+        Task-local like :attr:`current_agent_name` so concurrent agents sharing
+        one LLM instance each read their own id and token usage is aggregated by
+        identity rather than a collidable display name.
+        """
         var = getattr(self, "_current_agent_id_var", None)
         if var is None:
             return None
@@ -6664,12 +6671,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         agent_name: Optional[str],
         agent_id: Optional[str] = None,
     ) -> None:
-        """Set task-local agent attribution for token tracking."""
+        """Set task-local agent attribution for token tracking.
+
+        Both name and stable id are task-local so concurrent agents sharing one
+        LLM instance do not overwrite each other mid-completion (issue #5052).
+        """
         self.current_agent_name = agent_name
         self.current_agent_id = agent_id
 
-    def __deepcopy__(self, memo):
-        """Deep-copy the LLM while giving the clone fresh attribution ContextVars.
+    def __deepcopy__(self, memo: dict) -> "LLM":
+        """Deep-copy the LLM while giving the clone fresh, independent runtime state.
 
         ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
         not copyable/pickleable, so ``Agent.__deepcopy__`` (which recursively
