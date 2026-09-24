@@ -1077,10 +1077,14 @@ export {
   terminationToRunStatus, terminationToRunStatus as termination_to_run_status,
   validateDecisionString, validateDecisionString as validate_decision_string,
   classifyFinishReason, PROVIDER_BLOCK_REASONS, TERMINAL_REASON_PRECEDENCE,
+  // Canonical terminal-outcome contract (praisonaiagents/run_outcome.py)
+  RunTerminal, isSticky, isSticky as is_sticky, mergeRunTerminal, mergeRunTerminal as merge_run_terminal,
+  collapse,
 } from './agent/run-outcome';
 export type {
   AgentRunStatus, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunOutcomeFailureOptions,
   TerminalReason, RunOutcomeInit,
+  TerminalKind, TerminalSource, RunTerminalInit,
 } from './agent/run-outcome';
 
 // ---- managed ----
