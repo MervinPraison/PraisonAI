@@ -604,7 +604,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # another's mid-await and misattribute token spend (issues #5052/#3933).
         # A ContextVar keeps the value isolated per asyncio task / thread.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar("current_agent_name", default=None)
+            contextvars.ContextVar("praisonai_current_agent_name", default=None)
         )
         self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_id", default=None)
