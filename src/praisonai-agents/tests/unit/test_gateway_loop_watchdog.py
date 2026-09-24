@@ -8,12 +8,17 @@ do not kill the interpreter.
 
 import asyncio
 import os
+import sys
 import threading
 import time
 
 import pytest
 
-from praisonaiagents.gateway import LoopWatchdog, LoopWatchdogPolicy
+from praisonaiagents.gateway import (
+    LoopWatchdog,
+    LoopWatchdogPolicy,
+    StartupWatchdog,
+)
 from praisonaiagents.gateway.protocols import GATEWAY_RESTART_EXIT_CODE
 
 
@@ -381,3 +386,218 @@ def test_non_positive_deadline_is_noop():
     assert wd.deadline_armed is False
     wd.arm_deadline(-5)
     assert wd.deadline_armed is False
+
+
+# ── Startup-phase watchdog (Issue #5265) ──
+
+
+def test_startup_validation():
+    with pytest.raises(ValueError):
+        StartupWatchdog(on_expire="boom")
+    with pytest.raises(ValueError):
+        StartupWatchdog(max_extensions=-1)
+
+
+def test_startup_defaults_and_initial_state():
+    sw = StartupWatchdog()
+    assert sw.on_expire == "dump_and_exit"
+    assert sw.exit_code == GATEWAY_RESTART_EXIT_CODE
+    assert sw.armed is False
+    assert sw.expired is False
+    assert sw.confirmed is False
+
+
+def test_startup_non_positive_deadline_is_noop():
+    sw = StartupWatchdog()
+    sw.arm(deadline_s=0)
+    assert sw.armed is False
+    sw.arm(deadline_s=-1)
+    assert sw.armed is False
+    sw.arm(deadline_s=float("nan"))
+    assert sw.armed is False
+
+
+def test_startup_confirm_when_not_armed_is_safe():
+    sw = StartupWatchdog()
+    sw.confirm_loop_live()  # must not raise
+    assert sw.confirmed is True
+    assert sw.expired is False
+
+
+def test_startup_progress_when_not_armed_is_safe():
+    sw = StartupWatchdog()
+    sw.report_startup_progress("noop")  # must not raise
+    assert sw.armed is False
+
+
+def test_startup_confirm_before_deadline_no_exit():
+    """A startup that confirms the loop live before the deadline never exits."""
+    sw = StartupWatchdog(on_expire="dump_and_exit")
+    sw.arm(deadline_s=5.0)
+    assert sw.armed is True
+    sw.confirm_loop_live()  # loop came up promptly
+    assert sw.armed is False
+    assert sw.confirmed is True
+    assert sw.expired is False
+
+
+def test_startup_arm_is_idempotent():
+    sw = StartupWatchdog(on_expire="dump_only")
+    sw.arm(deadline_s=5.0)
+    first = sw._thread
+    sw.arm(deadline_s=5.0)  # no-op while armed
+    assert sw._thread is first
+    sw.confirm_loop_live()
+
+
+def test_startup_deadline_expires_and_dumps(tmp_path):
+    """A wedged startup expires, dumps stacks, records expiry (dump_only)."""
+    dump = tmp_path / "startup.txt"
+    sw = StartupWatchdog(on_expire="dump_only", dump_file=str(dump))
+    sw.arm(deadline_s=0.05)
+    thread = sw._thread
+    assert thread is not None
+    thread.join(timeout=5.0)
+    assert thread.is_alive() is False
+    assert sw.expired is True
+    assert dump.exists()
+    assert "startup did not confirm" in dump.read_text()
+
+
+def test_startup_progress_extends_deadline():
+    """Progress reports keep a slow-but-alive startup from being tripped."""
+    sw = StartupWatchdog(on_expire="dump_only", max_extensions=10)
+    sw.arm(deadline_s=0.1)
+    # Nudge the deadline several times across a span longer than the base
+    # deadline; a live startup reporting progress must not expire.
+    for _ in range(4):
+        time.sleep(0.05)
+        sw.report_startup_progress("phase")
+    assert sw.expired is False
+    assert sw.armed is True
+    sw.confirm_loop_live()
+    assert sw.expired is False
+
+
+def test_startup_extensions_are_bounded():
+    """Once extensions are exhausted, a still-wedged phase trips the deadline."""
+    sw = StartupWatchdog(on_expire="dump_only", max_extensions=2)
+    sw.arm(deadline_s=0.05)
+    sw.report_startup_progress("a")
+    sw.report_startup_progress("b")
+    # Third report is refused (bound reached); the phase then wedges.
+    sw.report_startup_progress("c")
+    thread = sw._thread
+    assert thread is not None
+    thread.join(timeout=5.0)
+    assert sw.expired is True
+    # Budget accounting is done by the watchdog thread (so batched reports never
+    # lose the resets they paid for); it is exact once the thread has drained.
+    assert sw._extensions_used == 2
+
+
+def test_startup_batched_progress_does_not_waste_budget():
+    """Reports batched before a wake each still buy a real deadline reset.
+
+    Regression for the review finding "progress reports lose extensions": with
+    per-call accounting, several reports landing between two wakes would each
+    spend budget but only reset the window once, letting a later legitimate
+    phase exhaust the budget early. With thread-side draining, a single slow
+    boot that stays under the extension bound must survive well past its base
+    deadline.
+    """
+    sw = StartupWatchdog(on_expire="dump_only", max_extensions=6)
+    sw.arm(deadline_s=0.08)
+    # Fire a burst of reports (likely batched) then keep reporting across a
+    # span far longer than the base deadline; must not expire while affordable.
+    sw.report_startup_progress("burst-1")
+    sw.report_startup_progress("burst-2")
+    for _ in range(4):
+        time.sleep(0.05)
+        sw.report_startup_progress("phase")
+    assert sw.expired is False
+    assert sw.armed is True
+    sw.confirm_loop_live()
+    assert sw.expired is False
+
+
+def test_startup_confirm_suppresses_in_flight_exit():
+    """A confirm racing an in-flight expiry must not call os._exit."""
+    sw = StartupWatchdog(on_expire="dump_and_exit")
+    stop = threading.Event()
+    stop.set()  # simulate confirm_loop_live() having raced in
+    exited = []
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        sw._on_expire(stop)  # must observe its own stop flag and stay inert
+    finally:
+        os._exit = original_exit
+    assert exited == []
+    assert sw.expired is False
+
+
+def test_startup_expiry_takes_active_exit_path():
+    """The active exit path (stop NOT set) must dump and call os._exit.
+
+    The in-flight-suppression test only exercises the first stop check; this one
+    covers the real wedge path so a regression that silently stopped exiting
+    would be caught (review: "exit race remains untested").
+    """
+    sw = StartupWatchdog(on_expire="dump_and_exit", exit_code=42)
+    sw._dump_stacks_on_expire = True
+    stop = threading.Event()  # deliberately NOT set: a genuine wedge
+    dumped = []
+    exited = []
+    sw._dump_stacks = lambda: dumped.append(True)
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        sw._on_expire(stop)
+    finally:
+        os._exit = original_exit
+    assert dumped == [True]
+    assert exited == [42]
+    assert sw.expired is True
+
+
+def test_startup_confirm_during_flush_suppresses_exit():
+    """A confirm landing while the pre-exit flush blocks must cancel the exit.
+
+    Simulates a full-pipe stderr.flush() that blocks long enough for
+    confirm_loop_live() to set the stop event; the final re-check before
+    os._exit must then honour it (review: "confirmation cannot prevent late
+    exit").
+    """
+    sw = StartupWatchdog(on_expire="dump_and_exit")
+    sw._dump_stacks_on_expire = False
+    stop = threading.Event()  # NOT set initially: wedge path is taken
+
+    exited = []
+    original_exit = os._exit
+    original_flush = sys.stderr.flush
+
+    def blocking_flush():
+        # The confirm races in "while" the flush is in progress.
+        stop.set()
+
+    os._exit = lambda code: exited.append(code)
+    sys.stderr.flush = blocking_flush
+    try:
+        sw._on_expire(stop)
+    finally:
+        os._exit = original_exit
+        sys.stderr.flush = original_flush
+    assert exited == []  # final re-check honoured the racing confirm
+    assert sw.expired is True
+
+
+def test_startup_dump_stacks_can_be_disabled(tmp_path):
+    dump = tmp_path / "nodump.txt"
+    sw = StartupWatchdog(on_expire="dump_only", dump_file=str(dump))
+    sw.arm(deadline_s=0.05, dump_stacks=False)
+    thread = sw._thread
+    assert thread is not None
+    thread.join(timeout=5.0)
+    assert sw.expired is True
+    assert dump.exists() is False
