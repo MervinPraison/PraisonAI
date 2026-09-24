@@ -321,6 +321,66 @@ class TestHookRegistry:
         assert [h["name"] for h in listed] == ["early", "late"]
         assert [h["priority"] for h in listed] == [10, 90]
 
+    def test_add_hook_default_priority_matches_register_function(self):
+        """Simplified add_hook and register_function share the default bucket.
+
+        A hook added via the beginner-friendly ``add_hook`` and one added via
+        ``register_function`` must not reorder relative to each other when
+        neither caller asked for a priority — both land in the 100 bucket and
+        keep registration order.
+        """
+        from praisonaiagents.hooks.registry import (
+            add_hook, get_default_registry, set_default_registry,
+        )
+        set_default_registry(HookRegistry())
+        try:
+            add_hook(HookEvent.BEFORE_TOOL, lambda d: HookResult.allow())
+            reg = get_default_registry()
+            reg.register_function(
+                event=HookEvent.BEFORE_TOOL,
+                func=lambda d: HookResult.allow(),
+                name="direct",
+            )
+            hooks = reg.get_hooks(HookEvent.BEFORE_TOOL)
+            assert [h.priority for h in hooks] == [100, 100]
+            assert hooks[1].name == "direct"
+        finally:
+            set_default_registry(HookRegistry())
+
+    def test_runner_honors_priority_across_parallel_sequential(self):
+        """A lower-priority sequential hook runs before a higher-priority parallel one.
+
+        Regression for the runner splitting all parallel hooks to the front,
+        which leaked unredacted input to a tracer that should have observed the
+        sequential redaction first.
+        """
+        registry = HookRegistry()
+        order = []
+
+        def redact(data):
+            order.append("redact")
+            return HookResult.allow()
+
+        def trace(data):
+            order.append("trace")
+            return HookResult.allow()
+
+        registry.register_function(
+            event=HookEvent.AFTER_LLM, func=redact, name="redact",
+            sequential=True, priority=10,
+        )
+        registry.register_function(
+            event=HookEvent.AFTER_LLM, func=trace, name="trace",
+            sequential=False, priority=20,
+        )
+
+        runner = HookRunner(registry)
+        input_data = HookInput(
+            session_id="s", cwd="/tmp", event_name="after_llm", timestamp="0",
+        )
+        asyncio.run(runner.execute(HookEvent.AFTER_LLM, input_data))
+        assert order == ["redact", "trace"]
+
     def test_disable_enable_hook(self):
         """Test disabling and enabling hooks."""
         registry = HookRegistry()

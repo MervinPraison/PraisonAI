@@ -382,7 +382,7 @@ def set_default_registry(registry: HookRegistry):
 def add_hook(
     event: Union[str, HookEvent],
     callback: Optional[Callable[[HookInput], HookResult]] = None,
-    priority: int = 10,
+    priority: int = 100,
     matcher: Optional[str] = None
 ) -> Union[str, Callable]:
     """Register a hook callback. Simplified API.
@@ -399,7 +399,9 @@ def add_hook(
     Args:
         event: Hook event name ('before_tool', 'after_llm', etc.) or HookEvent enum
         callback: Function to call when hook fires (optional when using as decorator)
-        priority: Execution order (lower = earlier). Default 10.
+        priority: Execution order (lower = earlier). Default 100 — same default
+            bucket as ``register_function``/``on``, so hooks added through either
+            API keep registration order unless an explicit priority is given.
         matcher: Optional regex pattern to match specific targets (e.g., tool names)
         
     Returns:
