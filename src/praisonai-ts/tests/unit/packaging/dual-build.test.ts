@@ -103,6 +103,50 @@ describe('praisonai dual ESM+CJS packaging', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('serves the Learn config enums from the built CJS and ESM root entries', () => {
+    // Source-level identity is guarded in exports.test.ts, but a build or
+    // exports-map regression could still drop a Learn enum from the *published*
+    // dist. Assert the concrete emitted CJS and ESM roots carry LearnScope,
+    // LearnMode, and LearnBackend with their Python-parity values.
+    const expected = {
+      LearnScope: { PRIVATE: 'private', SHARED: 'shared' },
+      LearnMode: { DISABLED: 'disabled', AGENTIC: 'agentic', PROPOSE: 'propose' },
+      LearnBackend: { FILE: 'file', SQLITE: 'sqlite', REDIS: 'redis', MONGODB: 'mongodb' },
+    };
+
+    const cjsRoot = require(path.join(PKG_ROOT, 'dist', 'index.js'));
+    for (const [name, members] of Object.entries(expected)) {
+      expect(cjsRoot[name]).toBeDefined();
+      for (const [key, value] of Object.entries(members)) {
+        expect(cjsRoot[name][key]).toBe(value);
+      }
+    }
+
+    const script = [
+      `const root = await import(${JSON.stringify(pathToFileURL(ESM_ENTRY).href)});`,
+      `const expected = ${JSON.stringify(expected)};`,
+      `for (const [name, members] of Object.entries(expected)) {`,
+      `  if (!root[name]) { console.error('MISSING_' + name); process.exit(4); }`,
+      `  for (const [key, value] of Object.entries(members)) {`,
+      `    if (root[name][key] !== value) { console.error('BAD_' + name + '_' + key); process.exit(5); }`,
+      `  }`,
+      `}`,
+      `console.log('LEARN_ENUMS_OK');`,
+    ].join('\n');
+
+    const scriptFile = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'praison-learn-')),
+      'load.mjs'
+    );
+    fs.writeFileSync(scriptFile, script);
+
+    const out = execFileSync(process.execPath, [scriptFile], {
+      cwd: PKG_ROOT,
+      encoding: 'utf8',
+    });
+    expect(out).toContain('LEARN_ENUMS_OK');
+  }, 120000);
+
   it('loads the ESM entry in native Node ESM and constructs an Agent', () => {
     // Run in a real child Node process so ts-jest cannot rewrite the dynamic
     // import() into a require(). This proves the *published ESM* actually works
