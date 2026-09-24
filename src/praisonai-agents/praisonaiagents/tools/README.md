@@ -114,9 +114,7 @@ from praisonaiagents.tools import internet_search
 results = internet_search("AI news")
 ```
 
-### 2. Class-Based Approach (Complex Tools)
-
-## Parallel Search MCP
+### Parallel Search MCP
 
 Install `praisonaiagents[parallel-search]` to use Parallel's free Search MCP
 without an API key. Select it for one call with `providers="parallel"`, or set
@@ -130,7 +128,14 @@ results = search_web("recent agent framework releases", providers="parallel")
 
 Parallel is opt-in and does not change the automatic provider order. When you
 select it, your search query is sent to Parallel Search MCP for processing.
+Requests include a `praisonaiagents/<installed-version>` User-Agent so Parallel
+can measure aggregate project usage. This identifier is shared across
+installations and contains no user or installation ID. Anonymous access is
+intended for exploration and light use; see the
+[Search MCP documentation](https://docs.parallel.ai/integrations/mcp/search-mcp)
+for access limits.
 
+### 2. Class-Based Approach (Complex Tools)
 
 Best for tools that do multiple related things or need to remember information. Like a smart calculator that remembers your previous calculations and can do many different math operations.
 

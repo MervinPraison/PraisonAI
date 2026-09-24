@@ -196,6 +196,8 @@ class HTTPStreamMCPTool:
         logger.debug(f"Async calling tool {self.name} with args: {kwargs}")
         try:
             result = await self.session.call_tool(self.name, kwargs)
+            if getattr(result, 'isError', False):
+                raise RuntimeError(f"MCP tool {self.name} failed: {result.content}")
             
             # Extract text from result
             if hasattr(result, 'content') and result.content:

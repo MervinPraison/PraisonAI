@@ -94,7 +94,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"content": [{"type": "text", "text": text}], "isError": False},
+                "result": {"content": [{"type": "text", "text": text}], "isError": self.server.tool_error},
             }
             if self.server.chunked_tool_call:
                 self._send_chunked_json(response)
@@ -150,6 +150,7 @@ def mcp_server():
     server.requests = []
     server.tool_calls = []
     server.header_snapshots = []
+    server.tool_error = False
     server.chunked_tool_call = False
     server.oversized_tools_list = False
     thread = Thread(target=server.serve_forever, daemon=True)
@@ -338,3 +339,16 @@ def test_parallel_streaming_response_limit_is_enforced(mcp_server, monkeypatch):
 
     with pytest.raises(ValueError, match="maximum of 512 bytes"):
         asyncio.run(read_oversized_response())
+
+
+def test_parallel_tool_error_is_not_reported_as_success(mcp_server, monkeypatch):
+    monkeypatch.setattr(web_search_module, "PARALLEL_SEARCH_MCP_URL", _server_url(mcp_server))
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    mcp_server.tool_error = True
+
+    result = web_search_module.search_web("failed search", providers="parallel")
+
+    assert len(mcp_server.tool_calls) == 1
+    assert len(result) == 1
+    assert "error" in result[0]
+    assert "MCP tool web_search failed" in result[0]["error"]
