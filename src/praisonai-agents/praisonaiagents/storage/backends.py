@@ -203,16 +203,14 @@ class SQLiteBackend:
         """Get thread-local connection."""
         # Lazy import sqlite3
         import sqlite3
-        
+
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            self._local.conn = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False
-            )
+            # Hardened factory: WAL where the filesystem supports it, safe
+            # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264).
+            from .sqlite import connect as _sqlite_connect
+
+            self._local.conn = _sqlite_connect(self.db_path, isolation_level=None)
             self._local.conn.row_factory = sqlite3.Row
-            # Enable WAL mode for better concurrent write safety
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn.execute("PRAGMA synchronous=NORMAL")
             self._local.conn.commit()
         return self._local.conn
     

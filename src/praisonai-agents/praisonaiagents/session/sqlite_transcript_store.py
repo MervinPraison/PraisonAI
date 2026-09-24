@@ -92,20 +92,20 @@ class SqliteTranscriptStore(DefaultSessionStore):
         with self._db_lock:
             if self._db_ready:
                 return self._conn
-            import sqlite3  # lazy import — stdlib, no heavy dependency
+            import sqlite3 as _sqlite3  # noqa: F401 - availability guard
 
             if self.db_path != ":memory:":
                 os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-            conn = sqlite3.connect(
-                self.db_path, check_same_thread=False, isolation_level=None
+            # Hardened factory: WAL where the filesystem supports it, safe
+            # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264). WAL lets
+            # readers proceed concurrently with a writer where available.
+            from ..storage.sqlite import connect as _sqlite_connect
+
+            conn = _sqlite_connect(
+                self.db_path,
+                isolation_level=None,
+                busy_timeout_ms=int(self.lock_timeout * 1000),
             )
-            try:
-                # WAL lets readers proceed concurrently with a writer.
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA busy_timeout=%d" % int(self.lock_timeout * 1000))
-            except Exception:  # pragma: no cover - PRAGMA best-effort
-                pass
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS sessions ("
                 "  session_id TEXT PRIMARY KEY,"
