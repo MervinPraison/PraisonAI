@@ -323,6 +323,28 @@ def test_parallel_uses_real_mcp_caller_and_preserves_request_headers(mcp_server,
     assert all(not snapshot["authorization_present"] for snapshot in mcp_server.header_snapshots)
 
 
+def test_parallel_uses_unknown_user_agent_when_distribution_metadata_is_missing(mcp_server, monkeypatch):
+    metadata = importlib.import_module("importlib.metadata")
+    installed_version = metadata.version
+
+    def missing_distribution(distribution):
+        if distribution == "praisonaiagents":
+            raise metadata.PackageNotFoundError(distribution)
+        return installed_version(distribution)
+
+    monkeypatch.setattr(metadata, "version", missing_distribution)
+    monkeypatch.setattr(web_search_module, "PARALLEL_SEARCH_MCP_URL", _server_url(mcp_server))
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
+    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+
+    result = web_search_module.search_web("search without package metadata", max_results=1)
+
+    assert result[0]["provider"] == "parallel"
+    assert mcp_server.header_snapshots
+    assert all(snapshot["user_agent"] == "praisonaiagents/unknown" for snapshot in mcp_server.header_snapshots)
+
+
 def test_parallel_streaming_response_limit_is_enforced(mcp_server, monkeypatch):
     import asyncio
     from httpx import Timeout
