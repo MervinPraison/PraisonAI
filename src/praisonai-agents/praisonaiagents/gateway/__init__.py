@@ -227,6 +227,8 @@ _LAZY_IMPORTS = {
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy": ("praisonaiagents.gateway.liveness", "LoopWatchdogPolicy"),
     "LoopWatchdog": ("praisonaiagents.gateway.liveness", "LoopWatchdog"),
+    # liveness.py — Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog": ("praisonaiagents.gateway.liveness", "StartupWatchdog"),
     # degraded_state.py — Unified degraded-capability registry (Issue #3518)
     "DegradedOwner": ("praisonaiagents.gateway.degraded_state", "DegradedOwner"),
     "DegradedCapabilityProtocol": ("praisonaiagents.gateway.degraded_state", "DegradedCapabilityProtocol"),
@@ -557,6 +559,8 @@ __all__ = [
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    # Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog",
     # Unified degraded-capability registry (Issue #3518)
     "DegradedOwner",
     "DegradedCapabilityProtocol",
