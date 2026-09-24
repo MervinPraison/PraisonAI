@@ -93,6 +93,10 @@ const CASES: Case[] = [
   ['track_workflow', 'trace', 'trackWorkflow'],
   ['trace_context', 'trace', 'traceContext'],
   ['resolve_guardrail_policies', 'protocols', 'resolveGuardrailPolicies'],
+  // Learn config enums (Python praisonaiagents.config.feature_configs)
+  ['LearnScope', 'config', 'LearnScope'],
+  ['LearnMode', 'config', 'LearnMode'],
+  ['LearnBackend', 'config', 'LearnBackend'],
 ];
 
 describe('package root serves Python-parity names from their real modules', () => {
