@@ -93,6 +93,9 @@ const CASES: Case[] = [
   ['track_workflow', 'trace', 'trackWorkflow'],
   ['trace_context', 'trace', 'traceContext'],
   ['resolve_guardrail_policies', 'protocols', 'resolveGuardrailPolicies'],
+  // Approval backends (Python parity: praisonaiagents/approval/backends.py)
+  ['AutoApproveBackend', 'approval/backends', 'AutoApproveBackend'],
+  ['ConsoleBackend', 'approval/backends', 'ConsoleBackend'],
 ];
 
 describe('package root serves Python-parity names from their real modules', () => {
