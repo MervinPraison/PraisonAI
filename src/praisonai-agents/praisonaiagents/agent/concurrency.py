@@ -13,12 +13,14 @@ Usage:
     async with registry.throttle("researcher"):
         await do_work()
     
-    # Or manual:
-    await registry.acquire("researcher")
+    # Or manual (pass the acquired handle back to release so a concurrent
+    # set_limit()/remove_limit() cannot redirect the release onto a fresh
+    # semaphore and inflate the cap):
+    sem = await registry.acquire("researcher")
     try:
         await do_work()
     finally:
-        registry.release("researcher")
+        registry.release("researcher", sem)
 """
 
 import asyncio
@@ -89,37 +91,51 @@ class ConcurrencyRegistry:
                 self._semaphores[agent_name] = sem
             return sem
 
-    async def acquire(self, agent_name: str) -> None:
+    async def acquire(self, agent_name: str) -> Optional[threading.Semaphore]:
         """Acquire concurrency slot for agent. No-op if unlimited.
 
         Waits on the loop-neutral semaphore in short, cancellable polls so the
         running event loop is never blocked while other tasks hold permits, and
         a cancelled/timed-out await never leaves a thread blocked on acquire().
+
+        Returns the exact semaphore instance acquired so the caller can release
+        that same instance (see release()). Returns None when unlimited.
         """
         sem = self._get_semaphore(agent_name)
         if sem is None:
-            return
+            return None
         while True:
             if sem.acquire(blocking=False):
-                return
+                return sem
             # Yield to the loop; on cancellation this raises and no permit leaks.
             await asyncio.sleep(0.005)
 
-    def acquire_sync(self, agent_name: str) -> None:
+    def acquire_sync(self, agent_name: str) -> Optional[threading.Semaphore]:
         """Synchronous acquire — for non-async code paths.
 
         Prefer async acquire() when possible. Blocks the calling thread until a
         permit is available. Safe to call whether or not a loop is running in the
-        current thread, since the semaphore is loop-neutral.
+        current thread, since the semaphore is loop-neutral. Returns the exact
+        semaphore instance acquired (None when unlimited) for release().
         """
         sem = self._get_semaphore(agent_name)
         if sem is not None:
             sem.acquire()
+        return sem
 
-    def release(self, agent_name: str) -> None:
-        """Release concurrency slot for agent. No-op if unlimited."""
-        with self._lock:
-            sem = self._semaphores.get(agent_name)
+    def release(self, agent_name: str, sem: Optional[threading.Semaphore] = None) -> None:
+        """Release a concurrency slot for agent. No-op if unlimited.
+
+        When ``sem`` (the instance returned by a matching acquire()) is given it
+        is released directly. This matters because set_limit()/remove_limit()
+        pop-and-replace the per-name semaphore: releasing by name alone could
+        hit a *different* semaphore than the one acquire() took, silently
+        inflating its permit count and corrupting the configured cap. Passing
+        the acquired instance keeps release matched to its own acquire.
+        """
+        if sem is None:
+            with self._lock:
+                sem = self._semaphores.get(agent_name)
         if sem is not None:
             try:
                 sem.release()
@@ -134,11 +150,19 @@ class ConcurrencyRegistry:
             async with registry.throttle("agent_name"):
                 await do_work()
         """
-        await self.acquire(agent_name)
+        sem = await self.acquire(agent_name)
         try:
             yield
         finally:
-            self.release(agent_name)
+            # Only release when this block actually acquired a permit. When
+            # acquire() returned None (unlimited at entry) there is nothing to
+            # release; falling back to a by-name lookup here would release a
+            # semaphore this block never acquired if a concurrent set_limit()
+            # created one meanwhile, inflating the cap past its configured
+            # limit. Release the exact instance acquired so the release stays
+            # matched to its own acquire.
+            if sem is not None:
+                self.release(agent_name, sem)
 
 
 # Singleton
