@@ -93,6 +93,15 @@ const CASES: Case[] = [
   ['track_workflow', 'trace', 'trackWorkflow'],
   ['trace_context', 'trace', 'traceContext'],
   ['resolve_guardrail_policies', 'protocols', 'resolveGuardrailPolicies'],
+  // RunTerminal terminal-outcome contract (Python parity: run_outcome.py)
+  ['RunTerminal', 'agent/run-outcome', 'RunTerminal'],
+  ['isSticky', 'agent/run-outcome', 'isSticky'],
+  ['mergeRunTerminal', 'agent/run-outcome', 'mergeRunTerminal'],
+  ['collapseRunTerminal', 'agent/run-outcome', 'collapseRunTerminal'],
+  // snake_case aliases (Python parity: praisonaiagents.run_outcome)
+  ['is_sticky', 'agent/run-outcome', 'isSticky'],
+  ['merge_run_terminal', 'agent/run-outcome', 'mergeRunTerminal'],
+  ['collapse', 'agent/run-outcome', 'collapseRunTerminal'],
 ];
 
 describe('package root serves Python-parity names from their real modules', () => {

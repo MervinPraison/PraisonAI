@@ -322,6 +322,16 @@ describe('RunTerminal (run_outcome.py)', () => {
     expect(RunTerminal.fromDict(bare.toDict()).detail).toBeNull();
   });
 
+  it('fromDict rejects incomplete records like Python KeyError', () => {
+    // Python from_dict uses data["kind"]/data["source"] -> KeyError when absent.
+    expect(() => RunTerminal.fromDict({ source: 'provider' } as any)).toThrow(TypeError);
+    expect(() => RunTerminal.fromDict({ source: 'provider' } as any)).toThrow("missing required key 'kind'");
+    expect(() => RunTerminal.fromDict({ kind: 'failed' } as any)).toThrow("missing required key 'source'");
+    expect(() => RunTerminal.fromDict(null as any)).toThrow(TypeError);
+    // detail stays optional
+    expect(RunTerminal.fromDict({ kind: 'failed', source: 'provider' } as any).detail).toBeNull();
+  });
+
   it('test_collapse_covers_all_kinds', () => {
     expect(collapseRunTerminal(new RunTerminal({ kind: 'ok', source: 'completion' }))).toBe('success');
     expect(collapseRunTerminal(new RunTerminal({ kind: 'failed', source: 'provider' }))).toBe('failure');

@@ -575,6 +575,12 @@ export class RunTerminal {
 
   /**
    * Rehydrate from a plain object produced by {@link toDict}.
+   *
+   * `kind` and `source` are required: a record missing either is rejected with
+   * a `TypeError` rather than silently producing a terminal whose `kind`/
+   * `source` is `undefined` (which would collapse to `failure` while merging
+   * like `ok`). Python parity: `from_dict` reads `data["kind"]`/`data["source"]`,
+   * which raise `KeyError` on an incomplete record.
    * Python parity: praisonaiagents/run_outcome.py:388-395 (`from_dict`)
    */
   static fromDict(data: {
@@ -582,6 +588,15 @@ export class RunTerminal {
     source: TerminalSource;
     detail?: string | null;
   }): RunTerminal {
+    if (data === null || typeof data !== 'object') {
+      throw new TypeError('RunTerminal.fromDict expects a plain object with "kind" and "source".');
+    }
+    if (!('kind' in data)) {
+      throw new TypeError("RunTerminal.fromDict: missing required key 'kind'.");
+    }
+    if (!('source' in data)) {
+      throw new TypeError("RunTerminal.fromDict: missing required key 'source'.");
+    }
     return new RunTerminal({
       kind: data.kind,
       source: data.source,
