@@ -108,11 +108,17 @@ def _search_parallel(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if result_limit == 0:
         return []
 
-    from importlib.metadata import version
+    from importlib.metadata import PackageNotFoundError, version
     from praisonaiagents.mcp import MCP
 
     # Keep this project-level so attribution aggregates across installations.
-    headers = {"User-Agent": f"praisonaiagents/{version('praisonaiagents')}"}
+    # Fall back gracefully when dist metadata is unavailable (source checkouts,
+    # vendored/frozen installs) instead of crashing the whole search path.
+    try:
+        package_version = version("praisonaiagents")
+    except PackageNotFoundError:
+        package_version = "unknown"
+    headers = {"User-Agent": f"praisonaiagents/{package_version}"}
     with MCP(
         PARALLEL_SEARCH_MCP_URL,
         timeout=PARALLEL_SEARCH_TIMEOUT_SECONDS,
