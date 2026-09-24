@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.7.6 | **Last Updated:** 2026-09-17
+> **Version:** 1.7.6 | **Last Updated:** 2026-09-24
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,13 +24,13 @@
 |--------|-------|
 | Python Core Features | 421 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2082 |
-| **Gap Count** | **4** |
+| TypeScript Features | 2091 |
+| **Gap Count** | **0** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 4 |
+| P3 (Low) | 0 |
 
 ## Gap Matrix
 
@@ -176,14 +176,10 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (290 exported, 0 stub, 4 missing)
+### P3_Advanced (294 exported, 0 stub, 0 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `RunTerminal` | ✅ | ❌ | high | ⏳ missing |
-| `collapse` | ✅ | ❌ | low | ⏳ missing |
-| `is\_sticky` | ✅ | ❌ | low | ⏳ missing |
-| `merge\_run\_terminal` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
 | `AGGRESSIVE\_POLICY` | ✅ | ✅ | low | ✅ exported |
@@ -352,6 +348,7 @@
 | `RulesConfig` | ✅ | ✅ | low | ✅ exported |
 | `RunOutcome` | ✅ | ✅ | high | ✅ exported |
 | `RunStatus` | ✅ | ✅ | high | ✅ exported |
+| `RunTerminal` | ✅ | ✅ | high | ✅ exported |
 | `SandboxConfig` | ✅ | ✅ | low | ✅ exported |
 | `SandboxProtocol` | ✅ | ✅ | medium | ✅ exported |
 | `SandboxResult` | ✅ | ✅ | low | ✅ exported |
@@ -394,6 +391,7 @@
 | `apply\_config\_defaults` | ✅ | ✅ | low | ✅ exported |
 | `async\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
 | `clean\_triple\_backticks` | ✅ | ✅ | low | ✅ exported |
+| `collapse` | ✅ | ✅ | low | ✅ exported |
 | `config` | ✅ | ✅ | low | ✅ exported |
 | `configure\_structured\_logging` | ✅ | ✅ | low | ✅ exported |
 | `detect\_url\_scheme` | ✅ | ✅ | low | ✅ exported |
@@ -429,11 +427,13 @@
 | `has\_toolset` | ✅ | ✅ | low | ✅ exported |
 | `is\_path\_like` | ✅ | ✅ | low | ✅ exported |
 | `is\_policy\_string` | ✅ | ✅ | low | ✅ exported |
+| `is\_sticky` | ✅ | ✅ | low | ✅ exported |
 | `list\_memory\_adapters` | ✅ | ✅ | low | ✅ exported |
 | `list\_runtimes` | ✅ | ✅ | low | ✅ exported |
 | `list\_toolsets` | ✅ | ✅ | low | ✅ exported |
 | `load\_plugin` | ✅ | ✅ | low | ✅ exported |
 | `memory` | ✅ | ✅ | low | ✅ exported |
+| `merge\_run\_terminal` | ✅ | ✅ | low | ✅ exported |
 | `no\_model\_requests` → `noModelRequests` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ✅ exported |
@@ -745,7 +745,7 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (178 exports)</summary>
+<summary><strong>agent</strong> (187 exports)</summary>
 
 ```typescript
 import { AGENT_RUN_STATUSES, Agent, AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput... } from 'praisonai';
