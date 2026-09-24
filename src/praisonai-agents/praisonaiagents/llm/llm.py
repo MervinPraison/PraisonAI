@@ -8,7 +8,6 @@ import re
 import inspect
 import asyncio
 import threading
-import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
