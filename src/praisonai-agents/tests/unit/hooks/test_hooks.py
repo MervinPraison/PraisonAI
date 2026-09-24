@@ -256,6 +256,71 @@ class TestHookRegistry:
         assert len(read_hooks) == 1
         assert read_hooks[0].name == "read_hook"
     
+    def test_get_hooks_orders_by_priority(self):
+        """Lower priority runs earlier; equal priority keeps registration order."""
+        registry = HookRegistry()
+
+        registry.register_function(
+            event=HookEvent.AFTER_LLM,
+            func=lambda d: HookResult.allow(),
+            name="trace",
+            priority=90,
+        )
+        registry.register_function(
+            event=HookEvent.AFTER_LLM,
+            func=lambda d: HookResult.allow(),
+            name="redact",
+            priority=10,
+        )
+
+        hooks = registry.get_hooks(HookEvent.AFTER_LLM)
+        assert [h.name for h in hooks] == ["redact", "trace"]
+
+    def test_get_hooks_stable_tie_break(self):
+        """Equal (default) priority falls back to deterministic registration order."""
+        registry = HookRegistry()
+        for name in ("a", "b", "c"):
+            registry.register_function(
+                event=HookEvent.BEFORE_TOOL,
+                func=lambda d: HookResult.allow(),
+                name=name,
+            )
+
+        hooks = registry.get_hooks(HookEvent.BEFORE_TOOL)
+        assert [h.name for h in hooks] == ["a", "b", "c"]
+
+    def test_priority_default_is_backward_compatible(self):
+        """Unset priority uses the default bucket so old callers are unaffected."""
+        registry = HookRegistry()
+        hook_id = registry.register_function(
+            event=HookEvent.BEFORE_TOOL,
+            func=lambda d: HookResult.allow(),
+            name="default",
+        )
+        hook = registry.get_hooks(HookEvent.BEFORE_TOOL)[0]
+        assert hook.id == hook_id
+        assert hook.priority == 100
+
+    def test_list_hooks_exposes_priority_in_order(self):
+        """list_hooks() surfaces priority and reflects effective execution order."""
+        registry = HookRegistry()
+        registry.register_function(
+            event=HookEvent.AFTER_LLM,
+            func=lambda d: HookResult.allow(),
+            name="late",
+            priority=90,
+        )
+        registry.register_function(
+            event=HookEvent.AFTER_LLM,
+            func=lambda d: HookResult.allow(),
+            name="early",
+            priority=10,
+        )
+
+        listed = registry.list_hooks()[HookEvent.AFTER_LLM.value]
+        assert [h["name"] for h in listed] == ["early", "late"]
+        assert [h["priority"] for h in listed] == [10, 90]
+
     def test_disable_enable_hook(self):
         """Test disabling and enabling hooks."""
         registry = HookRegistry()

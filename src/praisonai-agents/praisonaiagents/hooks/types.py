@@ -316,6 +316,8 @@ class HookDefinition:
     name: Optional[str] = None
     description: Optional[str] = None
     timeout: float = 60.0  # Timeout in seconds
+    priority: int = 100  # Execution order (lower runs earlier)
+    _seq: int = field(default=0, repr=False)  # Registration order for stable ties
     
     def matches(self, target: str) -> bool:
         """Check if this hook matches the target (tool name, etc.)."""
