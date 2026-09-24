@@ -6,6 +6,9 @@
  * are values, not just types, so a `export type` re-export would erase them.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 import * as root from '../../../src/index';
 
 describe('managed events package-root exports (Python parity)', () => {
@@ -36,5 +39,23 @@ describe('managed events package-root exports (Python parity)', () => {
   it('exports the managed enums as runtime values', () => {
     expect((root as any).ManagedEventType.AGENT_TOOL_USE).toBe('agent.tool_use');
     expect((root as any).ManagedStopReason.END_TURN).toBe('end_turn');
+  });
+
+  const distCjs = path.resolve(__dirname, '../../../dist/index.js');
+  const describeBuilt = fs.existsSync(distCjs) ? describe : describe.skip;
+
+  describeBuilt('compiled CommonJS entrypoint (published surface)', () => {
+    const built = require(distCjs);
+
+    it('exports ToolUseEvent as a usable class', () => {
+      expect(typeof built.ToolUseEvent).toBe('function');
+      const e = new built.ToolUseEvent({ name: 'bash' });
+      expect(e.type).toBe('agent.tool_use');
+    });
+
+    it('exports the managed enums as runtime values', () => {
+      expect(built.ManagedEventType.AGENT_TOOL_USE).toBe('agent.tool_use');
+      expect(built.ManagedStopReason.END_TURN).toBe('end_turn');
+    });
   });
 });
