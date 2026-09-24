@@ -14,6 +14,10 @@ import {
   TERMINAL_REASON_PRECEDENCE,
   RunOutcome,
   classifyFinishReason,
+  RunTerminal,
+  isSticky,
+  mergeRunTerminal,
+  collapseRunTerminal,
 } from '../../../src/agent/run-outcome';
 
 describe('AgentRunStatus / TerminationReason', () => {
@@ -292,6 +296,94 @@ describe('RunOutcome (agent/run_outcome.py)', () => {
       ['stop', 'I cannot help with that', 'refused'],
     ])('finish=%p refusal=%p -> %p', (finish, refusal, expected) => {
       expect(classifyFinishReason(finish as any, refusal)).toBe(expected);
+    });
+  });
+});
+
+describe('RunTerminal (run_outcome.py)', () => {
+  // Mirrors tests/unit/test_run_outcome.py::TestRunTerminal
+  it('instances are frozen and expose kind/source/detail', () => {
+    const o = new RunTerminal({ kind: 'aborted', source: 'external', detail: 'user /stop' });
+    expect(o.kind).toBe('aborted');
+    expect(o.source).toBe('external');
+    expect(o.detail).toBe('user /stop');
+    expect(Object.isFrozen(o)).toBe(true);
+    expect(() => { (o as any).kind = 'ok'; }).toThrow();
+    expect(new RunTerminal({ kind: 'ok', source: 'completion' }).detail).toBeNull();
+  });
+
+  it('test_round_trip_serialisation', () => {
+    const o = new RunTerminal({ kind: 'aborted', source: 'external', detail: 'user /stop' });
+    expect(o.toDict()).toEqual({ kind: 'aborted', source: 'external', detail: 'user /stop' });
+    expect(RunTerminal.fromDict(o.toDict()).equals(o)).toBe(true);
+    // Absent detail round-trips to null (Python: Optional -> None)
+    const bare = new RunTerminal({ kind: 'ok', source: 'completion' });
+    expect(RunTerminal.fromDict(bare.toDict()).equals(bare)).toBe(true);
+    expect(RunTerminal.fromDict(bare.toDict()).detail).toBeNull();
+  });
+
+  it('test_collapse_covers_all_kinds', () => {
+    expect(collapseRunTerminal(new RunTerminal({ kind: 'ok', source: 'completion' }))).toBe('success');
+    expect(collapseRunTerminal(new RunTerminal({ kind: 'failed', source: 'provider' }))).toBe('failure');
+    expect(collapseRunTerminal(new RunTerminal({ kind: 'timeout', source: 'idle' }))).toBe('timeout');
+    expect(collapseRunTerminal(new RunTerminal({ kind: 'aborted', source: 'external' }))).toBe('cancelled');
+  });
+
+  it('isSticky matches Python _STICKY_SOURCES', () => {
+    expect(isSticky(new RunTerminal({ kind: 'aborted', source: 'external' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'timeout', source: 'run_budget' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'aborted', source: 'superseded' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'failed', source: 'provider' }))).toBe(false);
+    expect(isSticky(new RunTerminal({ kind: 'timeout', source: 'idle' }))).toBe(false);
+    expect(isSticky(new RunTerminal({ kind: 'ok', source: 'completion' }))).toBe(false);
+  });
+
+  describe('mergeRunTerminal', () => {
+    it('no current takes the observation', () => {
+      const observed = new RunTerminal({ kind: 'failed', source: 'provider' });
+      expect(mergeRunTerminal(null, observed)).toBe(observed);
+      expect(mergeRunTerminal(undefined, observed)).toBe(observed);
+    });
+
+    it('a deliberate cancel is not overwritten by a late error', () => {
+      const cancel = new RunTerminal({ kind: 'aborted', source: 'external' });
+      const error = new RunTerminal({ kind: 'failed', source: 'provider' });
+      const merged = mergeRunTerminal(cancel, error);
+      expect(merged).toBe(cancel);
+      expect(collapseRunTerminal(merged)).toBe('cancelled');
+    });
+
+    it('a hard timeout is sticky', () => {
+      const timeout = new RunTerminal({ kind: 'timeout', source: 'run_budget' });
+      const error = new RunTerminal({ kind: 'failed', source: 'provider' });
+      expect(isSticky(timeout)).toBe(true);
+      expect(mergeRunTerminal(timeout, error)).toBe(timeout);
+      expect(collapseRunTerminal(mergeRunTerminal(timeout, error))).toBe('timeout');
+    });
+
+    it('a supersede is sticky', () => {
+      const superseded = new RunTerminal({ kind: 'aborted', source: 'superseded' });
+      const error = new RunTerminal({ kind: 'failed', source: 'provider' });
+      expect(isSticky(superseded)).toBe(true);
+      expect(mergeRunTerminal(superseded, error)).toBe(superseded);
+    });
+
+    it('stronger attribution refines a non-sticky current', () => {
+      const failed = new RunTerminal({ kind: 'failed', source: 'provider' });
+      const timeout = new RunTerminal({ kind: 'timeout', source: 'idle' });
+      expect(mergeRunTerminal(failed, timeout)).toBe(timeout);
+    });
+
+    it('a weaker later observation never downgrades a stronger one', () => {
+      const timeout = new RunTerminal({ kind: 'timeout', source: 'idle' });
+      const failed = new RunTerminal({ kind: 'failed', source: 'provider' });
+      expect(mergeRunTerminal(timeout, failed)).toBe(timeout);
+    });
+
+    it('equal kind sticky promotes over non-sticky (order-independent)', () => {
+      const idle = new RunTerminal({ kind: 'timeout', source: 'idle' });
+      const runBudget = new RunTerminal({ kind: 'timeout', source: 'run_budget' });
+      expect(mergeRunTerminal(idle, runBudget)).toBe(runBudget);
     });
   });
 });
