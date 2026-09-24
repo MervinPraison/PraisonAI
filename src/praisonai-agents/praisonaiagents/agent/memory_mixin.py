@@ -884,45 +884,56 @@ class MemoryMixin:
         if not self.auto_save:
             return
         
-        try:
-            # Filter out history markers before saving
-            clean_history = [
-                {k: v for k, v in msg.items() if k != "_from_history"}
-                for msg in self.chat_history
-            ]
-            
-            # Issue 1 FIX: Only save NEW messages since last save
-            # Track last saved index to avoid duplicates
-            last_saved = getattr(self, '_auto_save_last_index', 0)
-            new_messages = clean_history[last_saved:]
-            
-            if not new_messages:
-                return  # Nothing new to save
-            
-            # G-1 FIX: Use SessionStore for conversation history persistence
-            # This maintains clean separation: Memory = facts, SessionStore = turns
-            if self._session_store is not None:
-                # Persist only NEW messages to SessionStore
-                for msg in new_messages:
-                    self._session_store.add_message(
-                        self.auto_save,  # Use auto_save name as session_id
-                        role=msg.get("role", "user"),
-                        content=msg.get("content", ""),
+        # Serialize the whole read-modify-write of _auto_save_last_index. This
+        # method now runs via asyncio.to_thread, so two concurrent async runs
+        # sharing one Agent can execute it in separate worker threads. Without
+        # this lock both could read the same last-saved index, then each persist
+        # the same new turns, duplicating conversation history — the store's
+        # file lock serializes the writes but does not protect this index.
+        lock = getattr(self, '_auto_save_lock', None)
+        if lock is None:
+            lock = threading.Lock()
+            self._auto_save_lock = lock
+        with lock:
+            try:
+                # Filter out history markers before saving
+                clean_history = [
+                    {k: v for k, v in msg.items() if k != "_from_history"}
+                    for msg in self.chat_history
+                ]
+                
+                # Issue 1 FIX: Only save NEW messages since last save
+                # Track last saved index to avoid duplicates
+                last_saved = getattr(self, '_auto_save_last_index', 0)
+                new_messages = clean_history[last_saved:]
+                
+                if not new_messages:
+                    return  # Nothing new to save
+                
+                # G-1 FIX: Use SessionStore for conversation history persistence
+                # This maintains clean separation: Memory = facts, SessionStore = turns
+                if self._session_store is not None:
+                    # Persist only NEW messages to SessionStore
+                    for msg in new_messages:
+                        self._session_store.add_message(
+                            self.auto_save,  # Use auto_save name as session_id
+                            role=msg.get("role", "user"),
+                            content=msg.get("content", ""),
+                        )
+                    # Update last saved index
+                    self._auto_save_last_index = len(clean_history)
+                    logging.debug(f"Auto-saved {len(new_messages)} new messages to SessionStore: {self.auto_save}")
+                elif self._memory_instance and hasattr(self._memory_instance, 'save_session'):
+                    # Fallback to Memory.save_session() for backward compatibility
+                    # Memory.save_session() replaces entire history, so no duplicate issue
+                    self._memory_instance.save_session(
+                        name=self.auto_save,
+                        conversation_history=clean_history,
+                        metadata={"agent_name": self.name, "user_id": self.user_id}
                     )
-                # Update last saved index
-                self._auto_save_last_index = len(clean_history)
-                logging.debug(f"Auto-saved {len(new_messages)} new messages to SessionStore: {self.auto_save}")
-            elif self._memory_instance and hasattr(self._memory_instance, 'save_session'):
-                # Fallback to Memory.save_session() for backward compatibility
-                # Memory.save_session() replaces entire history, so no duplicate issue
-                self._memory_instance.save_session(
-                    name=self.auto_save,
-                    conversation_history=clean_history,
-                    metadata={"agent_name": self.name, "user_id": self.user_id}
-                )
-                logging.debug(f"Auto-saved session to Memory: {self.auto_save}")
-        except Exception as e:
-            logging.debug(f"Error auto-saving session: {e}")
+                    logging.debug(f"Auto-saved session to Memory: {self.auto_save}")
+            except Exception as e:
+                logging.debug(f"Error auto-saving session: {e}")
 
     def _save_output_to_file(self, content: str) -> bool:
         """Save agent output to file if output_file is configured.

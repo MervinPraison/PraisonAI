@@ -13,12 +13,14 @@ Usage:
     async with registry.throttle("researcher"):
         await do_work()
     
-    # Or manual:
-    await registry.acquire("researcher")
+    # Or manual (pass the acquired handle back to release so a concurrent
+    # set_limit()/remove_limit() cannot redirect the release onto a fresh
+    # semaphore and inflate the cap):
+    sem = await registry.acquire("researcher")
     try:
         await do_work()
     finally:
-        registry.release("researcher")
+        registry.release("researcher", sem)
 """
 
 import asyncio
@@ -152,10 +154,15 @@ class ConcurrencyRegistry:
         try:
             yield
         finally:
-            # Release the exact instance acquired, so a concurrent
-            # set_limit()/remove_limit() cannot redirect this release onto a
-            # freshly-created semaphore and break the cap.
-            self.release(agent_name, sem)
+            # Only release when this block actually acquired a permit. When
+            # acquire() returned None (unlimited at entry) there is nothing to
+            # release; falling back to a by-name lookup here would release a
+            # semaphore this block never acquired if a concurrent set_limit()
+            # created one meanwhile, inflating the cap past its configured
+            # limit. Release the exact instance acquired so the release stays
+            # matched to its own acquire.
+            if sem is not None:
+                self.release(agent_name, sem)
 
 
 # Singleton

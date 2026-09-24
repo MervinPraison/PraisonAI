@@ -2595,6 +2595,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self._on_budget_exceeded = _on_budget_exceeded
         # Thread-safe cost/token tracking (Gap 1a fix)
         self._cost_lock = threading.Lock()
+        # Serializes the read-modify-write of _auto_save_last_index. Auto-save
+        # now runs via asyncio.to_thread, so two concurrent async runs sharing
+        # one Agent could otherwise read the same last-saved index in separate
+        # worker threads and each persist the same turns, duplicating history.
+        self._auto_save_lock = threading.Lock()
         self._total_cost = 0.0
         self._total_tokens_in = 0
         self._total_tokens_out = 0
@@ -3232,7 +3237,7 @@ Your Goal: {self.goal}
         for k, v in self.__dict__.items():
             if k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
-            elif k == "_cost_lock":
+            elif k in ("_cost_lock", "_auto_save_lock"):
                 object.__setattr__(result, k, threading.Lock())
             elif k == "_approvals_lock":
                 object.__setattr__(result, k, asyncio.Lock())
