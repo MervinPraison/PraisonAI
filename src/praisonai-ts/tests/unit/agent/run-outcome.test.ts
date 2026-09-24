@@ -14,6 +14,10 @@ import {
   TERMINAL_REASON_PRECEDENCE,
   RunOutcome,
   classifyFinishReason,
+  RunTerminal,
+  isSticky,
+  mergeRunTerminal,
+  collapse,
 } from '../../../src/agent/run-outcome';
 
 describe('AgentRunStatus / TerminationReason', () => {
@@ -293,5 +297,112 @@ describe('RunOutcome (agent/run_outcome.py)', () => {
     ])('finish=%p refusal=%p -> %p', (finish, refusal, expected) => {
       expect(classifyFinishReason(finish as any, refusal)).toBe(expected);
     });
+  });
+});
+
+describe('RunTerminal / mergeRunTerminal', () => {
+  // Mirrors TestRunTerminal in praisonaiagents/tests/unit/test_run_outcome.py
+
+  it('no current takes the observation', () => {
+    const observed = new RunTerminal('failed', 'provider');
+    expect(mergeRunTerminal(null, observed)).toBe(observed);
+    expect(mergeRunTerminal(undefined, observed)).toBe(observed);
+  });
+
+  it('cancel is not overwritten by a late error', () => {
+    const cancel = new RunTerminal('aborted', 'external');
+    const error = new RunTerminal('failed', 'provider');
+    const merged = mergeRunTerminal(cancel, error);
+    expect(merged).toBe(cancel);
+    expect(collapse(merged)).toBe('cancelled');
+  });
+
+  it('hard timeout (run_budget) is sticky', () => {
+    const timeout = new RunTerminal('timeout', 'run_budget');
+    const error = new RunTerminal('failed', 'provider');
+    expect(isSticky(timeout)).toBe(true);
+    expect(mergeRunTerminal(timeout, error)).toBe(timeout);
+    expect(collapse(timeout)).toBe('timeout');
+  });
+
+  it('refines toward a stronger kind', () => {
+    const ok = new RunTerminal('ok', 'completion');
+    const error = new RunTerminal('failed', 'provider');
+    expect(mergeRunTerminal(ok, error)).toBe(error);
+  });
+
+  it('a weaker observation never downgrades a stronger one', () => {
+    const timeout = new RunTerminal('timeout', 'idle');
+    const ok = new RunTerminal('ok', 'completion');
+    expect(mergeRunTerminal(timeout, ok)).toBe(timeout);
+  });
+
+  it('a tie keeps the current (first writer wins)', () => {
+    const first = new RunTerminal('failed', 'provider');
+    const second = new RunTerminal('failed', 'idle');
+    expect(mergeRunTerminal(first, second)).toBe(first);
+  });
+
+  it('collapse covers all kinds', () => {
+    expect(collapse(new RunTerminal('ok', 'completion'))).toBe('success');
+    expect(collapse(new RunTerminal('failed', 'provider'))).toBe('failure');
+    expect(collapse(new RunTerminal('timeout', 'idle'))).toBe('timeout');
+    expect(collapse(new RunTerminal('aborted', 'external'))).toBe('cancelled');
+  });
+
+  it('round-trips through toDict/fromDict', () => {
+    const outcome = new RunTerminal('aborted', 'external', 'user /stop');
+    const rehydrated = RunTerminal.fromDict(outcome.toDict());
+    expect(rehydrated.equals(outcome)).toBe(true);
+    expect(outcome.toDict()).toEqual({ kind: 'aborted', source: 'external', detail: 'user /stop' });
+  });
+
+  it('superseded is sticky', () => {
+    const superseded = new RunTerminal('aborted', 'superseded');
+    const error = new RunTerminal('failed', 'provider');
+    expect(isSticky(superseded)).toBe(true);
+    expect(mergeRunTerminal(superseded, error)).toBe(superseded);
+  });
+
+  it('equal kind: sticky observation promotes over non-sticky current', () => {
+    const idle = new RunTerminal('timeout', 'idle');
+    const runBudget = new RunTerminal('timeout', 'run_budget');
+    expect(mergeRunTerminal(idle, runBudget)).toBe(runBudget);
+  });
+
+  it('equal kind: non-sticky observation does not downgrade sticky current', () => {
+    const runBudget = new RunTerminal('timeout', 'run_budget');
+    const idle = new RunTerminal('timeout', 'idle');
+    expect(mergeRunTerminal(runBudget, idle)).toBe(runBudget);
+  });
+
+  it('is order-independent for the same set of signals', () => {
+    const idle = new RunTerminal('timeout', 'idle');
+    const runBudget = new RunTerminal('timeout', 'run_budget');
+    const forward = mergeRunTerminal(mergeRunTerminal(null, idle), runBudget);
+    const reverse = mergeRunTerminal(mergeRunTerminal(null, runBudget), idle);
+    expect(forward.equals(reverse)).toBe(true);
+    expect(forward.equals(runBudget)).toBe(true);
+  });
+
+  it('RunTerminal instances are frozen (immutable)', () => {
+    const outcome = new RunTerminal('ok', 'completion');
+    expect(Object.isFrozen(outcome)).toBe(true);
+  });
+});
+
+describe('RunTerminal export surface (package root)', () => {
+  // Regression guard: parity matrix expects both snake_case and camelCase.
+  it('exports merge_run_terminal, mergeRunTerminal, is_sticky, RunTerminal', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pkg = require('../../../src/index');
+    expect(typeof pkg.merge_run_terminal).toBe('function');
+    expect(typeof pkg.mergeRunTerminal).toBe('function');
+    expect(typeof pkg.is_sticky).toBe('function');
+    expect(typeof pkg.isSticky).toBe('function');
+    expect(typeof pkg.collapse).toBe('function');
+    expect(typeof pkg.RunTerminal).toBe('function');
+    const observed = new pkg.RunTerminal('failed', 'provider');
+    expect(pkg.merge_run_terminal(null, observed)).toBe(observed);
   });
 });
