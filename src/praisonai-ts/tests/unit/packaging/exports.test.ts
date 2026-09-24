@@ -93,6 +93,8 @@ const CASES: Case[] = [
   ['track_workflow', 'trace', 'trackWorkflow'],
   ['trace_context', 'trace', 'traceContext'],
   ['resolve_guardrail_policies', 'protocols', 'resolveGuardrailPolicies'],
+  // Learn (continuous-learning memory manager)
+  ['LearnManager', 'memory/learn', 'LearnManager'],
 ];
 
 describe('package root serves Python-parity names from their real modules', () => {
