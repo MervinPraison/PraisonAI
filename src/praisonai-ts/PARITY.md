@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.7.6 | **Last Updated:** 2026-10-01
+> **Version:** 1.7.10 | **Last Updated:** 2026-10-07
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,13 +24,13 @@
 |--------|-------|
 | Python Core Features | 433 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2106 |
-| **Gap Count** | **7** |
+| TypeScript Features | 2115 |
+| **Gap Count** | **3** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 7 |
+| P3 (Low) | 3 |
 
 ## Gap Matrix
 
@@ -176,16 +176,12 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (299 exported, 0 stub, 7 missing)
+### P3_Advanced (303 exported, 0 stub, 3 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
 | `DecisionTriageRouter` | ✅ | ❌ | high | ⏳ missing |
-| `RunTerminal` | ✅ | ❌ | high | ⏳ missing |
 | `asystem\_one` | ✅ | ❌ | low | ⏳ missing |
-| `collapse` | ✅ | ❌ | low | ⏳ missing |
-| `is\_sticky` | ✅ | ❌ | low | ⏳ missing |
-| `merge\_run\_terminal` | ✅ | ❌ | low | ⏳ missing |
 | `triage\_decision` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
@@ -356,6 +352,7 @@
 | `RulesConfig` | ✅ | ✅ | low | ✅ exported |
 | `RunOutcome` | ✅ | ✅ | high | ✅ exported |
 | `RunStatus` | ✅ | ✅ | high | ✅ exported |
+| `RunTerminal` | ✅ | ✅ | high | ✅ exported |
 | `SandboxConfig` | ✅ | ✅ | low | ✅ exported |
 | `SandboxProtocol` | ✅ | ✅ | medium | ✅ exported |
 | `SandboxResult` | ✅ | ✅ | low | ✅ exported |
@@ -400,6 +397,7 @@
 | `async\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
 | `choice\_question` → `choiceQuestion` | ✅ | ✅ | low | ✅ exported |
 | `clean\_triple\_backticks` | ✅ | ✅ | low | ✅ exported |
+| `collapse` | ✅ | ✅ | low | ✅ exported |
 | `config` | ✅ | ✅ | low | ✅ exported |
 | `configure\_structured\_logging` | ✅ | ✅ | low | ✅ exported |
 | `default\_ticket\_triage\_questions` → `defaultTicketTriageQuestions` | ✅ | ✅ | low | ✅ exported |
@@ -437,11 +435,13 @@
 | `is\_decision\_model` → `isDecisionModel` | ✅ | ✅ | low | ✅ exported |
 | `is\_path\_like` | ✅ | ✅ | low | ✅ exported |
 | `is\_policy\_string` | ✅ | ✅ | low | ✅ exported |
+| `is\_sticky` | ✅ | ✅ | low | ✅ exported |
 | `list\_memory\_adapters` | ✅ | ✅ | low | ✅ exported |
 | `list\_runtimes` | ✅ | ✅ | low | ✅ exported |
 | `list\_toolsets` | ✅ | ✅ | low | ✅ exported |
 | `load\_plugin` | ✅ | ✅ | low | ✅ exported |
 | `memory` | ✅ | ✅ | low | ✅ exported |
+| `merge\_run\_terminal` | ✅ | ✅ | low | ✅ exported |
 | `no\_model\_requests` → `noModelRequests` | ✅ | ✅ | low | ✅ exported |
 | `noul\_question` → `noulQuestion` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header` | ✅ | ✅ | low | ✅ exported |
@@ -757,7 +757,7 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (178 exports)</summary>
+<summary><strong>agent</strong> (187 exports)</summary>
 
 ```typescript
 import { AGENT_RUN_STATUSES, Agent, AgentChatCallOptions, AgentChatOptions, AgentEvent, AgentExecuteTask, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput... } from 'praisonai';

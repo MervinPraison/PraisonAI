@@ -458,3 +458,170 @@ export function classifyFinishReason(
   if (fr === 'length' || fr.includes('max_tokens') || fr.includes('truncat')) return 'length_truncated';
   return undefined;
 }
+
+// ============================================================================
+// Canonical terminal-outcome contract (praisonaiagents/run_outcome.py:319-453)
+//
+// A gateway run can end for several reasons that observe the run concurrently
+// (idle timeout, run-budget timeout, external /stop, provider error, supersede
+// by a newer turn, normal completion). `RunTerminal` is the single closed
+// discriminated union for "how a run ended". `mergeRunTerminal` folds racing
+// terminal observations into one authoritative outcome with a fixed,
+// deterministic precedence so a deliberate cancellation or a hard timeout is
+// never silently overwritten by a late, generic provider error. `collapse`
+// projects back onto the existing `AgentRunStatus` vocabulary so nothing
+// downstream breaks.
+// ============================================================================
+
+/**
+ * How a run ended, in order of increasing attribution strength. `merge` may
+ * only refine toward a stronger kind; it never downgrades.
+ * Python parity: praisonaiagents/run_outcome.py:335 (`TerminalKind`)
+ */
+export type TerminalKind = 'ok' | 'failed' | 'timeout' | 'aborted';
+
+/**
+ * What observed the run ending.
+ * Python parity: praisonaiagents/run_outcome.py:338-345 (`TerminalSource`)
+ */
+export type TerminalSource =
+  | 'completion' // normal completion
+  | 'idle' // idle timeout
+  | 'run_budget' // run-budget / hard timeout
+  | 'external' // external /stop (deliberate user cancellation)
+  | 'provider' // provider error
+  | 'superseded'; // superseded by a newer turn
+
+/**
+ * Precedence rank per kind: higher wins a merge. A weaker later observation
+ * never downgrades a stronger recorded one.
+ * Python parity: praisonaiagents/run_outcome.py:349-354 (`_TERMINAL_KIND_RANK`)
+ */
+const TERMINAL_KIND_RANK: Readonly<Record<TerminalKind, number>> = Object.freeze({
+  ok: 0,
+  failed: 1,
+  timeout: 2,
+  aborted: 3,
+});
+
+/**
+ * Sticky sources: once recorded, they can never be overwritten by a later
+ * observation of a different (or weaker) kind. A deliberate cancellation, a
+ * hard run-budget timeout, and a supersede are all intentional terminals.
+ * Python parity: praisonaiagents/run_outcome.py:359 (`_STICKY_SOURCES`)
+ */
+const STICKY_SOURCES: ReadonlySet<TerminalSource> = new Set<TerminalSource>([
+  'external',
+  'run_budget',
+  'superseded',
+]);
+
+/**
+ * Project each terminal kind onto the existing `AgentRunStatus` vocabulary.
+ * Python parity: praisonaiagents/run_outcome.py:362-367 (`_TERMINAL_KIND_TO_RUN_STATUS`)
+ */
+const TERMINAL_KIND_TO_RUN_STATUS: Readonly<Record<TerminalKind, AgentRunStatus>> = Object.freeze({
+  ok: 'success',
+  failed: 'failure',
+  timeout: 'timeout',
+  aborted: 'cancelled',
+});
+
+/**
+ * Constructor fields of `RunTerminal`.
+ * Python parity: praisonaiagents/run_outcome.py:380-382 (dataclass fields)
+ */
+export interface RunTerminalInit {
+  kind: TerminalKind;
+  source: TerminalSource;
+  detail?: string;
+}
+
+/**
+ * One authoritative way a run ended — a closed discriminated union.
+ *
+ * `kind` is the collapsed terminal category; `source` records which observer
+ * produced it (used to decide stickiness). Instances are frozen so a recorded
+ * outcome is immutable — refinement happens by producing a new instance via
+ * {@link mergeRunTerminal}, never by mutation (Python: `@dataclass(frozen=True)`).
+ * Python parity: praisonaiagents/run_outcome.py:370-395 (`RunTerminal`)
+ */
+export class RunTerminal {
+  readonly kind: TerminalKind;
+  readonly source: TerminalSource;
+  readonly detail?: string;
+
+  constructor(init: RunTerminalInit) {
+    this.kind = init.kind;
+    this.source = init.source;
+    this.detail = init.detail;
+    Object.freeze(this);
+  }
+
+  /**
+   * Serialise to a plain object (JSON friendly, round-trippable). Keys match
+   * Python's `to_dict()`; an absent `detail` is `null`.
+   */
+  toDict(): { kind: TerminalKind; source: TerminalSource; detail: string | null } {
+    return { kind: this.kind, source: this.source, detail: this.detail ?? null };
+  }
+
+  /** Rehydrate from a plain object produced by {@link toDict}. */
+  static fromDict(data: { kind: TerminalKind; source: TerminalSource; detail?: string | null }): RunTerminal {
+    return new RunTerminal({ kind: data.kind, source: data.source, detail: data.detail ?? undefined });
+  }
+}
+
+/**
+ * Whether `outcome` can never be overwritten by a later observation.
+ *
+ * Deliberate cancellations (`external`), hard run-budget timeouts
+ * (`run_budget`), and supersedes (`superseded`) are intentional terminals:
+ * once recorded they are authoritative.
+ * Python parity: praisonaiagents/run_outcome.py:398-405 (`is_sticky`)
+ */
+export function isSticky(outcome: RunTerminal): boolean {
+  return STICKY_SOURCES.has(outcome.source);
+}
+
+/**
+ * Fold a newly-observed terminal into the current one (refine-only).
+ *
+ * Pure, deterministic and order-independent: folding the same set of
+ * observations always yields the same authoritative outcome regardless of the
+ * sequence in which they arrive. A later, weaker observation never overwrites
+ * a stronger one, and a sticky terminal always wins over an equally-ranked
+ * non-sticky one no matter which was observed first.
+ * Python parity: praisonaiagents/run_outcome.py:408-444 (`merge_run_terminal`)
+ */
+export function mergeRunTerminal(
+  current: RunTerminal | null | undefined,
+  observed: RunTerminal
+): RunTerminal {
+  if (current === null || current === undefined) {
+    return observed;
+  }
+  if (isSticky(current)) {
+    return current;
+  }
+  const currentRank = TERMINAL_KIND_RANK[current.kind] ?? 0;
+  const observedRank = TERMINAL_KIND_RANK[observed.kind] ?? 0;
+  if (observedRank > currentRank) {
+    return observed;
+  }
+  if (observedRank === currentRank && isSticky(observed)) {
+    return observed;
+  }
+  return current;
+}
+
+/**
+ * Project a `RunTerminal` onto the existing `AgentRunStatus` vocabulary.
+ *
+ * Collapses to exactly one of `success`/`timeout`/`cancelled`/`failure` for
+ * all downstream consumers.
+ * Python parity: praisonaiagents/run_outcome.py:447-453 (`collapse`)
+ */
+export function collapse(outcome: RunTerminal): AgentRunStatus {
+  return TERMINAL_KIND_TO_RUN_STATUS[outcome.kind] ?? 'failure';
+}
