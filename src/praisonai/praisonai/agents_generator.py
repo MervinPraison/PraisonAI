@@ -414,31 +414,58 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
 
         @functools.wraps(fn)
         def _sync_wrapped(*args, **kwargs):
-            executor = executor_factory()
-            future = executor.submit(fn, *args, **kwargs)
-            try:
-                return future.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                # Best-effort cancel; only effective if the future has not started.
-                # A started sync call cannot be interrupted, so warn operators that
-                # the worker may keep running (and its side effects may still occur).
-                cancelled = future.cancel()
-                if not cancelled and on_leaked is not None:
-                    # The worker is stuck and OS-owned; let the generator recycle
-                    # the pool so new submissions are not permanently queued behind
-                    # leaked threads.
-                    on_leaked()
-                logger.warning(
-                    "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
-                    "executing in the background.",
-                    getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds, cancelled,
-                )
-                raise ToolTimeoutError(
-                    tool_name=getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds=timeout_seconds,
-                    background_work_may_continue=not cancelled,
-                )
+            tool_name = getattr(fn, "__name__", repr(fn))
+            # A concurrent recycle (or close()) can shut the captured pool down
+            # between capture and submit. Retry once against a freshly-minted
+            # pool; a second failure is genuinely fatal. Surfacing the failure
+            # as ToolTimeoutError keeps the module contract (see the docstring
+            # above) intact instead of leaking RuntimeError/CancelledError.
+            for attempt in (0, 1):
+                executor = executor_factory()
+                try:
+                    future = executor.submit(fn, *args, **kwargs)
+                except RuntimeError:
+                    # "cannot schedule new futures after shutdown": the pool was
+                    # recycled between capture and submit. Retry once, then bail.
+                    if attempt == 0:
+                        continue
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
+                try:
+                    return future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    # Best-effort cancel; only effective if the future has not started.
+                    # A started sync call cannot be interrupted, so warn operators that
+                    # the worker may keep running (and its side effects may still occur).
+                    cancelled = future.cancel()
+                    if not cancelled and on_leaked is not None:
+                        # The worker is stuck and OS-owned; let the generator recycle
+                        # the pool so new submissions are not permanently queued behind
+                        # leaked threads.
+                        on_leaked()
+                    logger.warning(
+                        "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
+                        "executing in the background.",
+                        tool_name,
+                        timeout_seconds, cancelled,
+                    )
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=not cancelled,
+                    )
+                except concurrent.futures.CancelledError:
+                    # A concurrent pool recycle cancelled our queued future.
+                    # Surface as a timeout so the tool's declared return-type
+                    # contract is not silently downgraded to CancelledError.
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
         return _sync_wrapped
 
     # Framework tool object (CrewAI/LangChain BaseTool, praisonai @tool). These
@@ -593,6 +620,8 @@ class AgentsGenerator:
         self._tool_timeout_executor = tool_timeout_executor
         self._owns_tool_timeout_executor = tool_timeout_executor is None
         self._tool_timeout_executor_lock = threading.Lock()
+        # Set by close() to permanently refuse resurrecting an owned pool.
+        self._closed = False
         # Track workers permanently held by stuck sync tools. Once half the pool
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
@@ -620,6 +649,20 @@ class AgentsGenerator:
         import concurrent.futures
 
         with self._tool_timeout_executor_lock:
+            # Refuse to resurrect the pool after close(). Without this a tool
+            # object still reachable past the `with ... as gen:` block (via a
+            # framework lifecycle hook, shared registry, or retained callback)
+            # would find _tool_timeout_executor is None, build a fresh unowned
+            # pool, and leak its daemon threads per request in a long-lived
+            # server worker. Mirrors AsyncBridge._closed (_async_bridge.py:118).
+            if getattr(self, "_closed", False):
+                raise RuntimeError(
+                    "AgentsGenerator is closed; refusing to construct a new "
+                    "tool-timeout executor. This tool was invoked after "
+                    "close(); hold a live generator (e.g. keep the "
+                    "`with ... as gen:` block open) for the lifetime of any "
+                    "tool it wraps."
+                )
             recycle = (
                 self._owns_tool_timeout_executor
                 and self._tool_timeout_executor is not None
@@ -664,7 +707,14 @@ class AgentsGenerator:
         with self._tool_timeout_executor_lock:
             if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
                 self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
-                self._tool_timeout_executor = None
+            self._tool_timeout_executor = None
+            # Poison ownership and mark closed so a tool invoked after close()
+            # cannot silently resurrect an unowned pool (see
+            # _get_tool_timeout_executor). The `with ... as gen:` block that
+            # would have called close() has already exited, so nothing would
+            # ever tear a resurrected pool down.
+            self._owns_tool_timeout_executor = False
+            self._closed = True
 
     def __enter__(self):
         return self
