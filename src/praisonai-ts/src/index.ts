@@ -1082,6 +1082,15 @@ export type {
   AgentRunStatus, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunOutcomeFailureOptions,
   TerminalReason, RunOutcomeInit,
 } from './agent/run-outcome';
+// Canonical terminal-outcome contract (praisonaiagents/run_outcome.py:319-469).
+// snake_case aliases mirror the Python public surface for parity.
+export {
+  RunTerminal,
+  isSticky, isSticky as is_sticky,
+  mergeRunTerminal, mergeRunTerminal as merge_run_terminal,
+  collapse,
+} from './agent/run-outcome';
+export type { TerminalKind, TerminalSource, RunTerminalInit } from './agent/run-outcome';
 
 // ---- managed ----
 export {
