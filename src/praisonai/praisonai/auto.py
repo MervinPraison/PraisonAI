@@ -13,6 +13,7 @@ This ensures minimal import-time overhead.
 from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
 import os
 import json
+import re
 import asyncio
 import threading
 from praisonai._logging import get_logger
@@ -234,6 +235,11 @@ TOOL_CATEGORIES = {
     ]
 }
 
+# Matches a forged <TOPIC>/</TOPIC> fence delimiter inside an untrusted topic,
+# tolerant of whitespace and case (e.g. ``</ topic >``), so a crafted topic
+# cannot close the framework's own fence and smuggle instructions after it.
+_TOPIC_TAG_RE = re.compile(r"<\s*/?\s*topic\s*>", re.IGNORECASE)
+
 # Keywords that map to tool categories
 TASK_KEYWORD_TO_TOOLS = {
     # Web search keywords
@@ -448,14 +454,22 @@ class BaseAutoGenerator:
         return resolved
 
     def _fence_topic(self) -> str:
-        """Neutralise code-fence breakouts in an untrusted topic.
+        """Neutralise breakouts in an untrusted topic before interpolation.
 
         The topic is untrusted input (CLI arg, HTTP body under ``serve``,
-        workflow variable). Mirrors ``AutoGenerator.get_user_content`` so a
-        crafted topic cannot break out of the ``<TOPIC>`` block and inject
-        instructions to the model.
+        workflow variable). Two breakout vectors are closed so a crafted topic
+        cannot escape the ``<TOPIC>`` block and inject instructions to the model:
+
+        1. Code-fence breakout: ```` ``` ```` → ``'''`` (mirrors
+           ``AutoGenerator.get_user_content``).
+        2. Boundary forgery: a literal ``</TOPIC>`` (or ``<TOPIC>``) inside the
+           topic would appear to close/reopen the fence, letting text after it
+           read as model instructions. The tags are neutralised case- and
+           whitespace-insensitively (``</ topic >`` etc.) so only the framework's
+           own fence delimits the block.
         """
-        return str(getattr(self, "topic", "")).replace("```", "'''")
+        topic = str(getattr(self, "topic", "")).replace("```", "'''")
+        return _TOPIC_TAG_RE.sub("(topic-tag)", topic)
 
     def _topic_requests_code_execution(self) -> bool:
         """Opt-in signal: did the topic actually ask for code execution?
@@ -2221,7 +2235,15 @@ Generate a workflow for the task inside <TOPIC>:
             'description': data.description,
             'steps': []
         }
-        
+
+        # Authoritative server-side gate: strip shell/exec tools the model may
+        # have emitted from a poisoned topic unless the topic actually asked for
+        # code execution. Job agent steps resolve their tools for execution just
+        # like `run` steps, so they must pass the same gate — the prompt fence is
+        # advisory; this is not.
+        dangerous_tools = set(TOOL_CATEGORIES.get("code_execution", []))
+        code_exec_ok = self._topic_requests_code_execution()
+
         # Convert steps
         for step in data.steps:
             step_dict = {'name': step.name}
@@ -2239,8 +2261,20 @@ Generate a workflow for the task inside <TOPIC>:
                 if model:
                     agent['model'] = model
                 step_dict['agent'] = agent
-                if step.config.get('tools'):
-                    step_dict['agent']['tools'] = step.config['tools']
+                tools = step.config.get('tools')
+                if tools:
+                    if not code_exec_ok:
+                        dropped = [t for t in tools if t in dangerous_tools]
+                        if dropped:
+                            logger.warning(
+                                "Dropped %d shell/exec tool(s) from job agent "
+                                "step %r (task did not request code execution): "
+                                "%s",
+                                len(dropped), step.name, dropped,
+                            )
+                        tools = [t for t in tools if t not in dangerous_tools]
+                    if tools:
+                        step_dict['agent']['tools'] = tools
                 if step.config.get('output_file'):
                     step_dict['output_file'] = step.config['output_file']
                     

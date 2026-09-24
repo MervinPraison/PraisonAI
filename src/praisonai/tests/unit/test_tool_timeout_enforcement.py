@@ -606,3 +606,77 @@ def _assert_autogen_code_exec(config, *, expected, expected_human):
 
     assert captured["code_execution_config"] == expected
     assert captured["human_input_mode"] == expected_human
+
+
+def test_sync_wrapper_retries_on_pool_recycle():
+    """A concurrent recycle that shuts the captured pool down between capture
+    and submit must be retried once against a fresh pool, not surfaced as an
+    error (greptile #3/#4)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from praisonai.agents_generator import _wrap_with_timeout
+
+    def tool(x):
+        return x + 1
+
+    dead = ThreadPoolExecutor(max_workers=1)
+    dead.shutdown()  # submit() will raise RuntimeError
+    live = ThreadPoolExecutor(max_workers=1)
+    pools = iter([dead, live])
+    try:
+        wrapped = _wrap_with_timeout(
+            tool, 5.0, lambda: next(pools), owner_key=uuid.uuid4()
+        )
+        # First attempt hits the shut-down pool (RuntimeError), retry succeeds.
+        assert wrapped(41) == 42
+    finally:
+        live.shutdown()
+
+
+def test_sync_wrapper_surfaces_timeout_when_factory_closed_on_retry():
+    """If the generator is closed (factory raises RuntimeError) before the
+    retry obtains a pool, the failure must become ToolTimeoutError, not leak
+    the closed-generator RuntimeError (greptile #4)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from praisonai.agents_generator import _wrap_with_timeout, ToolTimeoutError
+
+    dead = ThreadPoolExecutor(max_workers=1)
+    dead.shutdown()
+
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return dead  # first submit() raises RuntimeError -> retry
+        raise RuntimeError("timeout executor is closed")  # close() landed
+
+    wrapped = _wrap_with_timeout(
+        lambda x: x, 5.0, factory, owner_key=uuid.uuid4()
+    )
+    with pytest.raises(ToolTimeoutError):
+        wrapped(1)
+
+
+def test_sync_wrapper_retries_on_concurrent_cancel():
+    """A queued future cancelled by shutdown(cancel_futures=True) must be
+    retried on a fresh pool rather than reported as a timeout (greptile #3)."""
+    from concurrent.futures import ThreadPoolExecutor, CancelledError
+    from praisonai.agents_generator import _wrap_with_timeout
+
+    class _CancelOnceFuture:
+        def result(self, timeout=None):
+            raise CancelledError()
+
+    class _CancelOncePool:
+        def submit(self, fn, *a, **k):
+            return _CancelOnceFuture()
+
+    live = ThreadPoolExecutor(max_workers=1)
+    pools = iter([_CancelOncePool(), live])
+    try:
+        wrapped = _wrap_with_timeout(
+            lambda x: x * 2, 5.0, lambda: next(pools), owner_key=uuid.uuid4()
+        )
+        assert wrapped(21) == 42
+    finally:
+        live.shutdown()

@@ -421,12 +421,18 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
             # as ToolTimeoutError keeps the module contract (see the docstring
             # above) intact instead of leaking RuntimeError/CancelledError.
             for attempt in (0, 1):
-                executor = executor_factory()
                 try:
+                    executor = executor_factory()
                     future = executor.submit(fn, *args, **kwargs)
                 except RuntimeError:
-                    # "cannot schedule new futures after shutdown": the pool was
-                    # recycled between capture and submit. Retry once, then bail.
+                    # Either "cannot schedule new futures after shutdown" (the
+                    # captured pool was recycled between capture and submit) or
+                    # the generator was closed and refuses to mint a new pool
+                    # (executor_factory() raises). Both are recoverable on the
+                    # first attempt via a fresh pool; a second failure is fatal.
+                    # Keep the factory call inside this try so a close() landing
+                    # between the two attempts still surfaces as ToolTimeoutError
+                    # rather than leaking RuntimeError to the caller.
                     if attempt == 0:
                         continue
                     raise ToolTimeoutError(
@@ -458,9 +464,14 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
                         background_work_may_continue=not cancelled,
                     )
                 except concurrent.futures.CancelledError:
-                    # A concurrent pool recycle cancelled our queued future.
-                    # Surface as a timeout so the tool's declared return-type
-                    # contract is not silently downgraded to CancelledError.
+                    # A concurrent pool recycle (shutdown(cancel_futures=True))
+                    # cancelled our still-queued future before it ran. The tool
+                    # never executed, so retry once against a freshly-minted pool
+                    # rather than losing a required result. If the retry is also
+                    # cancelled, surface as a timeout so the tool's declared
+                    # return-type contract is not silently downgraded.
+                    if attempt == 0:
+                        continue
                     raise ToolTimeoutError(
                         tool_name=tool_name,
                         timeout_seconds=timeout_seconds,
