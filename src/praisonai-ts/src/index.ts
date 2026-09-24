@@ -1077,10 +1077,15 @@ export {
   terminationToRunStatus, terminationToRunStatus as termination_to_run_status,
   validateDecisionString, validateDecisionString as validate_decision_string,
   classifyFinishReason, PROVIDER_BLOCK_REASONS, TERMINAL_REASON_PRECEDENCE,
+  // RunTerminal — closed terminal-outcome union (Python parity: run_outcome.py)
+  RunTerminal, isSticky, mergeRunTerminal, collapseRunTerminal,
+  // snake_case aliases (Python parity: praisonaiagents.run_outcome)
+  isSticky as is_sticky, mergeRunTerminal as merge_run_terminal, collapseRunTerminal as collapse,
 } from './agent/run-outcome';
 export type {
   AgentRunStatus, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunOutcomeFailureOptions,
   TerminalReason, RunOutcomeInit,
+  TerminalKind, TerminalSource, RunTerminalInit,
 } from './agent/run-outcome';
 
 // ---- managed ----
