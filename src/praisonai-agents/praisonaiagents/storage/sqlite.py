@@ -42,15 +42,41 @@ logger = get_logger(__name__)
 _WAL_FILE_FORMAT = 2
 
 
+def _resolve_probe_path(path: str) -> Optional[str]:
+    """Resolve a connection target to the on-disk file to probe, or None.
+
+    ``:memory:`` and anonymous/temporary databases have no header to read.
+    ``file:`` URIs (used with ``uri=True``) embed the real filename plus a query
+    string; parsing them back to the filesystem path keeps the no-downgrade
+    header probe honest instead of stat-ing the URI text as a literal filename.
+    """
+    if not path or path == ":memory:":
+        return None
+    if path.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(path)
+        # In-memory / anonymous URIs (``file::memory:``, ``file:?...``) have no
+        # backing file to probe.
+        if not parsed.path or parsed.path == ":memory:":
+            return None
+        return unquote(parsed.path)
+    return path
+
+
 def _header_is_wal(path: str) -> Optional[bool]:
     """Return True/False if the on-disk header reports WAL, or None if unknown.
 
     Reads only the fixed 100-byte SQLite header, so it never touches sidecars
     or takes a lock. Returns None when the file is absent/empty/too short to
     have a header yet (a fresh DB), so the caller treats it as "free to set".
+    Accepts either a plain filesystem path or a ``file:`` URI.
     """
+    probe = _resolve_probe_path(path)
+    if probe is None:
+        return None
     try:
-        with open(path, "rb") as fh:
+        with open(probe, "rb") as fh:
             header = fh.read(20)
     except (IOError, OSError):
         return None
@@ -59,7 +85,9 @@ def _header_is_wal(path: str) -> Optional[bool]:
     return header[18] == _WAL_FILE_FORMAT and header[19] == _WAL_FILE_FORMAT
 
 
-def apply_wal_with_fallback(conn, path: str, busy_timeout_ms: int = 5000) -> str:
+def apply_wal_with_fallback(
+    conn, path: str, busy_timeout_ms: int = 5000, synchronous: str = "FULL"
+) -> str:
     """Set a durable journal mode, falling back off WAL on hostile filesystems.
 
     Attempts ``journal_mode=WAL``. If the filesystem rejects it (a locking or
@@ -67,7 +95,15 @@ def apply_wal_with_fallback(conn, path: str, busy_timeout_ms: int = 5000) -> str
     ``journal_mode=DELETE`` — unless the on-disk header already reports WAL, in
     which case the DB is left in WAL so a peer connection's uncheckpointed
     commits are never stranded. Returns the journal mode actually in effect.
+
+    ``synchronous`` controls the ``PRAGMA synchronous`` durability level and
+    defaults to ``FULL`` so committed writes survive an OS/power crash — this
+    preserves the pre-hardening durability of the core stores (Issue #5264).
+    Callers that favour throughput over the last-transaction durability window
+    may pass ``synchronous="NORMAL"`` (safe under WAL against process crashes).
     """
+    sync = (synchronous or "FULL").upper()
+
     try:
         conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
     except Exception:  # pragma: no cover - busy_timeout is universally supported
@@ -78,7 +114,7 @@ def apply_wal_with_fallback(conn, path: str, busy_timeout_ms: int = 5000) -> str
         mode = (row[0] if row else "").lower()
         if mode == "wal":
             try:
-                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute(f"PRAGMA synchronous={sync}")
             except Exception:
                 pass
             return "wal"
@@ -91,7 +127,8 @@ def apply_wal_with_fallback(conn, path: str, busy_timeout_ms: int = 5000) -> str
 
     # WAL did not take. Never live-downgrade a DB whose header already reports
     # WAL — another connection may hold uncheckpointed commits in the -wal file.
-    if path and path != ":memory:" and _header_is_wal(path):
+    # ``_header_is_wal`` resolves ``file:`` URIs and rejects ``:memory:`` itself.
+    if _header_is_wal(path):
         logger.warning(
             "WAL requested but not applied for %s and its header already "
             "reports WAL; leaving as-is to avoid stranding peer commits.",
@@ -120,6 +157,7 @@ def connect(
     check_same_thread: bool = False,
     isolation_level: Optional[str] = "",
     busy_timeout_ms: int = 5000,
+    synchronous: str = "FULL",
     **kwargs,
 ):
     """Open a hardened SQLite connection used by core durable stores.
@@ -136,6 +174,9 @@ def connect(
         isolation_level: Forwarded to ``sqlite3.connect``. Defaults to ``""``
             (sqlite3's default autocommit-off); pass ``None`` for autocommit.
         busy_timeout_ms: ``PRAGMA busy_timeout`` in milliseconds.
+        synchronous: ``PRAGMA synchronous`` level. Defaults to ``FULL`` so
+            committed writes survive an OS/power crash (matches pre-hardening
+            durability). Pass ``"NORMAL"`` for higher throughput under WAL.
         **kwargs: Forwarded to ``sqlite3.connect``.
     """
     import sqlite3  # lazy import — stdlib, no heavy dependency
@@ -151,7 +192,12 @@ def connect(
 
     conn = sqlite3.connect(db_path, **connect_kwargs)
     try:
-        apply_wal_with_fallback(conn, str(db_path), busy_timeout_ms=busy_timeout_ms)
+        apply_wal_with_fallback(
+            conn,
+            str(db_path),
+            busy_timeout_ms=busy_timeout_ms,
+            synchronous=synchronous,
+        )
     except Exception as exc:  # never let hardening break connection creation
         logger.debug("Journal-mode hardening skipped for %s: %s", db_path, exc)
     return conn
