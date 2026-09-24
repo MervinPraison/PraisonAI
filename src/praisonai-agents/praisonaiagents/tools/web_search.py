@@ -3,13 +3,15 @@
 This module provides a single `search_web` function that automatically tries
 multiple search providers in order, falling back to the next if one fails.
 
-Search Provider Priority:
+Default Search Provider Priority:
 1. Tavily (requires TAVILY_API_KEY + tavily-python)
 2. Brave (requires BRAVE_API_KEY + requests)
 3. Exa (requires EXA_API_KEY + exa_py)
 4. You.com (requires YDC_API_KEY + youdotcom)
 5. DuckDuckGo (requires ddgs package, no API key)
 6. SearxNG (requires requests + running SearxNG instance)
+
+Parallel Search MCP is available when explicitly selected.
 
 Usage:
     from praisonaiagents.tools import search_web
@@ -24,9 +26,18 @@ Usage:
 from typing import List, Dict, Any, Optional
 from praisonaiagents._logging import get_logger
 import os
+import json
 from importlib import util
 
 logger = get_logger(__name__)
+
+PARALLEL_SEARCH_MCP_URL = "https://search.parallel.ai/mcp"
+PARALLEL_SEARCH_TIMEOUT_SECONDS = 30
+PARALLEL_MAX_RESPONSE_BYTES = 1_000_000
+PARALLEL_MAX_RESULTS = 10
+PARALLEL_MAX_TITLE_CHARS = 256
+PARALLEL_MAX_URL_CHARS = 2048
+PARALLEL_MAX_SNIPPET_CHARS = 1200
 
 def _check_tavily() -> tuple[bool, Optional[str]]:
     """Check if Tavily is available."""
@@ -71,6 +82,88 @@ def _check_searxng() -> tuple[bool, Optional[str]]:
     if util.find_spec("requests") is None:
         return False, "requests package not installed"
     return True, None
+
+def _check_parallel() -> tuple[bool, Optional[str]]:
+    """Check if compatible Streamable HTTP MCP support is installed."""
+    try:
+        from praisonaiagents.mcp.mcp_http_stream import streamablehttp_client
+    except ImportError:
+        streamablehttp_client = None
+    if streamablehttp_client is None:
+        return False, "install praisonaiagents[parallel-search] for Streamable HTTP MCP support"
+    from inspect import signature
+    if "httpx_client_factory" not in signature(streamablehttp_client).parameters:
+        return False, "install praisonaiagents[parallel-search] for bounded Streamable HTTP support"
+    return True, None
+
+def _truncate_parallel_text(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return text[:limit - 1] + "…"
+    return text
+
+def _search_parallel(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    """Search with the keyless Parallel Search MCP endpoint."""
+    result_limit = max(0, min(int(max_results), PARALLEL_MAX_RESULTS))
+    if result_limit == 0:
+        return []
+
+    from importlib.metadata import version
+    from praisonaiagents.mcp import MCP
+
+    # Keep this project-level so attribution aggregates across installations.
+    headers = {"User-Agent": f"praisonaiagents/{version('praisonaiagents')}"}
+    with MCP(
+        PARALLEL_SEARCH_MCP_URL,
+        timeout=PARALLEL_SEARCH_TIMEOUT_SECONDS,
+        allowed_tools=["web_search"],
+        headers=headers,
+        max_response_bytes=PARALLEL_MAX_RESPONSE_BYTES,
+    ) as client:
+        search_tool = next(
+            (tool for tool in client.get_tools() if getattr(tool, "__name__", None) == "web_search"),
+            None,
+        )
+        if search_tool is None:
+            raise RuntimeError("Parallel Search MCP did not expose web_search")
+        response = search_tool(objective=query, search_queries=[query])
+
+    if not isinstance(response, str):
+        raise ValueError("Parallel Search MCP returned a non-text response")
+    if response.startswith("Error:"):
+        raise RuntimeError(response)
+    payload = json.loads(response)
+    if not isinstance(payload, dict) or "results" not in payload:
+        raise ValueError("Parallel Search MCP returned an invalid response shape")
+    raw_results = payload["results"]
+    if not isinstance(raw_results, list):
+        raise ValueError("Parallel Search MCP returned an invalid results list")
+
+    results = []
+    for result in raw_results:
+        if not isinstance(result, dict):
+            continue
+        url = result.get("url")
+        if not isinstance(url, str) or not url or len(url) > PARALLEL_MAX_URL_CHARS:
+            continue
+        excerpts = result.get("excerpts", [])
+        if isinstance(excerpts, str):
+            excerpts = [excerpts]
+        if not isinstance(excerpts, list):
+            excerpts = []
+        snippet = " ".join(
+            excerpt.strip() for excerpt in excerpts
+            if isinstance(excerpt, str) and excerpt.strip()
+        )
+        results.append({
+            "title": _truncate_parallel_text(result.get("title", ""), PARALLEL_MAX_TITLE_CHARS),
+            "url": url,
+            "snippet": _truncate_parallel_text(snippet, PARALLEL_MAX_SNIPPET_CHARS),
+            "provider": "parallel",
+        })
+        if len(results) >= result_limit:
+            break
+    return results
 
 def _search_tavily(query: str, max_results: int = 5, search_depth: str = "basic", raw_content: bool = False) -> List[Dict[str, Any]]:
     """Search using Tavily."""
@@ -272,6 +365,10 @@ SEARCH_PROVIDERS = [
     ("searxng", _check_searxng, _search_searxng),
 ]
 
+SELECTABLE_SEARCH_PROVIDERS = SEARCH_PROVIDERS + [
+    ("parallel", _check_parallel, _search_parallel),
+]
+
 def search_web(
     query: str,
     max_results: int = 5,
@@ -284,7 +381,8 @@ def search_web(
 ) -> List[Dict[str, Any]]:
     """Search the web using one or more providers with automatic fallback.
     
-    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng
+    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng, parallel
+    Parallel is opt-in and does not change the existing automatic provider order.
     
     Args:
         query: Search query string
@@ -293,7 +391,8 @@ def search_web(
                    - Single string: "tavily" (uses just that provider)
                    - Comma-separated: "tavily, brave" (tries in order, falls back on failure)
                    - List: ["tavily", "brave"] (same as comma-separated)
-                   If not specified, tries all providers in order until one succeeds.
+                   If not specified, tries the default providers in order until one succeeds.
+                   Select "parallel" to use the keyless Parallel Search MCP provider.
         
         Provider-specific options (only used by their respective provider):
         - searxng_url: [SearxNG] Custom instance URL
@@ -308,7 +407,7 @@ def search_web(
     errors = []
     
     # Valid provider names for reference
-    valid_provider_names = [p[0] for p in SEARCH_PROVIDERS]
+    valid_provider_names = [p[0] for p in SELECTABLE_SEARCH_PROVIDERS]
     
     # Check for WEB_SEARCH_PROVIDER env var (set by CLI --web-provider flag)
     if providers is None:
@@ -328,7 +427,7 @@ def search_web(
         for name in providers:
             name_lower = name.lower().strip()
             matched = False
-            for pname, check_fn, search_fn in SEARCH_PROVIDERS:
+            for pname, check_fn, search_fn in SELECTABLE_SEARCH_PROVIDERS:
                 if pname == name_lower:
                     provider_order.append((pname, check_fn, search_fn))
                     matched = True
@@ -398,7 +497,7 @@ def get_available_providers() -> List[Dict[str, Any]]:
             print(f"{p['name']}: {'✓' if p['available'] else '✗'} {p.get('reason', '')}")
     """
     result = []
-    for name, check_func, _ in SEARCH_PROVIDERS:
+    for name, check_func, _ in SELECTABLE_SEARCH_PROVIDERS:
         is_available, error = check_func()
         result.append({
             "name": name,

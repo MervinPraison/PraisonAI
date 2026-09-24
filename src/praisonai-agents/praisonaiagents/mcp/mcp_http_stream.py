@@ -71,6 +71,65 @@ def _register_cleanup():
         atexit.register(_cleanup_all_clients)
         _cleanup_registered = True
 
+def _bounded_httpx_client_factory(max_response_bytes):
+    import httpx
+
+    class BoundedStream(httpx.AsyncByteStream):
+        def __init__(self, stream):
+            self.stream = stream
+
+        async def __aiter__(self):
+            total_bytes = 0
+            async for chunk in self.stream:
+                total_bytes += len(chunk)
+                if total_bytes > max_response_bytes:
+                    raise ValueError(f"MCP response exceeded maximum of {max_response_bytes} bytes")
+                yield chunk
+
+        async def aclose(self):
+            await self.stream.aclose()
+
+    class BoundedTransport(httpx.AsyncBaseTransport):
+        def __init__(self):
+            self.transport = httpx.AsyncHTTPTransport(trust_env=True)
+
+        async def handle_async_request(self, request):
+            response = await self.transport.handle_async_request(request)
+            encoding = response.headers.get("content-encoding", "identity").lower()
+            if encoding not in ("", "identity"):
+                await response.aclose()
+                raise ValueError("Compressed MCP responses are not supported with a response byte limit")
+            content_length = response.headers.get("content-length")
+            try:
+                content_length = int(content_length) if content_length is not None else None
+            except ValueError:
+                content_length = None
+            if content_length is not None and content_length > max_response_bytes:
+                await response.aclose()
+                raise ValueError(f"MCP response exceeded maximum of {max_response_bytes} bytes")
+            return httpx.Response(
+                status_code=response.status_code,
+                headers=response.headers,
+                stream=BoundedStream(response.stream),
+                extensions=response.extensions,
+                request=request,
+            )
+
+        async def aclose(self):
+            await self.transport.aclose()
+
+    def create_client(headers=None, timeout=None, auth=None):
+        request_headers = dict(headers or {})
+        request_headers["Accept-Encoding"] = "identity"
+        return httpx.AsyncClient(
+            headers=request_headers,
+            timeout=timeout,
+            auth=auth,
+            transport=BoundedTransport(),
+        )
+
+    return create_client
+
 class HTTPStreamMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
     
@@ -490,6 +549,13 @@ class HTTPStreamMCPClient:
         self.debug = debug
         self.timeout = timeout
         self.options = options or {}
+        self.max_response_bytes = self.options.get('max_response_bytes')
+        if self.max_response_bytes is not None and (
+            isinstance(self.max_response_bytes, bool)
+            or not isinstance(self.max_response_bytes, int)
+            or self.max_response_bytes <= 0
+        ):
+            raise ValueError("max_response_bytes must be a positive integer")
         self.session = None
         self.tools = []
         self.transport = None
@@ -510,17 +576,16 @@ class HTTPStreamMCPClient:
         
     def _initialize(self):
         """Initialize the connection and tools."""
-        # Use the global event loop
         loop = get_event_loop()
-        
-        # Start a background thread to run the event loop
-        def run_event_loop():
-            asyncio.set_event_loop(loop)
-            loop.run_forever()
-        
-        self.loop_thread = threading.Thread(target=run_event_loop, daemon=True)
-        self.loop_thread.start()
-        
+        self.loop_thread = None
+        if not loop.is_running():
+            def run_event_loop():
+                asyncio.set_event_loop(loop)
+                loop.run_forever()
+
+            self.loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+            self.loop_thread.start()
+
         # Run the initialization in the event loop
         future = asyncio.run_coroutine_threadsafe(self._async_initialize(), loop)
         self.tools = future.result(timeout=self.timeout)
@@ -542,11 +607,16 @@ class HTTPStreamMCPClient:
 
         headers = self.options.get('headers') or None
 
-        self._streams_context = streamablehttp_client(
-            url=self.base_url,
-            headers=headers,
-            timeout=self.timeout,
-        )
+        client_options = {
+            "url": self.base_url,
+            "headers": headers,
+            "timeout": self.timeout,
+        }
+        if self.max_response_bytes is not None:
+            client_options["httpx_client_factory"] = _bounded_httpx_client_factory(
+                self.max_response_bytes
+            )
+        self._streams_context = streamablehttp_client(**client_options)
 
         # If any step of the handshake fails after a context has been entered,
         # unwind the already-entered contexts so we don't leak the httpx/anyio
