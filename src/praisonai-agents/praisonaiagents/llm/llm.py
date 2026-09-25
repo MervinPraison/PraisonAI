@@ -4290,7 +4290,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -4299,7 +4299,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -5017,8 +5017,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         parallel_tool_calls: bool = False,
+        return_token_usage: bool = False,
         **kwargs
-    ) -> str:
+    ) -> Union[str, tuple[str, TokenUsage]]:
         """Async version of get_response with identical functionality."""
         # G2: Cooperative cancellation - honour InterruptController between tool iterations
         # so /stop (and cancellation generally) halts mid-flight runs on every provider.
@@ -5151,6 +5152,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             iteration_count = 0
             tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
+            # Track the final raw LLM response so return_token_usage can extract
+            # usage, mirroring the sync get_response path.
+            _final_llm_response = None
+
+            def _prepare_return_value(text: str) -> Union[str, tuple]:
+                if not return_token_usage:
+                    return text
+                token_usage = (
+                    self._extract_token_usage(_final_llm_response)
+                    if _final_llm_response else None
+                )
+                if token_usage is None:
+                    token_usage = TokenUsage()
+                return text, token_usage
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
@@ -5198,9 +5213,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # usage from the final response.completed event.
                         if stream_response is not None:
                             self._track_token_usage(stream_response, self.model)
+                            _final_llm_response = stream_response
                     else:
                         resp = await self._call_responses_api_async(**responses_params)
                         response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
+                        _final_llm_response = resp
 
                     # Build Chat-Completions-compatible final_response
                     final_response = {
@@ -5318,6 +5335,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                     )
                     self._record_finish_reason(resp)
+                    _final_llm_response = resp
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
                     
@@ -5427,6 +5445,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                         )
                         self._record_finish_reason(tool_response)
+                        _final_llm_response = tool_response
                         # Handle None content from Gemini
                         response_content = tool_response.choices[0].message.get("content")
                         response_text = response_content if response_content is not None else ""
@@ -5650,6 +5669,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                         )
                         self._record_finish_reason(resp)
+                        _final_llm_response = resp
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         
@@ -5702,6 +5722,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 )
                             )
                             self._record_finish_reason(resp)
+                            _final_llm_response = resp
                             response_text = resp["choices"][0]["message"].get("content") or ""
                             # If the response also contains new tool_calls, treat this as a
                             # tool-calling round rather than a final answer (Anthropic pattern)
@@ -5822,7 +5843,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
-                return response_text
+                return _prepare_return_value(response_text)
 
             if not self_reflect:
                 # Use final_response_text if we went through tool iterations
@@ -5853,8 +5874,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
-                    return stored_reasoning_content
-                return display_text
+                    return _prepare_return_value(stored_reasoning_content)
+                return _prepare_return_value(display_text)
 
             # Handle self-reflection
             reflection_prompt = f"""
@@ -5969,7 +5990,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -5978,7 +5999,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -5992,7 +6013,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        return response_text
+                        return _prepare_return_value(response_text)
                     continue  # Now properly in a loop
             
         except Exception as error:
