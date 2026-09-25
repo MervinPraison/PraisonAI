@@ -144,6 +144,161 @@ def _is_safe_crawl_url(url: str) -> bool:
     return is_safe_http_url(url)
 
 
+def _html_to_markdown(html: str) -> tuple:
+    """Convert HTML to lightweight Markdown using only the standard library.
+
+    Preserves headings, lists, links (with targets), and fenced code blocks so
+    that structure survives the dependency-free fetch path. Returns a tuple of
+    ``(markdown, title)``.
+    """
+    from html.parser import HTMLParser
+    from html import unescape
+
+    class _MarkdownParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts: List[str] = []
+            self.title = ""
+            self._skip_depth = 0
+            self._in_title = False
+            self._in_pre = 0
+            self._in_code = 0
+            self._href: Optional[str] = None
+            self._link_start: Optional[int] = None
+            self._list_stack: List[Dict[str, Any]] = []
+
+        _SKIP_TAGS = {"script", "style", "head", "noscript"}
+        _BLOCK_TAGS = {
+            "p", "div", "section", "article", "header", "footer", "main",
+            "table", "tr", "blockquote", "ul", "ol",
+        }
+
+        def _newline(self, count: int = 1) -> None:
+            self.parts.append("\n" * count)
+
+        def handle_starttag(self, tag, attrs):
+            if tag in self._SKIP_TAGS:
+                self._skip_depth += 1
+                if tag == "head":
+                    # still want <title> inside head
+                    self._skip_depth -= 1
+                    return
+                return
+            if self._skip_depth:
+                return
+            if tag == "title":
+                self._in_title = True
+                return
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                level = int(tag[1])
+                self._newline(2)
+                self.parts.append("#" * level + " ")
+            elif tag == "pre":
+                self._in_pre += 1
+                self._newline(2)
+                self.parts.append("```\n")
+            elif tag == "code":
+                self._in_code += 1
+                if not self._in_pre:
+                    self.parts.append("`")
+            elif tag == "a":
+                attr = dict(attrs)
+                self._href = attr.get("href")
+                self._link_start = len(self.parts)
+                self.parts.append("[")
+            elif tag in ("ul", "ol"):
+                self._list_stack.append({"ordered": tag == "ol", "index": 0})
+                self._newline()
+            elif tag == "li":
+                self._newline()
+                indent = "  " * (len(self._list_stack) - 1) if self._list_stack else ""
+                if self._list_stack and self._list_stack[-1]["ordered"]:
+                    self._list_stack[-1]["index"] += 1
+                    self.parts.append(f"{indent}{self._list_stack[-1]['index']}. ")
+                else:
+                    self.parts.append(f"{indent}- ")
+            elif tag == "br":
+                self._newline()
+            elif tag in ("strong", "b"):
+                self.parts.append("**")
+            elif tag in ("em", "i"):
+                self.parts.append("*")
+            elif tag in self._BLOCK_TAGS:
+                self._newline(2)
+
+        def handle_endtag(self, tag):
+            if tag in self._SKIP_TAGS and tag != "head":
+                if self._skip_depth:
+                    self._skip_depth -= 1
+                return
+            if self._skip_depth:
+                return
+            if tag == "title":
+                self._in_title = False
+                return
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                self._newline(2)
+            elif tag == "pre":
+                if self._in_pre:
+                    self._in_pre -= 1
+                self.parts.append("\n```\n")
+            elif tag == "code":
+                if self._in_code:
+                    self._in_code -= 1
+                if not self._in_pre:
+                    self.parts.append("`")
+            elif tag == "a":
+                if self._href:
+                    self.parts.append(f"]({self._href})")
+                else:
+                    # no href: drop the opening bracket to keep plain text
+                    if self._link_start is not None and self._link_start < len(self.parts):
+                        self.parts[self._link_start] = ""
+                self._href = None
+                self._link_start = None
+            elif tag in ("ul", "ol"):
+                if self._list_stack:
+                    self._list_stack.pop()
+                self._newline()
+            elif tag in ("strong", "b"):
+                self.parts.append("**")
+            elif tag in ("em", "i"):
+                self.parts.append("*")
+            elif tag in self._BLOCK_TAGS:
+                self._newline(2)
+
+        def handle_data(self, data):
+            if self._skip_depth:
+                return
+            if self._in_title:
+                self.title += data
+                return
+            if self._in_pre:
+                self.parts.append(data)
+            else:
+                self.parts.append(data)
+
+    parser = _MarkdownParser()
+    parser.feed(html)
+    parser.close()
+
+    markdown = "".join(parser.parts)
+    # Collapse excessive blank lines and trailing spaces per line.
+    lines = [line.rstrip() for line in markdown.split("\n")]
+    cleaned: List[str] = []
+    blank_run = 0
+    for line in lines:
+        if line.strip():
+            blank_run = 0
+            cleaned.append(line)
+        else:
+            blank_run += 1
+            if blank_run <= 2:
+                cleaned.append("")
+    markdown = "\n".join(cleaned).strip()
+    return markdown, unescape(parser.title).strip()
+
+
 def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using basic HTTP fetch with httpx or urllib."""
     import urllib.parse
@@ -182,20 +337,21 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
                 with urllib.request.urlopen(url, timeout=30) as response:
                     content = response.read().decode('utf-8', errors='ignore')
             
-            # Basic HTML to text extraction
-            import re
-            # Remove script and style elements
-            content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-            content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
-            # Remove HTML tags
-            content = re.sub(r'<[^>]+>', ' ', content)
-            # Clean up whitespace
-            content = re.sub(r'\s+', ' ', content).strip()
-            
-            # Extract title
-            title_match = re.search(r'<title[^>]*>([^<]+)</title>', content, re.IGNORECASE)
-            title = title_match.group(1) if title_match else ""
-            
+            # Convert HTML to structured Markdown using the standard library so
+            # headings, lists, links, and code blocks survive on this path.
+            try:
+                content, title = _html_to_markdown(content)
+            except Exception:
+                # Fall back to the flat-text extraction so the tool never fails.
+                import re
+                raw = content
+                raw = re.sub(r'<script[^>]*>.*?</script>', '', raw, flags=re.DOTALL | re.IGNORECASE)
+                raw = re.sub(r'<style[^>]*>.*?</style>', '', raw, flags=re.DOTALL | re.IGNORECASE)
+                title_match = re.search(r'<title[^>]*>([^<]+)</title>', raw, re.IGNORECASE)
+                title = title_match.group(1).strip() if title_match else ""
+                raw = re.sub(r'<[^>]+>', ' ', raw)
+                content = re.sub(r'\s+', ' ', raw).strip()
+
             results.append({
                 "url": url,
                 "content": content[:50000],  # Limit content size
