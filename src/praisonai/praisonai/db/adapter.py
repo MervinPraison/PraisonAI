@@ -166,8 +166,11 @@ class PraisonAIDB:
 
         # Initialize conversation store. An explicit *_backend override always
         # wins over URL-scheme detection so callers can reach a registered
-        # backend whose scheme isn't auto-inferable.
-        if self._database_url:
+        # backend whose scheme isn't auto-inferable. A backend is also built when
+        # only the override is given (no URL): URL-less stores (e.g. ``memory``,
+        # ``dynamodb``, ``firestore``) read their config from ``**options``, so
+        # gating solely on the URL would make the override unreachable.
+        if self._database_url or self._database_backend:
             backend = self._database_backend or self._detect_backend(
                 self._database_url, kind="conversation"
             )
@@ -176,21 +179,25 @@ class PraisonAIDB:
             )
 
         # Initialize state store
-        if self._state_url:
+        if self._state_url or self._state_backend:
             backend = self._state_backend or self._detect_backend(
                 self._state_url, kind="state"
             )
             self._state_store = create_state_store(
-                backend, url=self._state_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._state_url, backend),
+                **self._options,
             )
 
         # Initialize knowledge store
-        if self._knowledge_url:
+        if self._knowledge_url or self._knowledge_backend:
             backend = self._knowledge_backend or self._detect_backend(
                 self._knowledge_url, kind="knowledge"
             )
             self._knowledge_store = create_knowledge_store(
-                backend, url=self._knowledge_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._knowledge_url, backend),
+                **self._options,
             )
 
     # DBAPI/driver exception class names that indicate a *transient* connection
@@ -317,6 +324,14 @@ class PraisonAIDB:
     # PraisonAIDB(knowledge_url=...) can reach backends beyond the handful the
     # generic http(s) sniffing covered. An explicit *_backend override still
     # wins over this table (see _build_stores).
+    #
+    # Only schemes whose backend factory can actually construct a working store
+    # from the URL alone are listed. Backends that need out-of-band config the
+    # URL cannot carry — GCS (``bucket_name``), Cosmos DB (``connection_string``
+    # + database/collection) — are intentionally omitted: they raise a helpful
+    # error pointing the caller at the explicit ``state_backend=``/
+    # ``knowledge_backend=`` override (plus options) instead of failing with an
+    # opaque TypeError/ValueError deep inside the driver.
     _STATE_URL_SCHEMES = {
         "redis": "redis",
         "rediss": "redis",
@@ -326,26 +341,44 @@ class PraisonAIDB:
         "mongodb": "mongodb",
         "mongodb+srv": "mongodb",
         "upstash": "upstash",
-        "gcs": "gcs",
         "memory": "memory",
     }
     _KNOWLEDGE_URL_SCHEMES = {
         "chroma": "chroma",
         "chromadb": "chroma",
         "qdrant": "qdrant",
-        "pinecone": "pinecone",
         "weaviate": "weaviate",
         "lancedb": "lancedb",
         "milvus": "milvus",
         "pgvector": "pgvector",
-        "cassandra": "cassandra",
-        "clickhouse": "clickhouse",
-        "couchbase": "couchbase",
         "surrealdb": "surrealdb_vector",
-        "cosmosdb": "cosmosdb",
         "redis": "redis",
         "valkey": "valkey",
     }
+    # A handful of backends consume the connection URL directly (their factory
+    # forwards ``url=`` to a driver), so the friendly scheme a user writes must be
+    # rewritten to the driver's expected scheme before the URL is forwarded.
+    # pgvector runs over PostgreSQL: ``pgvector://host/db`` -> ``postgresql://…``
+    # so psycopg2's connection pool accepts it. Backends that ignore ``url`` (the
+    # SDK factory pops it) are unaffected.
+    _URL_SCHEME_REWRITE = {
+        "pgvector": "postgresql",
+    }
+
+    def _normalize_store_url(self, url: Optional[str], backend: str) -> Optional[str]:
+        """Rewrite a friendly scheme to the driver scheme the backend expects.
+
+        Only applies when the backend's factory forwards ``url=`` to a driver
+        that would reject the friendly scheme (see ``_URL_SCHEME_REWRITE``);
+        every other URL is returned unchanged.
+        """
+        if not url or "://" not in url:
+            return url
+        scheme, rest = url.split("://", 1)
+        target = self._URL_SCHEME_REWRITE.get(scheme.lower())
+        if target is not None:
+            return f"{target}://{rest}"
+        return url
 
     def _detect_backend(self, url: str, *, kind: Optional[str] = None) -> str:
         """Detect backend type from URL, optionally scoped to a store ``kind``.
