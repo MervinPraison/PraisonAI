@@ -5177,7 +5177,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if _is_cancelled():
                     reason = _cancel_reason()
                     logging.debug(f"Async LLM tool loop cancelled: {reason}")
-                    return f"Task interrupted: {reason}"
+                    return _prepare_return_value(f"Task interrupted: {reason}")
                 # G2: Mid-run steering - drain any pending steering notes and inject
                 # them as user messages so the model sees them on its next step.
                 _inject_steering(messages)
@@ -5258,7 +5258,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if _is_cancelled():
                             reason = _cancel_reason()
                             logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
-                            return f"Task interrupted: {reason}"
+                            return _prepare_return_value(f"Task interrupted: {reason}")
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
@@ -5502,7 +5502,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if _is_cancelled():
                         reason = _cancel_reason()
                         logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
-                        return f"Task interrupted: {reason}"
+                        return _prepare_return_value(f"Task interrupted: {reason}")
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider
@@ -6255,29 +6255,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             if not usage:
                 return None
-            
-            # Extract token counts with support for both dict and object access
-            if isinstance(usage, dict):
-                return TokenUsage(
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
-                    cached_tokens=usage.get("cached_tokens", 0),
-                    reasoning_tokens=usage.get("reasoning_tokens", 0),
-                    audio_input_tokens=usage.get("audio_input_tokens", 0),
-                    audio_output_tokens=usage.get("audio_output_tokens", 0),
-                )
-            else:
-                # Object-style access
-                return TokenUsage(
-                    prompt_tokens=getattr(usage, 'prompt_tokens', 0) or 0,
-                    completion_tokens=getattr(usage, 'completion_tokens', 0) or 0,
-                    total_tokens=getattr(usage, 'total_tokens', 0) or 0,
-                    cached_tokens=getattr(usage, 'cached_tokens', 0) or 0,
-                    reasoning_tokens=getattr(usage, 'reasoning_tokens', 0) or 0,
-                    audio_input_tokens=getattr(usage, 'audio_input_tokens', 0) or 0,
-                    audio_output_tokens=getattr(usage, 'audio_output_tokens', 0) or 0,
-                )
+
+            # Read a value under any of the given names, supporting both dict and
+            # object usage. The Responses API reports input_tokens/output_tokens
+            # instead of prompt_tokens/completion_tokens, so accept both spellings
+            # (mirroring _track_token_usage) to avoid returning zero counts.
+            def _usage_value(*names: str) -> int:
+                for name in names:
+                    value = (
+                        usage.get(name)
+                        if isinstance(usage, dict)
+                        else getattr(usage, name, None)
+                    )
+                    if value is not None:
+                        return int(value or 0)
+                return 0
+
+            return TokenUsage(
+                prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
+                completion_tokens=_usage_value("completion_tokens", "output_tokens"),
+                total_tokens=_usage_value("total_tokens"),
+                cached_tokens=_usage_value("cached_tokens"),
+                reasoning_tokens=_usage_value("reasoning_tokens"),
+                audio_input_tokens=_usage_value("audio_input_tokens"),
+                audio_output_tokens=_usage_value("audio_output_tokens"),
+            )
                 
         except Exception as e:
             if self.verbose:
