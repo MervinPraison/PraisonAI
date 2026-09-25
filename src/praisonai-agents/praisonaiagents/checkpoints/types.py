@@ -38,9 +38,13 @@ class CheckpointConfig:
     enabled: bool = True
     auto_checkpoint: bool = True  # Auto-checkpoint before file modifications
     max_checkpoints: int = 100  # Maximum checkpoints to keep
-    max_file_size: int = 2 * 1024 * 1024  # Skip staging files larger than this (bytes); 0 disables the cap
     user_name: str = field(default_factory=lambda: os.getenv("PRAISONAI_GIT_USER_NAME", "PraisonAI Checkpoints"))
     user_email: str = field(default_factory=lambda: os.getenv("PRAISONAI_GIT_USER_EMAIL", "checkpoints@praison.ai"))
+    # Skip staging files larger than this (bytes); 0 disables the cap. Kept
+    # after the identity fields so existing positional construction of
+    # CheckpointConfig(workspace, storage, enabled, auto, max_checkpoints,
+    # user_name, user_email) is unaffected.
+    max_file_size: int = 2 * 1024 * 1024
     exclude_patterns: List[str] = field(default_factory=lambda: [
         ".git",
         ".praisonai",

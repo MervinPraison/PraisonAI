@@ -366,7 +366,12 @@ class CheckpointService:
                     continue
                 abs_path = os.path.join(self.config.workspace_dir, path)
                 try:
-                    if os.path.isfile(abs_path) and os.path.getsize(abs_path) > max_size:
+                    # Use lstat so symlinks are measured by the link itself, not
+                    # their target: a small link to a large file must stay in the
+                    # checkpoint. Skip anything that isn't a regular file.
+                    if os.path.islink(abs_path) or not os.path.isfile(abs_path):
+                        continue
+                    if os.lstat(abs_path).st_size > max_size:
                         # Keep the file on disk; only drop it from the index.
                         await self._run_git("rm", "--cached", "--quiet", "--", path)
                         logger.debug(f"Skipped oversized file from checkpoint: {path}")
@@ -377,9 +382,16 @@ class CheckpointService:
 
     async def _maybe_gc(self, cadence: int = 20) -> None:
         """
-        Run ``git gc --auto`` on the shadow repo every ``cadence`` saves so loose
-        objects get packed and unreachable ones pruned. ``--auto`` makes git
-        decide whether work is actually needed, keeping the amortised cost low.
+        Every ``cadence`` saves, pack the shadow repo and make it self-contained.
+
+        We seed the shadow store from the project's objects via ``alternates``
+        for a fast first checkpoint, but a borrowed object can disappear if the
+        project repo later prunes or repacks it — which would make checkpoint
+        history unreadable. To keep ``/undo``/``/revert`` durable we periodically
+        run ``git repack -a -d`` (without ``--local``) so every reachable object,
+        including borrowed ones, is copied into a local pack the shadow store
+        owns. ``git gc --auto`` still handles pruning/packing of loose objects.
+
         Best-effort: failures are swallowed so a gc issue never breaks a turn.
         """
         self._saves_since_gc += 1
@@ -387,6 +399,10 @@ class CheckpointService:
             return
         self._saves_since_gc = 0
         try:
+            # -a: pack all reachable objects; -d: drop redundant packs. Omitting
+            # --local pulls borrowed (alternate) objects into the local pack so
+            # the shadow store no longer depends on the project object database.
+            await self._run_git("repack", "-a", "-d", "--quiet")
             await self._run_git("gc", "--auto", "--quiet")
         except Exception as e:
             logger.debug(f"Shadow-store gc skipped: {e}")
