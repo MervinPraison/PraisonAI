@@ -841,9 +841,23 @@ class AgentsGenerator:
         # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
         # Treat an empty ``roles: {}`` the same as a missing one so populated
         # ``agents:`` is still promoted instead of running with zero agents.
-        if 'agents' in config and not config.get('roles'):
-            config['roles'] = {}
+        #
+        # Promotion is *authoritative*: the shorthand ``agents:`` bucket is
+        # removed after merging into ``roles:`` so downstream validators and the
+        # executor read a single source of truth. Leaving ``agents:`` in place
+        # let validators see a merged ``{**roles, **agents}`` view the executor
+        # (which reads only ``roles:``) never runs — causing double-fired
+        # warnings, false-positive validation rejections, and silently dropped
+        # ``tool_timeout``/handoff knobs for agents that never became roles.
+        if 'agents' in config and isinstance(config['agents'], dict):
+            config.setdefault('roles', {})
+            if not isinstance(config['roles'], dict):
+                config['roles'] = {}
             for agent_name, agent_config in config['agents'].items():
+                # An entry already present under ``roles:`` is canonical and
+                # wins; only agents-only entries are promoted.
+                if agent_name in config['roles']:
+                    continue
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
                 if 'instructions' in role_config and 'backstory' not in role_config:
@@ -856,6 +870,8 @@ class AgentsGenerator:
                 if 'backstory' not in role_config:
                     role_config['backstory'] = f'You are a {role_config["role"]}'
                 config['roles'][agent_name] = role_config
+            # Drop the shorthand bucket so validators and the executor agree.
+            del config['agents']
 
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))

@@ -54,6 +54,10 @@ class PraisonAIDB:
         database_url: Optional[str] = None,
         state_url: Optional[str] = None,
         knowledge_url: Optional[str] = None,
+        *,
+        database_backend: Optional[str] = None,
+        state_backend: Optional[str] = None,
+        knowledge_backend: Optional[str] = None,
         **options
     ):
         """
@@ -63,11 +67,23 @@ class PraisonAIDB:
             database_url: URL for conversation storage (postgres, mysql, sqlite)
             state_url: URL for state storage (redis, etc.)
             knowledge_url: URL for knowledge/vector storage (qdrant, etc.)
+            database_backend: Explicit conversation backend name. Wins over URL
+                scheme detection — use it to reach a registered backend whose URL
+                scheme is not auto-inferable (e.g. a custom driver).
+            state_backend: Explicit state backend name (e.g. ``"mongodb"``,
+                ``"dynamodb"``, ``"firestore"``, ``"gcs"``, ``"memory"``). Wins
+                over URL scheme detection.
+            knowledge_backend: Explicit knowledge/vector backend name (e.g.
+                ``"chroma"``, ``"pinecone"``, ``"lancedb"``, ``"pgvector"``).
+                Wins over URL scheme detection.
             **options: Additional backend-specific options
         """
         self._database_url = database_url
         self._state_url = state_url
         self._knowledge_url = knowledge_url
+        self._database_backend = database_backend
+        self._state_backend = state_backend
+        self._knowledge_backend = knowledge_backend
         # Pop adapter-level options before forwarding the rest to the backend
         # store factories, so they are never passed through as backend kwargs.
         init_retry_cooldown = options.pop("init_retry_cooldown", 30.0)
@@ -122,6 +138,9 @@ class PraisonAIDB:
         self._database_url = None
         self._state_url = None
         self._knowledge_url = None
+        self._database_backend = None
+        self._state_backend = None
+        self._knowledge_backend = None
         self._options = {}
         self._conversation_store = conversation_store
         self._state_store = state_store
@@ -145,25 +164,40 @@ class PraisonAIDB:
             create_knowledge_store,
         )
 
-        # Initialize conversation store
-        if self._database_url:
-            backend = self._detect_backend(self._database_url)
+        # Initialize conversation store. An explicit *_backend override always
+        # wins over URL-scheme detection so callers can reach a registered
+        # backend whose scheme isn't auto-inferable. A backend is also built when
+        # only the override is given (no URL): URL-less stores (e.g. ``memory``,
+        # ``dynamodb``, ``firestore``) read their config from ``**options``, so
+        # gating solely on the URL would make the override unreachable.
+        if self._database_url or self._database_backend:
+            backend = self._database_backend or self._detect_backend(
+                self._database_url, kind="conversation"
+            )
             self._conversation_store = create_conversation_store(
                 backend, url=self._database_url, **self._options
             )
 
         # Initialize state store
-        if self._state_url:
-            backend = self._detect_backend(self._state_url)
+        if self._state_url or self._state_backend:
+            backend = self._state_backend or self._detect_backend(
+                self._state_url, kind="state"
+            )
             self._state_store = create_state_store(
-                backend, url=self._state_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._state_url, backend),
+                **self._options,
             )
 
         # Initialize knowledge store
-        if self._knowledge_url:
-            backend = self._detect_backend(self._knowledge_url)
+        if self._knowledge_url or self._knowledge_backend:
+            backend = self._knowledge_backend or self._detect_backend(
+                self._knowledge_url, kind="knowledge"
+            )
             self._knowledge_store = create_knowledge_store(
-                backend, url=self._knowledge_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._knowledge_url, backend),
+                **self._options,
             )
 
     # DBAPI/driver exception class names that indicate a *transient* connection
@@ -284,9 +318,77 @@ class PraisonAIDB:
         # callers on any loop can never construct stores concurrently.
         await asyncio.to_thread(self._init_stores)
     
-    def _detect_backend(self, url: str) -> str:
-        """Detect backend type from URL.
-        
+    # Per-kind URL scheme -> registered backend name. These map the schemes a
+    # user naturally writes for a state/knowledge URL onto the names the
+    # persistence registry actually registers, so PraisonAIDB(state_url=...) /
+    # PraisonAIDB(knowledge_url=...) can reach backends beyond the handful the
+    # generic http(s) sniffing covered. An explicit *_backend override still
+    # wins over this table (see _build_stores).
+    #
+    # Only schemes whose backend factory can actually construct a working store
+    # from the URL alone are listed. Backends that need out-of-band config the
+    # URL cannot carry — GCS (``bucket_name``), Cosmos DB (``connection_string``
+    # + database/collection) — are intentionally omitted: they raise a helpful
+    # error pointing the caller at the explicit ``state_backend=``/
+    # ``knowledge_backend=`` override (plus options) instead of failing with an
+    # opaque TypeError/ValueError deep inside the driver.
+    _STATE_URL_SCHEMES = {
+        "redis": "redis",
+        "rediss": "redis",
+        "valkey": "valkey",
+        "dynamodb": "dynamodb",
+        "firestore": "firestore",
+        "mongodb": "mongodb",
+        "mongodb+srv": "mongodb",
+        "upstash": "upstash",
+        "memory": "memory",
+    }
+    _KNOWLEDGE_URL_SCHEMES = {
+        "chroma": "chroma",
+        "chromadb": "chroma",
+        "qdrant": "qdrant",
+        "weaviate": "weaviate",
+        "lancedb": "lancedb",
+        "milvus": "milvus",
+        "pgvector": "pgvector",
+        "surrealdb": "surrealdb_vector",
+        "redis": "redis",
+        "valkey": "valkey",
+    }
+    # A handful of backends consume the connection URL directly (their factory
+    # forwards ``url=`` to a driver), so the friendly scheme a user writes must be
+    # rewritten to the driver's expected scheme before the URL is forwarded.
+    # pgvector runs over PostgreSQL: ``pgvector://host/db`` -> ``postgresql://…``
+    # so psycopg2's connection pool accepts it. Backends that ignore ``url`` (the
+    # SDK factory pops it) are unaffected.
+    _URL_SCHEME_REWRITE = {
+        "pgvector": "postgresql",
+    }
+
+    def _normalize_store_url(self, url: Optional[str], backend: str) -> Optional[str]:
+        """Rewrite a friendly scheme to the driver scheme the backend expects.
+
+        Only applies when the backend's factory forwards ``url=`` to a driver
+        that would reject the friendly scheme (see ``_URL_SCHEME_REWRITE``);
+        every other URL is returned unchanged.
+        """
+        if not url or "://" not in url:
+            return url
+        scheme, rest = url.split("://", 1)
+        target = self._URL_SCHEME_REWRITE.get(scheme.lower())
+        if target is not None:
+            return f"{target}://{rest}"
+        return url
+
+    def _detect_backend(self, url: str, *, kind: Optional[str] = None) -> str:
+        """Detect backend type from URL, optionally scoped to a store ``kind``.
+
+        ``kind`` is one of ``"conversation"``, ``"state"`` or ``"knowledge"``.
+        When given a state/knowledge URL, kind-specific schemes (e.g.
+        ``mongodb://`` for state, ``chroma://`` for knowledge) are matched so the
+        URL resolves to a backend that store kind actually registers. ``kind``
+        defaults to ``None`` (conversation-style detection) for backward compat.
+
         Supports cloud-native serverless providers:
         - Neon (*.neon.tech) -> postgres
         - CockroachDB (*.cockroachlabs.cloud) -> postgres
@@ -296,7 +398,16 @@ class PraisonAIDB:
         - Turso/libSQL (libsql://) -> turso
         """
         url_lower = url.lower()
-        
+        scheme = url_lower.split("://", 1)[0] if "://" in url_lower else ""
+
+        # Kind-specific schemes take priority so e.g. state_url="mongodb://…"
+        # resolves to a state backend rather than falling through the generic
+        # http(s) path or raising.
+        if kind == "state" and scheme in self._STATE_URL_SCHEMES:
+            return self._STATE_URL_SCHEMES[scheme]
+        if kind == "knowledge" and scheme in self._KNOWLEDGE_URL_SCHEMES:
+            return self._KNOWLEDGE_URL_SCHEMES[scheme]
+
         # Turso/libSQL — unique scheme
         if url_lower.startswith("libsql://"):
             return "turso"
@@ -323,12 +434,24 @@ class PraisonAIDB:
             raise ValueError(
                 f"Unable to infer DB backend from URL {url!r}; "
                 "use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
+                + (
+                    "; or pass an explicit "
+                    f"{kind}_backend= to select a registered {kind} backend"
+                    if kind in ("state", "knowledge")
+                    else ""
+                )
             )
         
         # Unknown scheme - fail loudly
         raise ValueError(
             f"Unable to infer DB backend from URL {url!r}; "
             "supported schemes: postgres://, mysql://, sqlite://, redis://, libsql://, http(s)://"
+            + (
+                "; or pass an explicit "
+                f"{kind}_backend= to select a registered {kind} backend"
+                if kind in ("state", "knowledge")
+                else ""
+            )
         )
     
     def on_agent_start(
@@ -1444,7 +1567,7 @@ class SQLiteDB(PraisonAIDB):
         url = database_url or path
         super().__init__(database_url=url, **options)
     
-    def _detect_backend(self, url: str) -> str:
+    def _detect_backend(self, url: str, *, kind: Optional[str] = None) -> str:
         return "sqlite"
 
 

@@ -2,6 +2,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import os
 import copy
+import contextvars
 import warnings
 import re
 import inspect
@@ -572,7 +573,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # Agent attribution is task-local: a single LLM instance is often shared
+        # by several concurrently-running agents, so a plain attribute would let
+        # one agent's set_current_agent() clobber another's mid-await and
+        # misattribute token spend (issues #5052/#3933). A ContextVar keeps the
+        # value isolated per asyncio task / thread.
+        self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("current_agent_name", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6263,9 +6271,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Task-local name of the agent currently driving this LLM.
+
+        Backed by a ContextVar so concurrent agents sharing one LLM instance
+        each read/write their own value instead of racing on a shared
+        attribute (issues #5052/#3933).
+        """
+        return self._current_agent_name_var.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        self._current_agent_name_var.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
         """Set the current agent name for token tracking."""
-        self.current_agent_name = agent_name
+        self._current_agent_name_var.set(agent_name)
+
+    def __deepcopy__(self, memo):
+        """Deep-copy this LLM, giving the clone a fresh attribution ContextVar.
+
+        ``_current_agent_name_var`` is a ``contextvars.ContextVar`` which is not
+        copyable/pickleable and whose value is runtime/task-local anyway. When
+        an Agent holding a built LLM instance is cloned (e.g. per gateway
+        channel, issue #5052), a naive recursive deepcopy would raise
+        ``TypeError: cannot pickle '_contextvars.ContextVar' object``. We copy
+        every other attribute normally and install a brand-new ContextVar so the
+        clone's agent attribution starts clean and stays independent.
+        """
+        cls = self.__class__
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
+        for key, value in self.__dict__.items():
+            if key == "_current_agent_name_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "current_agent_name", default=None
+                )
+            else:
+                clone.__dict__[key] = copy.deepcopy(value, memo)
+        return clone
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
