@@ -2881,7 +2881,10 @@ Your Goal: {self.goal}
                     # Reuse the caller's manager as-is (no disk I/O side-effect).
                     _mgr = self._approval_permissions
                 else:
-                    _mgr = PermissionManager(agent_name=self.name)
+                    _mgr = PermissionManager(
+                        agent_name=self.name,
+                        workspace_root=os.getcwd(),
+                    )
                     if isinstance(self._approval_permissions, dict):
                         _mgr.load_rules_from_config(self._approval_permissions)
                     elif isinstance(self._approval_permissions, (list, tuple)):
@@ -7083,8 +7086,16 @@ Answer:"""
             return GuardrailResult(success=True, result=task_output)
 
         try:
-            # Call the guardrail function
-            result = self._guardrail_fn(task_output)
+            # Call the guardrail function, awaiting it if the caller supplied an
+            # async def. Calling a coroutine function synchronously would only
+            # build a coroutine object (never running its body), which then
+            # crashes GuardrailResult.from_tuple and is misreported as a
+            # validation failure.
+            if asyncio.iscoroutinefunction(self._guardrail_fn):
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                result = run_coroutine_from_any_context(self._guardrail_fn(task_output))
+            else:
+                result = self._guardrail_fn(task_output)
 
             # Convert the result to a GuardrailResult
             return GuardrailResult.from_tuple(result)

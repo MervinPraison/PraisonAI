@@ -1930,6 +1930,81 @@ Respond with ONLY a valid JSON tool call in this format:
             return self._is_ollama_provider() and iteration_count == 0
         return False
 
+    def _force_tool_usage_message(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> Optional[str]:
+        """Return the force-tool-usage nudge, or None when no nudge is due.
+
+        Shared by both the sync and async tool loops so a `force_tool_usage`
+        setting an agent accepted is honoured identically whether it calls or
+        awaits. Returns the user-message content string (containing the tool
+        names) when the model ignored the tools, else None.
+        """
+        if not self._should_force_tool_usage(response_text, tool_calls, formatted_tools, iteration_count):
+            return None
+        tool_names = self._get_tool_names_for_prompt(formatted_tools)
+        return self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
+
+    def _tool_repair_message(self, tool_calls: Optional[List], formatted_tools: Optional[List]) -> Optional[str]:
+        """Return a repair nudge for malformed tool calls, or None.
+
+        Charges the `max_tool_repairs` budget once per repair attempt (via
+        `_current_repair_count`). Returns None when the budget is spent or the
+        tool calls validate cleanly. Shared by the sync and async loops.
+        """
+        if not tool_calls or self.max_tool_repairs <= 0:
+            return None
+        repair_attempt_count = getattr(self, '_current_repair_count', 0)
+        if repair_attempt_count >= self.max_tool_repairs:
+            return None
+        validation_errors = []
+        for tc in tool_calls:
+            error = self._validate_tool_call(tc, formatted_tools)
+            if error:
+                validation_errors.append(error)
+        if not validation_errors:
+            return None
+        error_msg = "; ".join(validation_errors)
+        tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
+        self._current_repair_count = repair_attempt_count + 1
+        return self.TOOL_CALL_REPAIR_PROMPT.format(error=error_msg, tool_schemas=tool_schemas)
+
+    @staticmethod
+    def _param_accepts_string(tool_name: str, param: str, formatted_tools: Optional[List]) -> bool:
+        """True if the named parameter's declared schema accepts a string.
+
+        Used to narrow `tool_result_mapping` substitution: a declared string
+        parameter must keep the value the model sent, even when that value
+        happens to match a prior tool's name. Recognises plain `type`,
+        list-typed `type` unions, and `anyOf` unions. Never raises on a
+        malformed schema - an unreadable schema simply returns False.
+        """
+        try:
+            if not formatted_tools:
+                return False
+            for tool in formatted_tools:
+                if not isinstance(tool, dict):
+                    continue
+                func = tool.get('function')
+                if not isinstance(func, dict) or func.get('name') != tool_name:
+                    continue
+                props = func.get('parameters', {}).get('properties', {})
+                schema = props.get(param)
+                if not isinstance(schema, dict):
+                    return False
+                ptype = schema.get('type')
+                if ptype == 'string':
+                    return True
+                if isinstance(ptype, list) and 'string' in ptype:
+                    return True
+                any_of = schema.get('anyOf')
+                if isinstance(any_of, list):
+                    for member in any_of:
+                        if isinstance(member, dict) and member.get('type') == 'string':
+                            return True
+                return False
+            return False
+        except Exception:
+            return False
+
     def _validate_tool_call(self, tool_call: Dict, formatted_tools: Optional[List]) -> Optional[str]:
         """
         Validate a tool call against available tools.
@@ -3728,13 +3803,12 @@ Respond with ONLY a valid JSON tool call in this format:
                                 logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
                     
                     # Force tool usage logic: if model ignores tools but should use them
-                    if self._should_force_tool_usage(response_text, tool_calls, formatted_tools, iteration_count):
-                        tool_names = self._get_tool_names_for_prompt(formatted_tools)
-                        force_prompt = self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
-                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
+                    _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
+                    if _force is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
                         messages.append({
                             "role": "user",
-                            "content": force_prompt
+                            "content": _force
                         })
                         iteration_count += 1
                         continue
@@ -3749,32 +3823,16 @@ Respond with ONLY a valid JSON tool call in this format:
                         continue
                     
                     # Tool call repair logic: validate and repair malformed tool calls
-                    repair_attempt_count = getattr(self, '_current_repair_count', 0)
-                    if tool_calls and self.max_tool_repairs > 0 and repair_attempt_count < self.max_tool_repairs:
-                        # Validate each tool call
-                        validation_errors = []
-                        for tc in tool_calls:
-                            error = self._validate_tool_call(tc, formatted_tools)
-                            if error:
-                                validation_errors.append(error)
-                        
-                        if validation_errors:
-                            # Tool call is invalid, attempt repair
-                            error_msg = "; ".join(validation_errors)
-                            tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
-                            repair_prompt = self.TOOL_CALL_REPAIR_PROMPT.format(
-                                error=error_msg,
-                                tool_schemas=tool_schemas
-                            )
-                            logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
-                            messages.append({
-                                "role": "user",
-                                "content": repair_prompt
-                            })
-                            self._current_repair_count = repair_attempt_count + 1
-                            iteration_count += 1
-                            tool_calls = None  # Clear invalid tool calls
-                            continue
+                    _repair = self._tool_repair_message(tool_calls, formatted_tools)
+                    if _repair is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {self._current_repair_count}/{self.max_tool_repairs}")
+                        messages.append({
+                            "role": "user",
+                            "content": _repair
+                        })
+                        iteration_count += 1
+                        tool_calls = None  # Clear invalid tool calls
+                        continue
                     
                     # Reset repair count on successful tool call
                     self._current_repair_count = 0
@@ -4290,7 +4348,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -4299,7 +4357,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -4735,6 +4793,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             yield f"Task interrupted: {reason}"
                             return
                          
+                        # Trim the conversation before the follow-up request so
+                        # the stream loop bounds its context like the sync and
+                        # async loops do (each tool turn appends an assistant
+                        # message plus one tool reply per call).
+                        messages = self._manage_context_in_loop(messages)
+
                         # Continue conversation after tool execution - get follow-up response
                         try:
                             follow_up_response = self._completion_with_retry(
@@ -5017,8 +5081,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         parallel_tool_calls: bool = False,
+        return_token_usage: bool = False,
         **kwargs
-    ) -> str:
+    ) -> Union[str, tuple[str, TokenUsage]]:
         """Async version of get_response with identical functionality."""
         # G2: Cooperative cancellation - honour InterruptController between tool iterations
         # so /stop (and cancellation generally) halts mid-flight runs on every provider.
@@ -5151,6 +5216,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             iteration_count = 0
             tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
+            # Track the final raw LLM response so return_token_usage can extract
+            # usage, mirroring the sync get_response path.
+            _final_llm_response = None
+
+            def _prepare_return_value(text: str) -> Union[str, tuple]:
+                if not return_token_usage:
+                    return text
+                token_usage = (
+                    self._extract_token_usage(_final_llm_response)
+                    if _final_llm_response else None
+                )
+                if token_usage is None:
+                    token_usage = TokenUsage()
+                return text, token_usage
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
@@ -5162,7 +5241,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if _is_cancelled():
                     reason = _cancel_reason()
                     logging.debug(f"Async LLM tool loop cancelled: {reason}")
-                    return f"Task interrupted: {reason}"
+                    return _prepare_return_value(f"Task interrupted: {reason}")
                 # G2: Mid-run steering - drain any pending steering notes and inject
                 # them as user messages so the model sees them on its next step.
                 _inject_steering(messages)
@@ -5198,9 +5277,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # usage from the final response.completed event.
                         if stream_response is not None:
                             self._track_token_usage(stream_response, self.model)
+                            _final_llm_response = stream_response
                     else:
                         resp = await self._call_responses_api_async(**responses_params)
                         response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
+                        _final_llm_response = resp
 
                     # Build Chat-Completions-compatible final_response
                     final_response = {
@@ -5241,7 +5322,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if _is_cancelled():
                             reason = _cancel_reason()
                             logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
-                            return f"Task interrupted: {reason}"
+                            return _prepare_return_value(f"Task interrupted: {reason}")
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
@@ -5318,6 +5399,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                     )
                     self._record_finish_reason(resp)
+                    _final_llm_response = resp
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
                     
@@ -5427,6 +5509,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                         )
                         self._record_finish_reason(tool_response)
+                        _final_llm_response = tool_response
                         # Handle None content from Gemini
                         response_content = tool_response.choices[0].message.get("content")
                         response_text = response_content if response_content is not None else ""
@@ -5467,6 +5550,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             interaction_displayed = True
 
+                    # Force tool usage / repair: applied AFTER both the streaming
+                    # and non-streaming branches converge so a streaming-with-tools
+                    # provider still honours the policy the sync path applies.
+                    _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
+                    if _force is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered (async). Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
+                        messages.append({
+                            "role": "user",
+                            "content": _force
+                        })
+                        iteration_count += 1
+                        continue
+
+                    _repair = self._tool_repair_message(tool_calls, formatted_tools)
+                    if _repair is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt (async) {self._current_repair_count}/{self.max_tool_repairs}")
+                        messages.append({
+                            "role": "user",
+                            "content": _repair
+                        })
+                        iteration_count += 1
+                        tool_calls = None  # Clear invalid tool calls
+                        continue
+
                 # For Ollama, if response is empty but we have tools, prompt for tool usage
                 if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
                     messages.append({
@@ -5483,7 +5590,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if _is_cancelled():
                         reason = _cancel_reason()
                         logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
-                        return f"Task interrupted: {reason}"
+                        return _prepare_return_value(f"Task interrupted: {reason}")
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider
@@ -5650,6 +5757,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                         )
                         self._record_finish_reason(resp)
+                        _final_llm_response = resp
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         
@@ -5702,6 +5810,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 )
                             )
                             self._record_finish_reason(resp)
+                            _final_llm_response = resp
                             response_text = resp["choices"][0]["message"].get("content") or ""
                             # If the response also contains new tool_calls, treat this as a
                             # tool-calling round rather than a final answer (Anthropic pattern)
@@ -5822,7 +5931,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
-                return response_text
+                return _prepare_return_value(response_text)
 
             if not self_reflect:
                 # Use final_response_text if we went through tool iterations
@@ -5853,8 +5962,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
-                    return stored_reasoning_content
-                return display_text
+                    return _prepare_return_value(stored_reasoning_content)
+                return _prepare_return_value(display_text)
 
             # Handle self-reflection
             reflection_prompt = f"""
@@ -5969,7 +6078,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -5978,7 +6087,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -5992,7 +6101,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        return response_text
+                        return _prepare_return_value(response_text)
                     continue  # Now properly in a loop
             
         except Exception as error:
@@ -6234,29 +6343,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             if not usage:
                 return None
-            
-            # Extract token counts with support for both dict and object access
-            if isinstance(usage, dict):
-                return TokenUsage(
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
-                    cached_tokens=usage.get("cached_tokens", 0),
-                    reasoning_tokens=usage.get("reasoning_tokens", 0),
-                    audio_input_tokens=usage.get("audio_input_tokens", 0),
-                    audio_output_tokens=usage.get("audio_output_tokens", 0),
-                )
-            else:
-                # Object-style access
-                return TokenUsage(
-                    prompt_tokens=getattr(usage, 'prompt_tokens', 0) or 0,
-                    completion_tokens=getattr(usage, 'completion_tokens', 0) or 0,
-                    total_tokens=getattr(usage, 'total_tokens', 0) or 0,
-                    cached_tokens=getattr(usage, 'cached_tokens', 0) or 0,
-                    reasoning_tokens=getattr(usage, 'reasoning_tokens', 0) or 0,
-                    audio_input_tokens=getattr(usage, 'audio_input_tokens', 0) or 0,
-                    audio_output_tokens=getattr(usage, 'audio_output_tokens', 0) or 0,
-                )
+
+            # Read a value under any of the given names, supporting both dict and
+            # object usage. The Responses API reports input_tokens/output_tokens
+            # instead of prompt_tokens/completion_tokens, so accept both spellings
+            # (mirroring _track_token_usage) to avoid returning zero counts.
+            def _usage_value(*names: str) -> int:
+                for name in names:
+                    value = (
+                        usage.get(name)
+                        if isinstance(usage, dict)
+                        else getattr(usage, name, None)
+                    )
+                    if value is not None:
+                        return int(value or 0)
+                return 0
+
+            return TokenUsage(
+                prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
+                completion_tokens=_usage_value("completion_tokens", "output_tokens"),
+                total_tokens=_usage_value("total_tokens"),
+                cached_tokens=_usage_value("cached_tokens"),
+                reasoning_tokens=_usage_value("reasoning_tokens"),
+                audio_input_tokens=_usage_value("audio_input_tokens"),
+                audio_output_tokens=_usage_value("audio_output_tokens"),
+            )
                 
         except Exception as e:
             if self.verbose:
