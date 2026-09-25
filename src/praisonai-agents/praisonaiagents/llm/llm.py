@@ -2,6 +2,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import os
 import copy
+import contextvars
 import warnings
 import re
 import inspect
@@ -572,7 +573,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # Agent attribution is task-local: a single LLM instance may be shared
+        # across concurrently running agents, so the "current" agent name must
+        # not leak between their asyncio tasks (issue #5052). A ContextVar keeps
+        # each task's value isolated; the ``current_agent_name`` property below
+        # preserves the historical attribute-style read/write API.
+        self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praison_llm_current_agent_name", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6263,9 +6271,42 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Task-local name of the agent currently driving this LLM.
+
+        Backed by a ContextVar so concurrent agents sharing one LLM instance
+        do not overwrite each other's attribution (issue #5052).
+        """
+        return self._current_agent_name_var.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        self._current_agent_name_var.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
         """Set the current agent name for token tracking."""
         self.current_agent_name = agent_name
+
+    def __deepcopy__(self, memo):
+        """Deep-copy safely despite the non-picklable attribution ContextVar.
+
+        ``copy.deepcopy`` cannot copy a ``ContextVar`` (issue #5052 / #1746),
+        and its value is task-local runtime state that a clone should not
+        inherit anyway. Copy every other attribute normally and give the clone
+        a fresh, empty ContextVar.
+        """
+        cls = self.__class__
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
+        for key, value in self.__dict__.items():
+            if key == "_current_agent_name_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "praison_llm_current_agent_name", default=None
+                )
+            else:
+                clone.__dict__[key] = copy.deepcopy(value, memo)
+        return clone
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
