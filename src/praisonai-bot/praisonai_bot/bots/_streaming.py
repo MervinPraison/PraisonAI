@@ -49,6 +49,11 @@ _ACTIVITY_CATEGORY_HINTS: tuple = (
     ("mcp", ("mcp",)),
 )
 
+# Neutral line used when a curated catalogue is enabled but has no phrase for the
+# current category and no ``default``. Guarantees opting in can never fall back to
+# surfacing the raw tool name.
+_SAFE_ACTIVITY_FALLBACK = "Working on it…"
+
 
 def resolve_activity_category(tool_name: Optional[str]) -> str:
     """Map a tool name to a stable activity *category* for the phrase catalogue.
@@ -445,8 +450,10 @@ class DraftStreamer:
         if phrases:
             category = resolve_activity_category(tool_name)
             phrase = phrases.get(category) or phrases.get("default")
-            if phrase:
-                return f"{self._config.progress_prefix}{phrase}"
+            # Opting in must NEVER silently restore the raw tool name: when a
+            # partial catalogue lacks both the matched category and a ``default``
+            # phrase, fall back to a safe generic line rather than the tool name.
+            return f"{self._config.progress_prefix}{phrase or _SAFE_ACTIVITY_FALLBACK}"
         return f"{self._config.progress_prefix}Running {tool_name}..."
 
     def _render_content(self) -> Optional[str]:
@@ -459,7 +466,11 @@ class DraftStreamer:
         if self._config.mode == StreamingMode.DRAFT:
             content = buffer or self._config.placeholder_text
         elif self._config.mode == StreamingMode.PROGRESS:
-            if self._feed_style and self._progress_lines:
+            # When a curated catalogue is opted in, the raw feed (which folds tool
+            # names/summaries/output into its lines) must not be rendered — that
+            # would bypass the privacy-safe surface. Fall through to the curated
+            # single-line ``_activity_line`` instead so only phrases are shown.
+            if self._feed_style and self._progress_lines and not self._config.activity_phrases:
                 from praisonaiagents.streaming.progress import render_progress
 
                 content = render_progress(
