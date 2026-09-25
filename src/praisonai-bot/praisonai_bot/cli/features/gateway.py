@@ -109,7 +109,7 @@ _START_FLAG_KEYS = (
     "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
     "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
     "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
-    "watchdog", "watchdog_timeout",
+    "watchdog", "watchdog_timeout", "trusted_proxies",
 )
 
 
@@ -188,6 +188,7 @@ class GatewayHandler:
         drain_marker: Optional[str] = None,
         watchdog: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
+        trusted_proxies: Optional[list] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -269,6 +270,7 @@ class GatewayHandler:
             "drain_marker": drain_marker,
             "watchdog": watchdog,
             "watchdog_timeout": watchdog_timeout,
+            "trusted_proxies": trusted_proxies,
         }
 
         def _commit_start_flags() -> None:
@@ -303,6 +305,9 @@ class GatewayHandler:
                 self._gateway._queue_depth_override = queue_depth
             if overflow_policy is not None:
                 self._gateway._overflow_policy_override = overflow_policy
+            # CLI --trusted-proxy overrides gateway.trusted_proxies in YAML (#5312)
+            if trusted_proxies:
+                self._gateway._trusted_proxies_override = list(trusted_proxies)
             # CLI --reliability preset overrides gateway.reliability in YAML (#2531)
             if reliability is not None:
                 self._gateway._reliability_override = reliability
@@ -378,6 +383,12 @@ class GatewayHandler:
 
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
+        # CLI --trusted-proxy applies in no-config mode too (#5312): stamp it on
+        # the config directly since start_with_config's YAML wiring is skipped.
+        if trusted_proxies:
+            config.trusted_proxies = [
+                str(p).strip() for p in trusted_proxies if str(p).strip()
+            ]
         self._gateway = WebSocketGateway(
             config=config, openai_api=openai_api, mcp=mcp
         )

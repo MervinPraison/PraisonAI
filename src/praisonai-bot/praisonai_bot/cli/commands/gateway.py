@@ -5,7 +5,7 @@ Provides commands for managing the WebSocket gateway with multi-bot support.
 """
 
 import sys
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
@@ -221,6 +221,13 @@ def gateway_start(
         help="Seconds the event loop may stall before the watchdog trips a "
         "restart (default ~15s = 5s x 3 strikes; #3410)",
     ),
+    trusted_proxy: Optional[List[str]] = typer.Option(
+        None, "--trusted-proxy",
+        help="CIDR/IP of an upstream proxy or tunnel to trust for real-client-IP "
+        "resolution (repeatable, e.g. --trusted-proxy 10.0.0.0/8). Behind a "
+        "reverse proxy this keeps per-IP rate-limits and the operator id keyed "
+        "on the real client; unattributable proxies fail closed (#5312)",
+    ),
 ):
     """Start the gateway server.
 
@@ -409,6 +416,7 @@ def gateway_start(
         drain_marker=drain_marker,
         watchdog=True if watchdog else None,
         watchdog_timeout=watchdog_timeout,
+        trusted_proxies=list(trusted_proxy) if trusted_proxy else None,
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 

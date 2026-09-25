@@ -2556,6 +2556,193 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
 
 
 # ---------------------------------------------------------------------------
+# Ingress attribution / trusted-proxy real-client-IP resolution (Issue #5312)
+# ---------------------------------------------------------------------------
+#
+# The gateway keys rate-limiting, the pre-auth connection budget, and the
+# operator identity on the *raw socket peer*. Behind a reverse proxy or tunnel
+# (nginx, Caddy, Traefik, a cloud LB, Cloudflare, Tailscale Serve/Funnel) that
+# peer is the *proxy* for every request, so every per-IP bucket collapses to
+# one and the operator id becomes identical for all callers. Trusting
+# ``X-Forwarded-For`` unconditionally is worse — a directly-reachable gateway
+# would accept a spoofed client IP any attacker can set.
+#
+# This pure, import-free contract resolves the real client address *only* by
+# walking the forwarded chain across hops the operator has explicitly declared
+# trusted, and **fails closed** for anything proxy-shaped but unattributable
+# (rate-limited as one bucket keyed on the socket peer; never trusts a header).
+# It lives in core so every seam consults one unit-testable decision, exactly
+# like the sibling ``resolve_route`` / ``evaluate_pressure`` contracts.
+
+IngressTrust = Literal[
+    "direct-local",
+    "direct-remote",
+    "trusted-proxy",
+    "tunnel",
+    "unattributable-proxy",
+]
+"""Classification of where an inbound request actually came from.
+
+- ``direct-local``: loopback peer, no proxy headers (local CLI / same host).
+- ``direct-remote``: a remote peer talking to us directly, no proxy headers.
+- ``trusted-proxy``: arrived via one or more hops all in ``trusted_proxies``;
+  the real client IP was resolved from the forwarded chain.
+- ``tunnel``: a trusted loopback/private tunnel hop (e.g. Tailscale/Cloudflare
+  sidecar on loopback) presented a forwarded client — resolved like a trusted
+  proxy.
+- ``unattributable-proxy``: proxy-shaped (forwarded headers present) but the
+  immediate hop is not declared trusted — fails closed, header not trusted.
+"""
+
+
+@dataclass(frozen=True)
+class IngressAttribution:
+    """Resolved answer to "who/where is this request from", consulted before
+    any per-IP policy.
+
+    Attributes:
+        trust: The :data:`IngressTrust` classification.
+        client_ip: The subject to key per-IP policy on. The *real* client only
+            when it was resolved across trusted hops; otherwise the raw socket
+            peer (never a spoofable header value).
+        via_proxy: Whether forwarded headers were present at all.
+        fail_closed: True when the request was proxy-shaped but unattributable —
+            the caller must rate-limit it as a single bucket keyed on the socket
+            peer and must never trust a client IP from a header.
+    """
+
+    trust: IngressTrust
+    client_ip: str
+    via_proxy: bool
+    fail_closed: bool
+
+
+def parse_forwarded_for(header: Optional[str]) -> "List[str]":
+    """Parse an ``X-Forwarded-For`` header into an ordered list of hops.
+
+    The chain is left→right, client-first: ``client, proxy1, proxy2``. Empty
+    tokens and surrounding whitespace are dropped; ``None``/empty yields an
+    empty list. Pure string handling — no name resolution, no validation of
+    whether each token is a real IP (that is the caller's trust decision).
+    """
+    if not header:
+        return []
+    return [tok.strip() for tok in header.split(",") if tok.strip()]
+
+
+def _is_trusted_hop(host: str, trusted_proxies: "Sequence[str]") -> bool:
+    """Return whether ``host`` is a member of the declared trusted set.
+
+    A trusted entry may be a bare IP or a CIDR (``10.0.0.0/8``). Loopback is
+    *not* implicitly trusted here — the caller decides how to treat a loopback
+    tunnel — so this stays a pure membership test.
+    """
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    for entry in trusted_proxies:
+        entry = str(entry).strip()
+        if not entry:
+            continue
+        try:
+            if "/" in entry:
+                if ip in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def resolve_ingress_attribution(
+    *,
+    peer_ip: str,
+    forwarded_for: "Sequence[str]" = (),
+    real_ip: Optional[str] = None,
+    trusted_proxies: "Sequence[str]" = (),
+) -> IngressAttribution:
+    """Resolve the real client attribution for an inbound request.
+
+    Pure and side-effect-free so it is unit-testable in isolation and every
+    seam (rate limiters, connection budget, operator id) consults the same
+    decision.
+
+    Args:
+        peer_ip: Raw socket peer (``request.client.host``).
+        forwarded_for: Parsed ``X-Forwarded-For`` chain, left→right
+            (client-first). See :func:`parse_forwarded_for`.
+        real_ip: Optional ``X-Real-IP`` value (used only when there is no
+            forwarded chain and the immediate hop is trusted).
+        trusted_proxies: CIDRs/IPs the operator declares trusted.
+
+    Returns:
+        An :class:`IngressAttribution`. The real client IP is resolved *only*
+        across hops in ``trusted_proxies``; anything proxy-shaped but
+        unattributable fails closed to the socket peer.
+
+    Resolution rules:
+        * No proxy headers → ``direct-local`` (loopback peer) or
+          ``direct-remote``; ``client_ip`` is the peer, never fail-closed.
+        * Proxy headers present but the socket peer is not a trusted hop →
+          ``unattributable-proxy``, ``fail_closed=True``, ``client_ip`` = peer
+          (a spoofable header is never trusted on a directly-reachable
+          gateway).
+        * Socket peer is a trusted hop → walk the forwarded chain right→left,
+          peeling trusted hops, and stop at the first untrusted address: that
+          address is the real client. If the chain is empty, fall back to
+          ``real_ip`` then the peer. A loopback trusted hop is classified
+          ``tunnel``; otherwise ``trusted-proxy``.
+    """
+    has_headers = bool(forwarded_for) or bool(real_ip)
+
+    # No forwarded headers at all — attribute straight to the socket peer.
+    if not has_headers:
+        trust: IngressTrust = "direct-local" if is_loopback(peer_ip) else "direct-remote"
+        return IngressAttribution(
+            trust=trust,
+            client_ip=peer_ip,
+            via_proxy=False,
+            fail_closed=False,
+        )
+
+    # Proxy-shaped. The immediate hop (socket peer) must itself be trusted for
+    # any header to be believed; otherwise fail closed to the socket peer.
+    if not _is_trusted_hop(peer_ip, trusted_proxies):
+        return IngressAttribution(
+            trust="unattributable-proxy",
+            client_ip=peer_ip,
+            via_proxy=True,
+            fail_closed=True,
+        )
+
+    # Trusted immediate hop. Walk the forwarded chain right→left, peeling hops
+    # that are themselves trusted; the first untrusted address is the real
+    # client. Stop as soon as we hit it so a client-supplied spoofed prefix
+    # cannot be peeled past.
+    client_ip = None
+    for hop in reversed(list(forwarded_for)):
+        if _is_trusted_hop(hop, trusted_proxies):
+            continue
+        client_ip = hop
+        break
+    if client_ip is None:
+        # Entire chain was trusted (or empty). Prefer X-Real-IP, then peer.
+        client_ip = (real_ip.strip() if real_ip else None) or peer_ip
+
+    trust = "tunnel" if is_loopback(peer_ip) else "trusted-proxy"
+    return IngressAttribution(
+        trust=trust,
+        client_ip=client_ip,
+        via_proxy=True,
+        fail_closed=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Weak / placeholder secret guard (Issue #3259)
 # ---------------------------------------------------------------------------
 
