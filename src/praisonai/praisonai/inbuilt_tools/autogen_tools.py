@@ -1,8 +1,9 @@
 # praisonai/inbuilt_tools/autogen_tools.py
 
 # Try to import praisonai_tools, but don't fail if not available.
-# This presence probe feeds `inbuilt_tools/__init__.py`'s PRAISONAI_TOOLS_AVAILABLE
-# accessor and the release `from praisonai.inbuilt_tools import *` smoke test.
+# Presence probe only: this keeps the release `from praisonai.inbuilt_tools import *`
+# smoke test working. The PRAISONAI_TOOLS_AVAILABLE accessor no longer depends on
+# this import — it delegates to `_framework_availability.is_available`.
 try:
     from praisonai_tools import (  # noqa: F401 — presence probe only
         CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
