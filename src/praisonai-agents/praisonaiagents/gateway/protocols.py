@@ -2630,6 +2630,25 @@ def parse_forwarded_for(header: Optional[str]) -> "List[str]":
     return [tok.strip() for tok in header.split(",") if tok.strip()]
 
 
+def _is_valid_ip(host: Optional[str]) -> bool:
+    """Return whether ``host`` parses as a literal IPv4/IPv6 address.
+
+    Forwarded-header tokens are attacker-influenced strings; a value such as
+    ``unknown`` or an arbitrary label must never become a per-IP policy subject
+    (it would group unrelated callers or split one caller across buckets). The
+    caller uses this to fail closed to the socket peer for a non-IP hop.
+    """
+    if not host:
+        return False
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(str(host).strip())
+        return True
+    except ValueError:
+        return False
+
+
 def _is_trusted_hop(host: str, trusted_proxies: "Sequence[str]") -> bool:
     """Return whether ``host`` is a member of the declared trusted set.
 
@@ -2694,8 +2713,9 @@ def resolve_ingress_attribution(
         * Socket peer is a trusted hop → walk the forwarded chain right→left,
           peeling trusted hops, and stop at the first untrusted address: that
           address is the real client. If the chain is empty, fall back to
-          ``real_ip`` then the peer. A loopback trusted hop is classified
-          ``tunnel``; otherwise ``trusted-proxy``.
+          ``real_ip`` then the peer. The resolved client must be a literal IP —
+          a malformed/non-IP hop fails closed to the peer. A loopback trusted
+          hop is classified ``tunnel``; otherwise ``trusted-proxy``.
     """
     has_headers = bool(forwarded_for) or bool(real_ip)
 
@@ -2732,6 +2752,18 @@ def resolve_ingress_attribution(
     if client_ip is None:
         # Entire chain was trusted (or empty). Prefer X-Real-IP, then peer.
         client_ip = (real_ip.strip() if real_ip else None) or peer_ip
+
+    # The resolved client must be a literal IP before it keys per-IP policy. A
+    # malformed hop (e.g. ``unknown`` or an arbitrary label injected upstream)
+    # would otherwise group unrelated callers or split one caller across
+    # buckets — fail closed to the socket peer instead (Greptile P2).
+    if not _is_valid_ip(client_ip):
+        return IngressAttribution(
+            trust="unattributable-proxy",
+            client_ip=peer_ip,
+            via_proxy=True,
+            fail_closed=True,
+        )
 
     trust = "tunnel" if is_loopback(peer_ip) else "trusted-proxy"
     return IngressAttribution(

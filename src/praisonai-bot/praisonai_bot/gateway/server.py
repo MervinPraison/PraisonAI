@@ -1520,15 +1520,29 @@ class WebSocketGateway:
             configured, this returns the raw socket peer — today's behaviour.
             """
             peer = peer_ip or "unknown"
-            trusted = list(getattr(self.config, "trusted_proxies", None) or [])
-            if not trusted:
-                # Multi-bot mode keeps YAML gateway.* in ``_loaded_config``, not
-                # on the sparse ``self.config``; consult it as a fallback.
+            # Precedence (highest first) so a live config reload is honoured
+            # and a removed proxy stops being trusted without a restart (#5312):
+            #   1. CLI ``--trusted-proxy`` override — operator-pinned, wins always.
+            #   2. Live YAML ``gateway.trusted_proxies`` from ``_loaded_config`` —
+            #      re-read every request so reload adds/removals take effect.
+            #   3. ``self.config.trusted_proxies`` — the Python/no-config value.
+            override = getattr(self, "_trusted_proxies_override", None)
+            trusted: list = []
+            if override:
+                trusted = [str(p).strip() for p in override if str(p).strip()]
+            else:
                 loaded = getattr(self, "_loaded_config", None) or {}
                 gw = loaded.get("gateway", {}) if isinstance(loaded, dict) else {}
-                raw = gw.get("trusted_proxies") if isinstance(gw, dict) else None
-                if isinstance(raw, (list, tuple)):
-                    trusted = [str(p).strip() for p in raw if str(p).strip()]
+                if isinstance(gw, dict) and "trusted_proxies" in gw:
+                    raw = gw.get("trusted_proxies")
+                    if isinstance(raw, (list, tuple)):
+                        trusted = [str(p).strip() for p in raw if str(p).strip()]
+                else:
+                    trusted = [
+                        str(p).strip()
+                        for p in (getattr(self.config, "trusted_proxies", None) or [])
+                        if str(p).strip()
+                    ]
             if resolve_ingress_attribution is None or not trusted:
                 return peer
             attr = resolve_ingress_attribution(
@@ -10454,22 +10468,27 @@ class WebSocketGateway:
             self._port = int(gw_cfg["port"])
         # Issue #5312: resolve the operator-declared trusted-proxy set. CLI
         # ``--trusted-proxy`` (``_trusted_proxies_override``) wins over the YAML
-        # ``gateway.trusted_proxies``. Stamp it onto ``self.config`` so the
-        # ingress-attribution seam reads it uniformly in both modes.
+        # ``gateway.trusted_proxies``. Stamp the resolved set onto ``self.config``
+        # so the ingress-attribution seam reads it uniformly. Only overwrite when
+        # a source actually supplies one — YAML that *omits* ``trusted_proxies``
+        # must not wipe a value a Python caller set on ``GatewayConfig`` before
+        # ``start_with_config`` (Greptile P1).
         _tp_override = getattr(self, "_trusted_proxies_override", None)
+        _trusted = None
         if _tp_override:
             _trusted = [str(p).strip() for p in _tp_override if str(p).strip()]
-        else:
+        elif "trusted_proxies" in gw_cfg:
             _raw_tp = gw_cfg.get("trusted_proxies")
             _trusted = (
                 [str(p).strip() for p in _raw_tp if str(p).strip()]
                 if isinstance(_raw_tp, (list, tuple))
                 else []
             )
-        try:
-            self.config.trusted_proxies = _trusted
-        except Exception:  # pragma: no cover - config is always a GatewayConfig
-            pass
+        if _trusted is not None:
+            try:
+                self.config.trusted_proxies = _trusted
+            except Exception:  # pragma: no cover - config is always a GatewayConfig
+                pass
         # Issue #3593: the multi-bot CLI builds this gateway with a *default*
         # session config, so ``__init__`` already picked a store before this
         # YAML loaded. Re-read the ``session:`` block here and re-select the

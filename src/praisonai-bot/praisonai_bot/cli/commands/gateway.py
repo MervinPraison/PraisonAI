@@ -416,7 +416,11 @@ def gateway_start(
         drain_marker=drain_marker,
         watchdog=True if watchdog else None,
         watchdog_timeout=watchdog_timeout,
-        trusted_proxies=list(trusted_proxy) if trusted_proxy else None,
+        trusted_proxies=(
+            list(trusted_proxy)
+            if isinstance(trusted_proxy, (list, tuple))
+            else None
+        ),
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 

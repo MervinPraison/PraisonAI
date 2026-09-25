@@ -156,3 +156,39 @@ def test_real_ip_only_untrusted_peer_fails_closed():
     )
     assert attr.fail_closed is True
     assert attr.client_ip == "203.0.113.9"
+
+
+def test_malformed_client_hop_fails_closed():
+    # A trusted proxy forwards a non-IP token (e.g. "unknown" or an injected
+    # label). It must NOT become the per-IP subject — fail closed to the peer.
+    attr = resolve_ingress_attribution(
+        peer_ip="10.0.0.5",
+        forwarded_for=["unknown", "10.0.0.5"],
+        trusted_proxies=["10.0.0.0/8"],
+    )
+    assert attr.trust == "unattributable-proxy"
+    assert attr.fail_closed is True
+    assert attr.client_ip == "10.0.0.5"
+
+
+def test_malformed_real_ip_fallback_fails_closed():
+    # Chain entirely trusted; a garbage X-Real-IP must not key policy.
+    attr = resolve_ingress_attribution(
+        peer_ip="10.0.0.5",
+        forwarded_for=["10.0.0.6", "10.0.0.5"],
+        real_ip="not-an-ip",
+        trusted_proxies=["10.0.0.0/8"],
+    )
+    assert attr.fail_closed is True
+    assert attr.client_ip == "10.0.0.5"
+
+
+def test_ipv6_client_hop_is_valid():
+    attr = resolve_ingress_attribution(
+        peer_ip="10.0.0.5",
+        forwarded_for=["2001:db8::1", "10.0.0.5"],
+        trusted_proxies=["10.0.0.0/8"],
+    )
+    assert attr.trust == "trusted-proxy"
+    assert attr.client_ip == "2001:db8::1"
+    assert attr.fail_closed is False
