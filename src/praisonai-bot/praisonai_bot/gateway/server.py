@@ -49,6 +49,15 @@ from praisonaiagents.gateway.protocols import (
     evaluate_pressure,
 )
 
+try:  # Trusted-proxy ingress attribution (Issue #5312); optional at import time.
+    from praisonaiagents.gateway.protocols import (
+        resolve_ingress_attribution,
+        parse_forwarded_for,
+    )
+except ImportError:  # pragma: no cover - core predates ingress attribution
+    resolve_ingress_attribution = None  # type: ignore[assignment]
+    parse_forwarded_for = None  # type: ignore[assignment]
+
 try:  # Central registry-driven authorization guard (Issue #5166).
     from praisonaiagents.gateway.protocols import (
         authorize_method,
@@ -1498,6 +1507,56 @@ class WebSocketGateway:
                 status_code=403,
             )
 
+        def _client_subject(peer_ip, headers) -> str:
+            """Resolve the per-IP policy subject for an inbound request.
+
+            Consults the pure core ``resolve_ingress_attribution`` contract
+            (Issue #5312) so rate-limiting, the pre-auth budget, and the
+            operator id all key on the *real* client behind a declared trusted
+            proxy — and fail closed (one bucket keyed on the socket peer, never
+            a spoofable header) for anything proxy-shaped but unattributable.
+
+            When core predates the contract, or no ``trusted_proxies`` are
+            configured, this returns the raw socket peer — today's behaviour.
+            """
+            peer = peer_ip or "unknown"
+            # Precedence (highest first) so a live config reload is honoured
+            # and a removed proxy stops being trusted without a restart (#5312):
+            #   1. CLI ``--trusted-proxy`` override — operator-pinned, wins always.
+            #   2. Live YAML ``gateway.trusted_proxies`` from ``_loaded_config`` —
+            #      re-read every request so reload adds/removals take effect.
+            #   3. ``self.config.trusted_proxies`` — the Python/no-config value.
+            override = getattr(self, "_trusted_proxies_override", None)
+            trusted: list = []
+            if override:
+                trusted = [str(p).strip() for p in override if str(p).strip()]
+            else:
+                loaded = getattr(self, "_loaded_config", None) or {}
+                gw = loaded.get("gateway", {}) if isinstance(loaded, dict) else {}
+                if isinstance(gw, dict) and "trusted_proxies" in gw:
+                    raw = gw.get("trusted_proxies")
+                    if isinstance(raw, (list, tuple)):
+                        trusted = [str(p).strip() for p in raw if str(p).strip()]
+                else:
+                    trusted = [
+                        str(p).strip()
+                        for p in (getattr(self.config, "trusted_proxies", None) or [])
+                        if str(p).strip()
+                    ]
+            if resolve_ingress_attribution is None or not trusted:
+                return peer
+            attr = resolve_ingress_attribution(
+                peer_ip=peer,
+                forwarded_for=parse_forwarded_for(
+                    headers.get("x-forwarded-for")
+                ),
+                real_ip=headers.get("x-real-ip"),
+                trusted_proxies=trusted,
+            )
+            if attr.fail_closed:
+                return f"proxy:{peer}"
+            return attr.client_ip
+
         def _resolve_operator_identity(request) -> str:
             """Derive a stable, non-secret operator identity for the audit trail.
 
@@ -1525,7 +1584,10 @@ class WebSocketGateway:
                 digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
                 return f"operator:{digest}"
             client_ip = request.client.host if request.client else None
-            return f"operator:{client_ip}" if client_ip else "gateway"
+            if not client_ip:
+                return "gateway"
+            subject = _client_subject(client_ip, request.headers)
+            return f"operator:{subject}"
 
         async def info(request):
             auth_err = _check_auth(request)
@@ -1569,11 +1631,16 @@ class WebSocketGateway:
                 )
 
         async def websocket_endpoint(websocket: WebSocket):
-            # Get client IP for rate limiting
-            client_ip = websocket.client.host if websocket.client else "unknown"
+            # Raw socket peer: used for the loopback exemption decision (a
+            # trusted proxy hop is not loopback) and as the fail-closed bucket.
+            peer_ip = websocket.client.host if websocket.client else "unknown"
+            # Resolve the real client behind a declared trusted proxy so per-IP
+            # rate-limit/budget buckets are not collapsed onto the proxy peer
+            # (Issue #5312). Falls back to the peer when no proxy is trusted.
+            client_ip = _client_subject(peer_ip, websocket.headers)
 
             # Rate limiting for WebSocket upgrades (exempt loopback per acceptance criteria)
-            if not is_loopback(client_ip) and not is_loopback(self._host):
+            if not is_loopback(peer_ip) and not is_loopback(self._host):
                 if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
                     retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
                     await _reject_connection(
@@ -1594,7 +1661,7 @@ class WebSocketGateway:
             # once so a hostile client cannot park many half-open connections up
             # to max_connections. Loopback is exempt so local CLIs are never
             # locked out. The slot is released on auth-success or on close.
-            _ip_is_loopback = is_loopback(client_ip) or is_loopback(self._host)
+            _ip_is_loopback = is_loopback(peer_ip) or is_loopback(self._host)
             _released = {"done": False}
 
             def _release_budget():
@@ -1805,7 +1872,8 @@ class WebSocketGateway:
             if auth_err:
                 return auth_err
 
-            client_ip = request.client.host if request.client else "unknown"
+            peer_ip = request.client.host if request.client else "unknown"
+            client_ip = _client_subject(peer_ip, request.headers)
             if not _approval_rate.allow("approval_pending", client_ip):
                 retry = _approval_rate.time_until_allowed("approval_pending", client_ip)
                 return JSONResponse(
@@ -1831,7 +1899,8 @@ class WebSocketGateway:
             if scope_err:
                 return scope_err
 
-            client_ip = request.client.host if request.client else "unknown"
+            peer_ip = request.client.host if request.client else "unknown"
+            client_ip = _client_subject(peer_ip, request.headers)
             if not _approval_rate.allow("approval_resolve", client_ip):
                 retry = _approval_rate.time_until_allowed("approval_resolve", client_ip)
                 return JSONResponse(
@@ -1908,7 +1977,8 @@ class WebSocketGateway:
             if scope_err:
                 return scope_err
 
-            client_ip = request.client.host if request.client else "unknown"
+            peer_ip = request.client.host if request.client else "unknown"
+            client_ip = _client_subject(peer_ip, request.headers)
             if not _approval_rate.allow("approval_allowlist", client_ip):
                 retry = _approval_rate.time_until_allowed("approval_allowlist", client_ip)
                 return JSONResponse(
@@ -10396,6 +10466,29 @@ class WebSocketGateway:
             self._host = gw_cfg["host"]
         if gw_cfg.get("port"):
             self._port = int(gw_cfg["port"])
+        # Issue #5312: resolve the operator-declared trusted-proxy set. CLI
+        # ``--trusted-proxy`` (``_trusted_proxies_override``) wins over the YAML
+        # ``gateway.trusted_proxies``. Stamp the resolved set onto ``self.config``
+        # so the ingress-attribution seam reads it uniformly. Only overwrite when
+        # a source actually supplies one — YAML that *omits* ``trusted_proxies``
+        # must not wipe a value a Python caller set on ``GatewayConfig`` before
+        # ``start_with_config`` (Greptile P1).
+        _tp_override = getattr(self, "_trusted_proxies_override", None)
+        _trusted = None
+        if _tp_override:
+            _trusted = [str(p).strip() for p in _tp_override if str(p).strip()]
+        elif "trusted_proxies" in gw_cfg:
+            _raw_tp = gw_cfg.get("trusted_proxies")
+            _trusted = (
+                [str(p).strip() for p in _raw_tp if str(p).strip()]
+                if isinstance(_raw_tp, (list, tuple))
+                else []
+            )
+        if _trusted is not None:
+            try:
+                self.config.trusted_proxies = _trusted
+            except Exception:  # pragma: no cover - config is always a GatewayConfig
+                pass
         # Issue #3593: the multi-bot CLI builds this gateway with a *default*
         # session config, so ``__init__`` already picked a store before this
         # YAML loaded. Re-read the ``session:`` block here and re-select the

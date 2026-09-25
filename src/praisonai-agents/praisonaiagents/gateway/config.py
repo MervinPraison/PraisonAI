@@ -965,6 +965,13 @@ class GatewayConfig:
     host: str = "127.0.0.1"
     port: int = 8765
     bind_host: Optional[str] = None
+    # Issue #5312: CIDRs/IPs of upstream proxies/tunnels the operator declares
+    # trusted. Empty (default) means the gateway is directly exposed: forwarded
+    # headers are never believed and per-IP policy keys on the socket peer.
+    # When set, the real client IP is resolved by walking the forwarded chain
+    # across trusted hops (see ``resolve_ingress_attribution``); anything
+    # proxy-shaped but unattributable fails closed to the socket peer.
+    trusted_proxies: List[str] = field(default_factory=list)
     cors_origins: List[str] = field(default_factory=lambda: [])
     allowed_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
@@ -1139,6 +1146,7 @@ class GatewayConfig:
         return {
             "host": self.host,
             "port": self.port,
+            "trusted_proxies": list(self.trusted_proxies),
             "cors_origins": self.cors_origins,
             "allowed_origins": self.allowed_origins,
             "auth_token": "***" if self.auth_token else None,
@@ -1333,9 +1341,17 @@ class MultiChannelGatewayConfig:
                 for tok, scopes in gw_data["auth_scopes"].items()
             }
 
+        raw_trusted = gw_data.get("trusted_proxies", [])
+        trusted_proxies = (
+            [str(p).strip() for p in raw_trusted if str(p).strip()]
+            if isinstance(raw_trusted, (list, tuple))
+            else []
+        )
+
         gateway_config = GatewayConfig(
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
+            trusted_proxies=trusted_proxies,
             cors_origins=gw_data.get("cors_origins", []),
             allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),

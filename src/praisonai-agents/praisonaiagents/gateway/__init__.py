@@ -45,6 +45,11 @@ _LAZY_IMPORTS = {
     # Saturation / back-pressure observability (Issue #4265)
     "HealthPressure": ("praisonaiagents.gateway.protocols", "HealthPressure"),
     "evaluate_pressure": ("praisonaiagents.gateway.protocols", "evaluate_pressure"),
+    # Trusted-proxy ingress attribution (Issue #5312)
+    "IngressTrust": ("praisonaiagents.gateway.protocols", "IngressTrust"),
+    "IngressAttribution": ("praisonaiagents.gateway.protocols", "IngressAttribution"),
+    "resolve_ingress_attribution": ("praisonaiagents.gateway.protocols", "resolve_ingress_attribution"),
+    "parse_forwarded_for": ("praisonaiagents.gateway.protocols", "parse_forwarded_for"),
     # Push protocols and dataclasses
     "PushChannelProtocol": ("praisonaiagents.gateway.protocols", "PushChannelProtocol"),
     "PresenceProtocol": ("praisonaiagents.gateway.protocols", "PresenceProtocol"),
@@ -382,6 +387,11 @@ __all__ = [
     "compute_config_revision",
     "HealthPressure",
     "evaluate_pressure",
+    # Trusted-proxy ingress attribution (Issue #5312)
+    "IngressTrust",
+    "IngressAttribution",
+    "resolve_ingress_attribution",
+    "parse_forwarded_for",
     # Push protocols (always available)
     "PushChannelProtocol",
     "PresenceProtocol",
