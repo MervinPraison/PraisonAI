@@ -1930,6 +1930,81 @@ Respond with ONLY a valid JSON tool call in this format:
             return self._is_ollama_provider() and iteration_count == 0
         return False
 
+    def _force_tool_usage_message(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> Optional[str]:
+        """Return the force-tool-usage nudge, or None when no nudge is due.
+
+        Shared by both the sync and async tool loops so a `force_tool_usage`
+        setting an agent accepted is honoured identically whether it calls or
+        awaits. Returns the user-message content string (containing the tool
+        names) when the model ignored the tools, else None.
+        """
+        if not self._should_force_tool_usage(response_text, tool_calls, formatted_tools, iteration_count):
+            return None
+        tool_names = self._get_tool_names_for_prompt(formatted_tools)
+        return self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
+
+    def _tool_repair_message(self, tool_calls: Optional[List], formatted_tools: Optional[List]) -> Optional[str]:
+        """Return a repair nudge for malformed tool calls, or None.
+
+        Charges the `max_tool_repairs` budget once per repair attempt (via
+        `_current_repair_count`). Returns None when the budget is spent or the
+        tool calls validate cleanly. Shared by the sync and async loops.
+        """
+        if not tool_calls or self.max_tool_repairs <= 0:
+            return None
+        repair_attempt_count = getattr(self, '_current_repair_count', 0)
+        if repair_attempt_count >= self.max_tool_repairs:
+            return None
+        validation_errors = []
+        for tc in tool_calls:
+            error = self._validate_tool_call(tc, formatted_tools)
+            if error:
+                validation_errors.append(error)
+        if not validation_errors:
+            return None
+        error_msg = "; ".join(validation_errors)
+        tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
+        self._current_repair_count = repair_attempt_count + 1
+        return self.TOOL_CALL_REPAIR_PROMPT.format(error=error_msg, tool_schemas=tool_schemas)
+
+    @staticmethod
+    def _param_accepts_string(tool_name: str, param: str, formatted_tools: Optional[List]) -> bool:
+        """True if the named parameter's declared schema accepts a string.
+
+        Used to narrow `tool_result_mapping` substitution: a declared string
+        parameter must keep the value the model sent, even when that value
+        happens to match a prior tool's name. Recognises plain `type`,
+        list-typed `type` unions, and `anyOf` unions. Never raises on a
+        malformed schema - an unreadable schema simply returns False.
+        """
+        try:
+            if not formatted_tools:
+                return False
+            for tool in formatted_tools:
+                if not isinstance(tool, dict):
+                    continue
+                func = tool.get('function')
+                if not isinstance(func, dict) or func.get('name') != tool_name:
+                    continue
+                props = func.get('parameters', {}).get('properties', {})
+                schema = props.get(param)
+                if not isinstance(schema, dict):
+                    return False
+                ptype = schema.get('type')
+                if ptype == 'string':
+                    return True
+                if isinstance(ptype, list) and 'string' in ptype:
+                    return True
+                any_of = schema.get('anyOf')
+                if isinstance(any_of, list):
+                    for member in any_of:
+                        if isinstance(member, dict) and member.get('type') == 'string':
+                            return True
+                return False
+            return False
+        except Exception:
+            return False
+
     def _validate_tool_call(self, tool_call: Dict, formatted_tools: Optional[List]) -> Optional[str]:
         """
         Validate a tool call against available tools.
@@ -3728,13 +3803,12 @@ Respond with ONLY a valid JSON tool call in this format:
                                 logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
                     
                     # Force tool usage logic: if model ignores tools but should use them
-                    if self._should_force_tool_usage(response_text, tool_calls, formatted_tools, iteration_count):
-                        tool_names = self._get_tool_names_for_prompt(formatted_tools)
-                        force_prompt = self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
-                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
+                    _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
+                    if _force is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
                         messages.append({
                             "role": "user",
-                            "content": force_prompt
+                            "content": _force
                         })
                         iteration_count += 1
                         continue
@@ -3749,32 +3823,16 @@ Respond with ONLY a valid JSON tool call in this format:
                         continue
                     
                     # Tool call repair logic: validate and repair malformed tool calls
-                    repair_attempt_count = getattr(self, '_current_repair_count', 0)
-                    if tool_calls and self.max_tool_repairs > 0 and repair_attempt_count < self.max_tool_repairs:
-                        # Validate each tool call
-                        validation_errors = []
-                        for tc in tool_calls:
-                            error = self._validate_tool_call(tc, formatted_tools)
-                            if error:
-                                validation_errors.append(error)
-                        
-                        if validation_errors:
-                            # Tool call is invalid, attempt repair
-                            error_msg = "; ".join(validation_errors)
-                            tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
-                            repair_prompt = self.TOOL_CALL_REPAIR_PROMPT.format(
-                                error=error_msg,
-                                tool_schemas=tool_schemas
-                            )
-                            logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
-                            messages.append({
-                                "role": "user",
-                                "content": repair_prompt
-                            })
-                            self._current_repair_count = repair_attempt_count + 1
-                            iteration_count += 1
-                            tool_calls = None  # Clear invalid tool calls
-                            continue
+                    _repair = self._tool_repair_message(tool_calls, formatted_tools)
+                    if _repair is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {self._current_repair_count}/{self.max_tool_repairs}")
+                        messages.append({
+                            "role": "user",
+                            "content": _repair
+                        })
+                        iteration_count += 1
+                        tool_calls = None  # Clear invalid tool calls
+                        continue
                     
                     # Reset repair count on successful tool call
                     self._current_repair_count = 0
@@ -4735,6 +4793,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             yield f"Task interrupted: {reason}"
                             return
                          
+                        # Trim the conversation before the follow-up request so
+                        # the stream loop bounds its context like the sync and
+                        # async loops do (each tool turn appends an assistant
+                        # message plus one tool reply per call).
+                        messages = self._manage_context_in_loop(messages)
+
                         # Continue conversation after tool execution - get follow-up response
                         try:
                             follow_up_response = self._completion_with_retry(
@@ -5485,6 +5549,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 task_id=task_id
                             )
                             interaction_displayed = True
+
+                    # Force tool usage / repair: applied AFTER both the streaming
+                    # and non-streaming branches converge so a streaming-with-tools
+                    # provider still honours the policy the sync path applies.
+                    _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
+                    if _force is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered (async). Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
+                        messages.append({
+                            "role": "user",
+                            "content": _force
+                        })
+                        iteration_count += 1
+                        continue
+
+                    _repair = self._tool_repair_message(tool_calls, formatted_tools)
+                    if _repair is not None:
+                        logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt (async) {self._current_repair_count}/{self.max_tool_repairs}")
+                        messages.append({
+                            "role": "user",
+                            "content": _repair
+                        })
+                        iteration_count += 1
+                        tool_calls = None  # Clear invalid tool calls
+                        continue
 
                 # For Ollama, if response is empty but we have tools, prompt for tool usage
                 if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
