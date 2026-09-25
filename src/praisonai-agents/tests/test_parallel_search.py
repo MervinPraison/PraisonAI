@@ -323,6 +323,71 @@ def test_parallel_uses_real_mcp_caller_and_preserves_request_headers(mcp_server,
     assert all(not snapshot["authorization_present"] for snapshot in mcp_server.header_snapshots)
 
 
+def test_parallel_bounded_mcp_client_routes_through_http_proxy(mcp_server, monkeypatch):
+    monkeypatch.setattr(web_search_module, "PARALLEL_SEARCH_MCP_URL", "http://parallel.invalid/mcp")
+    proxy_url = f"http://{mcp_server.server_address[0]}:{mcp_server.server_address[1]}"
+    monkeypatch.setenv("HTTP_PROXY", proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    monkeypatch.delenv("http_proxy", raising=False)
+    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+
+    result = web_search_module.search_web("proxy-routed search", providers="parallel", max_results=1)
+
+    assert result == [{
+        "title": "First result",
+        "url": "https://example.com/one",
+        "snippet": "Useful evidence from the first result.",
+        "provider": "parallel",
+    }]
+    assert len(mcp_server.tool_calls) == 1
+    assert mcp_server.tool_calls[0]["name"] == "web_search"
+
+
+def test_bounded_mcp_client_routes_https_through_environment_proxy(monkeypatch):
+    import asyncio
+    import httpx
+    from praisonaiagents.mcp.mcp_http_stream import _bounded_httpx_client_factory
+
+    class ConnectProxyHandler(BaseHTTPRequestHandler):
+        def do_CONNECT(self):
+            self.server.connect_requests.append(self.path)
+            self.send_response(200, "Connection Established")
+            self.end_headers()
+            self.close_connection = True
+
+        def log_message(self, format, *args):
+            return
+
+    proxy_server = ThreadingHTTPServer(("127.0.0.1", 0), ConnectProxyHandler)
+    proxy_server.daemon_threads = True
+    proxy_server.connect_requests = []
+    proxy_thread = Thread(target=proxy_server.serve_forever, daemon=True)
+    proxy_thread.start()
+    proxy_url = f"http://127.0.0.1:{proxy_server.server_address[1]}"
+    monkeypatch.setenv("HTTPS_PROXY", proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+    monkeypatch.delenv("all_proxy", raising=False)
+
+    async def request_through_proxy():
+        factory = _bounded_httpx_client_factory(512)
+        async with factory(timeout=httpx.Timeout(2)) as client:
+            with pytest.raises(httpx.TransportError):
+                await client.get("https://parallel.invalid/mcp")
+
+    try:
+        asyncio.run(request_through_proxy())
+    finally:
+        proxy_server.shutdown()
+        proxy_server.server_close()
+        proxy_thread.join(timeout=2)
+
+    assert proxy_server.connect_requests == ["parallel.invalid:443"]
+
+
 def test_parallel_uses_unknown_user_agent_when_distribution_metadata_is_missing(mcp_server, monkeypatch):
     metadata = importlib.import_module("importlib.metadata")
     installed_version = metadata.version

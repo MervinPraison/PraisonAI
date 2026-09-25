@@ -89,12 +89,9 @@ def _bounded_httpx_client_factory(max_response_bytes):
         async def aclose(self):
             await self.stream.aclose()
 
-    class BoundedTransport(httpx.AsyncBaseTransport):
-        def __init__(self):
-            self.transport = httpx.AsyncHTTPTransport(trust_env=True)
-
-        async def handle_async_request(self, request):
-            response = await self.transport.handle_async_request(request)
+    class BoundedClient(httpx.AsyncClient):
+        async def send(self, request, *, stream=False, **kwargs):
+            response = await super().send(request, stream=True, **kwargs)
             encoding = response.headers.get("content-encoding", "identity").lower()
             if encoding not in ("", "identity"):
                 await response.aclose()
@@ -107,25 +104,24 @@ def _bounded_httpx_client_factory(max_response_bytes):
             if content_length is not None and content_length > max_response_bytes:
                 await response.aclose()
                 raise ValueError(f"MCP response exceeded maximum of {max_response_bytes} bytes")
-            return httpx.Response(
-                status_code=response.status_code,
-                headers=response.headers,
-                stream=BoundedStream(response.stream),
-                extensions=response.extensions,
-                request=request,
-            )
-
-        async def aclose(self):
-            await self.transport.aclose()
+            response.stream = BoundedStream(response.stream)
+            if not stream:
+                try:
+                    await response.aread()
+                except BaseException:
+                    await response.aclose()
+                    raise
+                await response.aclose()
+            return response
 
     def create_client(headers=None, timeout=None, auth=None):
         request_headers = dict(headers or {})
         request_headers["Accept-Encoding"] = "identity"
-        return httpx.AsyncClient(
+        return BoundedClient(
             headers=request_headers,
             timeout=timeout,
             auth=auth,
-            transport=BoundedTransport(),
+            trust_env=True,
         )
 
     return create_client
