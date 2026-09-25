@@ -11,9 +11,8 @@ try:
         ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
         YoutubeChannelSearchTool, YoutubeVideoSearchTool
     )
-    TOOLS_AVAILABLE = True
 except ImportError:
-    TOOLS_AVAILABLE = False
+    pass
 
 # Legacy autogen_<Tool> wrappers and create_autogen_tool_function() removed:
 # their only consumer, ToolRegistry.register_builtin_autogen_adapters(), was
