@@ -12,6 +12,7 @@ from typing import Type, Optional
 import inspect
 import logging
 import threading
+import time
 
 from .base import FrameworkAdapter
 from .._registry import PluginRegistry
@@ -60,8 +61,14 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         # in tests), and protocol validation runs once per adapter class rather
         # than on every create()/run()/arun(). Both are guarded by a lock so
         # multi-tenant/threaded callers don't race.
-        self._avail_cache: dict[str, bool] = {}
+        # Value is (available, transient_ts): transient_ts is None for positive
+        # results and structural failures (cached for the process lifetime) and
+        # a monotonic timestamp for transient (ImportError) negatives, which
+        # expire after _avail_retry_cooldown so a mid-life `pip install` of an
+        # optional framework dep is picked up without a restart.
+        self._avail_cache: dict[str, tuple[bool, Optional[float]]] = {}
         self._avail_lock = threading.Lock()
+        self._avail_retry_cooldown: float = 30.0
         self._validated_classes: set[type] = set()
         # Capability probes (SUPPORTS_WORKFLOW / SUPPORTS_RUNTIME_FEATURES / ...)
         # are memoised PER REGISTRY, not process-globally: two registries can
@@ -247,24 +254,37 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         key = name.lower()
         with self._avail_lock:
             cached = self._avail_cache.get(key)
-        if cached is not None:
-            return cached
+            if cached is not None:
+                ok, ts = cached
+                # A cached negative caused by a *transient* failure (a missing
+                # optional dep the operator may `pip install` mid-life) expires
+                # after a cool-down so long-lived hosts (`praisonai serve`)
+                # recover without a restart. Positive results and structural
+                # negatives are memoised for the process lifetime.
+                if ok or ts is None or (time.monotonic() - ts) < self._avail_retry_cooldown:
+                    return ok
 
         try:
             adapter = self.create(name)
-            # ImportError covers ModuleNotFoundError raised when an adapter's
-            # constructor touches a missing optional dependency; treat the
-            # framework as simply unavailable rather than leaking a raw import
-            # error to callers (CLI validation, doctor checks, pick_default).
             ok = bool(adapter.is_available())
-        except (ValueError, TypeError, ImportError):
+            transient = False
+        except ImportError:
+            # A missing optional dependency is transient: the operator can
+            # install it after boot, so this negative expires after the
+            # cool-down instead of being memoised permanently.
             ok = False
+            transient = True
+        except (ValueError, TypeError):
+            # Structural failure (bad name / bad adapter shape): permanent.
+            ok = False
+            transient = False
         except Exception:
             logger.warning("is_available() raised for adapter %r", name, exc_info=True)
             ok = False
+            transient = False
 
         with self._avail_lock:
-            self._avail_cache[key] = ok
+            self._avail_cache[key] = (ok, time.monotonic() if transient else None)
         return ok
 
     def invalidate_availability(self, name: Optional[str] = None) -> None:
