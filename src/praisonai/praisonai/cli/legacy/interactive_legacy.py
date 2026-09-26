@@ -1613,18 +1613,20 @@ def _handle_tasks_command(self, console, args, session_state, runner=None):
     handler = BackgroundHandler(runner=runner)
     args = args.strip() if args else ""
 
+    from praisonai._async_bridge import run_cli_coro
+
     try:
         if not args:
-            asyncio.run(handler.list_tasks())
+            run_cli_coro(handler.list_tasks())
         elif args.lower().startswith("cancel"):
             parts = args.split(maxsplit=1)
             task_id = parts[1].strip() if len(parts) > 1 else ""
             if not task_id:
                 console.print("[yellow]Usage: /tasks cancel <id>[/yellow]")
                 return
-            asyncio.run(handler.cancel_task(task_id))
+            run_cli_coro(handler.cancel_task(task_id))
         else:
-            asyncio.run(handler.get_status(args))
+            run_cli_coro(handler.get_status(args))
     except Exception as e:
         console.print(f"[yellow]Error handling /tasks: {e}[/yellow]")
 

@@ -545,6 +545,15 @@ class AgentsGenerator:
             task_callback (callable, optional): A callback function to be executed after each tool run.
             tools (dict): A dictionary containing the tools to be used for the agents.
         """
+        # Wire the built-in readers/retrievers/rerankers into the core-SDK
+        # registries so YAML `retriever:` / `reader:` / `reranker:` declarations
+        # resolve identically on every launch path (CLI, serve, eval, Python).
+        # Single-sourced here so surfaces that construct AgentsGenerator directly
+        # (praisonai <file.yaml>, serve, eval) get the same wiring as run()/arun().
+        # Idempotent + thread-safe + register-only-if-absent; safe to call again.
+        from .adapters import register_default_adapters
+        register_default_adapters()
+
         self.agent_file = agent_file
         self.framework = framework
         self.config_list = config_list

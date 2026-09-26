@@ -109,7 +109,8 @@ class SandboxHandler:
             finally:
                 await sandbox.stop()
         
-        exit_code = asyncio.run(execute())
+        from praisonai._async_bridge import run_cli_coro
+        exit_code = run_cli_coro(execute())
         sys.exit(exit_code)
     
     def shell(
@@ -186,7 +187,8 @@ class SandboxHandler:
             finally:
                 await sandbox.stop()
         
-        asyncio.run(run_shell())
+        from praisonai._async_bridge import run_cli_coro
+        run_cli_coro(run_shell())
     
     def status(self) -> None:
         """Check sandbox backend availability."""

@@ -725,7 +725,8 @@ def _discover_instances(provider_filter: Optional[str] = None):
                 # Available but listing failed: real error, never hide it.
                 errors.append((name, str(e)))
 
-    asyncio.run(_collect())
+    from praisonai._async_bridge import run_cli_coro
+    run_cli_coro(_collect())
     return found, errors
 
 
@@ -836,10 +837,11 @@ def managed_stop(
         typer.echo("No running sandboxes.")
         return
 
+    from praisonai._async_bridge import run_cli_coro
     stopped, failed = 0, 0
     for name, info in rows:
         try:
-            asyncio.run(resolve_compute(name).shutdown(info.instance_id))
+            run_cli_coro(resolve_compute(name).shutdown(info.instance_id))
             typer.echo(f"Stopped {info.instance_id} ({name})")
             stopped += 1
         except Exception as e:
