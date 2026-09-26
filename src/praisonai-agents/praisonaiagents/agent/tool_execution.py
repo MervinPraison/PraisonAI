@@ -39,6 +39,57 @@ _MAX_ORPHANED_TOOL_EXECUTORS = 4
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 
+class _CallableGuardrailAdapter:
+    """Expose a plain callable guardrail as a chainable guardrail object.
+
+    A user ``guardrail`` may be a bare callable returning ``(bool, output)``
+    (the Agent's final-output contract). To let it run *inside* a
+    ``GuardrailChain`` alongside a plugin guardrail — so composing the two never
+    silently drops either — this wraps the callable with a ``validate_output``
+    (and passthrough ``validate_input``) the chain understands. Any
+    ``validate_tool_call`` / ``validate_tool_result`` the underlying object
+    already exposes is forwarded so tool-surface behaviour is preserved.
+    """
+
+    __slots__ = ("_fn",)
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def validate_output(self, content, **kwargs):
+        result = self._fn(content)
+        if isinstance(result, tuple) and len(result) == 2:
+            is_valid, processed = result
+            if is_valid:
+                # Normalise the passthrough value to a string so the chain can
+                # keep threading ``content`` through subsequent guardrails.
+                if isinstance(processed, str):
+                    return True, processed
+                return True, content
+            return False, processed if isinstance(processed, str) else str(processed)
+        # A callable that does not follow the (bool, output) contract is treated
+        # as a no-op passthrough rather than blocking.
+        return True, content
+
+    def validate_input(self, content, **kwargs):
+        inner = getattr(self._fn, "validate_input", None)
+        if callable(inner):
+            return inner(content, **kwargs)
+        return True, content
+
+    def validate_tool_call(self, tool_name, arguments, **kwargs):
+        inner = getattr(self._fn, "validate_tool_call", None)
+        if callable(inner):
+            return inner(tool_name, arguments, **kwargs)
+        return True, arguments
+
+    def validate_tool_result(self, tool_name, result, **kwargs):
+        inner = getattr(self._fn, "validate_tool_result", None)
+        if callable(inner):
+            return inner(tool_name, result, **kwargs)
+        return True, result
+
+
 def tool_arguments_parse_failed(arguments) -> bool:
     """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
     return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
@@ -660,12 +711,26 @@ class ToolExecutionMixin:
                             results.append(chain)
                         else:
                             self._tool_result_guardrails = [chain]
-                        # Also make the chain the Agent's output validator when
-                        # the user supplied none, so validate_output/input run
-                        # too (not just the tool surface).
-                        if getattr(self, "guardrail", None) is None:
+                        # Also make the chain participate in the Agent's
+                        # input/output validation (not just the tool surface).
+                        existing_fn = getattr(self, "_guardrail_fn", None)
+                        if existing_fn is None:
+                            # No user guardrail: the plugin chain becomes the
+                            # Agent's output/input validator directly.
                             self.guardrail = chain
                             self._guardrail_fn = chain
+                        elif existing_fn is not chain:
+                            # User already supplied a guardrail. Compose rather
+                            # than replace so BOTH run on the final response:
+                            # wrap the user's callable in an adapter exposing
+                            # validate_output/validate_input, then chain it with
+                            # the plugin chain. The user's guardrail runs first;
+                            # a plugin guardrail can no longer be silently
+                            # skipped just because a user guardrail exists.
+                            adapter = _CallableGuardrailAdapter(existing_fn)
+                            combined = GuardrailChain([adapter, chain])
+                            self.guardrail = combined
+                            self._guardrail_fn = combined
                 except Exception as exc:  # pragma: no cover - defensive boundary
                     logging.warning("Failed to wire plugin guardrails: %s", exc)
 
@@ -687,9 +752,35 @@ class ToolExecutionMixin:
                         self._policy = policy
                     add_policy = getattr(policy, "add_policy", None)
                     if callable(add_policy):
+                        # A user-supplied policy always wins: never let a plugin
+                        # rule silently replace an existing policy of the same
+                        # name (PolicyEngine.add_policy overwrites by name), which
+                        # could otherwise loosen a user-configured restriction.
+                        existing = set()
+                        get_policy = getattr(policy, "get_policy", None)
                         for rule in plugin_policies:
+                            rule_name = getattr(rule, "name", None)
+                            if rule_name is not None and callable(get_policy):
+                                try:
+                                    if get_policy(rule_name) is not None:
+                                        logging.warning(
+                                            "Skipping plugin policy %r: a policy "
+                                            "with that name already exists.",
+                                            rule_name,
+                                        )
+                                        continue
+                                except Exception:  # pragma: no cover
+                                    pass
+                            if rule_name is not None and rule_name in existing:
+                                logging.warning(
+                                    "Skipping duplicate plugin policy %r.",
+                                    rule_name,
+                                )
+                                continue
                             try:
                                 add_policy(rule)
+                                if rule_name is not None:
+                                    existing.add(rule_name)
                             except Exception as exc:  # pragma: no cover
                                 logging.warning(
                                     "Failed to add plugin policy %r: %s", rule, exc
@@ -710,6 +801,18 @@ class ToolExecutionMixin:
                 if not isinstance(current, list):
                     current = [current] if current else []
                 for skill in plugin_skills:
+                    # ``self._skills`` feeds ``SkillManager.add_skill(path)``,
+                    # which resolves each entry as a filesystem path. Only
+                    # string path selectors are loadable; a non-string (e.g. a
+                    # source object) would raise inside ``Path()``, so skip it
+                    # with a clear warning rather than corrupt discovery.
+                    if not isinstance(skill, str):
+                        logging.warning(
+                            "Skipping plugin skill %r: get_skills() must return "
+                            "filesystem path strings to skill directories.",
+                            skill,
+                        )
+                        continue
                     if skill not in current:
                         current.append(skill)
                 self._skills = current

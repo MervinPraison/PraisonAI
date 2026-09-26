@@ -285,13 +285,13 @@ class Plugin(ABC):
         return None
 
     def get_skills(self) -> List[Any]:
-        """Return skill sources/directories for a ``SKILL`` plugin.
+        """Return skill directory paths for a ``SKILL`` plugin.
 
-        Mirrors :meth:`get_tools`. Entries may be filesystem paths to skill
-        directories (each containing a ``SKILL.md``) or ``SkillSourceProtocol``
-        objects, which are registered with the Agent's ``SkillManager`` so an
-        installed plugin contributes real, discoverable skills. Empty by
-        default (opt-in).
+        Mirrors :meth:`get_tools`. Entries are filesystem path **strings** to
+        skill directories (each containing a ``SKILL.md``); they are handed to
+        the Agent's ``SkillManager`` so an installed plugin contributes real,
+        discoverable skills. Non-string entries are ignored (the manager loads
+        by path). Empty by default (opt-in).
         """
         return []
 

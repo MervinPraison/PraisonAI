@@ -1091,6 +1091,106 @@ class TestPluginTypedSubsystems:
             mgr.disable(name)
             mgr.unregister(name)
 
+    def test_plugin_policy_does_not_override_existing_named_policy(self):
+        """A later plugin policy must not replace an already-added same name."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents import Agent
+        from praisonaiagents.policy import Policy, PolicyRule
+        from praisonaiagents.policy.types import PolicyAction
+
+        first_rule = Policy(
+            name="shared",
+            rules=[PolicyRule(action=PolicyAction.DENY, resource="tool:x",
+                              reason="first-deny")],
+        )
+        second_rule = Policy(
+            name="shared",
+            rules=[PolicyRule(action=PolicyAction.ALLOW, resource="tool:x",
+                              reason="second-allow")],
+        )
+        # A single POLICY plugin returning two rules with the same name: the
+        # first must win so a later, looser rule can't silently replace it
+        # (PolicyEngine.add_policy overwrites by name).
+        plugin, name = self._make_plugin(
+            PluginType.POLICY, name="pol_override_test",
+            get_policies=lambda self: [first_rule, second_rule],
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+            kept = agent._policy.get_policy("shared")
+            assert kept is not None
+            # First DENY survives; the second ALLOW is skipped, not applied.
+            assert kept.rules[0].action == PolicyAction.DENY
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
+    def test_non_string_skill_entries_are_skipped(self):
+        """get_skills() entries that are not path strings are ignored safely."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents import Agent
+
+        class _NotAPath:
+            pass
+
+        plugin, name = self._make_plugin(
+            PluginType.SKILL, name="skill_badentry_test",
+            get_skills=lambda self: ["/tmp/valid_skill_dir", _NotAPath()],
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+            skills = agent._skills or []
+            assert "/tmp/valid_skill_dir" in skills
+            assert all(isinstance(s, str) for s in skills)
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
+    def test_user_and_plugin_guardrail_both_validate_output(self):
+        """A plugin guardrail composes with a user guardrail on the output path."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents import Agent
+
+        calls = {"user": 0, "plugin": 0}
+
+        def user_guardrail(content):
+            calls["user"] += 1
+            return True, content
+
+        class _PluginGuard:
+            def validate_output(self, content, **kw):
+                calls["plugin"] += 1
+                return True, content
+
+        plugin, name = self._make_plugin(
+            PluginType.GUARDRAIL, name="compose_guard_test",
+            as_guardrail=lambda self: _PluginGuard(),
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini",
+                          guardrails=user_guardrail)
+            ok, _out = agent._guardrail_fn.validate_output("hello")
+            assert ok is True
+            # Both the user's guardrail and the plugin guardrail ran — the
+            # plugin is no longer skipped just because a user guardrail exists.
+            assert calls["user"] == 1
+            assert calls["plugin"] == 1
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
