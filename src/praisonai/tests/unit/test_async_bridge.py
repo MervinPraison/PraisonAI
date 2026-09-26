@@ -64,6 +64,28 @@ class TestRunCliCoro(unittest.TestCase):
 
         self.assertEqual(run_sync(outer()), "raised")
 
+    def test_defaults_to_unbounded_timeout(self):
+        # CLI leaves replaced bare asyncio.run(...) (no whole-command deadline);
+        # a long-running interactive shell / standardise / background job must
+        # not be aborted by run_sync's 300s default. Assert the omitted timeout
+        # forwards None (unbounded), not the default.
+        import praisonai._async_bridge as bridge
+
+        captured = {}
+
+        def _fake_run_sync(coro, *, timeout):
+            captured["timeout"] = timeout
+            coro.close()
+            return "ok"
+
+        original = bridge.run_sync
+        bridge.run_sync = _fake_run_sync
+        try:
+            self.assertEqual(run_cli_coro(_coro(1)), "ok")
+        finally:
+            bridge.run_sync = original
+        self.assertIsNone(captured["timeout"])
+
 
 class TestRunSync(unittest.TestCase):
     def test_runs_coroutine_and_returns_result(self):
