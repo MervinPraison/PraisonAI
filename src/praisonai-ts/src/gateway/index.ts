@@ -244,6 +244,296 @@ export interface GatewaySessionProtocol {
 }
 
 // ============================================================================
+// Session Projection Reducer (Issue #5324)
+// ============================================================================
+
+/**
+ * Immutable view of a single agent run/turn within a session.
+ * Python parity: `RunView` in praisonaiagents/gateway/session_projection.py
+ */
+export interface RunView {
+  runId: string;
+  text: string;
+  done: boolean;
+  finalMessageId?: string;
+}
+
+/**
+ * A transcript entry tracked by the projection.
+ * Loosely mirrors Python's `GatewayMessage`.
+ */
+export interface ProjectionEntry {
+  messageId: string;
+  content: any;
+  senderId?: string;
+  requestId?: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Immutable, de-duplicated, bounded view of a session.
+ * Python parity: `SessionProjectionState`.
+ */
+export interface SessionProjectionState {
+  entries: ProjectionEntry[];
+  runs: Record<string, RunView>;
+  hasTransportGap: boolean;
+}
+
+/**
+ * A snapshot to seed the projection.
+ */
+export interface SessionSnapshot {
+  messages?: ProjectionEntry[];
+  entries?: ProjectionEntry[];
+  cursor?: number;
+  sequence?: number;
+}
+
+/**
+ * Normalize a raw transcript row (camelCase SDK shape or snake_case gateway
+ * wire shape) into a {@link ProjectionEntry}. Python gateway snapshots/events
+ * serialize `message_id`/`request_id`/`sender_id`, so the reducer accepts both
+ * conventions to stay in sync with the Python projection (Issue #5324).
+ */
+function normalizeEntry(raw: any): ProjectionEntry | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const messageId = raw.messageId ?? raw.message_id;
+  if (!messageId) {
+    return null;
+  }
+  const metadata = raw.metadata ?? {};
+  const requestId =
+    raw.requestId ??
+    raw.request_id ??
+    metadata.requestId ??
+    metadata.request_id;
+  return {
+    ...raw,
+    messageId,
+    content: raw.content,
+    senderId: raw.senderId ?? raw.sender_id,
+    requestId,
+    metadata,
+  };
+}
+
+const STREAM_DELTA_TYPES = new Set<string>([
+  GatewayEventType.TOKEN_STREAM,
+  'delta_text',
+]);
+
+const MESSAGE_TYPES = new Set<string>([
+  GatewayEventType.MESSAGE,
+  'message_persisted',
+]);
+
+/**
+ * Pure, dependency-free session-projection reducer.
+ *
+ * Folds an initial snapshot plus a stream of {@link GatewayEvent}s into a
+ * consistent, de-duplicated, memory-bounded view — so every gateway client
+ * stops re-implementing snapshot+event reconciliation, final-message
+ * de-duplication, optimistic echo reconciliation, gap healing and bounded
+ * retention.
+ *
+ * Python parity: `SessionProjection` in
+ * praisonaiagents/gateway/session_projection.py (Issue #5324).
+ */
+export class SessionProjection {
+  private readonly maxTrackedRuns: number;
+  private entries: ProjectionEntry[] = [];
+  private byMessageId: Map<string, number> = new Map();
+  private byRequestId: Map<string, number> = new Map();
+  private runs: Map<string, RunView> = new Map();
+  private expectedSequence: number | null = null;
+  private hasGap = false;
+
+  constructor(options: { maxTrackedRuns?: number } = {}) {
+    const max = options.maxTrackedRuns ?? 200;
+    if (max <= 0) {
+      throw new Error('maxTrackedRuns must be positive');
+    }
+    this.maxTrackedRuns = max;
+  }
+
+  get state(): SessionProjectionState {
+    return {
+      entries: [...this.entries],
+      runs: Object.fromEntries(this.runs),
+      hasTransportGap: this.hasGap,
+    };
+  }
+
+  applySnapshot(snapshot: SessionSnapshot): SessionProjectionState {
+    this.entries = [];
+    this.byMessageId = new Map();
+    this.byRequestId = new Map();
+    this.runs = new Map();
+    this.hasGap = false;
+    this.expectedSequence = null;
+
+    const rows = snapshot.messages ?? snapshot.entries ?? [];
+    for (const row of rows) {
+      const normalized = normalizeEntry(row);
+      if (normalized) {
+        this.upsertMessage(normalized, normalized.requestId);
+      }
+    }
+    const seq = snapshot.sequence ?? snapshot.cursor;
+    if (typeof seq === 'number') {
+      this.expectedSequence = seq + 1;
+    }
+    return this.state;
+  }
+
+  apply(event: GatewayEvent): SessionProjectionState {
+    this.trackSequence(event);
+    const etype = event.type;
+    if (STREAM_DELTA_TYPES.has(etype)) {
+      this.applyDelta(event);
+    } else if (etype === GatewayEventType.STREAM_END) {
+      this.applyStreamEnd(event);
+    } else if (MESSAGE_TYPES.has(etype)) {
+      this.applyMessage(event);
+    }
+    return this.state;
+  }
+
+  private trackSequence(event: GatewayEvent): void {
+    const seq = (event as any).sequence as number | undefined;
+    if (typeof seq !== 'number') {
+      return;
+    }
+    if (this.expectedSequence !== null && seq > this.expectedSequence) {
+      this.hasGap = true;
+    }
+    if (this.expectedSequence === null || seq >= this.expectedSequence) {
+      this.expectedSequence = seq + 1;
+    }
+  }
+
+  private applyMessage(event: GatewayEvent): void {
+    const data = event.data ?? {};
+    const raw = data.message ?? data;
+    const entry = normalizeEntry(raw);
+    if (!entry) {
+      return;
+    }
+    // A top-level requestId on the event envelope wins over the row's own.
+    const requestId =
+      data.requestId ?? data.request_id ?? entry.requestId;
+    entry.requestId = requestId;
+    this.upsertMessage(entry, requestId);
+  }
+
+  private upsertMessage(entry: ProjectionEntry, requestId?: string): void {
+    const existing = this.byMessageId.get(entry.messageId);
+    if (existing !== undefined) {
+      this.entries[existing] = entry;
+      this.reindex(existing, entry, requestId);
+      return;
+    }
+    if (requestId !== undefined) {
+      const echoed = this.byRequestId.get(requestId);
+      if (echoed !== undefined) {
+        const staleId = this.entries[echoed].messageId;
+        this.entries[echoed] = entry;
+        // Drop the echo's provisional messageId so a re-delivered echo cannot
+        // later overwrite the durable row via identity lookup.
+        if (staleId !== entry.messageId) {
+          this.byMessageId.delete(staleId);
+        }
+        this.reindex(echoed, entry, requestId);
+        return;
+      }
+    }
+    this.entries.push(entry);
+    const idx = this.entries.length - 1;
+    this.byMessageId.set(entry.messageId, idx);
+    if (requestId !== undefined) {
+      this.byRequestId.set(requestId, idx);
+    }
+  }
+
+  private reindex(idx: number, entry: ProjectionEntry, requestId?: string): void {
+    this.byMessageId.set(entry.messageId, idx);
+    if (requestId !== undefined) {
+      this.byRequestId.set(requestId, idx);
+    }
+  }
+
+  private runIdOf(event: GatewayEvent): string | undefined {
+    const data = event.data ?? {};
+    return (
+      data.runId ??
+      data.run_id ??
+      data.turnId ??
+      data.turn_id ??
+      data.messageId ??
+      data.message_id ??
+      data.responseId ??
+      data.response_id
+    );
+  }
+
+  private applyDelta(event: GatewayEvent): void {
+    const runId = this.runIdOf(event);
+    if (!runId) {
+      return;
+    }
+    const data = event.data ?? {};
+    const chunk: string =
+      data.delta ?? data.text ?? data.content ?? data.token ?? data.chunk ?? '';
+    const current = this.runs.get(runId);
+    const next: RunView = current
+      ? { ...current, text: current.text + chunk }
+      : { runId, text: chunk, done: false };
+    this.runs.delete(runId);
+    this.runs.set(runId, next);
+    this.evictRuns();
+  }
+
+  private applyStreamEnd(event: GatewayEvent): void {
+    const runId = this.runIdOf(event);
+    if (!runId) {
+      return;
+    }
+    const data = event.data ?? {};
+    const current = this.runs.get(runId) ?? { runId, text: '', done: false };
+    const finalId =
+      data.messageId ??
+      data.message_id ??
+      data.finalMessageId ??
+      data.final_message_id;
+    const next: RunView = {
+      ...current,
+      done: true,
+      finalMessageId: finalId ? String(finalId) : current.finalMessageId,
+    };
+    this.runs.delete(runId);
+    this.runs.set(runId, next);
+    this.evictRuns();
+  }
+
+  private evictRuns(): void {
+    if (this.runs.size <= this.maxTrackedRuns) {
+      return;
+    }
+    for (const [runId, view] of this.runs) {
+      if (this.runs.size <= this.maxTrackedRuns) {
+        break;
+      }
+      if (view.done) {
+        this.runs.delete(runId);
+      }
+    }
+  }
+}
+
+// ============================================================================
 // Provider Status
 // ============================================================================
 

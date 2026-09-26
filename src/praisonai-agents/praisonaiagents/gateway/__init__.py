@@ -31,6 +31,10 @@ _LAZY_IMPORTS = {
     "SessionVisibility": ("praisonaiagents.gateway.protocols", "SessionVisibility"),
     "SessionSharingRole": ("praisonaiagents.gateway.protocols", "SessionSharingRole"),
     "SessionObserverProtocol": ("praisonaiagents.gateway.protocols", "SessionObserverProtocol"),
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection": ("praisonaiagents.gateway.session_projection", "SessionProjection"),
+    "SessionProjectionState": ("praisonaiagents.gateway.session_projection", "SessionProjectionState"),
+    "RunView": ("praisonaiagents.gateway.session_projection", "RunView"),
     "GatewayCloseCode": ("praisonaiagents.gateway.protocols", "GatewayCloseCode"),
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor": ("praisonaiagents.gateway.protocols", "GatewayMethodDescriptor"),
@@ -369,6 +373,10 @@ __all__ = [
     "SessionVisibility",
     "SessionSharingRole",
     "SessionObserverProtocol",
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection",
+    "SessionProjectionState",
+    "RunView",
     "GatewayCloseCode",
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor",
