@@ -238,9 +238,15 @@ class ChromaKnowledgeAdapter:
         if run_id is not None:
             where_filter["run_id"] = run_id
         
-        # Merge with additional filters
+        # Merge with additional filters, but never let a caller-supplied filter
+        # overwrite the tenant-scope constraint: filters={"user_id": "bob"} must
+        # not widen an already-scoped query back onto another tenant's data
+        # (issue #5319).
         if filters:
-            where_filter.update(filters)
+            for key, value in filters.items():
+                if key in where_filter:
+                    continue
+                where_filter[key] = value
         
         # Search ChromaDB
         try:
@@ -542,8 +548,12 @@ class SQLiteKnowledgeAdapter:
         # instead of silently discarding the filters (issue #5319).
         if filters:
             for key, value in filters.items():
+                # Quote the key in the JSON path so a top-level metadata key that
+                # itself contains dots (e.g. "source.type") is matched literally
+                # instead of being interpreted as a nested path (issue #5319).
+                escaped_key = key.replace('"', '""')
                 sql += " AND json_extract(metadata, ?) = ?"
-                params.append(f"$.{key}")
+                params.append(f'$."{escaped_key}"')
                 params.append(value)
         
         sql += " LIMIT ?"

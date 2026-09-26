@@ -351,20 +351,26 @@ class MongoDBKnowledgeAdapter:
             logger.error(f"Failed to delete document {document_id}: {e}")
             return False
     
-    def get(self, item_id: str, **kwargs) -> Optional[Dict[str, Any]]:
-        """Get a specific document by ID from the knowledge store."""
+    def get(self, item_id: str, **kwargs):
+        """Get a specific document by ID from the knowledge store.
+
+        Returns a ``SearchResultItem`` (or ``None``) so the result shape matches
+        the shared KnowledgeStoreProtocol and the other adapters — a caller that
+        reads ``.text``/``.metadata`` or calls ``.to_dict()`` must not break when
+        it switches to the MongoDB backend (issue #5319).
+        """
+        from ..models import SearchResultItem
         try:
             from bson import ObjectId
             doc = self.collection.find_one({"_id": ObjectId(item_id)})
             if not doc:
                 return None
-            return {
-                "id": str(doc["_id"]),
-                "text": doc.get("content", ""),
-                "metadata": doc.get("metadata", {}),
-                "score": 1.0,
-                "timestamp": doc.get("timestamp"),
-            }
+            return SearchResultItem(
+                id=str(doc["_id"]),
+                text=doc.get("content", ""),
+                metadata=doc.get("metadata", {}) or {},
+                score=1.0,
+            )
         except Exception as e:
             logger.error(f"Failed to get document {item_id}: {e}")
             return None
@@ -377,12 +383,16 @@ class MongoDBKnowledgeAdapter:
         run_id: Optional[str] = None,
         limit: int = 100,
         **kwargs
-    ) -> List[Dict[str, Any]]:
+    ):
         """Get all documents matching the given scope.
+
+        Returns a ``SearchResult`` to match the shared KnowledgeStoreProtocol
+        and the other adapters.
 
         Raises:
             ScopeRequiredError: If no scope identifier is provided
         """
+        from ..models import SearchResult, SearchResultItem
         from ..protocols import require_scope
         require_scope(user_id, agent_id, run_id, "get_all", backend="mongodb")
         try:
@@ -393,22 +403,26 @@ class MongoDBKnowledgeAdapter:
                     "run_id": run_id,
                 }.items() if v is not None
             }
-            results = []
+            items = []
             for doc in self.collection.find(scope_filter).limit(limit):
-                results.append({
-                    "id": str(doc["_id"]),
-                    "text": doc.get("content", ""),
-                    "metadata": doc.get("metadata", {}),
-                    "score": 1.0,
-                    "timestamp": doc.get("timestamp"),
-                })
-            return results
+                items.append(SearchResultItem(
+                    id=str(doc["_id"]),
+                    text=doc.get("content", ""),
+                    metadata=doc.get("metadata", {}) or {},
+                    score=1.0,
+                ))
+            return SearchResult(results=items)
         except Exception as e:
             logger.error(f"Failed to get_all from MongoDB: {e}")
-            return []
+            return SearchResult(results=[])
 
-    def update(self, item_id: str, content: Any, **kwargs) -> bool:
-        """Update an existing document's content/metadata by ID."""
+    def update(self, item_id: str, content: Any, **kwargs):
+        """Update an existing document's content/metadata by ID.
+
+        Returns an ``AddResult`` to match the shared KnowledgeStoreProtocol and
+        the other adapters (issue #5319).
+        """
+        from ..models import AddResult
         try:
             from bson import ObjectId
             update_fields: Dict[str, Any] = {"content": str(content)}
@@ -418,10 +432,12 @@ class MongoDBKnowledgeAdapter:
                 {"_id": ObjectId(item_id)},
                 {"$set": update_fields}
             )
-            return result.matched_count > 0
+            if result.matched_count > 0:
+                return AddResult(success=True, id=item_id)
+            return AddResult(success=False, message=f"No document matched id {item_id}")
         except Exception as e:
             logger.error(f"Failed to update document {item_id}: {e}")
-            return False
+            return AddResult(success=False, message=str(e))
 
     def delete_all(
         self,

@@ -223,6 +223,12 @@ class MCPToolRunner(threading.Thread):
                         error_text = str(result.content[0])
                 else:
                     error_text = str(result)
+                # Guarantee a non-empty error string: an isError result with an
+                # empty text block would otherwise yield {"error": ""}, which
+                # retry/circuit-breaker/hook logic can misread as a success
+                # (issue #5319).
+                if not error_text:
+                    error_text = f"MCP tool '{tool_name}' reported an error (isError=True)"
                 return {"error": error_text, "mcp_error": True}
 
             # Process result
