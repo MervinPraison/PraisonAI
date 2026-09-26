@@ -39,6 +39,57 @@ _MAX_ORPHANED_TOOL_EXECUTORS = 4
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 
+class _CallableGuardrailAdapter:
+    """Expose a plain callable guardrail as a chainable guardrail object.
+
+    A user ``guardrail`` may be a bare callable returning ``(bool, output)``
+    (the Agent's final-output contract). To let it run *inside* a
+    ``GuardrailChain`` alongside a plugin guardrail — so composing the two never
+    silently drops either — this wraps the callable with a ``validate_output``
+    (and passthrough ``validate_input``) the chain understands. Any
+    ``validate_tool_call`` / ``validate_tool_result`` the underlying object
+    already exposes is forwarded so tool-surface behaviour is preserved.
+    """
+
+    __slots__ = ("_fn",)
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def validate_output(self, content, **kwargs):
+        result = self._fn(content)
+        if isinstance(result, tuple) and len(result) == 2:
+            is_valid, processed = result
+            if is_valid:
+                # Normalise the passthrough value to a string so the chain can
+                # keep threading ``content`` through subsequent guardrails.
+                if isinstance(processed, str):
+                    return True, processed
+                return True, content
+            return False, processed if isinstance(processed, str) else str(processed)
+        # A callable that does not follow the (bool, output) contract is treated
+        # as a no-op passthrough rather than blocking.
+        return True, content
+
+    def validate_input(self, content, **kwargs):
+        inner = getattr(self._fn, "validate_input", None)
+        if callable(inner):
+            return inner(content, **kwargs)
+        return True, content
+
+    def validate_tool_call(self, tool_name, arguments, **kwargs):
+        inner = getattr(self._fn, "validate_tool_call", None)
+        if callable(inner):
+            return inner(tool_name, arguments, **kwargs)
+        return True, arguments
+
+    def validate_tool_result(self, tool_name, result, **kwargs):
+        inner = getattr(self._fn, "validate_tool_result", None)
+        if callable(inner):
+            return inner(tool_name, result, **kwargs)
+        return True, result
+
+
 def tool_arguments_parse_failed(arguments) -> bool:
     """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
     return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
@@ -596,6 +647,175 @@ class ToolExecutionMixin:
             if not display_name and isinstance(tool, dict):
                 display_name = tool.get("type", "spec")
             logging.debug("Added plugin tool to Agent: %s", display_name or tool)
+
+    def _merge_plugin_subsystems(self):
+        """Route enabled GUARDRAIL/POLICY/SKILL plugins into their subsystems.
+
+        Complements ``_merge_plugin_tools``: instead of contributing tools, a
+        plugin declared ``PluginType.GUARDRAIL``/``POLICY``/``SKILL`` now
+        participates in the typed subsystem its category promises —
+
+        * GUARDRAIL: ``as_guardrail()`` objects are folded into ``self.guardrail``
+          so ``_setup_guardrail()`` (which runs after this) wires them into the
+          same ``GuardrailChain`` the Agent already runs — including
+          ``validate_tool_call`` / ``validate_tool_result``.
+        * POLICY: ``get_policies()`` rules are added to ``self._policy``
+          (a ``PolicyEngine``) so they gate tool calls.
+        * SKILL: ``get_skills()`` entries are appended to ``self._skills`` so the
+          lazy ``SkillManager`` discovers them as real, loadable skills.
+
+        Best-effort and fail-open on plugin errors: a broken plugin must never
+        prevent the Agent from constructing. Zero overhead when no such plugin
+        is enabled (each collector returns an empty list).
+        """
+        try:
+            from ..plugins import get_plugin_manager
+
+            manager = get_plugin_manager()
+        except Exception as exc:  # pragma: no cover - defensive plugin boundary
+            logging.warning("Failed to access plugin manager for subsystems: %s", exc)
+            return
+
+        # --- GUARDRAIL plugins -> self.guardrail (GuardrailChain) -------------
+        get_guardrails = getattr(manager, "get_all_guardrails", None)
+        if callable(get_guardrails):
+            try:
+                plugin_guardrails = get_guardrails() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin guardrails: %s", exc)
+                plugin_guardrails = []
+            if plugin_guardrails:
+                try:
+                    from ..guardrails import GuardrailChain
+                    from ..guardrails.protocols import is_guardrail_object
+
+                    chain_items = [
+                        g for g in plugin_guardrails if is_guardrail_object(g)
+                    ]
+                    if chain_items:
+                        chain = GuardrailChain(chain_items)
+                        # Register the plugin guardrails' tool-call/result
+                        # surface on the runtime lists ``_check_tool_policy_and_
+                        # guardrails`` / ``_apply_tool_result_guardrails`` read,
+                        # so a guardrail plugin finally sees tool calls and raw
+                        # tool results — the blind spot ``after_llm`` never
+                        # covered. Runs after ``_setup_guardrail()`` so we append
+                        # rather than replace any user-supplied guardrail surface.
+                        calls = getattr(self, "_tool_call_guardrails", None)
+                        if isinstance(calls, list):
+                            calls.append(chain)
+                        else:
+                            self._tool_call_guardrails = [chain]
+                        results = getattr(self, "_tool_result_guardrails", None)
+                        if isinstance(results, list):
+                            results.append(chain)
+                        else:
+                            self._tool_result_guardrails = [chain]
+                        # Also make the chain participate in the Agent's
+                        # input/output validation (not just the tool surface).
+                        existing_fn = getattr(self, "_guardrail_fn", None)
+                        if existing_fn is None:
+                            # No user guardrail: the plugin chain becomes the
+                            # Agent's output/input validator directly.
+                            self.guardrail = chain
+                            self._guardrail_fn = chain
+                        elif existing_fn is not chain:
+                            # User already supplied a guardrail. Compose rather
+                            # than replace so BOTH run on the final response:
+                            # wrap the user's callable in an adapter exposing
+                            # validate_output/validate_input, then chain it with
+                            # the plugin chain. The user's guardrail runs first;
+                            # a plugin guardrail can no longer be silently
+                            # skipped just because a user guardrail exists.
+                            adapter = _CallableGuardrailAdapter(existing_fn)
+                            combined = GuardrailChain([adapter, chain])
+                            self.guardrail = combined
+                            self._guardrail_fn = combined
+                except Exception as exc:  # pragma: no cover - defensive boundary
+                    logging.warning("Failed to wire plugin guardrails: %s", exc)
+
+        # --- POLICY plugins -> self._policy (PolicyEngine) -------------------
+        get_policies = getattr(manager, "get_all_policies", None)
+        if callable(get_policies):
+            try:
+                plugin_policies = get_policies() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin policies: %s", exc)
+                plugin_policies = []
+            if plugin_policies:
+                try:
+                    policy = getattr(self, "_policy", None)
+                    if policy is None:
+                        from ..policy import PolicyEngine
+
+                        policy = PolicyEngine()
+                        self._policy = policy
+                    add_policy = getattr(policy, "add_policy", None)
+                    if callable(add_policy):
+                        # A user-supplied policy always wins: never let a plugin
+                        # rule silently replace an existing policy of the same
+                        # name (PolicyEngine.add_policy overwrites by name), which
+                        # could otherwise loosen a user-configured restriction.
+                        existing = set()
+                        get_policy = getattr(policy, "get_policy", None)
+                        for rule in plugin_policies:
+                            rule_name = getattr(rule, "name", None)
+                            if rule_name is not None and callable(get_policy):
+                                try:
+                                    if get_policy(rule_name) is not None:
+                                        logging.warning(
+                                            "Skipping plugin policy %r: a policy "
+                                            "with that name already exists.",
+                                            rule_name,
+                                        )
+                                        continue
+                                except Exception:  # pragma: no cover
+                                    pass
+                            if rule_name is not None and rule_name in existing:
+                                logging.warning(
+                                    "Skipping duplicate plugin policy %r.",
+                                    rule_name,
+                                )
+                                continue
+                            try:
+                                add_policy(rule)
+                                if rule_name is not None:
+                                    existing.add(rule_name)
+                            except Exception as exc:  # pragma: no cover
+                                logging.warning(
+                                    "Failed to add plugin policy %r: %s", rule, exc
+                                )
+                except Exception as exc:  # pragma: no cover - defensive boundary
+                    logging.warning("Failed to wire plugin policies: %s", exc)
+
+        # --- SKILL plugins -> self._skills (SkillManager discovers them) -----
+        get_skills = getattr(manager, "get_all_skills", None)
+        if callable(get_skills):
+            try:
+                plugin_skills = get_skills() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin skills: %s", exc)
+                plugin_skills = []
+            if plugin_skills:
+                current = getattr(self, "_skills", None)
+                if not isinstance(current, list):
+                    current = [current] if current else []
+                for skill in plugin_skills:
+                    # ``self._skills`` feeds ``SkillManager.add_skill(path)``,
+                    # which resolves each entry as a filesystem path. Only
+                    # string path selectors are loadable; a non-string (e.g. a
+                    # source object) would raise inside ``Path()``, so skip it
+                    # with a clear warning rather than corrupt discovery.
+                    if not isinstance(skill, str):
+                        logging.warning(
+                            "Skipping plugin skill %r: get_skills() must return "
+                            "filesystem path strings to skill directories.",
+                            skill,
+                        )
+                        continue
+                    if skill not in current:
+                        current.append(skill)
+                self._skills = current
 
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
