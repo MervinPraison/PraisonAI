@@ -7,6 +7,14 @@ re-exports them lazily so user code can keep importing from
 import importlib
 
 from .models import ChannelMessage
+from .policy import (
+    DEFAULT_PREFERENCE,
+    DetailLevel,
+    NotificationCategory,
+    NotificationDecision,
+    NotificationPreference,
+    evaluate,
+)
 from .protocols import PushTransportProtocol
 
 _lazy_cache: dict = {}
@@ -33,6 +41,12 @@ def __getattr__(name: str):
 __all__ = [
     "ChannelMessage",
     "PushTransportProtocol",
+    "NotificationCategory",
+    "DetailLevel",
+    "NotificationPreference",
+    "NotificationDecision",
+    "evaluate",
+    "DEFAULT_PREFERENCE",
     "PushClient",
     "WebSocketTransport",
     "PollingTransport",
