@@ -169,7 +169,12 @@ class MongoDBKnowledgeAdapter:
             
         Returns:
             Document ID of inserted content
+
+        Raises:
+            ScopeRequiredError: If no scope identifier is provided
         """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "add", backend="mongodb")
         try:
             # Generate embedding if model is available
             embedding = None
@@ -210,6 +215,7 @@ class MongoDBKnowledgeAdapter:
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
         """
@@ -221,11 +227,17 @@ class MongoDBKnowledgeAdapter:
             user_id: Optional user scope for tenant isolation
             agent_id: Optional agent scope for tenant isolation
             run_id: Optional run scope for tenant isolation
+            filters: Optional metadata filters applied to the query
             **kwargs: Additional search parameters
             
         Returns:
             List of matching documents
+
+        Raises:
+            ScopeRequiredError: If no scope identifier is provided
         """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "search", backend="mongodb")
         try:
             results = []
 
@@ -237,6 +249,13 @@ class MongoDBKnowledgeAdapter:
                     "run_id": run_id,
                 }.items() if v is not None
             }
+
+            # Fold metadata filters in alongside the scope so a filtered search
+            # returns the same subset chroma/mem0 already return instead of
+            # silently discarding the filters (issue #5319).
+            if filters:
+                for key, value in filters.items():
+                    scope_filter[f"metadata.{key}"] = value
             
             # Try vector search first if available
             if self.use_vector_search and self.embedding_model and self._is_atlas_connection():
@@ -332,6 +351,111 @@ class MongoDBKnowledgeAdapter:
             logger.error(f"Failed to delete document {document_id}: {e}")
             return False
     
+    def get(self, item_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Get a specific document by ID from the knowledge store."""
+        try:
+            from bson import ObjectId
+            doc = self.collection.find_one({"_id": ObjectId(item_id)})
+            if not doc:
+                return None
+            return {
+                "id": str(doc["_id"]),
+                "text": doc.get("content", ""),
+                "metadata": doc.get("metadata", {}),
+                "score": 1.0,
+                "timestamp": doc.get("timestamp"),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get document {item_id}: {e}")
+            return None
+
+    def get_all(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        limit: int = 100,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """Get all documents matching the given scope.
+
+        Raises:
+            ScopeRequiredError: If no scope identifier is provided
+        """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "get_all", backend="mongodb")
+        try:
+            scope_filter = {
+                k: v for k, v in {
+                    "user_id": user_id,
+                    "agent_id": agent_id,
+                    "run_id": run_id,
+                }.items() if v is not None
+            }
+            results = []
+            for doc in self.collection.find(scope_filter).limit(limit):
+                results.append({
+                    "id": str(doc["_id"]),
+                    "text": doc.get("content", ""),
+                    "metadata": doc.get("metadata", {}),
+                    "score": 1.0,
+                    "timestamp": doc.get("timestamp"),
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Failed to get_all from MongoDB: {e}")
+            return []
+
+    def update(self, item_id: str, content: Any, **kwargs) -> bool:
+        """Update an existing document's content/metadata by ID."""
+        try:
+            from bson import ObjectId
+            update_fields: Dict[str, Any] = {"content": str(content)}
+            if "metadata" in kwargs and kwargs["metadata"] is not None:
+                update_fields["metadata"] = kwargs["metadata"]
+            result = self.collection.update_one(
+                {"_id": ObjectId(item_id)},
+                {"$set": update_fields}
+            )
+            return result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Failed to update document {item_id}: {e}")
+            return False
+
+    def delete_all(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """Delete all documents matching the given scope.
+
+        Enforces the same tenant-scope contract as the mem0 backend: an
+        unscoped call raises ``ScopeRequiredError`` instead of silently wiping
+        every tenant's documents from the (typically shared) collection.
+
+        Raises:
+            ScopeRequiredError: If no scope identifier is provided
+        """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "delete_all", backend="mongodb")
+        try:
+            scope_filter = {
+                k: v for k, v in {
+                    "user_id": user_id,
+                    "agent_id": agent_id,
+                    "run_id": run_id,
+                }.items() if v is not None
+            }
+            self.collection.delete_many(scope_filter)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete_all from MongoDB: {e}")
+            return False
+
     def close(self):
         """Close MongoDB connection."""
         if hasattr(self, 'client'):
