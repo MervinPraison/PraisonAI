@@ -216,7 +216,12 @@ class SessionProjection:
         if request_id is not None:
             echoed = self._by_request_id.get(request_id)
             if echoed is not None:
+                stale_id = self._entries[echoed].message_id
                 self._entries[echoed] = message
+                # Drop the echo's provisional message_id so a re-delivered echo
+                # cannot later overwrite the durable row via identity lookup.
+                if stale_id != message.message_id:
+                    self._by_message_id.pop(stale_id, None)
                 self._reindex(echoed, message, request_id)
                 return
 

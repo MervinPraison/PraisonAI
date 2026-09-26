@@ -994,6 +994,10 @@ export {
   // Classes
   FailoverManager,
   GatewayEventType,
+  // Session-projection reducer (Issue #5324)
+  SessionProjection,
+  type RunView, type ProjectionEntry,
+  type SessionProjectionState, type SessionSnapshot,
 } from './gateway';
 
 // Export Task Module (Python parity with praisonaiagents/task)
