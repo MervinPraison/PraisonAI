@@ -384,6 +384,31 @@ def run_sync(coro: Awaitable[T], *, timeout: "float | None | _Unset" = _UNSET) -
     return _default_bridge().run_sync(coro, timeout=timeout)
 
 
+def run_cli_coro(coro: Awaitable[T], *, timeout: "float | None | _Unset" = _UNSET) -> T:
+    """Preferred entry point for CLI subcommands running a coroutine.
+
+    Routes through the shared :class:`AsyncBridge` (via :func:`run_sync`) so
+    per-loop connection pools survive across calls, any embedder-installed
+    ``scoped_bridge()`` is honoured, and a fresh event loop is NOT spawned on
+    every invocation. This replaces bare ``asyncio.run(...)`` at CLI leaves,
+    which tears down the loop each call and breaks per-loop cached clients
+    (e.g. ``httpx.AsyncClient``) with ``RuntimeError: Event loop is closed``.
+
+    Sync context  -> :func:`run_sync` on the shared background loop.
+    Async context -> ``RuntimeError``; the caller must ``await coro`` directly.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run_sync(coro, timeout=timeout)
+    with contextlib.suppress(Exception):
+        coro.close()  # type: ignore[attr-defined]
+    raise RuntimeError(
+        "run_cli_coro() cannot be called from within a running event loop; "
+        "await the coroutine directly instead."
+    )
+
+
 def run_sync_or_offload(
     coro: Awaitable[T],
     *,
