@@ -65,6 +65,34 @@ class TestAsyncAgentSchedulerInit:
 
 
 # ---------------------------------------------------------------------------
+# get_stats_sync – dict-shape parity with _build_stats (Issue #5321)
+# ---------------------------------------------------------------------------
+
+class TestGetStatsSyncShapeParity:
+    """get_stats_sync must return the same keys as the base _build_stats."""
+
+    def test_get_stats_sync_includes_runtime_and_cost_per_execution(self):
+        scheduler = _make_scheduler()
+        stats = scheduler.get_stats_sync()
+        # Previously the async twin's get_stats_sync omitted these two keys.
+        assert "runtime_seconds" in stats
+        assert "cost_per_execution" in stats
+
+    def test_get_stats_sync_matches_build_stats_keys(self):
+        scheduler = _make_scheduler()
+        sync_stats = scheduler.get_stats_sync()
+        built = scheduler._build_stats(
+            execs=scheduler._execution_count,
+            success=scheduler._success_count,
+            failed=scheduler._failure_count,
+            total_cost=scheduler._total_cost,
+        )
+        assert set(sync_stats.keys()) == set(built.keys())
+        assert "delivered_deliveries" in sync_stats
+        assert "undelivered_deliveries" in sync_stats
+
+
+# ---------------------------------------------------------------------------
 # stop() – finally always clears is_running
 # ---------------------------------------------------------------------------
 

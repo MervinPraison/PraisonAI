@@ -100,14 +100,9 @@ def run(agent_file: str,
     """
     from .agents_generator import AgentsGenerator
 
-    # Wire the built-in readers/retrievers/rerankers into the core-SDK
-    # registries so YAML/CLI declarations (e.g. `retriever: fusion`,
-    # `reranker: llm`) resolve. Idempotent + thread-safe, and register-only-if-
-    # absent: a custom adapter already registered under a built-in name (e.g. a
-    # multi-tenant host's own `fusion`) is preserved, never overwritten.
-    from .adapters import register_default_adapters
-    register_default_adapters()
-
+    # Adapter wiring (readers/retrievers/rerankers) is single-sourced in
+    # AgentsGenerator.__init__ so every launch path (CLI, serve, eval, Python)
+    # is covered identically.
     adapter, config_list = _resolve_run_inputs(framework)
     _apply_model_override(config_list, kwargs)
     cli_config = _merge_cli_config(cli_config, kwargs)
@@ -142,11 +137,11 @@ async def arun(agent_file: str,
 
     from .agents_generator import AgentsGenerator
 
-    # Wire the built-in readers/retrievers/rerankers into the core-SDK
-    # registries so YAML/CLI declarations resolve. Run off the event loop since
-    # registration performs lazy imports. Idempotent + thread-safe, and
-    # register-only-if-absent: a custom adapter already registered under a
-    # built-in name is preserved, never overwritten.
+    # Adapter wiring (readers/retrievers/rerankers) is single-sourced in
+    # AgentsGenerator.__init__. Pre-warm it off the caller's event loop here so
+    # the (lazy-import) registration does not run on the loop when the generator
+    # is constructed synchronously below. Idempotent: __init__ then hits the fast
+    # path. Every launch path is covered identically via __init__.
     from .adapters import register_default_adapters
     await asyncio.to_thread(register_default_adapters)
 
@@ -159,7 +154,8 @@ async def arun(agent_file: str,
 
     # Own the generator's lifecycle so its lazily-allocated tool-timeout
     # executor is released once the single run completes, instead of leaking
-    # daemon threads per call in long-lived async server workers.
+    # daemon threads per call in long-lived async server workers. Adapter wiring
+    # was pre-warmed above, so __init__ hits the fast path without blocking loop.
     with AgentsGenerator(
         agent_file=agent_file,
         framework=adapter.name,

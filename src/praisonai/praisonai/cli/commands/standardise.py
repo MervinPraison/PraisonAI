@@ -508,8 +508,9 @@ def _run_ai(parsed) -> int:
         print(f"Error: Invalid feature slug: {slug.validation_error}")
         return 2
     
-    # Run the async workflow with single event loop
-    return asyncio.run(_run_ai_with_runtime(parsed, config, slug))
+    # Run the async workflow on the shared bridge loop (not a fresh loop).
+    from praisonai._async_bridge import run_cli_coro
+    return run_cli_coro(_run_ai_with_runtime(parsed, config, slug))
 
 
 def _run_checkpoint(parsed) -> int:
