@@ -211,6 +211,8 @@ class ChromaKnowledgeAdapter:
                **kwargs: Any):
         """Search for relevant content in ChromaDB."""
         from ..models import SearchResult, SearchResultItem
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "search", backend="chroma")
         
         # Get embedding for query
         embedding_model, embedding_kwargs = self._embedding_call()
@@ -236,9 +238,15 @@ class ChromaKnowledgeAdapter:
         if run_id is not None:
             where_filter["run_id"] = run_id
         
-        # Merge with additional filters
+        # Merge with additional filters, but never let a caller-supplied filter
+        # overwrite the tenant-scope constraint: filters={"user_id": "bob"} must
+        # not widen an already-scoped query back onto another tenant's data
+        # (issue #5319).
         if filters:
-            where_filter.update(filters)
+            for key, value in filters.items():
+                if key in where_filter:
+                    continue
+                where_filter[key] = value
         
         # Search ChromaDB
         try:
@@ -289,6 +297,8 @@ class ChromaKnowledgeAdapter:
             **kwargs: Any):
         """Add content to ChromaDB."""
         from ..models import AddResult
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "add", backend="chroma")
         
         # Convert content to string
         content_str = str(content)
@@ -375,6 +385,8 @@ class ChromaKnowledgeAdapter:
                 run_id: Optional[str] = None, limit: int = 100, **kwargs: Any):
         """Get all items from ChromaDB."""
         from ..models import SearchResult, SearchResultItem
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "get_all", backend="chroma")
         
         try:
             # ChromaDB doesn't support get_all with filters easily, so we'll use peek
@@ -510,7 +522,10 @@ class SQLiteKnowledgeAdapter:
                **kwargs: Any):
         """Search for relevant content in SQLite."""
         from ..models import SearchResult, SearchResultItem
+        from ..protocols import require_scope
         import json
+        
+        require_scope(user_id, agent_id, run_id, "search", backend="sqlite")
         
         conn = self._get_conn()
         
@@ -527,6 +542,19 @@ class SQLiteKnowledgeAdapter:
         if run_id:
             sql += " AND run_id = ?"
             params.append(run_id)
+        
+        # Apply metadata filters against the stored JSON metadata column so a
+        # filtered search returns the same subset chroma/mem0 already return
+        # instead of silently discarding the filters (issue #5319).
+        if filters:
+            for key, value in filters.items():
+                # Quote the key in the JSON path so a top-level metadata key that
+                # itself contains dots (e.g. "source.type") is matched literally
+                # instead of being interpreted as a nested path (issue #5319).
+                escaped_key = key.replace('"', '""')
+                sql += " AND json_extract(metadata, ?) = ?"
+                params.append(f'$."{escaped_key}"')
+                params.append(value)
         
         sql += " LIMIT ?"
         params.append(limit)
@@ -551,8 +579,11 @@ class SQLiteKnowledgeAdapter:
             **kwargs: Any):
         """Add content to SQLite."""
         from ..models import AddResult
+        from ..protocols import require_scope
         import json
         import time
+        
+        require_scope(user_id, agent_id, run_id, "add", backend="sqlite")
         
         content_str = str(content)
         doc_id = str(time.time_ns())
@@ -596,7 +627,10 @@ class SQLiteKnowledgeAdapter:
                 run_id: Optional[str] = None, limit: int = 100, **kwargs: Any):
         """Get all items from SQLite."""
         from ..models import SearchResult, SearchResultItem
+        from ..protocols import require_scope
         import json
+        
+        require_scope(user_id, agent_id, run_id, "get_all", backend="sqlite")
         
         conn = self._get_conn()
         
