@@ -976,5 +976,121 @@ class TestToolValidation:
         assert validate_tool(my_search) is True
 
 
+class TestPluginTypedSubsystems:
+    """PluginType.GUARDRAIL/POLICY/SKILL route into the typed subsystems."""
+
+    def _make_plugin(self, plugin_type, **overrides):
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+
+        name = overrides.pop("name", f"typed_{plugin_type.value}")
+
+        class _Typed(Plugin):
+            @property
+            def info(self_inner):
+                return PluginInfo(name=name, plugin_type=plugin_type)
+
+        for attr, fn in overrides.items():
+            setattr(_Typed, attr, fn)
+        return _Typed(), name
+
+    def test_manager_collectors_dispatch_on_type(self):
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins.manager import PluginManager
+
+        mgr = PluginManager()
+
+        class _G:
+            def validate_output(self, content, **kw):
+                return True, content
+
+        guard, gname = self._make_plugin(
+            PluginType.GUARDRAIL, name="g1", as_guardrail=lambda self: _G()
+        )
+        skill, sname = self._make_plugin(
+            PluginType.SKILL, name="s1", get_skills=lambda self: ["/tmp/skilldir"]
+        )
+        mgr.register(guard)
+        mgr.register(skill)
+        mgr.enable(gname)
+        mgr.enable(sname)
+
+        assert len(mgr.get_all_guardrails()) == 1
+        assert mgr.get_all_skills() == ["/tmp/skilldir"]
+        # A HOOK/TOOL plugin never contributes to these lists.
+        assert mgr.get_all_policies() == []
+
+    def test_disabled_plugin_not_collected(self):
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins.manager import PluginManager
+
+        mgr = PluginManager()
+
+        class _G:
+            def validate_output(self, content, **kw):
+                return True, content
+
+        guard, gname = self._make_plugin(
+            PluginType.GUARDRAIL, name="g2", as_guardrail=lambda self: _G()
+        )
+        mgr.register(guard)
+        mgr.disable(gname)
+        assert mgr.get_all_guardrails() == []
+
+    def test_guardrail_plugin_reaches_tool_result_surface(self):
+        """A GUARDRAIL plugin's validate_tool_result gates raw tool output."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents import Agent
+
+        class _PII:
+            def validate_tool_result(self, tool_name, result, **kw):
+                if isinstance(result, str) and "SECRET" in result:
+                    return True, result.replace("SECRET", "[REDACTED]")
+                return True, result
+
+        plugin, name = self._make_plugin(
+            PluginType.GUARDRAIL, name="pii_typed_test",
+            as_guardrail=lambda self: _PII(),
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+            assert len(agent._tool_result_guardrails) >= 1
+            out = agent._apply_tool_result_guardrails("tool", "a SECRET value")
+            assert out == "a [REDACTED] value"
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
+    def test_policy_plugin_reaches_policy_engine(self):
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents import Agent
+        from praisonaiagents.policy import Policy, PolicyRule
+        from praisonaiagents.policy.types import PolicyAction
+
+        rule = Policy(
+            name="no_delete",
+            rules=[PolicyRule(action=PolicyAction.DENY, resource="tool:delete_*",
+                              reason="blocked")],
+        )
+        plugin, name = self._make_plugin(
+            PluginType.POLICY, name="pol_typed_test",
+            get_policies=lambda self: [rule],
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+            assert agent._policy is not None
+            assert any(p.name == "no_delete" for p in agent._policy.policies)
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
