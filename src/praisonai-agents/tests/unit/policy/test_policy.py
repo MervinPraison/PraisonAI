@@ -587,6 +587,42 @@ class TestConvenienceFunctions:
         assert engine.check_network("169.254.169.254").allowed is False
         assert engine.check_network("anything.example").allowed is True
 
+    def test_create_network_policy_denies_case_variants(self):
+        """Regression: case/trailing-dot host variants must not bypass deny."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(deny_hosts=["api.example.com"]))
+
+        assert engine.check_network("API.EXAMPLE.COM").allowed is False
+        assert engine.check_network("Api.Example.Com.").allowed is False
+        assert engine.check_network("api.example.com").allowed is False
+
+    def test_create_network_policy_allow_case_insensitive(self):
+        """Regression: allow-list matches regardless of host casing."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(allow_hosts=["*.MyCorp.com"]))
+
+        assert engine.check_network("DOCS.mycorp.com").allowed is True
+        assert engine.check_network("evil.example").allowed is False
+
+    def test_check_network_context_cannot_override_host(self):
+        """Regression: caller context must not override the destination host."""
+        seen = {}
+
+        def _capture(ctx):
+            seen["host"] = ctx.get("host")
+            return True
+
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(Policy(
+            name="capture",
+            rules=[PolicyRule(action=PolicyAction.ALLOW,
+                              resource="net:*", condition=_capture)],
+        ))
+
+        engine.check_network("real.example.com", {"host": "spoofed.example.com"})
+
+        assert seen["host"] == "real.example.com"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

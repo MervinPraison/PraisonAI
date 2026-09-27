@@ -13,6 +13,18 @@ from .config import PolicyConfig
 
 logger = get_logger(__name__)
 
+
+def _normalize_host(host: str) -> str:
+    """Normalize a hostname for consistent egress matching.
+
+    DNS hostnames are case-insensitive and a single trailing dot denotes the
+    root; treating ``API.Example.com.`` and ``api.example.com`` as the same
+    host prevents policy bypass via case/trailing-dot variants.
+    """
+    if not isinstance(host, str):
+        return host
+    return host.strip().rstrip(".").lower()
+
 class PolicyEngine:
     """
     Policy Engine for execution control.
@@ -205,9 +217,12 @@ class PolicyEngine:
         Returns:
             PolicyResult indicating if the egress is allowed
         """
+        normalized = _normalize_host(host)
+        # Destination host stays authoritative: a caller-supplied context can
+        # add metadata but must not override the host seen by rule conditions.
         return self.check(
-            f"net:{host}",
-            {"host": host, **(context or {})}
+            f"net:{normalized}",
+            {**(context or {}), "host": normalized}
         )
     
     def clear(self):
@@ -357,8 +372,10 @@ def create_network_policy(
     Returns:
         Policy
     """
-    allow_hosts = list(allow_hosts or [])
-    deny_hosts = list(deny_hosts or [])
+    # Normalize patterns so they match the normalized host that
+    # ``check_network`` evaluates (case-insensitive, no trailing dot).
+    allow_hosts = [_normalize_host(h) for h in (allow_hosts or [])]
+    deny_hosts = [_normalize_host(h) for h in (deny_hosts or [])]
     rules: List[PolicyRule] = []
     
     # Deny-list wins: highest priority.
