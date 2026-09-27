@@ -114,6 +114,14 @@ class MemoryStateStore(StateStore):
                     f.write(payload)
                     f.flush()
                     os.fsync(f.fileno())
+                # Preserve the existing file's permission bits: mkstemp creates
+                # the temp file 0o600, so a naive replace would silently drop
+                # any group/other access a shared state file relied on.
+                try:
+                    existing_mode = os.stat(self.path).st_mode
+                    os.chmod(tmp_path, existing_mode)
+                except (OSError, FileNotFoundError):
+                    pass
                 os.replace(tmp_path, self.path)  # atomic on POSIX + Windows
             except BaseException:
                 # Preserve the original file untouched on any failure.
