@@ -66,7 +66,7 @@ class GCSStateStore(StateStore):
         """Convert key to GCS object path."""
         return f"{self.prefix}{key}.json"
     
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
+    def get(self, key: str) -> Optional[Any]:
         """Get state by key."""
         try:
             blob = self._bucket.blob(self._key_to_path(key))
@@ -78,28 +78,36 @@ class GCSStateStore(StateStore):
                         self.delete(key)
                         return None
                     del data["_ttl_expires"]
+                # Unwrap scalars stored via set() so values round-trip.
+                if isinstance(data, dict) and set(data.keys()) == {"__value__"}:
+                    return data["__value__"]
                 return data
             return None
         except Exception as e:
             logger.error(f"Error getting state {key}: {e}")
             return None
     
-    def set(self, key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> bool:
-        """Set state by key with optional TTL in seconds."""
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set state by key with optional TTL in seconds.
+
+        Non-dict values are wrapped so any JSON-native value round-trips
+        through :meth:`get`, matching the ``StateStore.set`` contract.
+        """
         try:
-            data = value.copy()
+            if isinstance(value, dict):
+                data = value.copy()
+            else:
+                data = {"__value__": value}
             if ttl:
                 data["_ttl_expires"] = time.time() + ttl
-            
+
             blob = self._bucket.blob(self._key_to_path(key))
             blob.upload_from_string(
                 json.dumps(data, default=str),
                 content_type="application/json"
             )
-            return True
         except Exception as e:
             logger.error(f"Error setting state {key}: {e}")
-            return False
     
     def delete(self, key: str) -> bool:
         """Delete state by key."""
@@ -150,6 +158,72 @@ class GCSStateStore(StateStore):
                 count += 1
         return count
     
+    def keys(self, pattern: str = "*") -> List[str]:
+        """List keys matching a glob pattern (StateStore contract)."""
+        all_keys = self.list_keys()
+        if pattern == "*":
+            return all_keys
+        import fnmatch
+        return [k for k in all_keys if fnmatch.fnmatch(k, pattern)]
+
+    def ttl(self, key: str) -> Optional[int]:
+        """Get remaining TTL in seconds. Returns None if no TTL or missing."""
+        try:
+            blob = self._bucket.blob(self._key_to_path(key))
+            if not blob.exists():
+                return None
+            raw = json.loads(blob.download_as_text())
+        except Exception as e:
+            logger.error(f"Error reading TTL for {key}: {e}")
+            return None
+        expires = raw.get("_ttl_expires") if isinstance(raw, dict) else None
+        if expires is None:
+            return None
+        remaining = int(expires - time.time())
+        return remaining if remaining > 0 else None
+
+    def expire(self, key: str, ttl: int) -> bool:
+        """Set TTL on an existing key. Returns True if the key exists."""
+        data = self.get(key)
+        if data is None:
+            return False
+        self.set(key, data, ttl=ttl)
+        return True
+
+    def hget(self, key: str, field: str) -> Optional[Any]:
+        """Get a field from a hash stored at ``key``."""
+        data = self.get(key)
+        if not isinstance(data, dict):
+            return None
+        return data.get(field)
+
+    def hset(self, key: str, field: str, value: Any) -> None:
+        """Set a field in a hash stored at ``key``."""
+        data = self.get(key)
+        if not isinstance(data, dict):
+            data = {}
+        data[field] = value
+        self.set(key, data)
+
+    def hgetall(self, key: str) -> Dict[str, Any]:
+        """Get all fields from a hash stored at ``key``."""
+        data = self.get(key)
+        return dict(data) if isinstance(data, dict) else {}
+
+    def hdel(self, key: str, *fields: str) -> int:
+        """Delete fields from a hash. Returns count deleted."""
+        data = self.get(key)
+        if not isinstance(data, dict):
+            return 0
+        count = 0
+        for field in fields:
+            if field in data:
+                del data[field]
+                count += 1
+        if count:
+            self.set(key, data)
+        return count
+
     def close(self) -> None:
         """Close the store."""
         self._client.close()
