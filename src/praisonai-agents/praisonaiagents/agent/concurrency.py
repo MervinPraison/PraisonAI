@@ -67,6 +67,10 @@ class _DynamicLimiter:
             self._held = max(0, self._held - 1)
             self._cond.notify_all()
 
+    def has_holders(self) -> bool:
+        with self._cond:
+            return self._held > 0
+
 
 class ConcurrencyRegistry:
     """Registry for per-agent concurrency limits.
@@ -110,23 +114,41 @@ class ConcurrencyRegistry:
             return self._limits.get(agent_name, self._default_limit)
 
     def remove_limit(self, agent_name: str) -> None:
-        """Remove concurrency limit for an agent (reverts to default)."""
+        """Remove concurrency limit for an agent (reverts to default).
+
+        The limiter object is kept alive while any permit is still held, so
+        in-flight acquire()/release() pairs keep operating on the same shared
+        state; dropping it mid-flight would strand those permits and let a
+        later set_limit() start from a fresh, empty count and admit work beyond
+        the configured cap. Once no permits are outstanding it is safe to drop.
+        """
         with self._lock:
             self._limits.pop(agent_name, None)
-            self._limiters.pop(agent_name, None)
+            # Retune the surviving limiter to unlimited so it stops blocking
+            # while remaining the single accounting object for its holders.
+            limiter = self._limiters.get(agent_name)
+            if limiter is None:
+                return
+            limiter.set_limit(0)
+            if not limiter.has_holders():
+                self._limiters.pop(agent_name, None)
 
     def _get_limiter(self, agent_name: str) -> Optional[_DynamicLimiter]:
         """Get or create the loop-neutral limiter for an agent.
 
-        Returns None if unlimited. The same _DynamicLimiter is shared across
-        every event loop and thread, so the configured limit is a true global cap.
+        Returns None only when the agent has never been given a limit (pure
+        unlimited fast path). Once a limiter exists it is always returned — even
+        while unlimited (limit 0) — so acquire() and release() stay symmetric
+        across a mid-flight retune to/from unlimited and the count can never be
+        corrupted. The same _DynamicLimiter is shared across every event loop
+        and thread, so a configured limit is a true global cap.
         """
         with self._lock:
             limit = self._limits.get(agent_name, self._default_limit)
-            if limit <= 0:
-                return None
             limiter = self._limiters.get(agent_name)
             if limiter is None:
+                if limit <= 0:
+                    return None
                 limiter = _DynamicLimiter(limit)
                 self._limiters[agent_name] = limiter
             return limiter

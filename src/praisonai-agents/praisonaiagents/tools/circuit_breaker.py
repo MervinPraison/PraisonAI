@@ -354,7 +354,13 @@ class CircuitBreaker:
                         elif asyncio.iscoroutinefunction(self._health_check):
                             is_healthy = await self._health_check()
                         else:
-                            is_healthy = self._health_check()
+                            # Run a synchronous callback off the event loop so a
+                            # blocking probe (network/disk I/O) never stalls
+                            # unrelated coroutines for the check's duration.
+                            loop = asyncio.get_running_loop()
+                            is_healthy = await loop.run_in_executor(
+                                None, self._health_check
+                            )
                         
                         # If healthy, transition to half-open for recovery probe
                         if is_healthy:
@@ -369,9 +375,25 @@ class CircuitBreaker:
                         # Ignore health check errors
                         pass
             finally:
-                # Allow a future OPEN transition to restart probing.
+                # Clear our own reference so a future OPEN can restart probing.
+                # Only clear if the stored task is still us (a concurrent
+                # _start_health_check may have already installed a replacement).
+                current = asyncio.current_task()
+                restart = False
                 with self._lock:
-                    self._health_check_task = None
+                    if self._health_check_task is current:
+                        self._health_check_task = None
+                        # A concurrent failure may have re-OPENed the circuit
+                        # after our loop-condition check but before this clear.
+                        # Without restarting, that OPEN episode would be left
+                        # with no probe (the start guard had rejected a
+                        # replacement while our stale task was still referenced).
+                        restart = (
+                            self._stats.state == CircuitState.OPEN
+                            and self.config.enable_health_check
+                        )
+                if restart:
+                    self._start_health_check()
         
         with self._lock:
             if self._stats.state != CircuitState.OPEN or self._health_check_task is not None:

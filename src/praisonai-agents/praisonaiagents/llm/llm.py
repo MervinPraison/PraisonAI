@@ -2,6 +2,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import os
 import copy
+import contextvars
 import warnings
 import re
 import inspect
@@ -572,7 +573,13 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        self.current_agent_name: Optional[str] = None
+        # Agent-name attribution is task-local so concurrent agents sharing one
+        # LLM instance never clobber each other's token accounting (#5052/#5329).
+        # A plain attribute here would let a second agent's set_current_agent()
+        # overwrite the first while it is still awaiting its own completion.
+        self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("praisonai_current_agent_name", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -1129,6 +1136,33 @@ Respond with ONLY a valid JSON tool call in this format:
             model = getattr(response, "model", None)
         return model or self.model
 
+    def _select_active_profile(self, kwargs: dict):
+        """Pick the profile a fresh call should start on, honoring rotation.
+
+        Defaults to the construction-time ``self._current_profile`` so existing
+        behaviour and multi-agent safety are unchanged (the shared instance
+        state is never mutated). Only when the manager is configured with
+        ``rotate_on_success`` do we re-select via ``get_next_profile()`` so a
+        long-lived, shared ``LLM`` actually spreads successful traffic across
+        the equal-priority tier instead of pinning its first profile forever.
+        The chosen profile travels in per-call kwargs, never on ``self``.
+        """
+        profile = self._current_profile
+        manager = self._failover_manager
+        if manager is None:
+            return profile, kwargs
+        rotate = getattr(getattr(manager, "config", None), "rotate_on_success", False)
+        if not rotate:
+            return profile, kwargs
+        try:
+            rotated = manager.get_next_profile()
+        except Exception:  # pragma: no cover - defensive
+            return profile, kwargs
+        if rotated and rotated != profile:
+            profile = rotated
+            kwargs = self._apply_profile_to_kwargs(rotated, kwargs)
+        return profile, kwargs
+
     def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict) -> dict:
         """Return a new kwargs dict with profile overrides applied.
 
@@ -1367,8 +1401,10 @@ Respond with ONLY a valid JSON tool call in this format:
         last_error = None
         # Track the failover profile per call (never self._current_profile) so
         # concurrent calls on one shared LLM cannot corrupt each other's
-        # failover bookkeeping (issue #3613 gap 2).
-        active_profile = self._current_profile
+        # failover bookkeeping (issue #3613 gap 2). When rotate_on_success is
+        # configured, pick the next profile in the tier so a shared instance
+        # actually rotates instead of pinning its construction-time profile.
+        active_profile, kwargs = self._select_active_profile(kwargs)
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -1451,8 +1487,10 @@ Respond with ONLY a valid JSON tool call in this format:
         last_error = None
         # Track the failover profile per call (never self._current_profile) so
         # concurrent coroutines on one shared LLM cannot corrupt each other's
-        # failover bookkeeping (issue #3613 gap 2).
-        active_profile = self._current_profile
+        # failover bookkeeping (issue #3613 gap 2). When rotate_on_success is
+        # configured, pick the next profile in the tier so a shared instance
+        # actually rotates instead of pinning its construction-time profile.
+        active_profile, kwargs = self._select_active_profile(kwargs)
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -6263,9 +6301,40 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @property
+    def current_agent_name(self) -> Optional[str]:
+        """Task-local agent name used for token attribution.
+
+        Backed by a ``ContextVar`` so concurrent agents sharing one LLM
+        instance each see their own value instead of the last writer's.
+        """
+        return self._current_agent_name_var.get()
+
+    @current_agent_name.setter
+    def current_agent_name(self, agent_name: Optional[str]) -> None:
+        self._current_agent_name_var.set(agent_name)
+
     def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
-        self.current_agent_name = agent_name
+        """Set the current agent name for token tracking (task-local)."""
+        self._current_agent_name_var.set(agent_name)
+
+    def __deepcopy__(self, memo):
+        """Deep-copy safe: a ``ContextVar`` cannot be pickled/copied, and its
+        value is task-local runtime state anyway. Give the clone a fresh,
+        independent ContextVar rather than trying to copy the original (which
+        would raise ``TypeError: cannot pickle '_contextvars.ContextVar'``).
+        """
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for key, value in self.__dict__.items():
+            if key == "_current_agent_name_var":
+                new._current_agent_name_var = contextvars.ContextVar(
+                    "praisonai_current_agent_name", default=None
+                )
+            else:
+                setattr(new, key, copy.deepcopy(value, memo))
+        return new
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
