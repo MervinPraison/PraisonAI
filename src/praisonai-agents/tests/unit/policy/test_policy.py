@@ -15,7 +15,8 @@ from praisonaiagents.policy.policy import Policy, PolicyRule
 from praisonaiagents.policy.config import PolicyConfig
 from praisonaiagents.policy.engine import (
     PolicyEngine, create_deny_tools_policy,
-    create_allow_tools_policy, create_read_only_policy
+    create_allow_tools_policy, create_read_only_policy,
+    create_network_policy
 )
 
 
@@ -441,6 +442,38 @@ class TestPolicyEngine:
         
         assert not result.allowed
     
+    def test_engine_check_network(self, engine):
+        """Test check_network helper evaluates a net: resource."""
+        engine.add_policy(Policy(
+            name="deny_metadata",
+            rules=[
+                PolicyRule(
+                    action=PolicyAction.DENY,
+                    resource="net:169.254.169.254",
+                    reason="metadata blocked"
+                )
+            ]
+        ))
+
+        result = engine.check_network("169.254.169.254")
+
+        assert not result.allowed
+        assert result.reason == "metadata blocked"
+
+    def test_engine_check_network_allowed(self, engine):
+        """Test check_network allows a matching host."""
+        engine.add_policy(Policy(
+            name="allow_api",
+            rules=[
+                PolicyRule(
+                    action=PolicyAction.ALLOW,
+                    resource="net:api.mycorp.com"
+                )
+            ]
+        ))
+
+        assert engine.check_network("api.mycorp.com").allowed
+
     def test_engine_enable_disable_policy(self, engine):
         """Test enabling/disabling policies."""
         engine.add_policy(Policy(name="test"))
@@ -517,6 +550,42 @@ class TestConvenienceFunctions:
 
         assert engine.check("tool:read_file", {}).allowed is True
         assert engine.check("tool:list_files", {}).allowed is True
+
+    def test_create_network_policy_deny_wins(self):
+        """Deny-list takes precedence over allow-list."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(
+            allow_hosts=["api.mycorp.com"],
+            deny_hosts=["169.254.169.254"]
+        ))
+
+        assert engine.check_network("169.254.169.254").allowed is False
+        assert engine.check_network("api.mycorp.com").allowed is True
+
+    def test_create_network_policy_allow_is_default_deny(self):
+        """Non-empty allow-list means every other host is denied."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(allow_hosts=["api.mycorp.com"]))
+
+        assert engine.check_network("api.mycorp.com").allowed is True
+        assert engine.check_network("evil.example").allowed is False
+
+    def test_create_network_policy_wildcard_allow(self):
+        """Wildcard host patterns are honoured."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(allow_hosts=["*.mycorp.com"]))
+
+        assert engine.check_network("docs.mycorp.com").allowed is True
+        assert engine.check_network("api.mycorp.com").allowed is True
+        assert engine.check_network("evil.example").allowed is False
+
+    def test_create_network_policy_deny_only(self):
+        """Deny-only policy blocks listed hosts, others fall through to allow."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_network_policy(deny_hosts=["169.254.169.254"]))
+
+        assert engine.check_network("169.254.169.254").allowed is False
+        assert engine.check_network("anything.example").allowed is True
 
 
 if __name__ == "__main__":
