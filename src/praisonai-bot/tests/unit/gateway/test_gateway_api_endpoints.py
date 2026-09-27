@@ -59,7 +59,7 @@ class _FakeGateway:
         return _FakeSession()
 
     @staticmethod
-    async def _dispatch_agent_turn(agent, content, on_complete=None):
+    async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
         result = await agent.achat(content)
         # Mirror the real gateway: snapshot per-turn state in the same context
         # that produced the result, before returning to the caller.
@@ -69,9 +69,10 @@ class _FakeGateway:
 
 
 class _FakeReq:
-    def __init__(self, body, headers=None):
+    def __init__(self, body, headers=None, path_params=None):
         self._body = body
         self.headers = headers or {}
+        self.path_params = path_params or {}
 
     async def json(self):
         return self._body
@@ -498,3 +499,118 @@ def test_construct_gateway_with_api_flags():
 def test_api_config_disabled_by_default():
     assert ApiConfig().enabled is False
     assert GatewayConfig().api.enabled is False
+
+
+# ── Issue #5335: background/async runs ─────────────────────────────────
+
+
+def _run_background_flow(gw, ep, body):
+    """Submit a background response and drain the driving task on one loop."""
+
+    async def _flow():
+        submit = await ep.openai_responses(_FakeReq(body))
+        data = _body(submit)
+        # Let the spawned task run to completion on this loop.
+        entry = ep._responses[data["id"]]
+        task = entry.get("task")
+        if task is not None:
+            await task
+        return submit, data
+
+    return asyncio.run(_flow())
+
+
+def test_background_submission_returns_queued_202():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "background": True}
+    )
+    assert submit.status_code == 202
+    assert data["status"] == "queued"
+    assert data["object"] == "response"
+    assert data["id"].startswith("resp-")
+    # Persisted and retrievable by id.
+    assert data["id"] in ep._responses
+
+
+def test_background_run_completes_and_is_retrievable():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "store": True}
+    )
+    got = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": data["id"]}))
+    )
+    body = _body(got)
+    assert body["status"] == "completed"
+    assert body["output_text"] == "echo:ping"
+    assert body["usage"]["input_tokens"] == 11
+
+
+def test_synchronous_responses_still_default():
+    # No background/store -> unchanged synchronous behaviour (status completed).
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "ping"}))
+    )
+    data = _body(resp)
+    assert data["status"] == "completed"
+    assert data["output_text"] == "echo:ping"
+
+
+def test_get_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+    assert _body(resp)["error"]["type"] == "invalid_request_error"
+
+
+def test_cancel_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_cancel(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+
+
+def test_cancel_in_flight_background_run():
+    # A run that never completes on its own must flip to ``cancelled`` when the
+    # cancel route fires (cooperative controller + task cancel).
+    class _SlowAgent:
+        _llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            await asyncio.sleep(60)
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SlowAgent()
+
+        @staticmethod
+        async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
+            result = await agent.achat(content)
+            if on_complete is not None:
+                on_complete(agent)
+            return result
+
+    async def _flow():
+        gw = _Gw()
+        ep = GatewayApiEndpoints(gw)
+        submit = await ep.openai_responses(
+            _FakeReq({"model": "assistant", "input": "x", "background": True})
+        )
+        rid = _body(submit)["id"]
+        await asyncio.sleep(0)  # let the task start and suspend on sleep
+        cancel = await ep.openai_responses_cancel(
+            _FakeReq(None, path_params={"id": rid})
+        )
+        return _body(cancel)
+
+    data = asyncio.run(_flow())
+    assert data["status"] == "cancelled"

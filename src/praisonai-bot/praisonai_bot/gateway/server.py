@@ -2245,6 +2245,18 @@ class WebSocketGateway:
                         _api_guarded(self._api_endpoints.openai_responses),
                         methods=["POST"],
                     ),
+                    # Issue #5335: background/async runs — retrieve a stored
+                    # Response by id and cancel an in-flight background run.
+                    Route(
+                        "/v1/responses/{id}",
+                        _api_guarded(self._api_endpoints.openai_responses_get),
+                        methods=["GET"],
+                    ),
+                    Route(
+                        "/v1/responses/{id}/cancel",
+                        _api_guarded(self._api_endpoints.openai_responses_cancel),
+                        methods=["POST"],
+                    ),
                     Route(
                         "/v1/models",
                         _api_guarded(self._api_endpoints.openai_models),

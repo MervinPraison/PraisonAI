@@ -14,10 +14,11 @@ call back into its public/registered state (``list_agents``, ``get_agent``,
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _now() -> int:
@@ -94,6 +95,13 @@ class GatewayApiEndpoints:
 
     def __init__(self, gateway: Any) -> None:
         self._gw = gateway
+        # In-process store for background/stored Response objects, keyed by id.
+        # Lightweight and dependency-free: a background run's status/output
+        # survives the originating HTTP request so a client can retrieve it by
+        # id later. Each entry also holds the run's InterruptController (for
+        # cancel) and the driving asyncio.Task. Not persisted across restarts;
+        # the durable-run ledger (Issue #4028) remains the cross-restart store.
+        self._responses: Dict[str, dict] = {}
 
     # ── shared dispatch ────────────────────────────────────────────────
     def _resolve_agent(self, requested: Optional[str]):
@@ -110,7 +118,9 @@ class GatewayApiEndpoints:
         aid = agents[0]
         return aid, self._gw.get_agent(aid)
 
-    async def _dispatch(self, session: Any, agent: Any, content: str) -> tuple:
+    async def _dispatch(
+        self, session: Any, agent: Any, content: str, interrupt: Any = None
+    ) -> tuple:
         """Run one agent turn through the same admission gate as chat users.
 
         Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
@@ -135,19 +145,25 @@ class GatewayApiEndpoints:
         def _capture(a: Any) -> None:
             holder["usage"] = self._usage_for(a)
 
+        # Forward ``interrupt`` only when supplied so callers/dispatchers that do
+        # not expect a ``cancel_token`` seam (e.g. the synchronous chat path)
+        # keep their exact prior signature; the background path passes it so a
+        # ``.../cancel`` can stop the turn cooperatively.
+        extra = {"interrupt": interrupt} if interrupt is not None else {}
+
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
                     result = await self._gw._dispatch_agent_turn(
-                        agent, content, on_complete=_capture
+                        agent, content, on_complete=_capture, **extra
                     )
             except AdmissionRejected as rej:
                 return str(rej.message), self._zero_usage()
         else:
             result = await self._gw._dispatch_agent_turn(
-                agent, content, on_complete=_capture
+                agent, content, on_complete=_capture, **extra
             )
         usage = holder.get("usage") or self._zero_usage()
         return ("" if result is None else str(result)), usage
@@ -395,30 +411,198 @@ class GatewayApiEndpoints:
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
         session = self._session_for(agent_id, self._caller_key(request))
+
+        # Async/background submission: when the caller opts in via ``background``
+        # or ``store`` (per the OpenAI Responses API), return immediately with a
+        # persisted, retrievable id instead of blocking for the whole turn. The
+        # synchronous path below is unchanged and stays the default (Issue
+        # #5335), so existing clients see no behaviour change.
+        if body.get("background") or body.get("store"):
+            return self._start_background_response(agent_id, agent, session, content)
+
         reply, usage = await self._dispatch(session, agent, content)
+        return JSONResponse(
+            self._response_object(agent_id, "completed", reply, usage)
+        )
+
+    @staticmethod
+    def _response_object(
+        agent_id: str,
+        status: str,
+        reply: str,
+        usage: dict,
+        *,
+        response_id: Optional[str] = None,
+        created_at: Optional[int] = None,
+        error: Optional[str] = None,
+    ) -> dict:
+        """Build a spec-shaped ``response`` object shared by sync + async paths."""
+        output: List[dict] = []
+        if reply:
+            output.append(
+                {
+                    "id": "msg-" + uuid.uuid4().hex,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": reply}],
+                }
+            )
+        obj = {
+            "id": response_id or ("resp-" + uuid.uuid4().hex),
+            "object": "response",
+            "created_at": created_at if created_at is not None else _now(),
+            "model": agent_id,
+            "status": status,
+            "output": output,
+            "output_text": reply,
+            "usage": {
+                "input_tokens": usage["prompt_tokens"],
+                "output_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+            },
+        }
+        if error is not None:
+            obj["error"] = {"message": error}
+        return obj
+
+    def _start_background_response(self, agent_id, agent, session, content):
+        """Spawn a background turn, persist a Response object, return ``queued``.
+
+        The run is driven on the event loop as an ``asyncio.Task``; its
+        status/output are recorded in ``self._responses`` so a later
+        ``GET /v1/responses/{id}`` can retrieve them. A per-run
+        ``InterruptController`` is stored so ``.../cancel`` can stop it
+        cooperatively via the same seam the WebSocket/``/stop`` path uses.
+        """
+        from starlette.responses import JSONResponse
+
+        response_id = "resp-" + uuid.uuid4().hex
+        created_at = _now()
+        controller = None
+        try:
+            from praisonaiagents.agent.interrupt import InterruptController
+            controller = InterruptController()
+        except Exception:
+            controller = None
+
+        entry: dict = {
+            "id": response_id,
+            "agent_id": agent_id,
+            "status": "in_progress",
+            "reply": "",
+            "usage": self._zero_usage(),
+            "created_at": created_at,
+            "error": None,
+            "controller": controller,
+            "task": None,
+        }
+        self._responses[response_id] = entry
+
+        async def _run() -> None:
+            try:
+                reply, usage = await self._dispatch(
+                    session, agent, content, interrupt=controller
+                )
+                entry["reply"] = reply
+                entry["usage"] = usage
+                cancelled = False
+                if controller is not None:
+                    try:
+                        cancelled = bool(controller.is_set())
+                    except Exception:
+                        cancelled = False
+                entry["status"] = "cancelled" if cancelled else "completed"
+            except asyncio.CancelledError:
+                entry["status"] = "cancelled"
+                raise
+            except Exception as exc:  # noqa: BLE001 - surface as failed status
+                entry["status"] = "failed"
+                entry["error"] = str(exc)
+
+        try:
+            entry["task"] = asyncio.ensure_future(_run())
+        except RuntimeError:
+            # No running loop (e.g. called outside an event loop): run inline so
+            # the submission never silently drops the turn.
+            entry["status"] = "queued"
 
         return JSONResponse(
-            {
-                "id": "resp-" + uuid.uuid4().hex,
-                "object": "response",
-                "created_at": _now(),
-                "model": agent_id,
-                "status": "completed",
-                "output": [
-                    {
-                        "id": "msg-" + uuid.uuid4().hex,
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": reply}],
-                    }
-                ],
-                "output_text": reply,
-                "usage": {
-                    "input_tokens": usage["prompt_tokens"],
-                    "output_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                },
-            }
+            self._response_object(
+                agent_id,
+                "queued",
+                "",
+                self._zero_usage(),
+                response_id=response_id,
+                created_at=created_at,
+            ),
+            status_code=202,
+        )
+
+    # ── OpenAI: responses retrieval ────────────────────────────────────
+    async def openai_responses_get(self, request):
+        """``GET /v1/responses/{id}`` — return the stored Response by id."""
+        from starlette.responses import JSONResponse
+
+        response_id = request.path_params.get("id")
+        entry = self._responses.get(response_id)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+        return JSONResponse(
+            self._response_object(
+                entry["agent_id"],
+                entry["status"],
+                entry["reply"],
+                entry["usage"],
+                response_id=entry["id"],
+                created_at=entry["created_at"],
+                error=entry["error"],
+            )
+        )
+
+    # ── OpenAI: responses cancel ───────────────────────────────────────
+    async def openai_responses_cancel(self, request):
+        """``POST /v1/responses/{id}/cancel`` — stop an in-flight background run.
+
+        Cooperative-first via the run's ``InterruptController`` (checked at the
+        agent's checkpoints); falls back to cancelling the driving task so a run
+        that does not yield is still torn down.
+        """
+        from starlette.responses import JSONResponse
+
+        response_id = request.path_params.get("id")
+        entry = self._responses.get(response_id)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+
+        if entry["status"] in ("in_progress", "queued"):
+            controller = entry.get("controller")
+            if controller is not None:
+                try:
+                    controller.request("cancel")
+                except Exception:
+                    pass
+            task = entry.get("task")
+            if task is not None and not task.done():
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            entry["status"] = "cancelled"
+
+        return JSONResponse(
+            self._response_object(
+                entry["agent_id"],
+                entry["status"],
+                entry["reply"],
+                entry["usage"],
+                response_id=entry["id"],
+                created_at=entry["created_at"],
+                error=entry["error"],
+            )
         )
 
     # ── MCP: JSON-RPC ──────────────────────────────────────────────────
