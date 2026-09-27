@@ -261,10 +261,6 @@ class CircuitBreaker:
                     self._stats.state = CircuitState.HALF_OPEN
                     self._stats.success_count = 0
         
-        # Start health check if enabled and not already running
-        if self.config.enable_health_check and not self._health_check_task:
-            self._start_health_check()
-        
         # Execute function
         try:
             if asyncio.iscoroutinefunction(func):
@@ -323,45 +319,69 @@ class CircuitBreaker:
             if (self._stats.state in (CircuitState.CLOSED, CircuitState.HALF_OPEN) and 
                 len(self._failure_times) >= self.config.failure_threshold):
                 self._stats.state = CircuitState.OPEN
+                just_opened = True
+            else:
+                just_opened = False
+
+        # Kick off health-check-driven recovery the moment the circuit opens, so
+        # both call() and acall() get it (was previously only wired into acall).
+        # Guarded so it only runs with a live loop and no probe already running.
+        if just_opened and self.config.enable_health_check:
+            self._start_health_check()
     
     def _start_health_check(self) -> None:
-        """Start periodic health check task."""
+        """Start periodic health check task.
+
+        Only starts when the circuit is actually OPEN and no probe is already
+        running, and clears ``_health_check_task`` when the loop exits so a
+        future OPEN can restart probing (the previous version pinned a completed
+        Task forever, permanently disabling recovery). Requires a running loop;
+        pure-sync callers with no loop simply fall back to ``recovery_timeout``.
+        """
         if not self._health_check:
             return
             
         async def health_check_loop():
-            while self._stats.state == CircuitState.OPEN:
-                try:
-                    await asyncio.sleep(self.config.health_check_interval)
-                    
-                    # Perform health check
-                    is_healthy = False
-                    if hasattr(self._health_check, 'ahealth_check'):
-                        is_healthy = await self._health_check.ahealth_check()
-                    elif asyncio.iscoroutinefunction(self._health_check):
-                        is_healthy = await self._health_check()
-                    else:
-                        is_healthy = self._health_check()
-                    
-                    # If healthy, transition to half-open for recovery probe
-                    if is_healthy:
-                        with self._lock:
-                            if self._stats.state == CircuitState.OPEN:
-                                self._stats.state = CircuitState.HALF_OPEN
-                                self._stats.success_count = 0
+            try:
+                while self._stats.state == CircuitState.OPEN:
+                    try:
+                        await asyncio.sleep(self.config.health_check_interval)
                         
-                except asyncio.CancelledError:
-                    break
-                except Exception:
-                    # Ignore health check errors
-                    pass
+                        # Perform health check
+                        is_healthy = False
+                        if hasattr(self._health_check, 'ahealth_check'):
+                            is_healthy = await self._health_check.ahealth_check()
+                        elif asyncio.iscoroutinefunction(self._health_check):
+                            is_healthy = await self._health_check()
+                        else:
+                            is_healthy = self._health_check()
+                        
+                        # If healthy, transition to half-open for recovery probe
+                        if is_healthy:
+                            with self._lock:
+                                if self._stats.state == CircuitState.OPEN:
+                                    self._stats.state = CircuitState.HALF_OPEN
+                                    self._stats.success_count = 0
+                            
+                    except asyncio.CancelledError:
+                        break
+                    except Exception:
+                        # Ignore health check errors
+                        pass
+            finally:
+                # Allow a future OPEN transition to restart probing.
+                with self._lock:
+                    self._health_check_task = None
         
-        try:
-            loop = asyncio.get_event_loop()
-            self._health_check_task = loop.create_task(health_check_loop())
-        except RuntimeError:
-            # No event loop running, skip health check
-            pass
+        with self._lock:
+            if self._stats.state != CircuitState.OPEN or self._health_check_task is not None:
+                return
+            try:
+                loop = asyncio.get_running_loop()
+                self._health_check_task = loop.create_task(health_check_loop())
+            except RuntimeError:
+                # No event loop running, skip health check
+                pass
 
 
 class CircuitBreakerRegistry:

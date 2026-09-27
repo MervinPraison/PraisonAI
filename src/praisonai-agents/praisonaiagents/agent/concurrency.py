@@ -31,23 +31,62 @@ from praisonaiagents._logging import get_logger
 logger = get_logger(__name__)
 
 
+class _DynamicLimiter:
+    """Resizable counting limiter: capacity can change with holders outstanding.
+
+    Unlike swapping a fresh threading.Semaphore on every retune (which lets
+    holders of the old primitive and the release() path operate on different
+    objects), this keeps one long-lived object per agent name and mutates its
+    capacity in place. Every acquirer and every release() therefore always
+    operate on the same shared state, so a retune takes effect immediately and
+    the configured cap can never be silently exceeded. Loop-neutral: uses a
+    threading.Condition so it is a true global cap across event loops/threads.
+    """
+
+    def __init__(self, limit: int):
+        self._limit = limit
+        self._held = 0
+        self._cond = threading.Condition()
+
+    def set_limit(self, limit: int) -> None:
+        with self._cond:
+            self._limit = limit
+            self._cond.notify_all()
+
+    def acquire(self, blocking: bool = True) -> bool:
+        with self._cond:
+            while self._limit > 0 and self._held >= self._limit:
+                if not blocking:
+                    return False
+                self._cond.wait(timeout=0.05)
+            self._held += 1
+            return True
+
+    def release(self) -> None:
+        with self._cond:
+            self._held = max(0, self._held - 1)
+            self._cond.notify_all()
+
+
 class ConcurrencyRegistry:
     """Registry for per-agent concurrency limits.
 
-    Thread-safe. Each agent name maps to a loop-neutral threading.Semaphore, so
-    the limit is a true global cap across every event loop and thread.
+    Thread-safe. Each agent name maps to a loop-neutral, resizable limiter, so
+    the limit is a true global cap across every event loop and thread and a
+    retune takes effect immediately for in-flight holders.
     Limit of 0 means unlimited (no throttling).
     """
 
     def __init__(self, default_limit: int = 0):
         self._default_limit = default_limit
         self._limits: Dict[str, int] = {}
-        # One loop-neutral threading.Semaphore per agent. Unlike asyncio.Semaphore
-        # (which binds to the loop it is first awaited on), a threading.Semaphore
-        # is shared safely across every event loop and thread, so the per-agent
-        # limit is a true global cap under multi-loop / multi-thread deployments.
-        # Async callers acquire it in an executor so they never block their loop.
-        self._semaphores: Dict[str, threading.Semaphore] = {}
+        # One long-lived, loop-neutral _DynamicLimiter per agent. Its capacity is
+        # mutated in place on retune (never swapped for a fresh object), so every
+        # acquirer and every release() always share the same state and the
+        # configured cap can never be silently exceeded. Loop-neutral means the
+        # per-agent limit is a true global cap under multi-loop / multi-thread
+        # deployments; async callers poll without blocking their loop.
+        self._limiters: Dict[str, _DynamicLimiter] = {}
         self._lock = threading.Lock()
 
     def set_limit(self, agent_name: str, max_concurrent: int) -> None:
@@ -59,8 +98,11 @@ class ConcurrencyRegistry:
         """
         with self._lock:
             self._limits[agent_name] = max_concurrent
-            # Reset semaphore so next acquire creates a fresh one at the new limit
-            self._semaphores.pop(agent_name, None)
+            # Mutate the existing limiter in place so the retune takes effect
+            # immediately for in-flight holders without ever swapping the object.
+            limiter = self._limiters.get(agent_name)
+            if limiter is not None:
+                limiter.set_limit(max_concurrent)
 
     def get_limit(self, agent_name: str) -> int:
         """Get concurrency limit for an agent."""
@@ -71,23 +113,23 @@ class ConcurrencyRegistry:
         """Remove concurrency limit for an agent (reverts to default)."""
         with self._lock:
             self._limits.pop(agent_name, None)
-            self._semaphores.pop(agent_name, None)
+            self._limiters.pop(agent_name, None)
 
-    def _get_semaphore(self, agent_name: str) -> Optional[threading.Semaphore]:
-        """Get or create the loop-neutral semaphore for an agent.
+    def _get_limiter(self, agent_name: str) -> Optional[_DynamicLimiter]:
+        """Get or create the loop-neutral limiter for an agent.
 
-        Returns None if unlimited. The same threading.Semaphore is shared across
+        Returns None if unlimited. The same _DynamicLimiter is shared across
         every event loop and thread, so the configured limit is a true global cap.
         """
         with self._lock:
             limit = self._limits.get(agent_name, self._default_limit)
             if limit <= 0:
                 return None
-            sem = self._semaphores.get(agent_name)
-            if sem is None:
-                sem = threading.Semaphore(limit)
-                self._semaphores[agent_name] = sem
-            return sem
+            limiter = self._limiters.get(agent_name)
+            if limiter is None:
+                limiter = _DynamicLimiter(limit)
+                self._limiters[agent_name] = limiter
+            return limiter
 
     async def acquire(self, agent_name: str) -> None:
         """Acquire concurrency slot for agent. No-op if unlimited.
@@ -96,11 +138,11 @@ class ConcurrencyRegistry:
         running event loop is never blocked while other tasks hold permits, and
         a cancelled/timed-out await never leaves a thread blocked on acquire().
         """
-        sem = self._get_semaphore(agent_name)
-        if sem is None:
+        limiter = self._get_limiter(agent_name)
+        if limiter is None:
             return
         while True:
-            if sem.acquire(blocking=False):
+            if limiter.acquire(blocking=False):
                 return
             # Yield to the loop; on cancellation this raises and no permit leaks.
             await asyncio.sleep(0.005)
@@ -112,19 +154,16 @@ class ConcurrencyRegistry:
         permit is available. Safe to call whether or not a loop is running in the
         current thread, since the semaphore is loop-neutral.
         """
-        sem = self._get_semaphore(agent_name)
-        if sem is not None:
-            sem.acquire()
+        limiter = self._get_limiter(agent_name)
+        if limiter is not None:
+            limiter.acquire()
 
     def release(self, agent_name: str) -> None:
         """Release concurrency slot for agent. No-op if unlimited."""
         with self._lock:
-            sem = self._semaphores.get(agent_name)
-        if sem is not None:
-            try:
-                sem.release()
-            except ValueError:
-                pass  # Already fully released
+            limiter = self._limiters.get(agent_name)
+        if limiter is not None:
+            limiter.release()
 
     @asynccontextmanager
     async def throttle(self, agent_name: str):
