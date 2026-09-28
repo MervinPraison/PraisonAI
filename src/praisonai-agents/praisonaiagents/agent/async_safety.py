@@ -139,6 +139,29 @@ class DualLock:
             self._async_locks[loop] = asyncio.Lock()
         return self._async_locks[loop]
 
+    async def _acquire_shared_mutex(self, loop):
+        """Acquire the shared mutex off-loop, releasing it if we are cancelled.
+
+        ``run_in_executor`` can complete (mutex acquired) after the awaiting
+        task is cancelled. If we let the ``CancelledError`` propagate without
+        checking, the worker would strand the mutex forever. We therefore wait
+        on the acquisition, and on cancellation ensure the mutex is released
+        once the worker finishes so no caller waits indefinitely.
+        """
+        future = loop.run_in_executor(None, self._thread_lock.acquire)
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            # The worker may still be mid-acquire; wait for it to settle, then
+            # release if it managed to take the mutex so it is never orphaned.
+            try:
+                acquired = await future
+            except asyncio.CancelledError:
+                acquired = False
+            if acquired:
+                self._thread_lock.release()
+            raise
+
     @asynccontextmanager
     async def async_lock(self):
         """Acquire lock in asynchronous context using the shared mutex.
@@ -150,15 +173,30 @@ class DualLock:
         a plain ``Lock``) happens on the loop thread. A per-event-loop
         ``asyncio.Lock`` serialises coroutines on this loop first so they don't
         all spin up executor hops at once.
+
+        While the mutex is held, the *event-loop thread* is registered as the
+        sync owner so a nested ``with lock.sync()`` on that thread (used by the
+        async handoff seeding path) is treated as re-entrant instead of
+        self-deadlocking against the mutex we already hold.
         """
         loop = asyncio.get_running_loop()
         async_gate = self._get_async_lock()
         async with async_gate:
-            await loop.run_in_executor(None, self._thread_lock.acquire)
+            await self._acquire_shared_mutex(loop)
+            me = threading.get_ident()
+            with self._owner_lock:
+                self._owner_thread = me
+                self._owner_depth = 1
             try:
                 yield
             finally:
-                self._thread_lock.release()
+                with self._owner_lock:
+                    self._owner_depth -= 1
+                    released = self._owner_depth == 0
+                    if released:
+                        self._owner_thread = None
+                if released:
+                    self._thread_lock.release()
             
     def is_async_context(self) -> bool:
         """Check if we're currently in an async context."""
@@ -232,12 +270,25 @@ class AsyncSafeState:
     @asynccontextmanager
     async def async_lock(self):
         """Acquire lock in async context."""
+        # Fail fast BEFORE blocking on the shared mutex: an in-progress
+        # synchronous deepcopy holds the mutex for the whole copy, so waiting on
+        # it here would block until the copy finished instead of surfacing the
+        # documented RuntimeError (and could stall the loop indefinitely).
+        self._raise_if_copying()
         async with self._lock.async_lock():
             self._begin_async_access()
             try:
                 yield self.value
             finally:
                 self._end_async_access()
+
+    def _raise_if_copying(self) -> None:
+        """Reject entry while a synchronous deepcopy of this state is active."""
+        with self._activity_lock:
+            if self._copying:
+                raise RuntimeError(
+                    "Cannot access AsyncSafeState during synchronous deepcopy"
+                )
 
     def _begin_async_access(self) -> None:
         """Register async access unless a synchronous copy is in progress."""
@@ -265,13 +316,17 @@ class AsyncSafeState:
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
+        # Fail fast before blocking on the mutex an in-progress deepcopy holds.
+        self._raise_if_copying()
         loop = asyncio.get_running_loop()
         async_lock = self._lock._get_async_lock()
         await async_lock.acquire()
         try:
             # Hold the SAME underlying mutex used by the sync path so async and
             # sync accessors are mutually exclusive (matches DualLock.async_lock).
-            await loop.run_in_executor(None, self._lock._thread_lock.acquire)
+            # Cancellation-safe acquire so the mutex is never stranded if the
+            # awaiting task is cancelled mid-acquisition.
+            await self._lock._acquire_shared_mutex(loop)
             try:
                 self._begin_async_access()
             except Exception:

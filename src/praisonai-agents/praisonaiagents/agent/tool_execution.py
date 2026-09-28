@@ -2512,26 +2512,42 @@ class ToolExecutionMixin:
                     }
             except Exception as e:
                 logging.debug("permission manager is_denied failed for %s: %s", target, e)
+        return None
 
-        # Deliver the doom-loop detection the PermissionManager advertises: when
-        # a manager is attached, record this call in its detector and deny on a
-        # genuine loop. Previously check_doom_loop() was unreachable dead code so
-        # a configured PermissionManager gave zero doom-loop protection.
+    def _check_permission_manager_doom_loop(self, function_name, arguments=None):
+        """Return an error dict if the PermissionManager detects a doom loop.
+
+        Deliver the doom-loop detection the ``PermissionManager`` advertises:
+        record this call in its detector and deny on a genuine loop. Previously
+        ``check_doom_loop()`` was unreachable dead code so a configured manager
+        gave zero doom-loop protection.
+
+        This is intentionally **separate** from :meth:`_check_permission_manager_deny`
+        and invoked exactly **once per approved tool call**, with the final
+        (post-approval, possibly rewritten) arguments. Folding it into the deny
+        gate would record the call on every gate pass — counting a rejected
+        attempt, or counting an approved call twice when its args are rewritten —
+        which could trip the threshold early and deny legitimate repeats.
+        """
+        manager = getattr(self, "_permission_manager", None)
+        if manager is None:
+            return None
         check_loop = getattr(manager, "check_doom_loop", None)
-        if callable(check_loop):
-            try:
-                loop_result = check_loop(function_name, arguments)
-                if loop_result is not None and getattr(loop_result, "is_loop", False):
-                    return {
-                        "error": (
-                            f"Tool '{function_name}' blocked: "
-                            f"{getattr(loop_result, 'reason', 'doom loop detected')}"
-                        ),
-                        "permission_denied": True,
-                        "loop_blocked": True,
-                    }
-            except Exception as e:  # noqa: BLE001
-                logging.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
+        if not callable(check_loop):
+            return None
+        try:
+            loop_result = check_loop(function_name, arguments)
+            if loop_result is not None and getattr(loop_result, "is_loop", False):
+                return {
+                    "error": (
+                        f"Tool '{function_name}' blocked: "
+                        f"{getattr(loop_result, 'reason', 'doom loop detected')}"
+                    ),
+                    "permission_denied": True,
+                    "loop_blocked": True,
+                }
+        except Exception as e:  # noqa: BLE001
+            logging.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
         return None
 
     def _is_bypass_mode(self) -> bool:
@@ -2595,6 +2611,13 @@ class ToolExecutionMixin:
                 if manager_denial is not None:
                     return manager_denial
 
+        # Record the (approved, final-args) call in the doom-loop detector once,
+        # after approval, so rejected attempts and arg rewrites are not counted.
+        if not self._is_bypass_mode():
+            loop_denial = self._check_permission_manager_doom_loop(function_name, arguments)
+            if loop_denial is not None:
+                return loop_denial
+
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
             function_name, arguments, agent_name=getattr(self, "name", None),
@@ -2640,6 +2663,13 @@ class ToolExecutionMixin:
                 manager_denial = self._check_permission_manager_deny(function_name, arguments)
                 if manager_denial is not None:
                     return manager_denial
+
+        # Record the (approved, final-args) call in the doom-loop detector once,
+        # after approval, so rejected attempts and arg rewrites are not counted.
+        if not self._is_bypass_mode():
+            loop_denial = self._check_permission_manager_doom_loop(function_name, arguments)
+            if loop_denial is not None:
+                return loop_denial
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(

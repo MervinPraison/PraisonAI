@@ -432,6 +432,73 @@ callbacks:
         
         assert workflow is not None
 
+    def test_registered_callbacks_wire_into_workflow_hooks(self):
+        """A registered YAML callback must reach the Workflow's lifecycle hooks."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+
+        yaml_content = """
+name: Callback Wiring Test
+agents:
+  agent1:
+    name: Agent1
+    role: Worker
+    goal: Work
+    instructions: "Do work"
+
+steps:
+  - agent: agent1
+    action: "Work"
+
+callbacks:
+  on_step_complete: log_step
+  on_workflow_start: log_start
+"""
+
+        def _log_step(*args, **kwargs):
+            return None
+
+        def _log_start(*args, **kwargs):
+            return None
+
+        parser = YAMLWorkflowParser()
+        parser.register_callback("log_step", _log_step)
+        parser.register_callback("log_start", _log_start)
+        workflow = parser.parse_string(yaml_content)
+
+        assert workflow is not None
+        # Resolved callbacks must be handed to the Workflow (previously they were
+        # resolved but never wired, so no callback event ran).
+        assert workflow.hooks is not None
+        assert workflow.hooks.on_step_complete is _log_step
+        assert workflow.hooks.on_workflow_start is _log_start
+
+    def test_unregistered_callbacks_leave_hooks_unset(self):
+        """Unresolved callback names must not fabricate a hooks config."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+
+        yaml_content = """
+name: Unresolved Callback Test
+agents:
+  agent1:
+    name: Agent1
+    role: Worker
+    goal: Work
+    instructions: "Do work"
+
+steps:
+  - agent: agent1
+    action: "Work"
+
+callbacks:
+  on_step_complete: not_registered
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+
+        assert workflow is not None
+        # No callable resolved, so the Workflow keeps its default (no hooks).
+        assert workflow.hooks is None
+
 
 class TestYAMLWorkflowParserGuardrails:
     """Tests for guardrails parsing and wiring to Task objects."""
@@ -1204,8 +1271,6 @@ steps:
         assert workflow is not None
         researcher = parser._agents.get('researcher')
         assert researcher is not None
-        assert hasattr(researcher, '_yaml_max_rpm')
-        assert researcher._yaml_max_rpm == 10
         # YAML max_rpm must wire a live RateLimiter (not just store metadata).
         from praisonaiagents.llm.rate_limiter import RateLimiter
         assert isinstance(researcher._rate_limiter, RateLimiter)
@@ -1236,7 +1301,9 @@ steps:
         assert workflow is not None
         researcher = parser._agents.get('researcher')
         assert researcher is not None
-        assert hasattr(researcher, '_yaml_max_execution_time')
+        # max_execution_time must reach the Agent (via ExecutionConfig), not a
+        # dead `_yaml_*` attribute that nothing reads.
+        assert researcher.max_execution_time == 300
     
     def test_agent_with_reflect_llm(self):
         """Test that agents can have reflect_llm for reflection."""
@@ -1264,9 +1331,12 @@ steps:
         assert workflow is not None
         researcher = parser._agents.get('researcher')
         assert researcher is not None
-        assert hasattr(researcher, '_yaml_reflect_llm')
-        assert hasattr(researcher, '_yaml_min_reflect')
-        assert hasattr(researcher, '_yaml_max_reflect')
+        # reflect_llm/min_reflect/max_reflect must configure real reflection
+        # (via ReflectionConfig), not a dead `_yaml_*` attribute.
+        assert researcher.self_reflect is True
+        assert researcher.reflect_llm == 'gpt-4o'
+        assert researcher.min_reflect == 1
+        assert researcher.max_reflect == 3
     
     def test_agent_with_templates(self):
         """Test that agents can have system/prompt/response templates."""
@@ -1294,9 +1364,11 @@ steps:
         assert workflow is not None
         researcher = parser._agents.get('researcher')
         assert researcher is not None
-        assert hasattr(researcher, '_yaml_system_template')
-        assert hasattr(researcher, '_yaml_prompt_template')
-        assert hasattr(researcher, '_yaml_response_template')
+        # Templates must reach the Agent (via TemplateConfig), not dead
+        # `_yaml_*` attributes that nothing reads.
+        assert researcher.system_template == "You are a helpful assistant."
+        assert researcher.prompt_template == "Please research: {topic}"
+        assert researcher.response_template == "Research findings: {response}"
 
 
 class TestTaskAdvancedFields:

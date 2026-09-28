@@ -376,6 +376,13 @@ class YAMLWorkflowParser:
                 )
             tools_run_on = tools_run_on.lower().strip()
 
+        # Wire resolved YAML `callbacks:` into the Workflow's lifecycle hooks so
+        # a registered `on_step_complete:`/`on_workflow_start:` etc. genuinely
+        # fires. Without this the parsed callbacks were resolved but never handed
+        # to the Workflow, so no callback event ran. Only Workflow-supported
+        # lifecycle names map through; unknown names were already warned about.
+        hooks_value = self._build_workflow_hooks()
+
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -389,6 +396,7 @@ class YAMLWorkflowParser:
             context=context_value,  # Pass context management config to Workflow
             history=history_enabled,  # Enable execution history tracking (robustness)
             tools_run_on=tools_run_on,  # One shared sandbox for every step (None = local)
+            hooks=hooks_value,  # Lifecycle callbacks resolved from YAML `callbacks:`
         )
         
         # Store additional attributes for feature parity with agents.yaml
@@ -797,6 +805,33 @@ class YAMLWorkflowParser:
                 self._callbacks[callback_name] = None
             else:
                 self._callbacks[callback_name] = resolved
+
+    # YAML `callbacks:` names that map to Workflow lifecycle hooks.
+    _WORKFLOW_HOOK_NAMES = (
+        "on_workflow_start",
+        "on_workflow_complete",
+        "on_step_start",
+        "on_step_complete",
+        "on_step_error",
+    )
+
+    def _build_workflow_hooks(self):
+        """Build a ``WorkflowHooksConfig`` from resolved lifecycle callbacks.
+
+        Maps the resolved ``callbacks:`` entries whose name is a recognised
+        Workflow lifecycle hook onto a ``WorkflowHooksConfig`` so the Workflow
+        engine actually dispatches them. Returns ``None`` when no lifecycle
+        callback resolved, leaving the Workflow's default (no hooks) untouched.
+        """
+        mapped = {
+            name: self._callbacks[name]
+            for name in self._WORKFLOW_HOOK_NAMES
+            if callable(self._callbacks.get(name))
+        }
+        if not mapped:
+            return None
+        from .workflow_configs import WorkflowHooksConfig
+        return WorkflowHooksConfig(**mapped)
     
     def _parse_steps(self, steps_data: List[Dict]) -> List:
         """
