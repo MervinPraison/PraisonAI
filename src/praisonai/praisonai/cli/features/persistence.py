@@ -563,19 +563,19 @@ def _mask_url(url: str) -> str:
 
 
 def _detect_store_backend(url: str, default: str) -> str:
-    """Reuse the canonical resolver; fall back leniently for the doctor.
+    """Reuse the canonical resolver; fall back for unknown URL schemes.
 
     Delegates to ``PraisonAIDB._detect_backend`` (the single, tested source of
     truth) so the doctor recognises the same schemes as the live path
     (e.g. ``libsql://`` -> turso, ``*.supabase.co`` -> supabase). Unknown
-    schemes fall back to the doctor's lenient ``default`` instead of failing.
+    schemes raise ``ValueError`` and fall back to the doctor's lenient
+    ``default``. Other resolver or import errors are allowed through so the
+    doctor can report the actual failure.
     """
     try:
         from praisonai.db.adapter import PraisonAIDB
         return PraisonAIDB._detect_backend(PraisonAIDB, url)
     except ValueError:
-        return default
-    except Exception:
         return default
 
 
