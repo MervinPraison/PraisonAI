@@ -325,8 +325,12 @@ class VideoAgent:
         Turn that opaque provider error into an actionable ValueError naming
         models that do have a video route. Any other error is left untouched.
         """
+        # Match LiteLLM's specific missing-backend phrasing
+        # ("video generation is not supported for <provider>") so a working
+        # backend rejecting a bad request (e.g. "video size is not supported")
+        # is NOT misclassified as a missing backend and left to propagate.
         message = str(error).lower()
-        if "not supported" in message and "video" in message:
+        if "video generation is not supported" in message:
             supported = ", ".join(self.SUPPORTED_MODEL_HINTS)
             raise ValueError(
                 f"'{self.llm}' has no LiteLLM video-generation backend "

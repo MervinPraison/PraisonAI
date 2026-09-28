@@ -481,6 +481,24 @@ class TestVideoAgentUnsupportedBackend:
         with pytest.raises(RuntimeError, match="API_KEY_INVALID"):
             agent.generate("test")
 
+    def test_working_backend_bad_request_is_not_masked(self):
+        """A working backend rejecting a bad request must propagate unchanged.
+
+        Greptile P1: an error like "video size is not supported" from a real
+        video backend must NOT be turned into a "no video-generation backend"
+        ValueError — the caller should fix the request, not switch models.
+        """
+        from praisonaiagents import VideoAgent
+
+        def raise_bad_size(**kwargs):
+            raise RuntimeError("BadRequestError: video size is not supported")
+
+        agent = VideoAgent(llm="openai/sora-2", verbose=False)
+        agent._litellm_video = {"video_generation": raise_bad_size}
+
+        with pytest.raises(RuntimeError, match="video size is not supported"):
+            agent.generate("test")
+
     @pytest.mark.asyncio
     async def test_agenerate_unsupported_backend_raises_valueerror(self):
         from praisonaiagents import VideoAgent
