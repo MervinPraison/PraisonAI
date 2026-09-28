@@ -737,8 +737,11 @@ class PersistenceOrchestrator:
         """Close all stores and release resources.
 
         Per-store errors are isolated so one failing store never strands the
-        others' pooled connections, and each field is reset to ``None`` so a
-        re-close is idempotent instead of re-hitting the same failing store.
+        others' pooled connections. A store's field is reset to ``None`` only on
+        a *successful* close, so a re-close is idempotent for the stores that
+        did close, while a store that raised keeps its reference and can be
+        retried by a later ``close()``/``aclose()`` instead of silently leaking
+        its pooled connections.
         """
         for attr in ("conversation", "knowledge", "state"):
             store = getattr(self, attr, None)
@@ -747,8 +750,8 @@ class PersistenceOrchestrator:
             try:
                 self._sync(store.close())
             except Exception:
-                logger.exception("Error closing %s store", attr)
-            finally:
+                logger.exception("Error closing %s store; keeping reference for retry", attr)
+            else:
                 setattr(self, attr, None)
 
         # Clear cache using thread-safe method
@@ -761,7 +764,9 @@ class PersistenceOrchestrator:
         ``close()`` routes through ``run_sync_or_offload`` which raises from a
         running event loop; an async shutdown handler has no clean way to call
         it. This awaits each store's ``aclose``/``close`` directly, isolating
-        per-store errors and resetting each field so it stays idempotent.
+        per-store errors. A field is reset to ``None`` only on a *successful*
+        close so it stays idempotent, while a store that raised keeps its
+        reference for a later retry instead of leaking its pooled connections.
         """
         for attr in ("conversation", "knowledge", "state"):
             store = getattr(self, attr, None)
@@ -774,8 +779,8 @@ class PersistenceOrchestrator:
                 else:
                     await asyncio.to_thread(close_fn)
             except Exception:
-                logger.exception("Error async-closing %s store", attr)
-            finally:
+                logger.exception("Error async-closing %s store; keeping reference for retry", attr)
+            else:
                 setattr(self, attr, None)
 
         self._cache_clear()

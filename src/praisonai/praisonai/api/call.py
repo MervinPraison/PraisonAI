@@ -129,22 +129,45 @@ class CallAppState:
         self.max_ips = max_tracked_ips
 
     def touch_ip(self, ip: str, now: float) -> "list[float]":
-        """Return this IP's live request timestamps, LRU-bounded.
+        """Return this IP's live request timestamps (window), LRU-bounded.
 
-        Empty entries are dropped so the map cannot grow forever, and the oldest
-        entries are evicted once ``max_ips`` is exceeded. Callers hold
-        ``ips_lock`` across this and the subsequent append so the window check
-        and mutation stay atomic across ``await`` points.
+        Only prunes expired timestamps out of the returned window — it does NOT
+        record the current request. The caller inspects the returned window
+        against ``MAX_REQUESTS_PER_WINDOW`` and, if admitted, calls
+        :meth:`record_ip` to append the new timestamp. Empty entries are dropped
+        eagerly so the map cannot grow from IPs whose windows have all expired.
+        Callers hold ``ips_lock`` across ``touch_ip`` + ``record_ip`` so the
+        check-then-record stays atomic across ``await`` points.
         """
         window = [t for t in self.client_ips.get(ip, ()) if now - t < RATE_LIMIT_WINDOW]
         if window:
             self.client_ips[ip] = window
             self.client_ips.move_to_end(ip)
         else:
+            # No live timestamps: drop the stale entry now. It is only re-added
+            # by record_ip() if this request is admitted, so a rejected caller
+            # never leaves a residue.
             self.client_ips.pop(ip, None)
-        while len(self.client_ips) > self.max_ips:
-            self.client_ips.popitem(last=False)
         return window
+
+    def record_ip(self, ip: str, window: "list[float]", now: float) -> None:
+        """Append ``now`` to this IP's admitted-request window and enforce the cap.
+
+        Pins ``ip`` as the most-recently-used entry, then evicts the oldest
+        entries so the map holds at most ``max_ips`` keys *after* this insert.
+        Eviction runs post-insert so the live caller is never the victim and the
+        map never transiently exceeds ``max_ips`` — the cap it promises. Because
+        eviction can drop another IP whose window is still open, ``max_ips``
+        should be provisioned above the realistic distinct-IP working set (the
+        10k default), so eviction only bites under a rotating-IP flood — exactly
+        the unbounded-growth case the bound exists to contain.
+        """
+        window.append(now)
+        self.client_ips[ip] = window
+        self.client_ips.move_to_end(ip)
+        while len(self.client_ips) > self.max_ips:
+            # last=False evicts the oldest (LRU); the just-touched ip is MRU.
+            self.client_ips.popitem(last=False)
 
     def mint_stream_token(self) -> str:
         """Create a single-use, TTL-bound token for the media-stream handshake."""
@@ -477,8 +500,6 @@ async def handle_media_stream(websocket):
     import websockets
     from fastapi.websockets import WebSocketDisconnect
 
-    global active_connections
-    
     # 1. Authentication — accept a one-shot, per-connection session token
     #    (from the ``session`` query param minted by the incoming-call handler,
     #    or an ``x-call-token`` header). The shared CALL_SERVER_TOKEN is never
@@ -507,9 +528,7 @@ async def handle_media_stream(websocket):
         if len(window) >= MAX_REQUESTS_PER_WINDOW:
             await websocket.close(code=4029, reason="Rate limit exceeded")
             return
-        window.append(now)
-        state.client_ips[client_ip] = window
-        state.client_ips.move_to_end(client_ip)
+        state.record_ip(client_ip, window, now)
 
     # 3. Connection Limiting — atomically check-and-increment under the lock so
     #    MAX_CONCURRENT_CONNECTIONS is never over-committed.
