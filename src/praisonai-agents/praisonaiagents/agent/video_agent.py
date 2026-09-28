@@ -308,6 +308,32 @@ class VideoAgent:
             params["extra_headers"] = headers
         return params
 
+    # Models with a working LiteLLM video backend, surfaced in the error
+    # message when a provider has no video route (e.g. xai/grok-imagine-video-*).
+    SUPPORTED_MODEL_HINTS = (
+        "openai/sora-2",
+        "gemini/veo-3.1-generate-preview",
+        "runwayml/gen4_turbo",
+    )
+
+    def _raise_if_unsupported_video_backend(self, error: Exception) -> None:
+        """Re-raise LiteLLM 'not supported' video errors with a clear message.
+
+        LiteLLM's cost/model catalogue lists chat-priced ids (e.g.
+        ``xai/grok-imagine-video-1.5``) that have no video-generation backend,
+        so ``video_generation()`` fails with ``... is not supported for <provider>``.
+        Turn that opaque provider error into an actionable ValueError naming
+        models that do have a video route. Any other error is left untouched.
+        """
+        message = str(error).lower()
+        if "not supported" in message and "video" in message:
+            supported = ", ".join(self.SUPPORTED_MODEL_HINTS)
+            raise ValueError(
+                f"'{self.llm}' has no LiteLLM video-generation backend "
+                f"(it may be listed for chat pricing only). "
+                f"Use a supported video model, e.g.: {supported}"
+            ) from error
+
     def _provider_headers(self) -> Dict[str, str]:
         """Optional attribution headers for gateway providers.
 
@@ -406,6 +432,7 @@ class VideoAgent:
                 progress.update(task, completed=True)
                 return response
             except Exception as e:
+                self._raise_if_unsupported_video_backend(e)
                 if self.verbose:
                     self.console.print(f"[red]Error generating video: {e}[/red]")
                 raise
@@ -435,7 +462,11 @@ class VideoAgent:
         params.pop("poll_interval", None)
         params.pop("max_wait_time", None)
         
-        return await self.video_module["avideo_generation"](**params)
+        try:
+            return await self.video_module["avideo_generation"](**params)
+        except Exception as e:
+            self._raise_if_unsupported_video_backend(e)
+            raise
     
     def status(self, video_id: str, **kwargs) -> Any:
         """
