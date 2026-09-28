@@ -541,6 +541,217 @@ def test_api_config_stream_roundtrip():
     assert cfg.to_dict()["stream"] is True
 
 
+class _FirstTokenAgent:
+    """Agent whose first answer piece is a FIRST_TOKEN event, rest DELTA_TEXT.
+
+    Mirrors the real SDK, which marks the opening content piece with
+    ``FIRST_TOKEN`` (the TTFT marker) and only subsequent pieces with
+    ``DELTA_TEXT``. It also emits a reasoning delta that must NOT surface as
+    answer text.
+    """
+
+    def __init__(self):
+        from praisonaiagents.streaming.events import StreamEventEmitter
+
+        self.stream_emitter = StreamEventEmitter()
+        self._llm_instance = _FakeLLM()
+
+    async def achat(self, content):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+
+        # Private reasoning first — must be filtered out of the answer stream.
+        self.stream_emitter.emit(
+            StreamEvent(
+                type=StreamEventType.DELTA_TEXT,
+                content="(thinking...)",
+                is_reasoning=True,
+            )
+        )
+        await asyncio.sleep(0)
+        self.stream_emitter.emit(
+            StreamEvent(type=StreamEventType.FIRST_TOKEN, content="Hel")
+        )
+        await asyncio.sleep(0)
+        self.stream_emitter.emit(
+            StreamEvent(type=StreamEventType.DELTA_TEXT, content="lo")
+        )
+        await asyncio.sleep(0)
+        return "Hello"
+
+
+def test_stream_includes_first_token_and_drops_reasoning():
+    # Greptile P1: the opening FIRST_TOKEN piece must be delivered (not lost to
+    # the buffered fallback) and reasoning deltas must never leak as answer text.
+    gw = _StreamGateway()
+    gw._agent = _FirstTokenAgent()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    texts = _content_texts(parts)
+    # First token present, ordered before the later delta, reasoning excluded.
+    assert texts == ["Hel", "lo"]
+    assert "(thinking...)" not in "".join(texts)
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_empty_reply_still_emits_content_frame():
+    # Greptile P2: an empty reply with no deltas must still carry a content
+    # frame so the frame shape matches the buffered single-chunk path exactly.
+    gw = _StreamGateway(deltas=())
+    ep = GatewayApiEndpoints(gw)
+
+    async def _achat(content):
+        return ""
+
+    gw._agent.achat = _achat
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    # Exactly one content frame carrying the empty string.
+    assert _content_texts(parts) == [""]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_delivers_frames_incrementally_before_turn_completes():
+    # Greptile P2: the whole point of streaming is time-to-first-token. This
+    # asserts a token's SSE frame is available BEFORE the turn finishes, not
+    # only after the agent returns its full reply. The agent blocks after the
+    # first delta until the consumer has observed that delta's frame.
+    from praisonaiagents.streaming.events import (
+        StreamEvent,
+        StreamEventEmitter,
+        StreamEventType,
+    )
+
+    first_frame_seen = asyncio.Event()
+
+    class _PausingAgent:
+        def __init__(self):
+            self.stream_emitter = StreamEventEmitter()
+            self._llm_instance = _FakeLLM()
+            self.completed = False
+
+        async def achat(self, content):
+            self.stream_emitter.emit(
+                StreamEvent(type=StreamEventType.DELTA_TEXT, content="early")
+            )
+            # Do not finish the turn until the consumer has seen the frame.
+            await first_frame_seen.wait()
+            self.completed = True
+            return "early-late"
+
+    gw = _StreamGateway()
+    agent = _PausingAgent()
+    gw._agent = agent
+    ep = GatewayApiEndpoints(gw)
+
+    def part_is_content(text, needle):
+        return text.startswith("data: ") and '"content"' in text and needle in text
+
+    async def _run():
+        response = await ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+        seen = []
+        async for part in response.body_iterator:
+            text = part if isinstance(part, str) else part.decode()
+            if part_is_content(text, "early"):
+                # We received the first token's frame while the turn is still
+                # paused (not yet completed) — genuine incremental delivery.
+                assert agent.completed is False
+                first_frame_seen.set()
+            seen.append(text)
+        return seen
+
+    parts = asyncio.run(_run())
+    assert agent.completed is True
+    assert "early" in "".join(_content_texts(parts))
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_concurrent_streams_do_not_mix_caller_text():
+    # Greptile P1 (security): two callers streaming from the SAME agent
+    # instance (shared stream_emitter) must each receive only their own tokens.
+    # The per-turn ContextVar isolation must keep the fan-out separated.
+    from praisonaiagents.streaming.events import (
+        StreamEvent,
+        StreamEventEmitter,
+        StreamEventType,
+    )
+
+    class _TaggingAgent:
+        """Emits deltas tagged with the calling turn's content prefix."""
+
+        def __init__(self):
+            self.stream_emitter = StreamEventEmitter()
+            self._llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            # Two deltas, each prefixed with this turn's content so a leak
+            # between callers is detectable.
+            for i in range(3):
+                self.stream_emitter.emit(
+                    StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        content=f"{content}-{i}",
+                    )
+                )
+                await asyncio.sleep(0)
+            return content
+
+    gw = _StreamGateway()
+    gw._agent = _TaggingAgent()
+    ep = GatewayApiEndpoints(gw)
+
+    async def _one(marker):
+        response = await ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": marker}],
+                }
+            )
+        )
+        parts = []
+        async for part in response.body_iterator:
+            parts.append(part if isinstance(part, str) else part.decode())
+        return _content_texts(parts)
+
+    async def _run():
+        return await asyncio.gather(_one("AAA"), _one("BBB"))
+
+    a_texts, b_texts = asyncio.run(_run())
+    # Each stream only carries its own marker — no cross-contamination.
+    assert all(t.startswith("AAA") for t in a_texts), a_texts
+    assert all(t.startswith("BBB") for t in b_texts), b_texts
+
+
 def test_openai_responses_reports_usage():
     ep = GatewayApiEndpoints(_FakeGateway())
     resp = asyncio.run(
