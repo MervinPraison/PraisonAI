@@ -734,21 +734,63 @@ class PersistenceOrchestrator:
     # =========================================================================
     
     def close(self) -> None:
-        """Close all stores and release resources."""
-        if self.conversation:
-            self._sync(self.conversation.close())
-        if self.knowledge:
-            self._sync(self.knowledge.close())
-        if self.state:
-            self._sync(self.state.close())
-        
+        """Close all stores and release resources.
+
+        Per-store errors are isolated so one failing store never strands the
+        others' pooled connections, and each field is reset to ``None`` so a
+        re-close is idempotent instead of re-hitting the same failing store.
+        """
+        for attr in ("conversation", "knowledge", "state"):
+            store = getattr(self, attr, None)
+            if store is None:
+                continue
+            try:
+                self._sync(store.close())
+            except Exception:
+                logger.exception("Error closing %s store", attr)
+            finally:
+                setattr(self, attr, None)
+
         # Clear cache using thread-safe method
         self._cache_clear()
         logger.info("Persistence orchestrator closed")
-    
+
+    async def aclose(self) -> None:
+        """Async close for FastAPI lifespans / async agents — never blocks the loop.
+
+        ``close()`` routes through ``run_sync_or_offload`` which raises from a
+        running event loop; an async shutdown handler has no clean way to call
+        it. This awaits each store's ``aclose``/``close`` directly, isolating
+        per-store errors and resetting each field so it stays idempotent.
+        """
+        for attr in ("conversation", "knowledge", "state"):
+            store = getattr(self, attr, None)
+            if store is None:
+                continue
+            try:
+                close_fn = getattr(store, "aclose", None) or store.close
+                if inspect.iscoroutinefunction(close_fn):
+                    await close_fn()
+                else:
+                    await asyncio.to_thread(close_fn)
+            except Exception:
+                logger.exception("Error async-closing %s store", attr)
+            finally:
+                setattr(self, attr, None)
+
+        self._cache_clear()
+        logger.info("Persistence orchestrator closed")
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+        return False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.aclose()
         return False

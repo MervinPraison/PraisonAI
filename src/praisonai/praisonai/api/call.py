@@ -10,7 +10,7 @@ import importlib.util
 import threading
 import time
 from typing import Optional
-from collections import defaultdict
+from collections import OrderedDict
 
 # Heavy, optional dependencies (websockets, fastapi, twilio, uvicorn, pyngrok,
 # rich) are imported lazily inside the functions that need them. Importing this
@@ -93,15 +93,6 @@ MAX_CONCURRENT_CONNECTIONS = int(os.getenv('MAX_CONCURRENT_CONNECTIONS', '5'))
 MAX_REQUESTS_PER_WINDOW = int(os.getenv('MAX_REQUESTS_PER_WINDOW', '100'))
 RATE_LIMIT_WINDOW = 3600
 
-active_connections = 0
-client_ips = defaultdict(list)
-
-# Guard the shared, async-mutated counters so concurrent WebSocket handlers
-# can't over-commit MAX_CONCURRENT_CONNECTIONS / MAX_REQUESTS_PER_WINDOW via a
-# check-then-mutate TOCTOU across ``await`` points.
-_conn_lock = asyncio.Lock()
-_ips_lock = asyncio.Lock()
-
 # One-shot, short-lived session tokens handed to the Twilio media-stream client
 # so the shared server secret is never embedded in a URL (which leaks into
 # access logs / referrers / history).
@@ -114,16 +105,46 @@ class CallAppState:
     Replaces the previous module-level ``tools`` / ``_pending_stream_sessions``
     globals so co-hosted / multi-tenant ``build_call_app()`` instances in one
     process never share a tool schema or cross-consume each other's stream
-    tokens. FastAPI hands this to handlers via ``request.app.state`` /
-    ``websocket.app.state``.
+    tokens. The rate-limit / capacity primitives (``active_connections``,
+    ``client_ips``) live here too so co-hosted tenants never cross-consume each
+    other's connection budget, and the IP map is LRU-bounded so a caller behind
+    rotating IPs cannot grow it without bound. FastAPI hands this to handlers via
+    ``request.app.state`` / ``websocket.app.state``.
     """
 
-    __slots__ = ("tools", "pending_sessions", "_lock")
+    __slots__ = (
+        "tools", "pending_sessions", "_lock",
+        "active_connections", "conn_lock",
+        "client_ips", "ips_lock", "max_ips",
+    )
 
-    def __init__(self):
+    def __init__(self, max_tracked_ips: int = 10_000):
         self.tools: list = []
         self.pending_sessions: "dict[str, float]" = {}
         self._lock = threading.Lock()
+        self.active_connections = 0
+        self.conn_lock = asyncio.Lock()
+        self.client_ips: "OrderedDict[str, list[float]]" = OrderedDict()
+        self.ips_lock = asyncio.Lock()
+        self.max_ips = max_tracked_ips
+
+    def touch_ip(self, ip: str, now: float) -> "list[float]":
+        """Return this IP's live request timestamps, LRU-bounded.
+
+        Empty entries are dropped so the map cannot grow forever, and the oldest
+        entries are evicted once ``max_ips`` is exceeded. Callers hold
+        ``ips_lock`` across this and the subsequent append so the window check
+        and mutation stay atomic across ``await`` points.
+        """
+        window = [t for t in self.client_ips.get(ip, ()) if now - t < RATE_LIMIT_WINDOW]
+        if window:
+            self.client_ips[ip] = window
+            self.client_ips.move_to_end(ip)
+        else:
+            self.client_ips.pop(ip, None)
+        while len(self.client_ips) > self.max_ips:
+            self.client_ips.popitem(last=False)
+        return window
 
     def mint_stream_token(self) -> str:
         """Create a single-use, TTL-bound token for the media-stream handshake."""
@@ -481,22 +502,22 @@ async def handle_media_stream(websocket):
     #    over-commit the window via a check-then-mutate race across ``await``.
     client_ip = websocket.client.host if websocket.client else "unknown"
     now = time.time()
-    async with _ips_lock:
-        window = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
+    async with state.ips_lock:
+        window = state.touch_ip(client_ip, now)
         if len(window) >= MAX_REQUESTS_PER_WINDOW:
-            client_ips[client_ip] = window
             await websocket.close(code=4029, reason="Rate limit exceeded")
             return
         window.append(now)
-        client_ips[client_ip] = window
+        state.client_ips[client_ip] = window
+        state.client_ips.move_to_end(client_ip)
 
     # 3. Connection Limiting — atomically check-and-increment under the lock so
     #    MAX_CONCURRENT_CONNECTIONS is never over-committed.
-    async with _conn_lock:
-        if active_connections >= MAX_CONCURRENT_CONNECTIONS:
+    async with state.conn_lock:
+        if state.active_connections >= MAX_CONCURRENT_CONNECTIONS:
             await websocket.close(code=1013, reason="Server busy")
             return
-        active_connections += 1
+        state.active_connections += 1
     try:
         print("Client connected")
         await websocket.accept()
@@ -570,8 +591,8 @@ async def handle_media_stream(websocket):
 
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
     finally:
-        async with _conn_lock:
-            active_connections -= 1
+        async with state.conn_lock:
+            state.active_connections -= 1
 
 async def handle_response_done(state, response, openai_ws):
     """Handle the response.done event and process any function calls."""

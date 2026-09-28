@@ -257,29 +257,35 @@ def _release(provider, instance_id: str, place: str) -> None:
 
     Collection can happen on a thread that already drives an event loop (GC
     inside async workflow code), where a bare ``asyncio.run`` raises before the
-    shutdown ever runs and the instance leaks. Bridge through the same
-    loop-safe helper ``SharedCompute`` uses so teardown survives either case.
+    shutdown ever runs and the instance leaks. Route through the module's shared
+    ``AsyncBridge`` — one long-lived background loop, never a fresh loop per
+    teardown — and fire-and-forget so the caller's loop is never pinned for the
+    cloud round-trip.
     """
-    import asyncio
-
     async def _shutdown():
         await provider.shutdown(instance_id)
 
     try:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_shutdown())
-        else:
-            import concurrent.futures
+        from praisonai._async_bridge import current_bridge
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(asyncio.run, _shutdown()).result()
-        logger.debug("[compute_managed] released %s on %s", instance_id, place)
-    except Exception as exc:  # pragma: no cover - teardown stays quiet
+        fut = current_bridge().submit(_shutdown())
+    except Exception as exc:  # pragma: no cover - bridge poisoned / interpreter exit
         logger.warning(
-            "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
+            "[compute_managed] leaked %s on %s (bridge unavailable: %s)",
+            instance_id, place, exc,
         )
+        return
+
+    def _log_result(f):
+        try:
+            f.result()
+            logger.debug("[compute_managed] released %s on %s", instance_id, place)
+        except Exception as exc:  # pragma: no cover - teardown stays quiet
+            logger.warning(
+                "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
+            )
+
+    fut.add_done_callback(_log_result)
 
 
 def _as_dict(config: Any) -> Dict[str, Any]:
