@@ -31,6 +31,20 @@ class ImageResult:
         return path
 
 
+def _apply_param_dropping(call_kwargs: Dict[str, Any]) -> None:
+    """Ask LiteLLM to drop params the target model does not support.
+
+    Newer OpenAI image models (e.g. ``gpt-image-*``) and the current
+    ``dall-e-3`` route reject ``response_format`` (and legacy
+    ``quality`` / ``style``). Scoping ``drop_params`` to the individual
+    call lets LiteLLM strip unsupported params instead of failing with
+    UnsupportedParamsError / HTTP 400, while leaving the global
+    ``litellm.drop_params`` setting untouched. Callers may override by
+    passing ``drop_params`` explicitly.
+    """
+    call_kwargs.setdefault('drop_params', True)
+
+
 def image_generate(
     prompt: str,
     model: str = "dall-e-3",
@@ -94,6 +108,7 @@ def image_generate(
     if metadata:
         call_kwargs['metadata'] = metadata
     
+    _apply_param_dropping(call_kwargs)
     response = litellm.image_generation(**call_kwargs)
     
     results = []
@@ -155,6 +170,7 @@ async def aimage_generate(
     if metadata:
         call_kwargs['metadata'] = metadata
     
+    _apply_param_dropping(call_kwargs)
     response = await litellm.aimage_generation(**call_kwargs)
     
     results = []
@@ -238,6 +254,7 @@ def image_edit(
         if metadata:
             call_kwargs['metadata'] = metadata
         
+        _apply_param_dropping(call_kwargs)
         response = litellm.image_edit(**call_kwargs)
         
         results = []
@@ -310,6 +327,7 @@ async def aimage_edit(
         if metadata:
             call_kwargs['metadata'] = metadata
         
+        _apply_param_dropping(call_kwargs)
         response = await litellm.aimage_edit(**call_kwargs)
         
         results = []

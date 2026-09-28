@@ -105,6 +105,51 @@ class TestImagesCapabilities:
         assert len(results) == 1
         assert results[0].url == "https://example.com/image.png"
 
+    @patch('litellm.image_generation')
+    def test_image_generate_scopes_drop_params(self, mock_image_generation):
+        """drop_params=True must be sent so LiteLLM strips unsupported params
+        (e.g. response_format) for models like gpt-image-2.5-*."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="gpt-image-2.5-flare")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured.get('drop_params') is True
+        assert captured['model'] == "gpt-image-2.5-flare"
+        assert captured['prompt'] == "green pixel"
+
+    @patch('litellm.image_generation')
+    def test_image_generate_respects_explicit_drop_params(self, mock_image_generation):
+        """An explicit drop_params override must be preserved."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="dall-e-3", drop_params=False)
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured.get('drop_params') is False
+
+    @patch('litellm.image_edit')
+    def test_image_edit_scopes_drop_params(self, mock_image_edit):
+        """image_edit must also scope drop_params."""
+        from praisonai.capabilities.images import image_edit
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_edit.return_value = mock_response
+
+        image_edit(b"imgbytes", "make it blue", model="gpt-image-2.5-flare")
+
+        captured = mock_image_edit.call_args.kwargs
+        assert captured.get('drop_params') is True
+
 
 class TestFilesCapabilities:
     """Tests for file management capabilities."""
