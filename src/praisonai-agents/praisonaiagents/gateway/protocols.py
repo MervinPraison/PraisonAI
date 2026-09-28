@@ -3366,6 +3366,122 @@ class ConversationRequestProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Server→client interactive request/reply over the gateway transport
+# (Issue #5351)
+#
+# A blocked HITL turn (approval / choice / free-text input) needs to reach a
+# generic gateway client — a web dashboard, TUI, or custom app — and correlate
+# the client's answer back into the waiting turn. Structured elicitation today
+# only renders through per-channel button backends; a client on the gateway
+# WebSocket cannot see or answer one, and an in-flight prompt is lost when the
+# client drops (the ``since`` cursor replays *past events*, not *still-open
+# requests*).
+#
+# Core owns only the *shape*: the typed request (:class:`GatewayServerRequest`),
+# the correlated reply (:class:`GatewayServerReply`), and the protocol seam
+# (:class:`GatewayRequestChannelProtocol`) — including the ``open_requests``
+# contract that the resume path honours so a reconnecting client is re-sent
+# every still-open (and *only* still-open) request for its sessions. The socket
+# delivery, correlation, and durable open-request set are bound by the running
+# gateway (praisonai-bot) exactly as the outbound messenger is — no heavy
+# import lives in core.
+# ---------------------------------------------------------------------------
+
+GatewayRequestKind = Literal["approval", "choice", "input"]
+"""Closed set of server→client interactive request kinds.
+
+* ``approval`` — allow/deny; the reply ``value`` is ``"allow"`` or ``"deny"``.
+* ``choice`` — select one of ``options``; the reply ``value`` is the option.
+* ``input`` — free text; the reply ``value`` is the entered text.
+"""
+
+
+@dataclass
+class GatewayServerRequest:
+    """A typed server→client interactive request (Issue #5351).
+
+    Delivered to a connected gateway client as a ``server_request`` frame while
+    a turn is blocked awaiting a human answer, and re-issued verbatim on resume
+    for as long as it stays open.
+
+    Attributes:
+        request_id: Correlation id echoed back in the :class:`GatewayServerReply`.
+        kind: One of :data:`GatewayRequestKind`.
+        prompt: Human-readable prompt to render.
+        options: Selectable options, populated only for ``kind == "choice"``.
+        session_id: Session the request belongs to (used for resume replay).
+    """
+
+    request_id: str
+    kind: GatewayRequestKind
+    prompt: str
+    options: Optional[List[str]] = None
+    session_id: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the ``server_request`` frame."""
+        data: Dict[str, Any] = {
+            "request_id": self.request_id,
+            "kind": self.kind,
+            "prompt": self.prompt,
+        }
+        if self.options is not None:
+            data["options"] = list(self.options)
+        if self.session_id:
+            data["session_id"] = self.session_id
+        return data
+
+
+@dataclass
+class GatewayServerReply:
+    """A client's correlated answer to a :class:`GatewayServerRequest`.
+
+    Attributes:
+        request_id: The id of the request being answered.
+        value: ``"allow"``/``"deny"`` for approval, the chosen option for
+            choice, or the entered text for input.
+    """
+
+    request_id: str
+    value: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {"request_id": self.request_id, "value": self.value}
+
+
+@runtime_checkable
+class GatewayRequestChannelProtocol(Protocol):
+    """Protocol for server→client interactive request/reply over the transport.
+
+    A concrete implementation is bound by the running gateway (in praisonai-bot)
+    and registered into the per-turn context so a blocked HITL turn can deliver
+    an :class:`GatewayServerRequest` to the connected client and await the
+    correlated :class:`GatewayServerReply`. ``open_requests`` returns the
+    still-open requests for a session so the gateway's resume path can re-issue
+    them alongside the event replay — a dropped connection never wedges a turn.
+    """
+
+    async def request(
+        self,
+        req: "GatewayServerRequest",
+        *,
+        timeout_s: float = 120.0,
+    ) -> Optional["GatewayServerReply"]:
+        """Deliver ``req`` to the session's client and await its reply.
+
+        Returns the correlated :class:`GatewayServerReply`, or ``None`` when no
+        reply arrives within ``timeout_s`` (the request is then cleared from the
+        open set so it is not replayed on a later reconnect).
+        """
+        ...
+
+    def open_requests(self, session_id: str) -> List["GatewayServerRequest"]:
+        """Return the still-open (unanswered) requests for ``session_id``."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Agent-callable live status/health (Issue #3688)
 #
 # The gateway already computes rich live state (per-turn run status, active
@@ -7364,6 +7480,10 @@ def _register_core_gateway_methods() -> None:
         # the same action, so both names carry the WRITE scope in lockstep.
         "abort": OperatorScope.WRITE,
         "message_abort": OperatorScope.WRITE,
+        # Issue #5351: answering a server→client interactive request (approval /
+        # choice / input) on behalf of the blocked turn mutates it, so it needs
+        # the same WRITE scope as sending a message.
+        "server_reply": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,
