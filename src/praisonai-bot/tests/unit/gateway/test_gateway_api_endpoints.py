@@ -392,6 +392,155 @@ def test_sync_agent_usage_snapshot_captured_before_thread_returns():
     assert events == ["chat_returned", "snapshot"]
 
 
+class _RealEmitterAgent:
+    """Agent whose ``achat`` emits real DELTA_TEXT events via a stream_emitter."""
+
+    def __init__(self, deltas):
+        from praisonaiagents.streaming.events import StreamEventEmitter
+
+        self.stream_emitter = StreamEventEmitter()
+        self._llm_instance = _FakeLLM()
+        self._deltas = deltas
+
+    async def achat(self, content):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+
+        for piece in self._deltas:
+            self.stream_emitter.emit(
+                StreamEvent(type=StreamEventType.DELTA_TEXT, content=piece)
+            )
+            await asyncio.sleep(0)
+        return "".join(self._deltas)
+
+
+class _StreamGateway(_FakeGateway):
+    """Gateway with token streaming enabled and a delta-emitting agent."""
+
+    def __init__(self, deltas=("Hel", "lo ", "world")):
+        super().__init__()
+        self._agent = _RealEmitterAgent(list(deltas))
+
+        class _Api:
+            stream = True
+
+        class _Cfg:
+            api = _Api()
+
+        self.config = _Cfg()
+
+
+def _content_texts(parts):
+    out = []
+    for p in parts:
+        if p.startswith("data: ") and '"content"' in p:
+            payload = json.loads(p[len("data: "):])
+            out.append(payload["choices"][0]["delta"]["content"])
+    return out
+
+
+def test_stream_enabled_emits_token_level_deltas():
+    gw = _StreamGateway(deltas=("Hel", "lo ", "world"))
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    # Each token delta arrives as its own content frame (not one buffered chunk).
+    assert _content_texts(parts) == ["Hel", "lo ", "world"]
+    assert parts[-1] == "data: [DONE]\n\n"
+    # Terminator + role prelude preserved.
+    assert any('"finish_reason": "stop"' in p for p in parts)
+    assert any('"role": "assistant"' in p for p in parts)
+
+
+def test_stream_enabled_still_emits_usage_when_opted_in():
+    gw = _StreamGateway()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads
+    assert usage_payloads[-1]["usage"]["total_tokens"] == 18
+
+
+def test_stream_enabled_falls_back_to_buffered_when_no_deltas():
+    # An agent that streams no DELTA_TEXT must still deliver its reply as one
+    # buffered content chunk so content is never lost.
+    gw = _StreamGateway(deltas=())
+    ep = GatewayApiEndpoints(gw)
+
+    async def _achat(content):
+        return "buffered-reply"
+
+    gw._agent.achat = _achat
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert _content_texts(parts) == ["buffered-reply"]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_disabled_uses_single_buffered_chunk():
+    # Default gateway (no config.api.stream) keeps the byte-for-byte buffered
+    # path: one content chunk carrying the whole reply.
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert _content_texts(parts) == ["echo:hi"]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_api_config_stream_roundtrip():
+    from praisonaiagents.gateway import ApiConfig
+
+    assert ApiConfig().stream is False
+    cfg = ApiConfig.from_dict({"openai": True, "stream": True})
+    assert cfg.stream is True
+    assert cfg.to_dict()["stream"] is True
+
+
 def test_openai_responses_reports_usage():
     ep = GatewayApiEndpoints(_FakeGateway())
     resp = asyncio.run(
