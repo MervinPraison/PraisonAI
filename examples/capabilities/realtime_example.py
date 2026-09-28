@@ -9,7 +9,7 @@ from praisonai.capabilities import realtime_connect
 # Create a realtime session
 print("=== Realtime Session ===")
 session = realtime_connect(
-    model="gpt-4o-realtime-preview",
+    model="gpt-realtime",
     modalities=["text", "audio"],
     voice="alloy"
 )
