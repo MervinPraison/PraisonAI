@@ -653,9 +653,21 @@ fn main() {
             {
                 if !*has_visible_windows {
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
+                        if let Err(error) = window.show() {
+                            eprintln!(
+                                "[praisonai] failed to show main window on reopen: {error}"
+                            );
+                        }
+                        if let Err(error) = window.unminimize() {
+                            eprintln!(
+                                "[praisonai] failed to unminimize main window on reopen: {error}"
+                            );
+                        }
+                        if let Err(error) = window.set_focus() {
+                            eprintln!(
+                                "[praisonai] failed to focus main window on reopen: {error}"
+                            );
+                        }
                     }
                 }
             }
