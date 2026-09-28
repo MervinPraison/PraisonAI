@@ -75,9 +75,24 @@ class DualLock:
     """
     
     def __init__(self):
-        """Initialize with separate threading and asyncio locks."""
-        self._thread_lock = threading.RLock()  # Re-entrant lock to handle nested acquisitions
-        self._async_locks = WeakKeyDictionary()  # Per-event-loop async locks
+        """Initialize with a single underlying mutex shared by both call styles.
+
+        A single ``threading.Lock`` backs both ``sync()`` and ``async_lock()``
+        so that holding one genuinely blocks the other — mutual exclusion is
+        real across sync and async callers of the same instance. A plain
+        ``Lock`` (not ``RLock``) is used because the async path acquires on a
+        worker thread but releases on the event-loop thread, which ``RLock``'s
+        thread-ownership semantics forbid. Same-thread ``sync()`` reentrancy is
+        preserved explicitly via an owner/depth guard below. The per-event-loop
+        ``asyncio.Lock`` only serialises coroutines on the same loop so they
+        queue for the underlying mutex cooperatively instead of every coroutine
+        racing straight into the blocking acquire.
+        """
+        self._thread_lock = threading.Lock()  # Shared mutex (cross-thread release ok)
+        self._owner_lock = threading.Lock()    # Guards the reentrancy bookkeeping
+        self._owner_thread: Any = None         # Thread id currently holding for sync reentrancy
+        self._owner_depth = 0
+        self._async_locks = WeakKeyDictionary()  # Per-event-loop async gate
 
     def __deepcopy__(self, memo):
         """Return an unlocked primitive with no event-loop state sharing."""
@@ -87,9 +102,31 @@ class DualLock:
     
     @contextmanager
     def sync(self):
-        """Acquire lock in synchronous context using threading.Lock."""
-        with self._thread_lock:
+        """Acquire lock in synchronous context using the shared mutex.
+
+        Re-entrant for the same thread: a nested ``sync()`` on the thread that
+        already holds the mutex does not re-acquire (and cannot self-deadlock).
+        """
+        me = threading.get_ident()
+        with self._owner_lock:
+            reentrant = self._owner_thread == me and self._owner_depth > 0
+            if reentrant:
+                self._owner_depth += 1
+        if not reentrant:
+            self._thread_lock.acquire()
+            with self._owner_lock:
+                self._owner_thread = me
+                self._owner_depth = 1
+        try:
             yield
+        finally:
+            with self._owner_lock:
+                self._owner_depth -= 1
+                released = self._owner_depth == 0
+                if released:
+                    self._owner_thread = None
+            if released:
+                self._thread_lock.release()
             
     def _get_async_lock(self):
         """Get or create an asyncio.Lock for the current event loop."""
@@ -104,14 +141,24 @@ class DualLock:
 
     @asynccontextmanager
     async def async_lock(self):
-        """Acquire lock in asynchronous context using asyncio.Lock.
-        
-        Uses a per-event-loop asyncio.Lock to ensure proper async coordination
-        without blocking the event loop or violating thread ownership semantics.
+        """Acquire lock in asynchronous context using the shared mutex.
+
+        Backs onto the *same* ``threading.Lock`` as ``sync()`` so a concurrent
+        sync caller is genuinely excluded (and vice-versa). The blocking
+        ``acquire`` is offloaded to a worker thread so the event loop is never
+        blocked while waiting; the matching ``release`` (allowed cross-thread on
+        a plain ``Lock``) happens on the loop thread. A per-event-loop
+        ``asyncio.Lock`` serialises coroutines on this loop first so they don't
+        all spin up executor hops at once.
         """
-        async_lock = self._get_async_lock()
-        async with async_lock:
-            yield
+        loop = asyncio.get_running_loop()
+        async_gate = self._get_async_lock()
+        async with async_gate:
+            await loop.run_in_executor(None, self._thread_lock.acquire)
+            try:
+                yield
+            finally:
+                self._thread_lock.release()
             
     def is_async_context(self) -> bool:
         """Check if we're currently in an async context."""
@@ -218,10 +265,18 @@ class AsyncSafeState:
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
+        loop = asyncio.get_running_loop()
         async_lock = self._lock._get_async_lock()
         await async_lock.acquire()
         try:
-            self._begin_async_access()
+            # Hold the SAME underlying mutex used by the sync path so async and
+            # sync accessors are mutually exclusive (matches DualLock.async_lock).
+            await loop.run_in_executor(None, self._lock._thread_lock.acquire)
+            try:
+                self._begin_async_access()
+            except Exception:
+                self._lock._thread_lock.release()
+                raise
         except Exception:
             async_lock.release()
             raise
@@ -233,7 +288,10 @@ class AsyncSafeState:
         try:
             self._end_async_access()
         finally:
-            async_lock.release()
+            try:
+                self._lock._thread_lock.release()
+            finally:
+                async_lock.release()
         return None
             
     def get(self) -> Any:

@@ -2512,6 +2512,26 @@ class ToolExecutionMixin:
                     }
             except Exception as e:
                 logging.debug("permission manager is_denied failed for %s: %s", target, e)
+
+        # Deliver the doom-loop detection the PermissionManager advertises: when
+        # a manager is attached, record this call in its detector and deny on a
+        # genuine loop. Previously check_doom_loop() was unreachable dead code so
+        # a configured PermissionManager gave zero doom-loop protection.
+        check_loop = getattr(manager, "check_doom_loop", None)
+        if callable(check_loop):
+            try:
+                loop_result = check_loop(function_name, arguments)
+                if loop_result is not None and getattr(loop_result, "is_loop", False):
+                    return {
+                        "error": (
+                            f"Tool '{function_name}' blocked: "
+                            f"{getattr(loop_result, 'reason', 'doom loop detected')}"
+                        ),
+                        "permission_denied": True,
+                        "loop_blocked": True,
+                    }
+            except Exception as e:  # noqa: BLE001
+                logging.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
         return None
 
     def _is_bypass_mode(self) -> bool:
