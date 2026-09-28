@@ -3878,7 +3878,15 @@ class WebSocketGateway:
                 
                 # Set negotiated protocol version for the session
                 session._protocol_version = negotiated_version
-                
+
+                # Rebind client_id to session for correct routing (parity with
+                # the ``hello`` path). Without this a joining client would not
+                # become the session's preferred delivery target, so a new
+                # server→client request could be sent to a stale client and the
+                # joining client would miss the next prompt (Issue #5351).
+                if hasattr(session, '_client_id'):
+                    session._client_id = client_id
+
                 self._client_sessions[client_id] = session.session_id
                 
                 # Check if resync is required
@@ -4133,16 +4141,7 @@ class WebSocketGateway:
 
         elif msg_type == "server_reply":
             # Issue #5351: a client's correlated answer to a server→client
-            # interactive request (approval / choice / input). Answering a HITL
-            # prompt on behalf of the agent turn requires the WRITE scope.
-            if not self._client_has_scope(client_id, OperatorScope.WRITE):
-                await self._send_to_client(client_id, {
-                    "type": "error",
-                    "code": "insufficient_scope",
-                    "message": "insufficient scope",
-                    "required_scope": OperatorScope.WRITE.value,
-                })
-                return True
+            # interactive request (approval / choice / input).
             request_id = data.get("request_id")
             value = data.get("value")
             if not request_id or not isinstance(value, str):
@@ -4151,6 +4150,52 @@ class WebSocketGateway:
                     "message": "server_reply requires 'request_id' and string 'value'",
                 })
                 return
+            # Locate the still-open request so ownership, scope and value can be
+            # validated against its actual session and kind. An unknown/answered
+            # request_id resolves nothing and never leaks another session's kind.
+            open_req = self._find_open_request(request_id)
+            if open_req is None:
+                await self._send_to_client(client_id, {
+                    "type": "server_reply_ack",
+                    "request_id": request_id,
+                    "status": "unknown_request",
+                })
+                return
+            req_session_id = getattr(open_req, "session_id", "") or ""
+            req_kind = getattr(open_req, "kind", "input")
+            # Session ownership: only a client bound to the request's own session
+            # may answer it — a WRITE client in another session must not resolve
+            # a foreign turn's prompt by guessing its request_id.
+            if self._client_sessions.get(client_id) != req_session_id:
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "session_mismatch",
+                    "message": "server_reply for a request not owned by this session",
+                })
+                return True
+            # Answering an approval on behalf of the turn is an approval decision
+            # and requires the APPROVALS scope (parity with approvals.resolve);
+            # choice/input answers require WRITE like sending a message.
+            required_scope = (
+                OperatorScope.APPROVALS if req_kind == "approval" else OperatorScope.WRITE
+            )
+            if not self._client_has_scope(client_id, required_scope):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": required_scope.value,
+                })
+                return True
+            # Validate the answer against the request contract so hosts receive
+            # only well-formed values (allow/deny, an offered option, or text).
+            if not self._server_reply_value_ok(open_req, value):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "invalid_value",
+                    "message": "server_reply value not permitted for this request",
+                })
+                return True
             resolved = self._resolve_server_reply(request_id, value)
             await self._send_to_client(client_id, {
                 "type": "server_reply_ack",
@@ -5057,6 +5102,37 @@ class WebSocketGateway:
                 "type": "server_request",
                 "request": req.as_dict(),
             })
+
+    def _find_open_request(self, request_id: str) -> Optional[Any]:
+        """Return the still-open request for ``request_id`` across sessions.
+
+        Used by the ``server_reply`` handler to validate session ownership,
+        scope, and value against the request's own session/kind before it
+        resolves the waiting turn (Issue #5351).
+        """
+        for open_for_session in self._open_requests.values():
+            req = open_for_session.get(request_id)
+            if req is not None:
+                return req
+        return None
+
+    @staticmethod
+    def _server_reply_value_ok(req: Any, value: str) -> bool:
+        """Validate a ``server_reply`` value against the request contract.
+
+        * ``approval`` → ``"allow"`` or ``"deny"``.
+        * ``choice`` → one of the offered ``options`` (any value if none given).
+        * ``input`` → any string.
+        """
+        kind = getattr(req, "kind", "input")
+        if kind == "approval":
+            return value in ("allow", "deny")
+        if kind == "choice":
+            options = getattr(req, "options", None)
+            if options:
+                return value in options
+            return True
+        return True
 
     def _resolve_server_reply(self, request_id: str, value: str) -> bool:
         """Correlate a client ``server_reply`` back to its waiting request.
