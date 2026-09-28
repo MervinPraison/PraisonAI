@@ -641,6 +641,24 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building the PraisonAI desktop shell")
         .run(|app, event| {
+            // macOS reports a Dock-icon reopen through this native event, not
+            // the single-instance callback. The close handler hides `main`,
+            // so restore it when the user reopens the app without a visible
+            // window.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = &event
+            {
+                if !*has_visible_windows {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+
             // Dropping managed state on exit is not guaranteed, so reap here
             // explicitly. Verified by `pgrep -f server.py` after quit.
             if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
