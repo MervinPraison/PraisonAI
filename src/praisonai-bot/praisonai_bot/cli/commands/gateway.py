@@ -570,6 +570,7 @@ def gateway_status(
     daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
     deep: bool = typer.Option(False, "--deep", help="Extended diagnostics (health + log tail)"),
     probe: bool = typer.Option(False, "--probe", help="Live credential probe per channel"),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable status snapshot"),
 ):
     """Check gateway status and daemon service status.
 
@@ -579,6 +580,7 @@ def gateway_status(
         praisonai gateway status --deep --config bot.yaml
         praisonai gateway status --probe --config bot.yaml
         praisonai gateway status --daemon-only
+        praisonai gateway status --json
     """
     import os
     from ..features.gateway import GatewayHandler
@@ -596,6 +598,17 @@ def gateway_status(
     # the file onboarding wrote instead of nothing (#3880).
     if config is None:
         config = _resolve_gateway_config_path(None)
+
+    # Machine-readable path (#5363): sibling commands (doctor/test) support
+    # --json; status did not, so scripts/health-checks/dashboards could not
+    # consume its state. Emit a single stable snapshot built from /health +
+    # /info and the daemon status, then return before any human-only text.
+    if json_output:
+        import json as _json
+
+        snapshot = _build_status_snapshot(host, port)
+        typer.echo(_json.dumps(snapshot, default=str))
+        raise typer.Exit(0 if snapshot.get("reachable") else 1)
 
     output = get_output_controller()
     
@@ -871,6 +884,84 @@ def _print_secret_availability(report: dict) -> None:
             mark = "✓" if status == "available" else "✗"
             print(f"{name:<12} {f:<13} {mark}  {status}")
     print()
+
+
+def _fetch_gateway_json(host: str, port: int, path: str, timeout: float = 5.0):
+    """GET a JSON gateway endpoint over loopback, returning None on failure.
+
+    Attaches the loopback-only bearer token the same way ``_print_version_skew``
+    does so authenticated gateways still answer, without leaking the credential
+    onto a remote plaintext hop.
+    """
+    import json
+    import os
+    import urllib.request
+
+    url = f"http://{host}:{port}{path}"
+    try:
+        req = urllib.request.Request(url)
+        token = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+        if token and host in ("127.0.0.1", "localhost", "::1"):
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode())
+    except Exception:
+        return None
+
+
+def _build_status_snapshot(host: str, port: int) -> dict:
+    """Assemble one machine-readable gateway status snapshot (#5363).
+
+    Combines the daemon service state with the rich ``/health`` payload
+    (uptime, sessions, clients, per-channel supervision, degraded owners,
+    delivery back-pressure, applied/on-disk config revision + drift) and the
+    version/protocol_version from ``/info`` so a single ``--json`` call answers
+    "is my gateway healthy, on the right config, and what version".
+    """
+    from praisonai_bot.daemon import get_daemon_status
+
+    snapshot: dict = {"host": host, "port": port, "reachable": False}
+
+    try:
+        daemon_status = get_daemon_status()
+        snapshot["daemon"] = {
+            "platform": daemon_status.get("platform", "unknown"),
+            "installed": bool(daemon_status.get("installed", False)),
+            "running": bool(daemon_status.get("running", False)),
+            "pid": daemon_status.get("pid"),
+            "error": daemon_status.get("error"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        snapshot["daemon"] = {"error": str(exc)}
+
+    health = _fetch_gateway_json(host, port, "/health")
+    info = _fetch_gateway_json(host, port, "/info")
+
+    if info:
+        snapshot["version"] = info.get("version")
+        snapshot["protocol_version"] = info.get("protocol_version")
+
+    if health:
+        snapshot["reachable"] = True
+        snapshot["status"] = health.get("status")
+        snapshot["uptime_s"] = health.get("uptime")
+        snapshot["active_sessions"] = health.get("sessions")
+        snapshot["clients"] = health.get("clients")
+        snapshot["agents"] = health.get("agents")
+        snapshot["channels"] = health.get("channels") or {}
+        snapshot["degraded"] = health.get("degraded_owners") or []
+        snapshot["applied_config_revision"] = health.get("applied_config_revision")
+        snapshot["on_disk_config_revision"] = health.get("on_disk_config_revision")
+        snapshot["config_drift"] = health.get("config_drift")
+        snapshot["last_inbound_at"] = health.get("last_inbound_at")
+        if "pressure" in health:
+            snapshot["delivery"] = health.get("pressure")
+        elif "delivery" in health:
+            snapshot["delivery"] = health.get("delivery")
+        if snapshot.get("version") is None and health.get("version") is not None:
+            snapshot["version"] = health.get("version")
+
+    return snapshot
 
 
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:

@@ -867,10 +867,14 @@ class GatewayApiEndpoints:
             )
 
         if method == "initialize":
+            from .server import _installed_gateway_version
             return ok(
                 {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "PraisonAI Gateway", "version": "1.0.0"},
+                    "serverInfo": {
+                        "name": "PraisonAI Gateway",
+                        "version": _installed_gateway_version(),
+                    },
                     "capabilities": {"tools": {}},
                 }
             )
