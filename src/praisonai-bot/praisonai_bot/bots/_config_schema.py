@@ -459,7 +459,12 @@ class ChannelConfigSchema(BaseModel):
     routing: Optional[Dict[str, str]] = None  # Alias for routes
     bindings: List[Dict[str, Any]] = Field(default_factory=list)  # Priority-ordered route bindings (Issue #2225)
     webhook_url: Optional[str] = None
-    webhook_port: int = 8080
+    # Issue #5146: default is now None ("shared-listener" mode) so a webhook
+    # channel is served through the gateway's single HTTP listener at
+    # ``/webhooks/<channel>`` — one port, one public URL, routed by path — with
+    # no per-channel port collision. Setting an explicit port keeps the legacy
+    # standalone-server behaviour (backward-compatible opt-out).
+    webhook_port: Optional[int] = None
     streaming: Optional[StreamingConfigSchema] = None
     home_channel: Optional[str] = None  # Default channel for this platform
     aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping
