@@ -541,11 +541,30 @@ class AsyncBaseJSONStore:
                 else:
                     self._backend.save(self._storage_key, self._data)
             else:
-                # File-based async write
+                # File-based async write. Serialise to a string FIRST, write it
+                # to a temp file, then os.replace it into place so a crash/kill
+                # mid-write cannot truncate the previous good file (writing
+                # directly to the target truncates it before any bytes land).
                 import aiofiles
                 self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-                async with aiofiles.open(self.storage_path, "w", encoding="utf-8") as f:
-                    await f.write(json.dumps(self._data, indent=2, default=str, ensure_ascii=False))
+                payload = json.dumps(self._data, indent=2, default=str, ensure_ascii=False)
+                dir_path = self.storage_path.parent
+                fd, temp_path = tempfile.mkstemp(
+                    dir=str(dir_path),
+                    prefix=self.storage_path.name + ".",
+                    suffix=".tmp",
+                )
+                os.close(fd)
+                try:
+                    async with aiofiles.open(temp_path, "w", encoding="utf-8") as f:
+                        await f.write(payload)
+                    os.replace(temp_path, self.storage_path)
+                except BaseException:
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                    raise
     
     async def exists_async(self) -> bool:
         """Check if storage exists asynchronously."""

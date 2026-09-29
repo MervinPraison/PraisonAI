@@ -61,7 +61,13 @@ def ensure_schedule_runner() -> None:
         return
     try:
         from praisonaiagents.scheduler import get_default_store, ScheduleLoop
+    except ImportError as exc:
+        # Truly optional feature: the scheduler package is not installed. This is
+        # the ONLY leg that legitimately means "nothing to run", so DEBUG is fine.
+        log.debug("Scheduler optional dependency not installed: %s", exc)
+        return
 
+    try:
         store = get_default_store()
         _executor = _build_executor(store)
 
@@ -74,9 +80,10 @@ def ensure_schedule_runner() -> None:
         # leave the loop unstarted — nothing is claimed, every job stays truly
         # due until a later start finds an executor (issue #4079, Defect 2).
         if _executor is None:
-            log.debug(
-                "Schedule executor unavailable; poll loop not started "
-                "(jobs left due, none claimed)"
+            log.warning(
+                "Schedule executor unavailable; poll loop not started. "
+                "Scheduled jobs will remain due but will NOT fire until the "
+                "host app is restarted with the executor available."
             )
             return
 
@@ -101,5 +108,11 @@ def ensure_schedule_runner() -> None:
         _loop.start()
         _runner_started = True
         log.info("ScheduleLoop started for host integration")
-    except Exception as exc:
-        log.debug("Schedule runner unavailable: %s", exc)
+    except Exception:
+        # A real failure (store construction, thread creation, executor init):
+        # the operator MUST see the traceback because scheduling is now off and
+        # _runner_started stays False, so scheduled jobs never fire silently.
+        log.exception(
+            "Schedule runner failed to start; scheduled jobs will NOT fire "
+            "until the host app is restarted."
+        )
