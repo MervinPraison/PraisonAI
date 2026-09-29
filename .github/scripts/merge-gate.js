@@ -16,6 +16,9 @@ const PR_MAX_AUTO_ADDITIONS = 800;
 const PR_MAX_AUTO_FILES = 30;
 const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
 const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
+const EXTERNAL_EXAMPLE_PATH_PREFIX = 'examples/tools/external/';
+const EXTERNAL_EXAMPLE_LABEL = 'pipeline/external-example';
+const MAINTAINER_ACCEPT_EXAMPLE_LABEL = 'maintainer-accept-example';
 const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
 const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/', 'src/praisonai-ts/'];
 const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
@@ -328,7 +331,7 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
 }
 
 const FINAL_CLAUDE_REVIEW_BODY =
-  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**MANDATORY READ (before reviewing):**\n- Always read src/praisonai-agents/AGENTS.md\n- If this PR touches src/praisonai-ts/, also read src/praisonai-ts/AGENTS.md §2.1.2 (TS triage + PR review checklist)\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n\n**MANDATORY COMMENT FORMAT — include this Phase 1 table in your review comment:**\n#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|\n| Protocol-driven / no heavy impl in core | ✅ or ❌ + one-line rationale |\n| Backward compatible | ✅ or ❌ + one-line rationale |\n| Performance (hot path) | ✅ or ❌ + one-line rationale |\n| **SDK value** | ✅ or ❌ + one-line rationale (explicitly judge whether the change strengthens the SDK) |\n| No Agent param bloat | ✅ or ❌ + one-line rationale |\n| Repo routing | ✅ or ❌ + one-line rationale |\n\nFor TypeScript PRs (src/praisonai-ts/), also add:\n| TS types / parity / tests | ✅ or ❌ + one-line rationale (npm run build && npm test) |\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
+  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**MANDATORY READ (before reviewing):**\n- Always read src/praisonai-agents/AGENTS.md\n- If this PR touches src/praisonai-ts/, also read src/praisonai-ts/AGENTS.md §2.1.2 (TS triage + PR review checklist)\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n6b. **External tool examples (`examples/tools/external/**`):** If the diff is confined to that path, mark **SDK value** ❌ for monorepo merge — redirect the contributor to PraisonAI-Tools; do **not** Approve for merge unless the PR has the `maintainer-accept-example` label.\n\n**MANDATORY COMMENT FORMAT — include this Phase 1 table in your review comment:**\n#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|\n| Protocol-driven / no heavy impl in core | ✅ or ❌ + one-line rationale |\n| Backward compatible | ✅ or ❌ + one-line rationale |\n| Performance (hot path) | ✅ or ❌ + one-line rationale |\n| **SDK value** | ✅ or ❌ + one-line rationale (explicitly judge whether the change strengthens the SDK) |\n| No Agent param bloat | ✅ or ❌ + one-line rationale |\n| Repo routing | ✅ or ❌ + one-line rationale |\n\nFor TypeScript PRs (src/praisonai-ts/), also add:\n| TS types / parity / tests | ✅ or ❌ + one-line rationale (npm run build && npm test) |\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
 
 async function getMergeState(github, owner, repo, prNumber) {
   const query = `
@@ -581,6 +584,11 @@ async function hasInProgressClaudeAssistant(github, owner, repo, prNumber = null
 function isCiOnlyChange(files) {
   if (!files.length) return false;
   return files.every((f) => CI_ONLY_PATH_PREFIXES.some((p) => f.filename.startsWith(p)));
+}
+
+function isExternalExampleOnlyChange(files) {
+  if (!files.length) return false;
+  return files.every((f) => f.filename.startsWith(EXTERNAL_EXAMPLE_PATH_PREFIX));
 }
 
 function isInternalPullRequestLink(link, owner, repo) {
@@ -973,6 +981,15 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
 
   const pullFiles = await listPullFiles(github, owner, repo, prNumber);
 
+  if (
+    isExternalExampleOnlyChange(pullFiles) &&
+    !ctx.labels.includes(MAINTAINER_ACCEPT_EXAMPLE_LABEL)
+  ) {
+    reasons.push(
+      'external example only — belongs in PraisonAI-Tools (add maintainer-accept-example to opt in)'
+    );
+  }
+
   const agentChange = getAgentPyChangeFromFiles(pullFiles);
   const agentManual = manualReviewReasonForAgentPy(agentChange);
   if (agentManual) reasons.push(agentManual);
@@ -1019,6 +1036,13 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
   }
   const mergeReady = mergeReadyIssues
     .filter((issue) => issue.pull_request)
+    .filter((issue) => {
+      const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+      if (labels.includes(EXTERNAL_EXAMPLE_LABEL) && !labels.includes(MAINTAINER_ACCEPT_EXAMPLE_LABEL)) {
+        return false;
+      }
+      return true;
+    })
     .map((issue) => issue.number)
     .sort((a, b) => a - b);
 
@@ -1146,6 +1170,10 @@ module.exports = {
   claudeRunBlocksPr,
   hasBlockingClaudeRunForPr,
   isCiOnlyChange,
+  isExternalExampleOnlyChange,
+  EXTERNAL_EXAMPLE_PATH_PREFIX,
+  EXTERNAL_EXAMPLE_LABEL,
+  MAINTAINER_ACCEPT_EXAMPLE_LABEL,
   isInternalPullRequestLink,
   resolvePrNumberFromLinkedPullRequests,
   resolvePrNumberFromHeadBranch,
