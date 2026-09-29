@@ -444,6 +444,13 @@ class ChannelConfigSchema(BaseModel):
     group_policy: str = "mention_only"  # respond_all, mention_only, command_only, observe (record unmentioned msgs as context)
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
     silence_token: Optional[str] = None  # Custom silence token (defaults to NO_REPLY)
+    # Bot-to-bot inbound (#5062). Off by default: bot-authored inbound messages
+    # are dropped as before. When ``allow_bots: true`` the channel accepts
+    # bot-authored messages and the core ``BotLoopGuard`` auto-breaks a runaway
+    # A<->B reply loop using ``bot_loop_protection``'s sliding-window pair budget
+    # (enabled / max_events_per_window / window_seconds / cooldown_seconds).
+    allow_bots: bool = False
+    bot_loop_protection: Optional[Dict[str, Any]] = None
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)  # Changed to List for consistency
@@ -459,7 +466,12 @@ class ChannelConfigSchema(BaseModel):
     routing: Optional[Dict[str, str]] = None  # Alias for routes
     bindings: List[Dict[str, Any]] = Field(default_factory=list)  # Priority-ordered route bindings (Issue #2225)
     webhook_url: Optional[str] = None
-    webhook_port: int = 8080
+    # Issue #5146: default is now None ("shared-listener" mode) so a webhook
+    # channel is served through the gateway's single HTTP listener at
+    # ``/webhooks/<channel>`` — one port, one public URL, routed by path — with
+    # no per-channel port collision. Setting an explicit port keeps the legacy
+    # standalone-server behaviour (backward-compatible opt-out).
+    webhook_port: Optional[int] = None
     streaming: Optional[StreamingConfigSchema] = None
     home_channel: Optional[str] = None  # Default channel for this platform
     aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping

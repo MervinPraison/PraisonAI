@@ -34,7 +34,11 @@ if TYPE_CHECKING:
     from ._presentation_approval_backend import PresentationApprovalBackend
     from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
     from ._outbox import OutboundQueue, OutboundEntry
-    from ._idempotency import SqliteIdempotencyStore, build_idempotency_store
+    from ._idempotency import (
+        RedisIdempotencyStore,
+        SqliteIdempotencyStore,
+        build_idempotency_store,
+    )
     from ._approval_store import ApprovalStore
     from ._delivery_control_store import DeliveryControlStore
     from ._delivery import DurableDelivery, deliver_with_retry
@@ -169,6 +173,9 @@ def __getattr__(name: str):
     if name == "SqliteIdempotencyStore":
         from ._idempotency import SqliteIdempotencyStore
         return SqliteIdempotencyStore
+    if name == "RedisIdempotencyStore":
+        from ._idempotency import RedisIdempotencyStore
+        return RedisIdempotencyStore
     if name == "build_idempotency_store":
         from ._idempotency import build_idempotency_store
         return build_idempotency_store
@@ -228,7 +235,7 @@ __all__ = [
     "DeadTargetRegistry", "DeadTarget",
     "InboundJournal", "JournalEntry",
     "OutboundQueue", "OutboundEntry",
-    "SqliteIdempotencyStore", "build_idempotency_store",
+    "SqliteIdempotencyStore", "RedisIdempotencyStore", "build_idempotency_store",
     "ApprovalStore",
     "DeliveryControlStore",
     "DurableDelivery", "deliver_with_retry", "deliver_chunked",

@@ -82,14 +82,54 @@ class MemoryStateStore(StateStore):
             logger.warning(f"Failed to load state from {self.path}: {e}")
     
     def _save(self) -> None:
-        """Save state to JSON file."""
+        """Save state to JSON file atomically.
+
+        Serialises the payload FIRST so a non-serialisable value fails before
+        the on-disk file is touched, then writes to a sibling temp file with an
+        fsync + ``os.replace`` so a crash, disk-full, or Ctrl+C never leaves a
+        truncated/half-written file that the next ``_load()`` would silently
+        drop.
+        """
         if not self.path:
             return
-        
+
+        import tempfile
+
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "w") as f:
-                json.dump({"data": self._data, "ttls": self._ttls}, f)
+            payload = json.dumps({"data": self._data, "ttls": self._ttls})
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "Refusing to save non-serialisable state to %s: %s", self.path, e
+            )
+            return
+
+        try:
+            target_dir = os.path.dirname(os.path.abspath(self.path)) or "."
+            os.makedirs(target_dir, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=".tmp_state_", suffix=".json", dir=target_dir
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # Preserve the existing file's permission bits: mkstemp creates
+                # the temp file 0o600, so a naive replace would silently drop
+                # any group/other access a shared state file relied on.
+                try:
+                    existing_mode = os.stat(self.path).st_mode
+                    os.chmod(tmp_path, existing_mode)
+                except (OSError, FileNotFoundError):
+                    pass
+                os.replace(tmp_path, self.path)  # atomic on POSIX + Windows
+            except BaseException:
+                # Preserve the original file untouched on any failure.
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             self._last_save = time.time()
         except Exception as e:
             logger.warning(f"Failed to save state to {self.path}: {e}")

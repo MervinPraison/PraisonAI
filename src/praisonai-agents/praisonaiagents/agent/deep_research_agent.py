@@ -898,14 +898,18 @@ You are a professional research analyst. When conducting research:
         if grounding_file_prompt:
             create_params["grounding_file_prompt"] = grounding_file_prompt
         
-        interaction = self.gemini_client.interactions.create(**create_params)
+        interaction = await asyncio.to_thread(
+            self.gemini_client.interactions.create, **create_params
+        )
         
         if self.verbose:
             self.logger.debug(f"Gemini research started (async): {interaction.id}")
         
         start_time = time.time()
         while True:
-            interaction = self.gemini_client.interactions.get(interaction.id)
+            interaction = await asyncio.to_thread(
+                self.gemini_client.interactions.get, interaction.id
+            )
             
             if interaction.status == "completed":
                 if self.verbose:

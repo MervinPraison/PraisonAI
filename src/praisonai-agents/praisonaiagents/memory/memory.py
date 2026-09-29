@@ -500,18 +500,16 @@ class Memory(SearchMixin, MemoryCoreMixin):
     def _get_stm_conn(self):
         """Get thread-local short-term memory SQLite connection."""
         if not hasattr(self._local, 'stm_conn') or self._local.stm_conn is None:
-            self._local.stm_conn = sqlite3.connect(
+            # Hardened factory: WAL where the filesystem supports it, safe
+            # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264).
+            from ..storage.sqlite import connect as _sqlite_connect
+
+            self._local.stm_conn = _sqlite_connect(
                 self.short_db,
                 check_same_thread=False,  # Allow cross-thread cleanup
-                timeout=30.0  # 30 second timeout for lock contention
+                timeout=30.0,  # 30 second timeout for lock contention
+                busy_timeout_ms=30000,  # 30 seconds
             )
-            # Configure busy timeout for better contention handling
-            self._local.stm_conn.execute("PRAGMA busy_timeout=30000")  # 30 seconds
-            
-            # Enable WAL mode for concurrent read/write without blocking
-            result = self._local.stm_conn.execute("PRAGMA journal_mode=WAL").fetchone()
-            if result and result[0].upper() != 'WAL':
-                logger.warning(f"WAL mode not enabled for STM, got: {result[0]}")
             self._local.stm_conn.commit()
             
             # Register connection for cleanup
@@ -522,18 +520,16 @@ class Memory(SearchMixin, MemoryCoreMixin):
     def _get_ltm_conn(self):
         """Get thread-local long-term memory SQLite connection."""
         if not hasattr(self._local, 'ltm_conn') or self._local.ltm_conn is None:
-            self._local.ltm_conn = sqlite3.connect(
+            # Hardened factory: WAL where the filesystem supports it, safe
+            # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264).
+            from ..storage.sqlite import connect as _sqlite_connect
+
+            self._local.ltm_conn = _sqlite_connect(
                 self.long_db,
                 check_same_thread=False,  # Allow cross-thread cleanup
-                timeout=30.0  # 30 second timeout for lock contention
+                timeout=30.0,  # 30 second timeout for lock contention
+                busy_timeout_ms=30000,  # 30 seconds
             )
-            # Configure busy timeout for better contention handling
-            self._local.ltm_conn.execute("PRAGMA busy_timeout=30000")  # 30 seconds
-            
-            # Enable WAL mode for concurrent read/write without blocking
-            result = self._local.ltm_conn.execute("PRAGMA journal_mode=WAL").fetchone()
-            if result and result[0].upper() != 'WAL':
-                logger.warning(f"WAL mode not enabled for LTM, got: {result[0]}")
             self._local.ltm_conn.commit()
             
             # Register connection for cleanup
