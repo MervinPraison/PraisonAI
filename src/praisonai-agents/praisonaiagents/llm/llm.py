@@ -573,8 +573,11 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        # Agent attribution is task-local so concurrent agents sharing one LLM
-        # instance don't overwrite each other's name mid-completion (issue #5052).
+        # Agent attribution is task-local: a single LLM instance is shared by
+        # concurrent agents (gateway channels, asyncio.gather), so a plain
+        # attribute would let one agent's set_current_agent() overwrite another's
+        # while it is still awaiting its own completion, misattributing tokens
+        # (issue #5052). A ContextVar isolates the value per async task/context.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_name", default=None)
         )
@@ -1822,12 +1825,22 @@ Respond with ONLY a valid JSON tool call in this format:
         self,
         arguments: Dict[str, Any],
         tool_result_mapping: Dict[str, Any],
+        function_name: Optional[str] = None,
+        tools: Optional[List] = None,
     ) -> Dict[str, Any]:
-        """Delegate Ollama function-name substitution to the provider adapter."""
+        """Delegate Ollama function-name substitution to the provider adapter.
+
+        When ``function_name``/``tools`` are supplied, a parameter the target
+        tool declares as string-accepting is left untouched even if its literal
+        value happens to match an earlier tool's name (e.g. ``city="get_weather"``).
+        Otherwise a legitimate string argument would be silently overwritten with
+        an unrelated prior result. The substitution only ever targets values the
+        model meant as result references, never declared string inputs.
+        """
         adapter = getattr(self, "_provider_adapter", None)
         if adapter is not None:
             try:
-                return adapter.resolve_chained_arguments(
+                resolved = adapter.resolve_chained_arguments(
                     arguments,
                     tool_result_mapping,
                     correlation_id=self._ollama_correlation_id(),
@@ -1836,14 +1849,48 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Keep compatibility with lightweight test/custom adapters.
                 resolver = getattr(adapter, "resolve_chained_arguments", None)
                 if resolver is not None:
-                    return resolver(arguments, tool_result_mapping)
+                    resolved = resolver(arguments, tool_result_mapping)
+                else:
+                    resolved = None
+            if resolved is not None:
+                return self._preserve_declared_string_args(
+                    arguments, resolved, tool_result_mapping, function_name, tools
+                )
         from .adapters import resolve_ollama_chained_arguments
 
-        return resolve_ollama_chained_arguments(
+        resolved = resolve_ollama_chained_arguments(
             arguments,
             tool_result_mapping,
             correlation_id=self._ollama_correlation_id(),
         )
+        return self._preserve_declared_string_args(
+            arguments, resolved, tool_result_mapping, function_name, tools
+        )
+
+    def _preserve_declared_string_args(
+        self,
+        original: Dict[str, Any],
+        resolved: Dict[str, Any],
+        tool_result_mapping: Dict[str, Any],
+        function_name: Optional[str],
+        tools: Optional[List],
+    ) -> Dict[str, Any]:
+        """Undo result-reference substitution for declared string parameters.
+
+        Only acts when schema info is available and a value was actually changed
+        by the resolver. A no-op for callers that pass no tools (backward
+        compatible with every existing call site).
+        """
+        if not function_name or not tools or resolved is original:
+            return resolved
+        for arg_name, orig_value in original.items():
+            if not (isinstance(orig_value, str) and orig_value in tool_result_mapping):
+                continue
+            if resolved.get(arg_name) is orig_value:
+                continue  # resolver left it alone already
+            if self._param_accepts_string(function_name, arg_name, tools):
+                resolved[arg_name] = orig_value
+        return resolved
 
     def _record_ollama_tool_result(
         self,
@@ -4014,7 +4061,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             # result, then filter unknown argument keys.
                             if is_ollama:
                                 arguments = self._resolve_ollama_chained_args(
-                                    arguments, tool_result_mapping
+                                    arguments, tool_result_mapping, function_name, tools
                                 )
                             # Validate and filter arguments for Ollama provider
                             if is_ollama and tools:
@@ -4758,7 +4805,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Resolve any same-turn result reference first.
                             if is_ollama:
                                 arguments = self._resolve_ollama_chained_args(
-                                    arguments, ollama_tool_result_mapping
+                                    arguments, ollama_tool_result_mapping, function_name, tools
                                 )
                             # Validate and filter before dispatch. Nothing has
                             # been yielded yet, so streaming consumers remain
@@ -4792,7 +4839,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_results = []
                             for _tool_call in tool_calls_batch:
                                 _tool_call.arguments = self._resolve_ollama_chained_args(
-                                    _tool_call.arguments, ollama_tool_result_mapping
+                                    _tool_call.arguments, ollama_tool_result_mapping,
+                                    _tool_call.function_name, tools
                                 )
                                 # The batch-preparation filter above has
                                 # already removed unknown keys. Re-validate
@@ -5067,7 +5115,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # user's tool with parameters it never declared.
                             if is_ollama and tools:
                                 arguments = self._resolve_ollama_chained_args(
-                                    arguments, ollama_tool_result_mapping
+                                    arguments, ollama_tool_result_mapping, function_name, tools
                                 )
                                 arguments = self._validate_and_filter_ollama_arguments(
                                     function_name, arguments, tools)
@@ -5763,7 +5811,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if is_ollama and tools:
                             if parallel_tool_calls:
                                 arguments = self._resolve_ollama_chained_args(
-                                    arguments, ollama_tool_result_mapping
+                                    arguments, ollama_tool_result_mapping, function_name, tools
                                 )
                                 arguments = self._validate_and_filter_ollama_arguments(
                                     function_name, arguments, tools
@@ -5771,7 +5819,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         if is_ollama and not parallel_tool_calls:
                             arguments = self._resolve_ollama_chained_args(
-                                arguments, ollama_tool_result_mapping
+                                arguments, ollama_tool_result_mapping, function_name, tools
                             )
                             if tools:
                                 arguments = self._validate_and_filter_ollama_arguments(
@@ -6488,29 +6536,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     
     @property
     def current_agent_name(self) -> Optional[str]:
-        """The agent currently attributed to this task's completions.
+        """The agent name attributed to the current async task/context.
 
-        Backed by a :class:`contextvars.ContextVar` so concurrent agents that
-        share a single LLM instance each read their own value instead of
-        clobbering a shared attribute mid-completion (issue #5052).
+        Backed by a per-instance ContextVar (issue #5052) so concurrent agents
+        sharing one LLM instance keep independent, task-local attribution and do
+        not clobber each other's value while awaiting their own completions.
         """
-        return self._current_agent_name_var.get()
+        var = getattr(self, "_current_agent_name_var", None)
+        if var is None:
+            return None
+        return var.get()
 
     @current_agent_name.setter
     def current_agent_name(self, agent_name: Optional[str]) -> None:
-        self._current_agent_name_var.set(agent_name)
+        var = getattr(self, "_current_agent_name_var", None)
+        if var is None:
+            var = contextvars.ContextVar(
+                "current_agent_name", default=None
+            )
+            self._current_agent_name_var = var
+        var.set(agent_name)
 
     def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
-        self._current_agent_name_var.set(agent_name)
+        """Set the current agent name for token tracking (task-local)."""
+        self.current_agent_name = agent_name
 
     def __deepcopy__(self, memo):
         """Deep-copy the LLM while giving the clone a fresh attribution ContextVar.
 
-        ``contextvars.ContextVar`` objects cannot be pickled/deep-copied, so a
-        naive ``copy.deepcopy`` of an already-built LLM raises. The clone also
-        wants its own task-local attribution state rather than sharing the
-        source's, so we install a new ContextVar on the copy (issue #5052).
+        ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
+        not copyable, so ``Agent.__deepcopy__`` (which recursively copies
+        ``_llm_instance``) would raise ``TypeError: cannot pickle ContextVar``.
+        The attribution value is runtime/task-local anyway, so the clone starts
+        with its own independent, empty ContextVar (issue #5052).
         """
         cls = self.__class__
         new = cls.__new__(cls)
