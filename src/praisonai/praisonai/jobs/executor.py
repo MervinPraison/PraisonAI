@@ -525,6 +525,17 @@ class JobExecutor:
             return
         
         try:
+            # Re-validate immediately before delivery. Submit-time validation
+            # can be stale (jobs run for minutes/hours); an attacker-controlled
+            # DNS record could flip a public answer to an internal one in the
+            # meantime (DNS rebinding / TOCTOU) and exfiltrate ``job.result``.
+            from .models import validate_webhook_url
+            try:
+                await asyncio.to_thread(validate_webhook_url, job.webhook_url)
+            except ValueError as exc:
+                logger.warning(f"Webhook target rejected for {job.id}: {exc}")
+                return
+
             payload = {
                 "job_id": job.id,
                 "status": job.status.value,
@@ -535,10 +546,13 @@ class JobExecutor:
             }
             
             client = await self._get_webhook_client()
+            # Never follow redirects: a 3xx to an internal URL must not be
+            # silently chased past the validated target.
             response = await client.post(
                 job.webhook_url,
                 json=payload,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
+                follow_redirects=False,
             )
             
             if response.status_code >= 400:

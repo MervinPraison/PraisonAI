@@ -740,14 +740,13 @@ class AgentsGenerator:
         for key in agent_level_fields:
             if key not in cli_config:
                 continue
-            # The legacy parser always supplies 16000, even when the user did
-            # not pass --max-tokens. Do not let that default overwrite a
-            # per-agent or nested YAML budget; only a marked explicit value or
-            # a non-default value is a real CLI override.
+            # The legacy parser fills in a default when the user did not pass
+            # --max-tokens. Do not let that default overwrite a per-agent or
+            # nested YAML budget; only a value the parser marked as explicitly
+            # supplied on the command line is a real CLI override.
             if (
                 key == 'max_tokens'
                 and not cli_config.get('_max_tokens_explicit')
-                and cli_config[key] == 16000
             ):
                 continue
             agent_overrides[key] = cli_config[key]
@@ -1407,8 +1406,14 @@ class AgentsGenerator:
             workflow_label = self._adapter_registry.resolve_or_default(
                 self.framework or config.get('framework')
             ).lower()
+            # Isolate this sync workflow run's sync->async work onto its own
+            # loop+thread, matching the sequential/hierarchical and async
+            # workflow paths, so a stuck coroutine in one agent/tenant does not
+            # park the shared default bridge for the rest.
+            from ._async_bridge import scoped_bridge
             with observability_session(workflow_label):
-                return self._run_yaml_workflow(config)
+                with scoped_bridge():
+                    return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
