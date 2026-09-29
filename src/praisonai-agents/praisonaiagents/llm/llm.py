@@ -1995,8 +1995,9 @@ Respond with ONLY a valid JSON tool call in this format:
         as _force_tool_usage_message.
         """
         repair_attempt_count = getattr(self, '_current_repair_count', 0)
-        if not (tool_calls and self.max_tool_repairs > 0
-                and repair_attempt_count < self.max_tool_repairs):
+        max_tool_repairs = getattr(self, 'max_tool_repairs', 0)
+        if not (tool_calls and max_tool_repairs > 0
+                and repair_attempt_count < max_tool_repairs):
             return None
         validation_errors = [e for e in
                              (self._validate_tool_call(tc, formatted_tools) for tc in tool_calls)
@@ -2007,7 +2008,7 @@ Respond with ONLY a valid JSON tool call in this format:
         tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
         logging.debug(
             f"[OLLAMA_RELIABILITY] Tool call repair attempt "
-            f"{repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
+            f"{repair_attempt_count + 1}/{max_tool_repairs}: {error_msg}")
         self._current_repair_count = repair_attempt_count + 1
         return self.TOOL_CALL_REPAIR_PROMPT.format(
             error=error_msg, tool_schemas=tool_schemas)
@@ -2024,12 +2025,13 @@ Respond with ONLY a valid JSON tool call in this format:
             return False
         if tool_calls:
             return False
-        
-        if self.force_tool_usage == 'never':
+
+        force_tool_usage = getattr(self, 'force_tool_usage', 'never')
+        if force_tool_usage == 'never':
             return False
-        elif self.force_tool_usage == 'always':
+        elif force_tool_usage == 'always':
             return True
-        elif self.force_tool_usage == 'auto':
+        elif force_tool_usage == 'auto':
             # Auto mode: only for Ollama on first iteration when model ignores tools
             return self._is_ollama_provider() and iteration_count == 0
         return False
