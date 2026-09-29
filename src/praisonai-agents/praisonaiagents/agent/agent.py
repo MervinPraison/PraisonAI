@@ -3052,6 +3052,12 @@ Your Goal: {self.goal}
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory
         self._policy = policy
+        # Route enabled GUARDRAIL/POLICY/SKILL plugins into their typed
+        # subsystems now that guardrail (_setup_guardrail), _skills and _policy
+        # are all set. A plugin declared PluginType.GUARDRAIL/POLICY/SKILL thus
+        # participates in the GuardrailChain / PolicyEngine / SkillManager, not
+        # just a generic lifecycle hook. No-op when no such plugin is enabled.
+        self._merge_plugin_subsystems()
         self._output_style = output_style
         # Backward-compatible: `thinking_budget` property mirrors the legacy int
         # budget when supplied via the alias (Issue #4452); the unified effort is
