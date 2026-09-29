@@ -57,6 +57,7 @@ class CodeToolBridge(Protocol):
         registry: Optional[ToolRegistry] = None,
         timeout: int = 30,
         max_output_size: int = 10000,
+        policy_hook: Optional[Callable[..., Any]] = None,
     ) -> Dict[str, Any]:
         """Run *code* under isolation, servicing tool calls over the transport.
 
@@ -79,6 +80,7 @@ def serve_tool_call(
     kwargs: Dict[str, Any],
     allowed: Iterable[str],
     registry: Optional[ToolRegistry] = None,
+    policy_hook: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """Parent-side handler for a single bridged tool call.
 
@@ -86,6 +88,13 @@ def serve_tool_call(
     receives from isolated code.  It reuses the exact allow-list resolution and
     ``require_approval`` gate as the in-process proxy, so an isolated call is
     subject to the same policy as an in-process one — never a weaker path.
+
+    ``policy_hook`` (when supplied) is the owning agent's PolicyEngine /
+    permission-deny / per-tool-guardrail gate. It is consulted with the tool's
+    keyword arguments before the tool runs; it may deny the call and/or rewrite
+    the arguments (see :func:`_run_policy_hook` for the accepted return shapes),
+    so a code-mode call is gated identically to the normal tool-call loop (which
+    the approval gate alone does not cover).
     """
     allowed_set = frozenset(allowed)
     # ``registry is not None`` (not truthiness): an empty ToolRegistry is a
@@ -99,7 +108,9 @@ def serve_tool_call(
     tool = resolved_registry.get(name)
     if tool is None:
         raise NameError(f"tool '{name}' is not registered")
-    return _invoke_with_approval(name, tool, tuple(args), dict(kwargs))
+    return _invoke_with_approval(
+        name, tool, tuple(args), dict(kwargs), policy_hook=policy_hook
+    )
 
 
 def _resolve_callable(tool: Any) -> Callable[..., Any]:
@@ -128,8 +139,70 @@ def _call_and_resolve(callable_tool: Callable[..., Any], args: tuple, kwargs: Di
     return result
 
 
+def _bind_kwargs(callable_tool: Callable[..., Any], args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort mapping of ``(args, kwargs)`` to a name->value dict.
+
+    Positional arguments are bound to their parameter names so a policy/guardrail
+    hook sees the same keyword-argument view the normal tool-call loop passes to
+    ``_check_tool_policy_and_guardrails``. Falls back to ``argN`` keys when the
+    signature is unavailable/unbindable.
+    """
+    bound_args: Dict[str, Any] = dict(kwargs)
+    try:
+        import inspect
+
+        signature = inspect.signature(callable_tool)
+        bound = signature.bind_partial(*args, **kwargs)
+        bound_args = dict(bound.arguments)
+    except (TypeError, ValueError):
+        for index, value in enumerate(args):
+            bound_args.setdefault(f"arg{index}", value)
+    return bound_args
+
+
+def _run_policy_hook(
+    policy_hook: Callable[..., Any],
+    name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Invoke ``policy_hook`` and normalise its return, raising on denial.
+
+    The hook mirrors the direct tool-call path: it may deny the call and/or
+    rewrite the arguments (a sanitising input-guardrail). Two return shapes are
+    accepted for backward compatibility:
+
+    * ``(denial_reason, rewritten_args)`` — the current agent contract. A
+      non-``None`` ``denial_reason`` blocks; ``rewritten_args`` (when a dict) is
+      the argument view the tool must run with, so a guardrail rewrite is
+      honoured rather than discarded.
+    * a bare ``denial_reason`` string / ``None`` — older/third-party hooks. A
+      string blocks; ``None`` allows with the arguments unchanged.
+
+    Returns the (possibly rewritten) argument dict to dispatch with. Raises
+    ``PermissionError`` when the hook denies the call.
+    """
+    verdict = policy_hook(name, arguments)
+    denial_reason: Optional[str]
+    rewritten: Dict[str, Any] = arguments
+    if isinstance(verdict, tuple):
+        denial_reason = verdict[0]
+        if len(verdict) > 1 and isinstance(verdict[1], dict):
+            rewritten = verdict[1]
+    else:
+        denial_reason = verdict
+    if denial_reason is not None:
+        raise PermissionError(
+            f"Execution of {name} denied by policy: {denial_reason}"
+        )
+    return rewritten
+
+
 def _invoke_with_approval(
-    name: str, tool: Any, args: tuple, kwargs: Dict[str, Any]
+    name: str,
+    tool: Any,
+    args: tuple,
+    kwargs: Dict[str, Any],
+    policy_hook: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """Run a registered tool honouring the existing approval framework.
 
@@ -140,6 +213,16 @@ def _invoke_with_approval(
     Positional arguments are bound to their parameter names before being sent to
     the approval backend so the human approver sees every argument value and can
     rewrite any of them via ``decision.modified_args``.
+
+    ``policy_hook`` gates the call through the owning agent's PolicyEngine,
+    permission deny-rules, and per-tool ``input_guardrails`` — the exact checks
+    the normal tool-call loop runs and which the approval gate alone does not
+    cover. It runs before the tool executes and raises ``PermissionError`` on
+    denial so a code-mode call cannot silently bypass a guardrail the same tool
+    is subject to via the direct tool-call path. A guardrail's argument rewrite
+    is honoured (the returned args are dispatched), and — mirroring the direct
+    path — the hook is re-run after the approval backend modifies the arguments
+    so an approval rewrite cannot smuggle a call past an argument-scoped policy.
     """
     from ..approval import (
         is_approval_required,
@@ -149,6 +232,25 @@ def _invoke_with_approval(
     )
 
     callable_tool = _resolve_callable(tool)
+
+    # Bind positional args to parameter names once so the policy hook and the
+    # approval backend share the same keyword view the direct path uses. When a
+    # hook rewrites the args we dispatch by keyword from that view (positional
+    # ``args`` is then dropped to avoid a double-bind of the same parameter).
+    effective_kwargs = _bind_kwargs(callable_tool, args, kwargs)
+    use_kwargs_only = False
+
+    if policy_hook is not None:
+        rewritten = _run_policy_hook(policy_hook, name, dict(effective_kwargs))
+        # Only switch to keyword-only redispatch when the hook *actually*
+        # changed the arguments. Compare by value (not identity): the hook is
+        # handed a copy, so an allow-with-no-rewrite still returns a distinct
+        # object whose contents equal ``effective_kwargs``. Forcing keyword-only
+        # dispatch on an unchanged call would rebind a positional argument to a
+        # decorated tool's ``*args``/``**kwargs`` parameter names and break it.
+        if rewritten != effective_kwargs:
+            effective_kwargs = dict(rewritten)
+            use_kwargs_only = True
 
     # Note: unlike the regular agent path we deliberately do NOT honour the
     # per-session ``is_already_approved`` sticky flag, nor do we call
@@ -173,41 +275,38 @@ def _invoke_with_approval(
                 f"async context. Configure a non-console approval backend."
             )
 
-        # Bind positional args to parameter names so the approval backend sees
-        # (and can modify) every argument, not just the keyword ones.
-        approval_args: Dict[str, Any] = dict(kwargs)
-        bound = None
-        try:
-            import inspect
-
-            signature = inspect.signature(callable_tool)
-            bound = signature.bind_partial(*args, **kwargs)
-            approval_args = dict(bound.arguments)
-        except (TypeError, ValueError):
-            # Signature unavailable/unbindable: fall back to positional preview.
-            for index, value in enumerate(args):
-                approval_args.setdefault(f"arg{index}", value)
-
         decision = run_coroutine_from_any_context(
-            request_approval(name, approval_args)
+            request_approval(name, dict(effective_kwargs))
         )
         if not decision.approved:
             raise PermissionError(
                 f"Execution of {name} denied: {decision.reason}"
             )
         if decision.modified_args:
-            approval_args.update(decision.modified_args)
-            if bound is not None:
-                try:
-                    rebound = signature.bind_partial(**approval_args)
-                    return _call_and_resolve(callable_tool, rebound.args, rebound.kwargs)
-                except TypeError:
-                    pass
-            # Fall back: apply only keyword modifications.
-            kwargs.update(
-                {k: v for k, v in decision.modified_args.items() if k in kwargs}
-            )
+            effective_kwargs.update(decision.modified_args)
+            use_kwargs_only = True
+            # Re-authorise: an approval backend may have rewritten the args into
+            # a call an argument-scoped policy/guardrail prohibits. The earlier
+            # gate only saw the original args, so re-run the hook on the final
+            # ones before dispatch — exactly as the direct path does.
+            if policy_hook is not None:
+                effective_kwargs = dict(
+                    _run_policy_hook(policy_hook, name, dict(effective_kwargs))
+                )
 
+    if use_kwargs_only:
+        # The args were rewritten (by a guardrail and/or the approval backend).
+        # Prefer re-binding through the signature so a rewritten VAR_POSITIONAL /
+        # VAR_KEYWORD parameter maps back to real positional/keyword args; fall
+        # back to a plain keyword call when the signature is unavailable.
+        try:
+            import inspect
+
+            signature = inspect.signature(callable_tool)
+            rebound = signature.bind_partial(**effective_kwargs)
+            return _call_and_resolve(callable_tool, rebound.args, rebound.kwargs)
+        except (TypeError, ValueError):
+            return _call_and_resolve(callable_tool, (), effective_kwargs)
     return _call_and_resolve(callable_tool, args, kwargs)
 
 
@@ -215,6 +314,7 @@ def _make_proxy(
     name: str,
     allowed: frozenset,
     registry: ToolRegistry,
+    policy_hook: Optional[Callable[..., Any]] = None,
 ) -> Callable[..., Any]:
     """Build a single tool proxy enforcing the allow-list and approval gate."""
     if name not in allowed:
@@ -224,7 +324,7 @@ def _make_proxy(
         raise NameError(f"tool '{name}' is not registered")
 
     def _proxy(*args: Any, **kwargs: Any) -> Any:
-        return _invoke_with_approval(name, tool, args, kwargs)
+        return _invoke_with_approval(name, tool, args, kwargs, policy_hook=policy_hook)
 
     _proxy.__name__ = name
     return _proxy
@@ -253,6 +353,7 @@ class ToolProxy:
         self,
         allowed: Iterable[str],
         registry: Optional[ToolRegistry] = None,
+        policy_hook: Optional[Callable[..., Any]] = None,
     ) -> None:
         allowed_set = frozenset(allowed)
         # ``is not None`` so an explicitly-passed empty (agent-scoped) registry
@@ -260,7 +361,7 @@ class ToolProxy:
         resolved_registry = registry if registry is not None else get_registry()
 
         def _getter(name: str) -> Callable[..., Any]:
-            return _make_proxy(name, allowed_set, resolved_registry)
+            return _make_proxy(name, allowed_set, resolved_registry, policy_hook=policy_hook)
 
         # Stash all state inside a closure; never as an instance attribute.
         object.__setattr__(self, "_ToolProxy__getter", _getter)
@@ -326,6 +427,7 @@ class LocalProcessBridge:
         registry: Optional[ToolRegistry] = None,
         timeout: int = 30,
         max_output_size: int = 10000,
+        policy_hook: Optional[Callable[..., Any]] = None,
     ) -> Dict[str, Any]:
         import os
         import subprocess
@@ -414,7 +516,7 @@ class LocalProcessBridge:
             # same way as the in-process one — do not wrap this in a broad
             # try/except that would swallow them.
             return _pump_bridge(
-                process, allowed, registry, timeout, max_output_size
+                process, allowed, registry, timeout, max_output_size, policy_hook
             )
         finally:
             if temp_file:
@@ -424,7 +526,7 @@ class LocalProcessBridge:
                     pass
 
 
-def _pump_bridge(process, allowed, registry, timeout, max_output_size):
+def _pump_bridge(process, allowed, registry, timeout, max_output_size, policy_hook=None):
     """Drive the child: service tool-call requests, collect the result.
 
     Runs in the parent. Tool-call request lines are serviced by
@@ -451,7 +553,7 @@ def _pump_bridge(process, allowed, registry, timeout, max_output_size):
                 if line.startswith(_BRIDGE_CALL):
                     payload = json.loads(line[len(_BRIDGE_CALL):])
                     response = _service_bridge_call(
-                        payload, allowed, registry, policy_error
+                        payload, allowed, registry, policy_error, policy_hook
                     )
                     try:
                         encoded = json.dumps(response)
@@ -548,14 +650,15 @@ def _pump_bridge(process, allowed, registry, timeout, max_output_size):
     return outcome
 
 
-def _service_bridge_call(payload, allowed, registry, policy_error):
+def _service_bridge_call(payload, allowed, registry, policy_error, policy_hook=None):
     """Run one bridged tool call in the parent under the shared gate."""
     name = payload.get("name")
     args = payload.get("args", [])
     kwargs = payload.get("kwargs", {})
     try:
         value = serve_tool_call(
-            name, args, kwargs, allowed=allowed, registry=registry
+            name, args, kwargs, allowed=allowed, registry=registry,
+            policy_hook=policy_hook,
         )
         return {"ok": True, "value": value}
     except (PermissionError, NameError) as exc:
@@ -685,12 +788,17 @@ _main()
 def build_tool_namespace(
     allowed: Iterable[str],
     registry: Optional[ToolRegistry] = None,
+    policy_hook: Optional[Callable[..., Any]] = None,
 ) -> Dict[str, Callable[..., Any]]:
     """Build a dict of ``{tool_name: proxy_callable}`` for the allow-list.
 
     The returned mapping can be merged directly into the executor globals so
     the model can call ``fetch(...)`` by bare name, in addition to the
     ``tools.fetch(...)`` form via :class:`ToolProxy`.
+
+    ``policy_hook`` is forwarded to each proxy so bare-name calls are gated by
+    the owning agent's PolicyEngine / permission-deny / per-tool guardrails,
+    identically to the normal tool-call loop.
     """
     allowed_set = frozenset(allowed)
     # ``is not None`` so an explicitly-passed empty (agent-scoped) registry is
@@ -699,7 +807,9 @@ def build_tool_namespace(
     namespace: Dict[str, Callable[..., Any]] = {}
     for name in sorted(allowed_set):
         try:
-            namespace[name] = _make_proxy(name, allowed_set, resolved_registry)
+            namespace[name] = _make_proxy(
+                name, allowed_set, resolved_registry, policy_hook=policy_hook
+            )
         except NameError:
             # Tool on the allow-list but not registered yet — skip silently;
             # calling it would raise NameError at runtime anyway.

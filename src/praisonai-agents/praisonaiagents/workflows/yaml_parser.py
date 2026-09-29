@@ -13,9 +13,12 @@ import yaml
 from typing import Any, Callable, Dict, List, Optional, Union
 from pathlib import Path
 
+from .._logging import get_logger
 from ..agent.agent import Agent
 from .workflows import Workflow, route, parallel, loop, repeat, Include, include
 from ..task.task import Task
+
+logger = get_logger(__name__)
 
 
 class YAMLWorkflowParser:
@@ -373,6 +376,13 @@ class YAMLWorkflowParser:
                 )
             tools_run_on = tools_run_on.lower().strip()
 
+        # Wire resolved YAML `callbacks:` into the Workflow's lifecycle hooks so
+        # a registered `on_step_complete:`/`on_workflow_start:` etc. genuinely
+        # fires. Without this the parsed callbacks were resolved but never handed
+        # to the Workflow, so no callback event ran. Only Workflow-supported
+        # lifecycle names map through; unknown names were already warned about.
+        hooks_value = self._build_workflow_hooks()
+
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -386,6 +396,7 @@ class YAMLWorkflowParser:
             context=context_value,  # Pass context management config to Workflow
             history=history_enabled,  # Enable execution history tracking (robustness)
             tools_run_on=tools_run_on,  # One shared sandbox for every step (None = local)
+            hooks=hooks_value,  # Lifecycle callbacks resolved from YAML `callbacks:`
         )
         
         # Store additional attributes for feature parity with agents.yaml
@@ -554,28 +565,62 @@ class YAMLWorkflowParser:
         elif agent_type == 'deepresearchagent':
             agent = self._create_deep_research_agent(name, llm, config)
         else:
-            # Default: create standard Agent
-            agent = Agent(
-                name=name,
-                role=role,
-                goal=goal,
-                instructions=instructions,
-                backstory=backstory,
-                llm=llm,
-                tools=tools if tools else None,
-            )
+            # Default: create standard Agent. Wire the agents.yaml advanced
+            # fields straight into the matching Agent constructor kwargs so a
+            # YAML `reasoning:`/`planning:`/templates/etc. actually changes agent
+            # behaviour (feature parity with agents.yaml), instead of being
+            # parsed and silently dropped onto an unread attribute.
+            agent_kwargs: Dict[str, Any] = {
+                'name': name,
+                'role': role,
+                'goal': goal,
+                'instructions': instructions,
+                'backstory': backstory,
+                'llm': llm,
+                'tools': tools if tools else None,
+            }
+            if planning:
+                agent_kwargs['planning'] = planning
+            if reasoning:
+                # agents.yaml `reasoning:` toggles reasoning-step output.
+                agent_kwargs['output'] = {'reasoning_steps': True}
+            if allow_delegation:
+                # Deprecated flat param, consolidated into legacy_kwargs -> handoffs.
+                agent_kwargs['allow_delegation'] = allow_delegation
+            # `cache` defaults to True in YAML; only pass when explicitly disabled
+            # so we don't override the Agent's own caching default.
+            if cache is False:
+                agent_kwargs['caching'] = False
+            _execution: Dict[str, Any] = {}
+            if max_iter is not None:
+                _execution['max_iter'] = max_iter
+            if max_execution_time is not None:
+                _execution['max_execution_time'] = max_execution_time
+            if _execution:
+                agent_kwargs['execution'] = _execution
+            _reflection: Dict[str, Any] = {}
+            if reflect_llm is not None:
+                _reflection['llm'] = reflect_llm
+            if min_reflect is not None:
+                _reflection['min_iterations'] = min_reflect
+            if max_reflect is not None:
+                _reflection['max_iterations'] = max_reflect
+            if _reflection:
+                agent_kwargs['reflection'] = _reflection
+            _templates: Dict[str, Any] = {}
+            if system_template is not None:
+                _templates['system'] = system_template
+            if prompt_template is not None:
+                _templates['prompt'] = prompt_template
+            if response_template is not None:
+                _templates['response'] = response_template
+            if _templates:
+                agent_kwargs['templates'] = _templates
+            agent = Agent(**agent_kwargs)
         
-        # Store additional attributes for later use
-        agent._yaml_planning = planning
-        agent._yaml_reasoning = reasoning
-        agent._yaml_allow_delegation = allow_delegation
-        agent._yaml_max_iter = max_iter
-        agent._yaml_cache = cache
-        
-        # Store additional agents.yaml fields for feature parity
-        agent._yaml_max_rpm = max_rpm
         # Wire YAML max_rpm into a live RateLimiter when none is already set,
-        # so `max_rpm` in YAML actually throttles requests.
+        # so `max_rpm` in YAML actually throttles requests. (Applies to
+        # specialized agent types too, which don't take it via kwargs above.)
         if max_rpm is not None:
             if max_rpm <= 0:
                 raise ValueError(f"max_rpm must be a positive int, got {max_rpm!r}")
@@ -583,15 +628,9 @@ class YAMLWorkflowParser:
                 from praisonaiagents.llm.rate_limiter import RateLimiter
                 agent.max_rpm = max_rpm
                 agent._rate_limiter = RateLimiter(requests_per_minute=max_rpm)
-        agent._yaml_max_execution_time = max_execution_time
-        agent._yaml_reflect_llm = reflect_llm
-        agent._yaml_min_reflect = min_reflect
-        agent._yaml_max_reflect = max_reflect
-        agent._yaml_system_template = system_template
-        agent._yaml_prompt_template = prompt_template
-        agent._yaml_response_template = response_template
         
-        # Store tool_choice for forcing tool usage (auto, required, none)
+        # Store tool_choice for forcing tool usage (auto, required, none).
+        # This attribute IS read on the execution path (chat_mixin/workflows).
         agent._yaml_tool_choice = tool_choice
         
         return agent
@@ -750,11 +789,49 @@ class YAMLWorkflowParser:
         Args:
             callbacks_data: Dictionary of callback name to function name
         """
-        # For now, store callback names - they can be resolved later
-        # In a full implementation, these would be resolved to actual functions
+        # Resolve each `on_event: func_name` to a registered callable. Callables
+        # must be registered ahead of time via `register_callback(func_name, fn)`
+        # (the same registry `register_callback` writes into); YAML cannot import
+        # arbitrary functions by name. Unresolved names are recorded as None and
+        # warned about so a typo'd/aspirational callback is not silently swallowed.
         for callback_name, func_name in callbacks_data.items():
-            # Store as None for now - actual resolution happens at runtime
-            self._callbacks[callback_name] = None
+            resolved = self._callbacks.get(func_name)
+            if resolved is None or not callable(resolved):
+                logger.warning(
+                    "Callback '%s' references unregistered function '%s'; "
+                    "register it with register_callback('%s', fn) before parsing.",
+                    callback_name, func_name, func_name,
+                )
+                self._callbacks[callback_name] = None
+            else:
+                self._callbacks[callback_name] = resolved
+
+    # YAML `callbacks:` names that map to Workflow lifecycle hooks.
+    _WORKFLOW_HOOK_NAMES = (
+        "on_workflow_start",
+        "on_workflow_complete",
+        "on_step_start",
+        "on_step_complete",
+        "on_step_error",
+    )
+
+    def _build_workflow_hooks(self):
+        """Build a ``WorkflowHooksConfig`` from resolved lifecycle callbacks.
+
+        Maps the resolved ``callbacks:`` entries whose name is a recognised
+        Workflow lifecycle hook onto a ``WorkflowHooksConfig`` so the Workflow
+        engine actually dispatches them. Returns ``None`` when no lifecycle
+        callback resolved, leaving the Workflow's default (no hooks) untouched.
+        """
+        mapped = {
+            name: self._callbacks[name]
+            for name in self._WORKFLOW_HOOK_NAMES
+            if callable(self._callbacks.get(name))
+        }
+        if not mapped:
+            return None
+        from .workflow_configs import WorkflowHooksConfig
+        return WorkflowHooksConfig(**mapped)
     
     def _parse_steps(self, steps_data: List[Dict]) -> List:
         """

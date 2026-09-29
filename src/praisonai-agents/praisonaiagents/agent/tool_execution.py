@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 # timeouts so they cannot exhaust process resources.
 _MAX_ORPHANED_TOOL_EXECUTORS = 4
 
+# Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
+# pool is created and to decide (with the per-executor in-flight counter)
+# whether a fresh call would have to queue behind hung workers.
+_TOOL_POOL_MAX_WORKERS = 2
+
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
 # It is distinct from {} ("no arguments"): {} would silently execute the tool
@@ -37,6 +42,57 @@ _MAX_ORPHANED_TOOL_EXECUTORS = 4
 # Lives here (agent-side, lightweight) so both chat_mixin.py and llm.py share
 # one identity — an `is` check only works against the same object.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+class _CallableGuardrailAdapter:
+    """Expose a plain callable guardrail as a chainable guardrail object.
+
+    A user ``guardrail`` may be a bare callable returning ``(bool, output)``
+    (the Agent's final-output contract). To let it run *inside* a
+    ``GuardrailChain`` alongside a plugin guardrail — so composing the two never
+    silently drops either — this wraps the callable with a ``validate_output``
+    (and passthrough ``validate_input``) the chain understands. Any
+    ``validate_tool_call`` / ``validate_tool_result`` the underlying object
+    already exposes is forwarded so tool-surface behaviour is preserved.
+    """
+
+    __slots__ = ("_fn",)
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def validate_output(self, content, **kwargs):
+        result = self._fn(content)
+        if isinstance(result, tuple) and len(result) == 2:
+            is_valid, processed = result
+            if is_valid:
+                # Normalise the passthrough value to a string so the chain can
+                # keep threading ``content`` through subsequent guardrails.
+                if isinstance(processed, str):
+                    return True, processed
+                return True, content
+            return False, processed if isinstance(processed, str) else str(processed)
+        # A callable that does not follow the (bool, output) contract is treated
+        # as a no-op passthrough rather than blocking.
+        return True, content
+
+    def validate_input(self, content, **kwargs):
+        inner = getattr(self._fn, "validate_input", None)
+        if callable(inner):
+            return inner(content, **kwargs)
+        return True, content
+
+    def validate_tool_call(self, tool_name, arguments, **kwargs):
+        inner = getattr(self._fn, "validate_tool_call", None)
+        if callable(inner):
+            return inner(tool_name, arguments, **kwargs)
+        return True, arguments
+
+    def validate_tool_result(self, tool_name, result, **kwargs):
+        inner = getattr(self._fn, "validate_tool_result", None)
+        if callable(inner):
+            return inner(tool_name, result, **kwargs)
+        return True, result
 
 
 def tool_arguments_parse_failed(arguments) -> bool:
@@ -597,6 +653,175 @@ class ToolExecutionMixin:
                 display_name = tool.get("type", "spec")
             logging.debug("Added plugin tool to Agent: %s", display_name or tool)
 
+    def _merge_plugin_subsystems(self):
+        """Route enabled GUARDRAIL/POLICY/SKILL plugins into their subsystems.
+
+        Complements ``_merge_plugin_tools``: instead of contributing tools, a
+        plugin declared ``PluginType.GUARDRAIL``/``POLICY``/``SKILL`` now
+        participates in the typed subsystem its category promises —
+
+        * GUARDRAIL: ``as_guardrail()`` objects are folded into ``self.guardrail``
+          so ``_setup_guardrail()`` (which runs after this) wires them into the
+          same ``GuardrailChain`` the Agent already runs — including
+          ``validate_tool_call`` / ``validate_tool_result``.
+        * POLICY: ``get_policies()`` rules are added to ``self._policy``
+          (a ``PolicyEngine``) so they gate tool calls.
+        * SKILL: ``get_skills()`` entries are appended to ``self._skills`` so the
+          lazy ``SkillManager`` discovers them as real, loadable skills.
+
+        Best-effort and fail-open on plugin errors: a broken plugin must never
+        prevent the Agent from constructing. Zero overhead when no such plugin
+        is enabled (each collector returns an empty list).
+        """
+        try:
+            from ..plugins import get_plugin_manager
+
+            manager = get_plugin_manager()
+        except Exception as exc:  # pragma: no cover - defensive plugin boundary
+            logging.warning("Failed to access plugin manager for subsystems: %s", exc)
+            return
+
+        # --- GUARDRAIL plugins -> self.guardrail (GuardrailChain) -------------
+        get_guardrails = getattr(manager, "get_all_guardrails", None)
+        if callable(get_guardrails):
+            try:
+                plugin_guardrails = get_guardrails() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin guardrails: %s", exc)
+                plugin_guardrails = []
+            if plugin_guardrails:
+                try:
+                    from ..guardrails import GuardrailChain
+                    from ..guardrails.protocols import is_guardrail_object
+
+                    chain_items = [
+                        g for g in plugin_guardrails if is_guardrail_object(g)
+                    ]
+                    if chain_items:
+                        chain = GuardrailChain(chain_items)
+                        # Register the plugin guardrails' tool-call/result
+                        # surface on the runtime lists ``_check_tool_policy_and_
+                        # guardrails`` / ``_apply_tool_result_guardrails`` read,
+                        # so a guardrail plugin finally sees tool calls and raw
+                        # tool results — the blind spot ``after_llm`` never
+                        # covered. Runs after ``_setup_guardrail()`` so we append
+                        # rather than replace any user-supplied guardrail surface.
+                        calls = getattr(self, "_tool_call_guardrails", None)
+                        if isinstance(calls, list):
+                            calls.append(chain)
+                        else:
+                            self._tool_call_guardrails = [chain]
+                        results = getattr(self, "_tool_result_guardrails", None)
+                        if isinstance(results, list):
+                            results.append(chain)
+                        else:
+                            self._tool_result_guardrails = [chain]
+                        # Also make the chain participate in the Agent's
+                        # input/output validation (not just the tool surface).
+                        existing_fn = getattr(self, "_guardrail_fn", None)
+                        if existing_fn is None:
+                            # No user guardrail: the plugin chain becomes the
+                            # Agent's output/input validator directly.
+                            self.guardrail = chain
+                            self._guardrail_fn = chain
+                        elif existing_fn is not chain:
+                            # User already supplied a guardrail. Compose rather
+                            # than replace so BOTH run on the final response:
+                            # wrap the user's callable in an adapter exposing
+                            # validate_output/validate_input, then chain it with
+                            # the plugin chain. The user's guardrail runs first;
+                            # a plugin guardrail can no longer be silently
+                            # skipped just because a user guardrail exists.
+                            adapter = _CallableGuardrailAdapter(existing_fn)
+                            combined = GuardrailChain([adapter, chain])
+                            self.guardrail = combined
+                            self._guardrail_fn = combined
+                except Exception as exc:  # pragma: no cover - defensive boundary
+                    logging.warning("Failed to wire plugin guardrails: %s", exc)
+
+        # --- POLICY plugins -> self._policy (PolicyEngine) -------------------
+        get_policies = getattr(manager, "get_all_policies", None)
+        if callable(get_policies):
+            try:
+                plugin_policies = get_policies() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin policies: %s", exc)
+                plugin_policies = []
+            if plugin_policies:
+                try:
+                    policy = getattr(self, "_policy", None)
+                    if policy is None:
+                        from ..policy import PolicyEngine
+
+                        policy = PolicyEngine()
+                        self._policy = policy
+                    add_policy = getattr(policy, "add_policy", None)
+                    if callable(add_policy):
+                        # A user-supplied policy always wins: never let a plugin
+                        # rule silently replace an existing policy of the same
+                        # name (PolicyEngine.add_policy overwrites by name), which
+                        # could otherwise loosen a user-configured restriction.
+                        existing = set()
+                        get_policy = getattr(policy, "get_policy", None)
+                        for rule in plugin_policies:
+                            rule_name = getattr(rule, "name", None)
+                            if rule_name is not None and callable(get_policy):
+                                try:
+                                    if get_policy(rule_name) is not None:
+                                        logging.warning(
+                                            "Skipping plugin policy %r: a policy "
+                                            "with that name already exists.",
+                                            rule_name,
+                                        )
+                                        continue
+                                except Exception:  # pragma: no cover
+                                    pass
+                            if rule_name is not None and rule_name in existing:
+                                logging.warning(
+                                    "Skipping duplicate plugin policy %r.",
+                                    rule_name,
+                                )
+                                continue
+                            try:
+                                add_policy(rule)
+                                if rule_name is not None:
+                                    existing.add(rule_name)
+                            except Exception as exc:  # pragma: no cover
+                                logging.warning(
+                                    "Failed to add plugin policy %r: %s", rule, exc
+                                )
+                except Exception as exc:  # pragma: no cover - defensive boundary
+                    logging.warning("Failed to wire plugin policies: %s", exc)
+
+        # --- SKILL plugins -> self._skills (SkillManager discovers them) -----
+        get_skills = getattr(manager, "get_all_skills", None)
+        if callable(get_skills):
+            try:
+                plugin_skills = get_skills() or []
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                logging.warning("Failed to collect plugin skills: %s", exc)
+                plugin_skills = []
+            if plugin_skills:
+                current = getattr(self, "_skills", None)
+                if not isinstance(current, list):
+                    current = [current] if current else []
+                for skill in plugin_skills:
+                    # ``self._skills`` feeds ``SkillManager.add_skill(path)``,
+                    # which resolves each entry as a filesystem path. Only
+                    # string path selectors are loadable; a non-string (e.g. a
+                    # source object) would raise inside ``Path()``, so skip it
+                    # with a clear warning rather than corrupt discovery.
+                    if not isinstance(skill, str):
+                        logging.warning(
+                            "Skipping plugin skill %r: get_skills() must return "
+                            "filesystem path strings to skill directories.",
+                            skill,
+                        )
+                        continue
+                    if skill not in current:
+                        current.append(skill)
+                self._skills = current
+
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
         if not callable(func) or not arguments:
@@ -1081,13 +1306,72 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
+                                pool_exhausted = False
                                 with self._get_tool_executor_lock().sync():
                                     if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                                         self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                            max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                                            max_workers=_TOOL_POOL_MAX_WORKERS,
+                                            thread_name_prefix=f"tool-{self.name}"
                                         )
+                                        # Per-executor in-flight counter so a
+                                        # retired pool's late-finishing future can
+                                        # never corrupt the *new* pool's count.
+                                        self._tool_executor._inflight = 0
                                     executor = self._tool_executor
-                                    future = executor.submit(ctx.run, execute_with_context)
+                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
+                                    inflight = getattr(executor, '_inflight', 0)
+                                    # Once the orphan cap is hit we can no longer
+                                    # retire a stuck pool, so we would otherwise
+                                    # queue behind hung workers and time out a
+                                    # healthy tool that never got to start. Refuse
+                                    # fast and visibly instead when no worker is
+                                    # free, and let the pool self-heal (the orphan
+                                    # count drops as hung threads finish).
+                                    if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
+                                        pool_exhausted = True
+                                    else:
+                                        executor._inflight = inflight + 1
+                                        future = executor.submit(ctx.run, execute_with_context)
+
+                                        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
+                                            with _agent._get_tool_executor_lock().sync():
+                                                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
+                                                # Orphan accounting is per-POOL, not
+                                                # per-future: retiring a pool adds
+                                                # exactly one to the orphan count, so
+                                                # a pool may return exactly one slot.
+                                                # Recover it only when this retired
+                                                # pool's LAST in-flight worker exits
+                                                # (``_inflight`` == 0), and guard with
+                                                # a one-shot flag so a multi-worker
+                                                # pool can never decrement more than
+                                                # the single unit it contributed and
+                                                # steal another orphaned pool's slot.
+                                                if (
+                                                    getattr(_agent, '_tool_executor', None) is not _executor
+                                                    and _executor._inflight == 0
+                                                    and not getattr(_executor, '_orphan_recovered', False)
+                                                ):
+                                                    _executor._orphan_recovered = True
+                                                    _agent._tool_executor_orphaned = max(
+                                                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
+                                                    )
+
+                                        future.add_done_callback(_on_tool_done)
+                                if pool_exhausted:
+                                    logging.warning(
+                                        f"Tool worker pool exhausted; refusing to queue '{function_name}' "
+                                        f"behind {orphaned} hung tool call(s)."
+                                    )
+                                    result = {
+                                        "error": (
+                                            f"Tool worker pool exhausted: {orphaned} earlier tool call(s) "
+                                            f"are still running past their timeout. Refusing to queue "
+                                            f"'{function_name}'."
+                                        ),
+                                        "tool_pool_exhausted": True,
+                                    }
+                                    break
                                 try:
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
@@ -1898,6 +2182,30 @@ class ToolExecutionMixin:
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
 
+    @staticmethod
+    def _approval_backend_accepts_timeout(backend) -> bool:
+        """Return True if ``backend.request_approval_sync`` accepts a ``timeout`` kwarg.
+
+        Determined by signature introspection so the caller can route the
+        per-call timeout without a call-and-catch that would re-invoke a
+        backend whose *own* body raised ``TypeError``. Backends that accept
+        ``**kwargs`` are treated as accepting ``timeout``. On any introspection
+        failure we conservatively return False (call without ``timeout``).
+        """
+        method = getattr(backend, 'request_approval_sync', None)
+        if method is None:
+            return False
+        try:
+            sig = inspect.signature(method)
+        except (TypeError, ValueError):
+            return False
+        params = sig.parameters
+        if 'timeout' in params:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     def _resolve_approval_decision(self, tool_name: str, tool_args: dict, is_async: bool = False):
         """Shared approval logic for both sync and async paths.
         
@@ -2071,41 +2379,51 @@ class ToolExecutionMixin:
 
                     return _ask_backend_async()
                 else:
-                    # Sync path - handle timeout and sync/async backend compatibility
+                    # Sync path - handle timeout and sync/async backend compatibility.
+                    #
+                    # The per-call timeout is passed explicitly rather than
+                    # mutated onto the (often SHARED) backend object. Mutating
+                    # ``backend._timeout`` here leaked between agents that pass
+                    # one backend instance: an overlapping call captured the
+                    # first agent's temporary value as its "original" and
+                    # restored it, leaving the backend permanently wrong.
                     cfg_timeout = getattr(self, '_approval_timeout', 0)
-                    orig_timeout = None
+
+                    # Compute effective timeout from agent configuration.
+                    #   None  -> indefinite wait
+                    #   > 0   -> explicit per-call timeout
+                    #   == 0  -> backend default (or 60s fallback)
                     if cfg_timeout is None:
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = 86400 * 365
+                        effective_timeout = None
                     elif cfg_timeout > 0:
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = cfg_timeout
-                    
-                    try:
-                        if hasattr(backend, 'request_approval_sync'):
-                            return _remember(backend.request_approval_sync(request))
-                        else:
-                            # Use the shared utility to avoid code duplication and handle timeout correctly
-                            from ..approval.utils import run_coroutine_safely
-                            
-                            # Compute effective timeout from agent configuration
-                            if cfg_timeout is None:
-                                effective_timeout = None  # indefinite wait
-                            elif cfg_timeout > 0:
-                                effective_timeout = cfg_timeout
-                            else:
-                                # cfg_timeout == 0: use backend default or fallback
-                                effective_timeout = getattr(backend, '_timeout', 60)
-                            
-                            return _remember(run_coroutine_safely(
-                                backend.request_approval(request),
-                                timeout=effective_timeout
+                        effective_timeout = cfg_timeout
+                    else:
+                        effective_timeout = getattr(backend, '_timeout', 60)
+
+                    if hasattr(backend, 'request_approval_sync'):
+                        # Decide *up front* whether the backend accepts a
+                        # ``timeout`` kwarg by inspecting its signature, rather
+                        # than calling and catching ``TypeError``. A try/except
+                        # would re-invoke the backend when the *user callback*
+                        # inside it raised its own ``TypeError`` — duplicating
+                        # side effects and masking the real error. Signature
+                        # introspection is side-effect free.
+                        if self._approval_backend_accepts_timeout(backend):
+                            return _remember(backend.request_approval_sync(
+                                request, timeout=effective_timeout
                             ))
-                    finally:
-                        if orig_timeout is not None and hasattr(backend, '_timeout'):
-                            backend._timeout = orig_timeout
+                        # Legacy backend whose request_approval_sync has no
+                        # timeout kwarg: honour its own default, no mutation of
+                        # (often shared) backend state.
+                        return _remember(backend.request_approval_sync(request))
+                    else:
+                        # Use the shared utility to avoid code duplication and handle timeout correctly
+                        from ..approval.utils import run_coroutine_safely
+
+                        return _remember(run_coroutine_safely(
+                            backend.request_approval(request),
+                            timeout=effective_timeout
+                        ))
             else:
                 if is_async:
                     # For async, wrap the decision in a coroutine
@@ -2514,6 +2832,42 @@ class ToolExecutionMixin:
                 logging.debug("permission manager is_denied failed for %s: %s", target, e)
         return None
 
+    def _check_permission_manager_doom_loop(self, function_name, arguments=None):
+        """Return an error dict if the PermissionManager detects a doom loop.
+
+        Deliver the doom-loop detection the ``PermissionManager`` advertises:
+        record this call in its detector and deny on a genuine loop. Previously
+        ``check_doom_loop()`` was unreachable dead code so a configured manager
+        gave zero doom-loop protection.
+
+        This is intentionally **separate** from :meth:`_check_permission_manager_deny`
+        and invoked exactly **once per approved tool call**, with the final
+        (post-approval, possibly rewritten) arguments. Folding it into the deny
+        gate would record the call on every gate pass — counting a rejected
+        attempt, or counting an approved call twice when its args are rewritten —
+        which could trip the threshold early and deny legitimate repeats.
+        """
+        manager = getattr(self, "_permission_manager", None)
+        if manager is None:
+            return None
+        check_loop = getattr(manager, "check_doom_loop", None)
+        if not callable(check_loop):
+            return None
+        try:
+            loop_result = check_loop(function_name, arguments)
+            if loop_result is not None and getattr(loop_result, "is_loop", False):
+                return {
+                    "error": (
+                        f"Tool '{function_name}' blocked: "
+                        f"{getattr(loop_result, 'reason', 'doom loop detected')}"
+                    ),
+                    "permission_denied": True,
+                    "loop_blocked": True,
+                }
+        except Exception as e:  # noqa: BLE001
+            logging.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
+        return None
+
     def _is_bypass_mode(self) -> bool:
         """Return ``True`` when ``PermissionMode.BYPASS`` is active.
 
@@ -2575,6 +2929,13 @@ class ToolExecutionMixin:
                 if manager_denial is not None:
                     return manager_denial
 
+        # Record the (approved, final-args) call in the doom-loop detector once,
+        # after approval, so rejected attempts and arg rewrites are not counted.
+        if not self._is_bypass_mode():
+            loop_denial = self._check_permission_manager_doom_loop(function_name, arguments)
+            if loop_denial is not None:
+                return loop_denial
+
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
             function_name, arguments, agent_name=getattr(self, "name", None),
@@ -2620,6 +2981,13 @@ class ToolExecutionMixin:
                 manager_denial = self._check_permission_manager_deny(function_name, arguments)
                 if manager_denial is not None:
                     return manager_denial
+
+        # Record the (approved, final-args) call in the doom-loop detector once,
+        # after approval, so rejected attempts and arg rewrites are not counted.
+        if not self._is_bypass_mode():
+            loop_denial = self._check_permission_manager_doom_loop(function_name, arguments)
+            if loop_denial is not None:
+                return loop_denial
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(

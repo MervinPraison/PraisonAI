@@ -459,15 +459,20 @@ class TestEventBusOptimization:
         assert len(received) == 1
     
     @pytest.mark.asyncio
-    async def test_publish_async_fast_path_no_subscribers(self):
-        """Test that async publishing with no subscribers skips expensive work."""
+    async def test_publish_async_records_history_with_no_subscribers(self):
+        """publish_async records history even with no subscribers, matching the
+        sync publish_event path. The no-subscriber fast path only skips
+        subscriber matching/dispatch, not the (cheap, capped) history append,
+        so an event published with nobody listening is still retrievable via
+        get_history()."""
         bus = EventBus()
-        
+
         result = await bus.publish_async("test.event", {"key": "value"})
-        
-        # Should return event but not store in history
+
         assert isinstance(result, Event)
-        assert len(bus.get_history()) == 0  # No history when no subscribers
+        history = bus.get_history()
+        assert len(history) == 1
+        assert history[0].type == "test.event"
 
 
 class TestEventType:

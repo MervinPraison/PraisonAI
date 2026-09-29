@@ -98,9 +98,11 @@ class SqliteSessionStore(DefaultSessionStore):
             try:
                 if self.db_path != ":memory:":
                     os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-                conn = sqlite3.connect(
-                    self.db_path, check_same_thread=False, isolation_level=None
-                )
+                # Hardened factory: WAL where the filesystem supports it, safe
+                # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264).
+                from ..storage.sqlite import connect as _sqlite_connect
+
+                conn = _sqlite_connect(self.db_path, isolation_level=None)
                 self._fts_available = self._init_schema(conn)
                 self._conn = conn
             except Exception as exc:
