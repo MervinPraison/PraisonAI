@@ -236,6 +236,11 @@ class AsyncSafeState:
         self._activity_lock = threading.Lock()
         self._async_holders = 0
         self._copying = False
+        # Per-thread stack of active sync context-manager guards. A single
+        # shared attribute would be clobbered by concurrent or nested
+        # ``with state:`` blocks, so each ``__enter__`` pushes its own guard and
+        # the matching ``__exit__`` pops it (LIFO) on the same thread.
+        self._sync_guards = threading.local()
 
     def __deepcopy__(self, memo):
         """Copy protected state, rejecting overlap with asynchronous access."""
@@ -259,6 +264,7 @@ class AsyncSafeState:
         result._activity_lock = threading.Lock()
         result._async_holders = 0
         result._copying = False
+        result._sync_guards = threading.local()
         return result
         
     @contextmanager 
@@ -305,14 +311,33 @@ class AsyncSafeState:
             self._async_holders -= 1
             
     def __enter__(self):
-        """Support for synchronous context manager protocol (backward compatibility)."""
-        self._sync_guard = self._lock.sync()
-        self._sync_guard.__enter__()
+        """Support for synchronous context manager protocol (backward compatibility).
+
+        Each entry pushes its own guard onto a per-thread LIFO stack so that
+        concurrent (different threads) and nested (same thread) ``with state:``
+        blocks never clobber each other's guard. ``DualLock.sync()`` remains
+        the underlying reentrant mutex; here we only track the matching
+        generator so ``__exit__`` closes the right one.
+        """
+        stack = getattr(self._sync_guards, "stack", None)
+        if stack is None:
+            stack = []
+            self._sync_guards.stack = stack
+        guard = self._lock.sync()
+        guard.__enter__()
+        stack.append(guard)
         return self.value
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        return self._sync_guard.__exit__(exc_type, exc_val, exc_tb)
+        stack = getattr(self._sync_guards, "stack", None)
+        if not stack:
+            raise RuntimeError(
+                "AsyncSafeState.__exit__ called without a matching __enter__ "
+                "on this thread"
+            )
+        guard = stack.pop()
+        return guard.__exit__(exc_type, exc_val, exc_tb)
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
