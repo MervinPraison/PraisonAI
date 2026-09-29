@@ -81,6 +81,22 @@ def test_render_query_and_errors_are_sanitized():
     assert error.value.status_code == 401
     assert "private-token" not in str(error.value)
     assert "token=" not in str(error.value)
+    # The token-bearing request must not leak through the exception chain.
+    assert error.value.__context__ is None
+    assert error.value.__cause__ is None
+
+
+def test_render_extends_http_timeout_to_page_timeout():
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(200, json={"data": {"markdown": "ok"}})
+
+    with MrScraperClient("secret", http_timeout=60.0,
+                         transport=httpx.MockTransport(respond)) as client:
+        client.fetch_rendered_html("https://example.com", page_timeout=300)
+    assert seen[0].extensions["timeout"]["read"] == pytest.approx(330.0)
 
 
 def test_structured_preset_and_bounded_tools(calls):

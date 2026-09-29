@@ -60,7 +60,8 @@ class MrScraperClient:
 
     def _request(self, method: str, host: str, path: str, *,
                  params: Optional[Mapping[str, Any]] = None,
-                 body: Optional[Mapping[str, Any]] = None) -> Json:
+                 body: Optional[Mapping[str, Any]] = None,
+                 timeout: Optional[float] = None) -> Json:
         headers = {"Accept": "application/json"}
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -70,9 +71,12 @@ class MrScraperClient:
             headers["x-api-token"] = self._token
         else:
             headers["x-api-token"] = self._token
+        request_kwargs: Dict[str, Any] = {"headers": headers, "params": params, "json": body}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
+        error: Optional[MrScraperError] = None
         try:
-            response = self._http.request(method, host + path, headers=headers,
-                                          params=params, json=body)
+            response = self._http.request(method, host + path, **request_kwargs)
             response.raise_for_status()
             if not response.content:
                 return None
@@ -81,10 +85,13 @@ class MrScraperClient:
             return response.text
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            raise MrScraperError(f"MrScraper HTTP {status} on {method} {host}{path}", status) from None
+            error = MrScraperError(f"MrScraper HTTP {status} on {method} {host}{path}", status)
         except (httpx.RequestError, ValueError) as exc:
             # httpx errors can contain the rendered URL and its token query.
-            raise MrScraperError(f"MrScraper request failed on {method} {host}{path}: {type(exc).__name__}") from None
+            error = MrScraperError(f"MrScraper request failed on {method} {host}{path}: {type(exc).__name__}")
+        # Raise outside the except block so the original token-bearing exception
+        # is not attached via __context__/__cause__ and cannot leak the token.
+        raise error
 
     def get_account_info(self) -> Json:
         """Get subscription account details from the platform host."""
@@ -193,7 +200,11 @@ class MrScraperClient:
                           "waitForSelector": wait_for_selector, "waitUntil": wait_until})
         query = {key: str(value).lower() if isinstance(value, bool) else value
                  for key, value in query.items()}
-        return self._request("POST", RENDER, "/", params=query, body=_present({
+        # Give the synchronous render the page timeout it requested, plus a
+        # buffer for network transfer, so the HTTP client does not abort early.
+        http_timeout = float(page_timeout) + 30.0
+        return self._request("POST", RENDER, "/", params=query, timeout=http_timeout,
+                             body=_present({
             "url": url, "maxRetries": max_retries, "homePage": home_page,
             "tokenCap": token_cap}))
 
