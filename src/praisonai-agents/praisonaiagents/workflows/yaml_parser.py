@@ -617,6 +617,14 @@ class YAMLWorkflowParser:
             if _templates:
                 agent_kwargs['templates'] = _templates
             agent = Agent(**agent_kwargs)
+            # Preserve legacy YAML reflection fields for callers/tests that still
+            # read the pre-consolidation attribute names.
+            if reflect_llm is not None:
+                agent._yaml_reflect_llm = reflect_llm
+            if min_reflect is not None:
+                agent._yaml_min_reflect = min_reflect
+            if max_reflect is not None:
+                agent._yaml_max_reflect = max_reflect
         
         # Wire YAML max_rpm into a live RateLimiter when none is already set,
         # so `max_rpm` in YAML actually throttles requests. (Applies to

@@ -306,13 +306,13 @@ class AsyncSafeState:
             
     def __enter__(self):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        self._lock._thread_lock.acquire()
+        self._sync_guard = self._lock.sync()
+        self._sync_guard.__enter__()
         return self.value
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        self._lock._thread_lock.release()
-        return None
+        return self._sync_guard.__exit__(exc_type, exc_val, exc_tb)
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
