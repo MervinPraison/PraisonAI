@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 # timeouts so they cannot exhaust process resources.
 _MAX_ORPHANED_TOOL_EXECUTORS = 4
 
+# Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
+# pool is created and to decide (with the per-executor in-flight counter)
+# whether a fresh call would have to queue behind hung workers.
+_TOOL_POOL_MAX_WORKERS = 2
+
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
 # It is distinct from {} ("no arguments"): {} would silently execute the tool
@@ -1081,13 +1086,72 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
+                                pool_exhausted = False
                                 with self._get_tool_executor_lock().sync():
                                     if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                                         self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                            max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                                            max_workers=_TOOL_POOL_MAX_WORKERS,
+                                            thread_name_prefix=f"tool-{self.name}"
                                         )
+                                        # Per-executor in-flight counter so a
+                                        # retired pool's late-finishing future can
+                                        # never corrupt the *new* pool's count.
+                                        self._tool_executor._inflight = 0
                                     executor = self._tool_executor
-                                    future = executor.submit(ctx.run, execute_with_context)
+                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
+                                    inflight = getattr(executor, '_inflight', 0)
+                                    # Once the orphan cap is hit we can no longer
+                                    # retire a stuck pool, so we would otherwise
+                                    # queue behind hung workers and time out a
+                                    # healthy tool that never got to start. Refuse
+                                    # fast and visibly instead when no worker is
+                                    # free, and let the pool self-heal (the orphan
+                                    # count drops as hung threads finish).
+                                    if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
+                                        pool_exhausted = True
+                                    else:
+                                        executor._inflight = inflight + 1
+                                        future = executor.submit(ctx.run, execute_with_context)
+
+                                        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
+                                            with _agent._get_tool_executor_lock().sync():
+                                                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
+                                                # Orphan accounting is per-POOL, not
+                                                # per-future: retiring a pool adds
+                                                # exactly one to the orphan count, so
+                                                # a pool may return exactly one slot.
+                                                # Recover it only when this retired
+                                                # pool's LAST in-flight worker exits
+                                                # (``_inflight`` == 0), and guard with
+                                                # a one-shot flag so a multi-worker
+                                                # pool can never decrement more than
+                                                # the single unit it contributed and
+                                                # steal another orphaned pool's slot.
+                                                if (
+                                                    getattr(_agent, '_tool_executor', None) is not _executor
+                                                    and _executor._inflight == 0
+                                                    and not getattr(_executor, '_orphan_recovered', False)
+                                                ):
+                                                    _executor._orphan_recovered = True
+                                                    _agent._tool_executor_orphaned = max(
+                                                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
+                                                    )
+
+                                        future.add_done_callback(_on_tool_done)
+                                if pool_exhausted:
+                                    logging.warning(
+                                        f"Tool worker pool exhausted; refusing to queue '{function_name}' "
+                                        f"behind {orphaned} hung tool call(s)."
+                                    )
+                                    result = {
+                                        "error": (
+                                            f"Tool worker pool exhausted: {orphaned} earlier tool call(s) "
+                                            f"are still running past their timeout. Refusing to queue "
+                                            f"'{function_name}'."
+                                        ),
+                                        "tool_pool_exhausted": True,
+                                    }
+                                    break
                                 try:
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
@@ -1898,6 +1962,30 @@ class ToolExecutionMixin:
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
 
+    @staticmethod
+    def _approval_backend_accepts_timeout(backend) -> bool:
+        """Return True if ``backend.request_approval_sync`` accepts a ``timeout`` kwarg.
+
+        Determined by signature introspection so the caller can route the
+        per-call timeout without a call-and-catch that would re-invoke a
+        backend whose *own* body raised ``TypeError``. Backends that accept
+        ``**kwargs`` are treated as accepting ``timeout``. On any introspection
+        failure we conservatively return False (call without ``timeout``).
+        """
+        method = getattr(backend, 'request_approval_sync', None)
+        if method is None:
+            return False
+        try:
+            sig = inspect.signature(method)
+        except (TypeError, ValueError):
+            return False
+        params = sig.parameters
+        if 'timeout' in params:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     def _resolve_approval_decision(self, tool_name: str, tool_args: dict, is_async: bool = False):
         """Shared approval logic for both sync and async paths.
         
@@ -2071,41 +2159,51 @@ class ToolExecutionMixin:
 
                     return _ask_backend_async()
                 else:
-                    # Sync path - handle timeout and sync/async backend compatibility
+                    # Sync path - handle timeout and sync/async backend compatibility.
+                    #
+                    # The per-call timeout is passed explicitly rather than
+                    # mutated onto the (often SHARED) backend object. Mutating
+                    # ``backend._timeout`` here leaked between agents that pass
+                    # one backend instance: an overlapping call captured the
+                    # first agent's temporary value as its "original" and
+                    # restored it, leaving the backend permanently wrong.
                     cfg_timeout = getattr(self, '_approval_timeout', 0)
-                    orig_timeout = None
+
+                    # Compute effective timeout from agent configuration.
+                    #   None  -> indefinite wait
+                    #   > 0   -> explicit per-call timeout
+                    #   == 0  -> backend default (or 60s fallback)
                     if cfg_timeout is None:
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = 86400 * 365
+                        effective_timeout = None
                     elif cfg_timeout > 0:
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = cfg_timeout
-                    
-                    try:
-                        if hasattr(backend, 'request_approval_sync'):
-                            return _remember(backend.request_approval_sync(request))
-                        else:
-                            # Use the shared utility to avoid code duplication and handle timeout correctly
-                            from ..approval.utils import run_coroutine_safely
-                            
-                            # Compute effective timeout from agent configuration
-                            if cfg_timeout is None:
-                                effective_timeout = None  # indefinite wait
-                            elif cfg_timeout > 0:
-                                effective_timeout = cfg_timeout
-                            else:
-                                # cfg_timeout == 0: use backend default or fallback
-                                effective_timeout = getattr(backend, '_timeout', 60)
-                            
-                            return _remember(run_coroutine_safely(
-                                backend.request_approval(request),
-                                timeout=effective_timeout
+                        effective_timeout = cfg_timeout
+                    else:
+                        effective_timeout = getattr(backend, '_timeout', 60)
+
+                    if hasattr(backend, 'request_approval_sync'):
+                        # Decide *up front* whether the backend accepts a
+                        # ``timeout`` kwarg by inspecting its signature, rather
+                        # than calling and catching ``TypeError``. A try/except
+                        # would re-invoke the backend when the *user callback*
+                        # inside it raised its own ``TypeError`` — duplicating
+                        # side effects and masking the real error. Signature
+                        # introspection is side-effect free.
+                        if self._approval_backend_accepts_timeout(backend):
+                            return _remember(backend.request_approval_sync(
+                                request, timeout=effective_timeout
                             ))
-                    finally:
-                        if orig_timeout is not None and hasattr(backend, '_timeout'):
-                            backend._timeout = orig_timeout
+                        # Legacy backend whose request_approval_sync has no
+                        # timeout kwarg: honour its own default, no mutation of
+                        # (often shared) backend state.
+                        return _remember(backend.request_approval_sync(request))
+                    else:
+                        # Use the shared utility to avoid code duplication and handle timeout correctly
+                        from ..approval.utils import run_coroutine_safely
+
+                        return _remember(run_coroutine_safely(
+                            backend.request_approval(request),
+                            timeout=effective_timeout
+                        ))
             else:
                 if is_async:
                     # For async, wrap the decision in a coroutine
