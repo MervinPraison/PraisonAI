@@ -194,6 +194,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             max_message_length=2000,  # Discord's limit for regular messages
             length_unit="codepoints",
             supports_edit=True,  # Discord supports message editing
+            supports_delete=True,  # Discord supports deleting bot messages
             supports_typing=True,
             markdown_dialect="discord_markdown",
             needs_rate_limit=False,  # Discord.py handles rate limiting

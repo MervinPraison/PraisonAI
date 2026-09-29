@@ -222,7 +222,14 @@ class RelayAdapter:
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
     ) -> Any:
-        """Relay an outbound message down to the connector."""
+        """Relay an outbound message down to the connector.
+
+        Relay-backed replies do not funnel through ``fire_message_sending`` /
+        ``DraftStreamer`` / ``DeliveryRouter``, so the outbound secret scrub
+        (Issue #5055) is applied here — the single outbound seam every relay
+        reply passes through — before the message leaves the process.
+        """
+        content = self._redact_outbound(content)
         from praisonaiagents.gateway import GatewayMessage, TargetInfo
 
         target = TargetInfo(target=channel_id, platform=self._platform)
@@ -234,3 +241,29 @@ class RelayAdapter:
             metadata={"thread_id": thread_id} if thread_id else {},
         )
         return await self._transport.send_outbound(target, message)
+
+    def _redact_outbound(self, content: Any) -> Any:
+        """Scrub secrets/credentials from relayed text before dispatch.
+
+        Honours the same controls as the mixin seam: an injected
+        ``_outbound_redactor`` (e.g. one that also applies a PII policy) takes
+        precedence, ``_redact_secrets_outbound = False`` opts out, and any
+        scrubber error (or a core predating the primitive) leaves the content
+        unchanged rather than blocking delivery.
+        """
+        if not content or not isinstance(content, str):
+            return content
+        if not getattr(self, "_redact_secrets_outbound", True):
+            return content
+        redactor = getattr(self, "_outbound_redactor", None)
+        try:
+            if redactor is not None:
+                masked = redactor.redact(content)
+                # Only honour a well-behaved injected redactor (returns a str).
+                if isinstance(masked, str):
+                    return masked
+            from praisonaiagents.secrets import redact_outbound
+
+            return redact_outbound(content)
+        except Exception:  # pragma: no cover — never block delivery on a scrubber bug
+            return content

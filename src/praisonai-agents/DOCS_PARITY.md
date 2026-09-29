@@ -18,16 +18,16 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 59 | 18970 |
+| ✅ Agent | 22 | 59 | 18997 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 3941 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3879 |
 | ✅ Autonomy | 3 | 7 | 2794 |
-| ✅ Bots | 7 | 36 | 14882 |
+| ✅ Bots | 7 | 38 | 15473 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 38936 |
+| ✅ CLI | 5 | 124 | 38956 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
@@ -43,25 +43,25 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
-| ✅ Gateway | 7 | 89 | 34188 |
+| ✅ Gateway | 7 | 90 | 34764 |
 | ✅ Guardrails | 5 | 4 | 2529 |
 | ✅ Handoffs | 11 | 6 | 2748 |
-| ✅ Hooks | 2 | 9 | 4990 |
-| ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 20 | 6184 |
+| ✅ Hooks | 2 | 9 | 5011 |
+| ✅ Image | 1 | 11 | 1295 |
+| ✅ Knowledge | 4 | 20 | 6188 |
 | ✅ LLM | 3 | 15 | 5946 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 64 | 15068 |
-| ✅ Memory | 6 | 21 | 8186 |
+| ✅ Memory | 6 | 21 | 8188 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1273 |
+| ✅ Output | 3 | 5 | 1289 |
 | ✅ Parallel Execution | 3 | 2 | 528 |
 | ✅ Planning | 6 | 7 | 1825 |
-| ✅ Plugins | 8 | 5 | 3404 |
+| ✅ Plugins | 8 | 5 | 3590 |
 | ✅ Prompts | 2 | 9 | 2043 |
-| ✅ Providers | 1 | 58 | 8732 |
+| ✅ Providers | 1 | 58 | 8734 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3152 |
 | ✅ Realtime | 2 | 5 | 668 |
@@ -70,12 +70,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3712 |
 | ✅ Security | 1 | 3 | 3607 |
-| ✅ Sessions | 4 | 21 | 8285 |
+| ✅ Sessions | 4 | 21 | 8382 |
 | ✅ Skills | 6 | 16 | 5988 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 145 | 44594 |
+| ✅ Tools | 12 | 145 | 44758 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 10 | 1303 |
