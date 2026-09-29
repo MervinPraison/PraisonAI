@@ -3001,6 +3001,18 @@ class WebSocketGateway:
         """
         enable = getattr(self, "_watchdog_override", None)
         timeout = getattr(self, "_watchdog_timeout_override", None)
+        # Issue #5362: fall back to the public ``GatewayConfig`` fields so a
+        # Python embedder building ``GatewayConfig(watchdog=True, …)`` enables
+        # the backstop without a YAML block or CLI flag. The CLI override still
+        # wins; an explicit YAML ``watchdog`` block wins when neither is set.
+        if enable is None and not isinstance(watchdog_cfg, dict):
+            cfg_enable = getattr(self.config, "watchdog", None)
+            if cfg_enable:
+                enable = True
+        if timeout is None:
+            cfg_timeout = getattr(self.config, "watchdog_timeout", None)
+            if cfg_timeout is not None:
+                timeout = cfg_timeout
         if enable is None and timeout is None:
             return watchdog_cfg
 
@@ -10879,6 +10891,11 @@ class WebSocketGateway:
         drain_timeout_cfg = getattr(self, "_drain_timeout_override", None)
         if drain_timeout_cfg is None:
             drain_timeout_cfg = gw_cfg.get("drain_timeout")
+        # Issue #5362: a Python embedder building ``GatewayConfig(drain_timeout=…)``
+        # directly (no YAML key, no CLI flag) must still take effect, closing the
+        # CLI/YAML/Python parity gap for the drain window.
+        if drain_timeout_cfg is None:
+            drain_timeout_cfg = getattr(self.config, "drain_timeout", None)
         # YAML/env-substituted values may arrive as strings (e.g. "30");
         # coerce once so later ``> 0`` comparisons never raise TypeError.
         if drain_timeout_cfg is not None:
