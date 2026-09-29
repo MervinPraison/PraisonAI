@@ -1916,7 +1916,7 @@ def outbox_list(
 
     from praisonai_bot.bots import OutboundQueue
 
-    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
     entries = outbox.list(status=status, target=target, limit=limit)
     if not entries:
         typer.echo(f"Outbox empty (path={outbox.path})")
@@ -1926,18 +1926,19 @@ def outbox_list(
         f"Outbox {outbox.path} — {outbox.size()} entries "
         f"(showing {len(entries)}):"
     )
-    typer.echo(
-        f"  {'KEY':<40} {'TARGET':<22} {'STATUS':<18} {'ATT':>3}  LAST_ERROR"
-    )
+    # Print the FULL tracking key: operators copy it verbatim into `outbox
+    # retry`/`outbox purge`, so truncating it (with an ellipsis over the id)
+    # would make listed entries unactionable. Metadata follows on the next line.
     now = time.time()
     for e in entries:
         key = f"{e.target}:{e.idempotency_key}:{e.id}"
-        key_preview = (key[:37] + "…") if len(key) > 38 else key
-        err = (e.error or "")[:50]
+        err = (e.error or "")[:80]
         age = f"{int(now - e.ts)}s"
+        typer.echo(f"  key={key}")
         typer.echo(
-            f"  {key_preview:<40} {e.target[:22]:<22} {e.status:<18} "
-            f"{e.attempts:>3}  {err} (age={age})"
+            f"      target={e.target} status={e.status} "
+            f"attempts={e.attempts} age={age}"
+            + (f" error={err}" if err else "")
         )
 
 
@@ -1948,7 +1949,7 @@ def outbox_stats(
     """Show a per-status breakdown of the outbound queue."""
     from praisonai_bot.bots import OutboundQueue
 
-    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
     counts = outbox.stats()
     if not counts:
         typer.echo(f"Outbox empty (path={outbox.path})")

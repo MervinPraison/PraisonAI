@@ -119,3 +119,93 @@ def test_retried_entry_drains_successfully(tmp_path):
         assert q.list(status="sent")[0].idempotency_key == "m1"
 
     asyncio.run(run())
+
+
+def test_retry_does_not_touch_recovered_entry(tmp_path):
+    """A crash-recovered entry must keep its 'recovered' safeguard; manual retry
+    is a no-op so the next drain still reconciles/annotates it (no unlabelled
+    duplicate)."""
+
+    async def run():
+        path = tmp_path / "o.sqlite"
+        q1 = OutboundQueue(path=str(path))
+        key = await q1.enqueue("m1", "telegram:1", {"text": "a"})
+        # Simulate an in-flight send interrupted by a crash: leave it 'sending'.
+        with q1._lock, __import__("contextlib").closing(q1._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
+                (q1._extract_id_from_key(key),),
+            )
+            conn.commit()
+        # Reopen: crash recovery flips 'sending' -> 'recovered'.
+        q2 = OutboundQueue(path=str(path))
+        assert q2.list()[0].status == "recovered"
+
+        assert await q2.retry(key) is False
+        assert q2.list()[0].status == "recovered"
+
+    asyncio.run(run())
+
+
+def test_purge_refuses_in_flight_sending_entry(tmp_path):
+    """purge_entry must not delete a row an active send is awaiting a terminal
+    write on."""
+
+    async def run():
+        path = tmp_path / "o.sqlite"
+        q = OutboundQueue(path=str(path))
+        key = await q.enqueue("m1", "telegram:1", {"text": "a"})
+        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
+                (q._extract_id_from_key(key),),
+            )
+            conn.commit()
+
+        assert q.purge_entry(key) is False
+        assert q.list()[0].status == "sending"
+
+    asyncio.run(run())
+
+
+def test_targeted_ops_reject_mismatched_key(tmp_path):
+    """A key whose id exists but whose target/idempotency differ must not mutate
+    the real entry (stale/mistyped key protection)."""
+
+    async def run():
+        q = OutboundQueue(path=str(tmp_path / "o.sqlite"))
+        key = await q.enqueue("m1", "telegram:1", {"text": "a"})
+        await q.mark_failed(key, "boom", permanent=True)
+        entry_id = q._extract_id_from_key(key)
+
+        wrong_key = f"telegram:999:wrong:{entry_id}"
+        assert await q.retry(wrong_key) is False
+        assert q.purge_entry(wrong_key) is False
+        # Real entry untouched and still actionable via its true key.
+        assert q.list()[0].status == "permanent_failure"
+        assert await q.retry(key) is True
+
+    asyncio.run(run())
+
+
+def test_read_only_does_not_recover_sending_rows(tmp_path):
+    """Opening the outbox read_only (operator inspection) must NOT flip live
+    'sending' rows to 'recovered' — doing so would let a running drain re-claim
+    and duplicate an in-flight message."""
+
+    async def run():
+        path = tmp_path / "o.sqlite"
+        q = OutboundQueue(path=str(path))
+        key = await q.enqueue("m1", "telegram:1", {"text": "a"})
+        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
+                (q._extract_id_from_key(key),),
+            )
+            conn.commit()
+
+        ro = OutboundQueue(path=str(path), read_only=True)
+        assert ro.list()[0].status == "sending"
+        assert ro.stats().get("sending") == 1
+
+    asyncio.run(run())

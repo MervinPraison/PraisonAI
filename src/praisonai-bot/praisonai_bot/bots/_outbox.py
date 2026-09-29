@@ -172,7 +172,16 @@ class OutboundQueue:
         ordering: Literal["strict", "best_effort"] = "best_effort",
         dead_letter_min_age: float = _DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS,
         dead_letter_policy: Optional[Any] = None,
+        read_only: bool = False,
     ) -> None:
+        # Operator inspection (``list``/``stats``) must NEVER run crash recovery
+        # on a live database: flipping in-flight ``sending`` rows to
+        # ``recovered`` while the owning gateway is mid-send lets a later drain
+        # re-claim and duplicate a message. ``read_only=True`` opens the store
+        # for reads without the ``sending``→``recovered`` migration; targeted
+        # ops (``retry``/``purge_entry``) still work but leave in-flight rows
+        # untouched.
+        self.read_only = bool(read_only)
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
@@ -255,11 +264,17 @@ class OutboundQueue:
             # reconciled before re-dispatch to avoid duplicate delivery. Drain
             # treats 'recovered' like a retryable entry but offers it to a
             # reconciler first.
-            conn.execute("""
-                UPDATE outbound_queue
-                SET status = 'recovered'
-                WHERE status = 'sending'
-            """)
+            #
+            # NEVER run this under read_only inspection: the gateway may be live
+            # and a 'sending' row genuinely in flight. Flipping it to 'recovered'
+            # here would let the running drain re-claim and duplicate it, so
+            # operator ``list``/``stats`` open the store without touching claims.
+            if not self.read_only:
+                conn.execute("""
+                    UPDATE outbound_queue
+                    SET status = 'recovered'
+                    WHERE status = 'sending'
+                """)
             conn.commit()
     
     # ── Core API ────────────────────────────────────────────────────
@@ -743,6 +758,31 @@ class OutboundQueue:
             return int(key.split(":")[-1])
         except (ValueError, IndexError):
             raise ValueError(f"Invalid entry key format: {key}")
+
+    def _row_status_if_key_matches(
+        self, conn: sqlite3.Connection, key: str
+    ) -> Optional[str]:
+        """Return the row's status only if ``key`` fully matches a stored entry.
+
+        :meth:`enqueue` builds the key as ``f"{target}:{idempotency_key}:{id}"``.
+        Targeted ops (:meth:`retry`, :meth:`purge_entry`) previously acted on the
+        trailing id alone, so a stale key from another outbox — or a mistyped
+        target/idempotency that kept an existing id — would silently mutate the
+        WRONG message. This verifies the whole reconstructed key against the row
+        before any state change. Returns ``None`` when no row matches the full
+        key (unknown id, or id matches but target/idempotency differ).
+        """
+        entry_id = self._extract_id_from_key(key)
+        row = conn.execute(
+            "SELECT target, idempotency_key, status FROM outbound_queue WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        target, idempotency, status = row
+        if f"{target}:{idempotency}:{entry_id}" != key:
+            return None
+        return str(status)
     
     # ── Maintenance ─────────────────────────────────────────────────
     def _evict_expired_locked(self, conn: sqlite3.Connection) -> int:
@@ -936,26 +976,35 @@ class OutboundQueue:
     async def retry(self, key: str) -> bool:
         """Requeue a single entry for the next drain.
 
-        Resets a ``failed``/``permanent_failure``/``recovered`` entry back to
-        ``pending`` and clears its ``attempts`` so the next :meth:`drain`
-        re-dispatches it — e.g. after a channel outage recovers. Returns True if
-        an entry was requeued, False if the key is unknown or already terminal
-        (``sent``). ``key`` is the tracking key form ``target:idempotency:id``.
+        Resets a ``failed``/``permanent_failure`` entry back to ``pending`` and
+        clears its ``attempts`` so the next :meth:`drain` re-dispatches it —
+        e.g. after a channel outage recovers. Returns True if an entry was
+        requeued, False if the key is unknown, already terminal (``sent``),
+        in-flight (``sending``), or crash-``recovered``.
+
+        A ``recovered`` entry is DELIBERATELY not manually retriable: it was
+        in-flight when the process last crashed, so its delivery outcome is
+        unknown and the next :meth:`drain` already handles it safely (reconcile
+        first, else re-send with the "possible duplicate" annotator). Flipping it
+        to ``pending`` here would strip that safeguard and risk an unlabelled
+        duplicate. ``key`` is the tracking key form ``target:idempotency:id`` and
+        is matched in full against the stored row.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._sync_retry, key)
 
     def _sync_retry(self, key: str) -> bool:
         """Synchronous version of retry for thread pool execution."""
-        entry_id = self._extract_id_from_key(key)
         with self._lock, closing(self._connect()) as conn:
+            if self._row_status_if_key_matches(conn, key) is None:
+                return False  # unknown id or full key mismatch — never guess
+            entry_id = self._extract_id_from_key(key)
             cur = conn.execute(
                 """
                 UPDATE outbound_queue
                 SET status = 'pending', attempts = 0, error = NULL,
                     last_attempt = NULL
-                WHERE id = ? AND status IN
-                      ('failed', 'permanent_failure', 'recovered')
+                WHERE id = ? AND status IN ('failed', 'permanent_failure')
                 """,
                 (entry_id,),
             )
@@ -964,9 +1013,22 @@ class OutboundQueue:
             return cur.rowcount > 0
 
     def purge_entry(self, key: str) -> bool:
-        """Delete a single entry by its tracking key. Returns True if removed."""
-        entry_id = self._extract_id_from_key(key)
+        """Delete a single entry by its full tracking key. Returns True if removed.
+
+        Refuses to delete an in-flight ``sending`` entry: the gateway may have
+        already handed it to the channel API and be awaiting the terminal
+        ``mark_sent``/``mark_failed`` write. Deleting the row out from under that
+        send makes ``mark_sent`` a no-op and the caller report a spurious
+        failure despite delivery. The key is matched in full against the stored
+        row so a stale/mistyped key cannot delete the wrong message.
+        """
         with self._lock, closing(self._connect()) as conn:
+            status = self._row_status_if_key_matches(conn, key)
+            if status is None:
+                return False  # unknown id or full key mismatch
+            if status == "sending":
+                return False  # in-flight — never delete under an active send
+            entry_id = self._extract_id_from_key(key)
             cur = conn.execute(
                 "DELETE FROM outbound_queue WHERE id = ?", (entry_id,)
             )
