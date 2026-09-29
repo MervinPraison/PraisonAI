@@ -1116,11 +1116,23 @@ class ToolExecutionMixin:
                                         def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
                                             with _agent._get_tool_executor_lock().sync():
                                                 _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
-                                                # A retired (orphaned) pool's worker
-                                                # finally exited: recover one orphan
-                                                # slot so the agent becomes usable
-                                                # again once hung tools complete.
-                                                if getattr(_agent, '_tool_executor', None) is not _executor:
+                                                # Orphan accounting is per-POOL, not
+                                                # per-future: retiring a pool adds
+                                                # exactly one to the orphan count, so
+                                                # a pool may return exactly one slot.
+                                                # Recover it only when this retired
+                                                # pool's LAST in-flight worker exits
+                                                # (``_inflight`` == 0), and guard with
+                                                # a one-shot flag so a multi-worker
+                                                # pool can never decrement more than
+                                                # the single unit it contributed and
+                                                # steal another orphaned pool's slot.
+                                                if (
+                                                    getattr(_agent, '_tool_executor', None) is not _executor
+                                                    and _executor._inflight == 0
+                                                    and not getattr(_executor, '_orphan_recovered', False)
+                                                ):
+                                                    _executor._orphan_recovered = True
                                                     _agent._tool_executor_orphaned = max(
                                                         0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
                                                     )
@@ -1950,6 +1962,30 @@ class ToolExecutionMixin:
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
 
+    @staticmethod
+    def _approval_backend_accepts_timeout(backend) -> bool:
+        """Return True if ``backend.request_approval_sync`` accepts a ``timeout`` kwarg.
+
+        Determined by signature introspection so the caller can route the
+        per-call timeout without a call-and-catch that would re-invoke a
+        backend whose *own* body raised ``TypeError``. Backends that accept
+        ``**kwargs`` are treated as accepting ``timeout``. On any introspection
+        failure we conservatively return False (call without ``timeout``).
+        """
+        method = getattr(backend, 'request_approval_sync', None)
+        if method is None:
+            return False
+        try:
+            sig = inspect.signature(method)
+        except (TypeError, ValueError):
+            return False
+        params = sig.parameters
+        if 'timeout' in params:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     def _resolve_approval_decision(self, tool_name: str, tool_args: dict, is_async: bool = False):
         """Shared approval logic for both sync and async paths.
         
@@ -2145,14 +2181,21 @@ class ToolExecutionMixin:
                         effective_timeout = getattr(backend, '_timeout', 60)
 
                     if hasattr(backend, 'request_approval_sync'):
-                        try:
+                        # Decide *up front* whether the backend accepts a
+                        # ``timeout`` kwarg by inspecting its signature, rather
+                        # than calling and catching ``TypeError``. A try/except
+                        # would re-invoke the backend when the *user callback*
+                        # inside it raised its own ``TypeError`` — duplicating
+                        # side effects and masking the real error. Signature
+                        # introspection is side-effect free.
+                        if self._approval_backend_accepts_timeout(backend):
                             return _remember(backend.request_approval_sync(
                                 request, timeout=effective_timeout
                             ))
-                        except TypeError:
-                            # Legacy backend whose request_approval_sync has no
-                            # timeout kwarg: honour its own default, no mutation.
-                            return _remember(backend.request_approval_sync(request))
+                        # Legacy backend whose request_approval_sync has no
+                        # timeout kwarg: honour its own default, no mutation of
+                        # (often shared) backend state.
+                        return _remember(backend.request_approval_sync(request))
                     else:
                         # Use the shared utility to avoid code duplication and handle timeout correctly
                         from ..approval.utils import run_coroutine_safely
