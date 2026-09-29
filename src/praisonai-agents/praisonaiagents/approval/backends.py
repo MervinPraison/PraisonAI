@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import re
 from praisonaiagents._logging import get_logger
-from typing import Any
+from typing import Any, Optional
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
@@ -175,7 +175,7 @@ class AutoApproveBackend:
     async def request_approval(self, request: ApprovalRequest) -> ApprovalDecision:
         return ApprovalDecision(approved=True, reason="auto-approved", approver="system")
 
-    def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
+    def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         return ApprovalDecision(approved=True, reason="auto-approved", approver="system")
 
 class ConsoleBackend:
@@ -293,7 +293,7 @@ class ConsoleBackend:
             return (True, "always", suggested or None, None)
         return (True, "once", None, None)
 
-    def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
+    def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         """Synchronous approval via Rich console prompt."""
         try:
             approved, scope, scope_pattern, feedback = self._prompt_user(request)
@@ -474,10 +474,12 @@ class AgentApproval:
                 reason=f"Agent approval error: {e}",
             )
 
-    def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
+    def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         """Synchronous wrapper."""
         from .utils import run_coroutine_safely
-        return run_coroutine_safely(self.request_approval(request), timeout=60)
+        return run_coroutine_safely(
+            self.request_approval(request), timeout=60 if timeout is None else timeout
+        )
 
 class CallbackBackend:
     """Wraps a legacy ``(function_name, arguments, risk_level) -> ApprovalDecision`` callback
@@ -489,7 +491,7 @@ class CallbackBackend:
     def __init__(self, callback):
         self._callback = callback
 
-    def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
+    def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         result = self._callback(request.tool_name, request.arguments, request.risk_level)
         if isinstance(result, ApprovalDecision):
             return result

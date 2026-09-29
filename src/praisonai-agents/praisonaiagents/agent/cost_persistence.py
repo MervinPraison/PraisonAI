@@ -58,8 +58,8 @@ def save_cost_report(
     }
 
     filepath = COST_DIR / f"{safe_name}.json"
-    with open(filepath, "w") as f:
-        json.dump(report, f, indent=2)
+    from ..utils.atomic_io import atomic_write_json
+    atomic_write_json(str(filepath), report, indent=2)
 
     logger.info(f"[costs] Saved cost report to {filepath}")
     return str(filepath)

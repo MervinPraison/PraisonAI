@@ -59,7 +59,7 @@ class _FakeGateway:
         return _FakeSession()
 
     @staticmethod
-    async def _dispatch_agent_turn(agent, content, on_complete=None):
+    async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
         result = await agent.achat(content)
         # Mirror the real gateway: snapshot per-turn state in the same context
         # that produced the result, before returning to the caller.
@@ -69,9 +69,10 @@ class _FakeGateway:
 
 
 class _FakeReq:
-    def __init__(self, body, headers=None):
+    def __init__(self, body, headers=None, path_params=None):
         self._body = body
         self.headers = headers or {}
+        self.path_params = path_params or {}
 
     async def json(self):
         return self._body
@@ -392,6 +393,366 @@ def test_sync_agent_usage_snapshot_captured_before_thread_returns():
     assert events == ["chat_returned", "snapshot"]
 
 
+class _RealEmitterAgent:
+    """Agent whose ``achat`` emits real DELTA_TEXT events via a stream_emitter."""
+
+    def __init__(self, deltas):
+        from praisonaiagents.streaming.events import StreamEventEmitter
+
+        self.stream_emitter = StreamEventEmitter()
+        self._llm_instance = _FakeLLM()
+        self._deltas = deltas
+
+    async def achat(self, content):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+
+        for piece in self._deltas:
+            self.stream_emitter.emit(
+                StreamEvent(type=StreamEventType.DELTA_TEXT, content=piece)
+            )
+            await asyncio.sleep(0)
+        return "".join(self._deltas)
+
+
+class _StreamGateway(_FakeGateway):
+    """Gateway with token streaming enabled and a delta-emitting agent."""
+
+    def __init__(self, deltas=("Hel", "lo ", "world")):
+        super().__init__()
+        self._agent = _RealEmitterAgent(list(deltas))
+
+        class _Api:
+            stream = True
+
+        class _Cfg:
+            api = _Api()
+
+        self.config = _Cfg()
+
+
+def _content_texts(parts):
+    out = []
+    for p in parts:
+        if p.startswith("data: ") and '"content"' in p:
+            payload = json.loads(p[len("data: "):])
+            out.append(payload["choices"][0]["delta"]["content"])
+    return out
+
+
+def test_stream_enabled_emits_token_level_deltas():
+    gw = _StreamGateway(deltas=("Hel", "lo ", "world"))
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    # Each token delta arrives as its own content frame (not one buffered chunk).
+    assert _content_texts(parts) == ["Hel", "lo ", "world"]
+    assert parts[-1] == "data: [DONE]\n\n"
+    # Terminator + role prelude preserved.
+    assert any('"finish_reason": "stop"' in p for p in parts)
+    assert any('"role": "assistant"' in p for p in parts)
+
+
+def test_stream_enabled_still_emits_usage_when_opted_in():
+    gw = _StreamGateway()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads
+    assert usage_payloads[-1]["usage"]["total_tokens"] == 18
+
+
+def test_stream_enabled_falls_back_to_buffered_when_no_deltas():
+    # An agent that streams no DELTA_TEXT must still deliver its reply as one
+    # buffered content chunk so content is never lost.
+    gw = _StreamGateway(deltas=())
+    ep = GatewayApiEndpoints(gw)
+
+    async def _achat(content):
+        return "buffered-reply"
+
+    gw._agent.achat = _achat
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert _content_texts(parts) == ["buffered-reply"]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_disabled_uses_single_buffered_chunk():
+    # Default gateway (no config.api.stream) keeps the byte-for-byte buffered
+    # path: one content chunk carrying the whole reply.
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert _content_texts(parts) == ["echo:hi"]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_api_config_stream_roundtrip():
+    from praisonaiagents.gateway import ApiConfig
+
+    assert ApiConfig().stream is False
+    cfg = ApiConfig.from_dict({"openai": True, "stream": True})
+    assert cfg.stream is True
+    assert cfg.to_dict()["stream"] is True
+
+
+class _FirstTokenAgent:
+    """Agent whose first answer piece is a FIRST_TOKEN event, rest DELTA_TEXT.
+
+    Mirrors the real SDK, which marks the opening content piece with
+    ``FIRST_TOKEN`` (the TTFT marker) and only subsequent pieces with
+    ``DELTA_TEXT``. It also emits a reasoning delta that must NOT surface as
+    answer text.
+    """
+
+    def __init__(self):
+        from praisonaiagents.streaming.events import StreamEventEmitter
+
+        self.stream_emitter = StreamEventEmitter()
+        self._llm_instance = _FakeLLM()
+
+    async def achat(self, content):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+
+        # Private reasoning first — must be filtered out of the answer stream.
+        self.stream_emitter.emit(
+            StreamEvent(
+                type=StreamEventType.DELTA_TEXT,
+                content="(thinking...)",
+                is_reasoning=True,
+            )
+        )
+        await asyncio.sleep(0)
+        self.stream_emitter.emit(
+            StreamEvent(type=StreamEventType.FIRST_TOKEN, content="Hel")
+        )
+        await asyncio.sleep(0)
+        self.stream_emitter.emit(
+            StreamEvent(type=StreamEventType.DELTA_TEXT, content="lo")
+        )
+        await asyncio.sleep(0)
+        return "Hello"
+
+
+def test_stream_includes_first_token_and_drops_reasoning():
+    # Greptile P1: the opening FIRST_TOKEN piece must be delivered (not lost to
+    # the buffered fallback) and reasoning deltas must never leak as answer text.
+    gw = _StreamGateway()
+    gw._agent = _FirstTokenAgent()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    texts = _content_texts(parts)
+    # First token present, ordered before the later delta, reasoning excluded.
+    assert texts == ["Hel", "lo"]
+    assert "(thinking...)" not in "".join(texts)
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_empty_reply_still_emits_content_frame():
+    # Greptile P2: an empty reply with no deltas must still carry a content
+    # frame so the frame shape matches the buffered single-chunk path exactly.
+    gw = _StreamGateway(deltas=())
+    ep = GatewayApiEndpoints(gw)
+
+    async def _achat(content):
+        return ""
+
+    gw._agent.achat = _achat
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    # Exactly one content frame carrying the empty string.
+    assert _content_texts(parts) == [""]
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_stream_delivers_frames_incrementally_before_turn_completes():
+    # Greptile P2: the whole point of streaming is time-to-first-token. This
+    # asserts a token's SSE frame is available BEFORE the turn finishes, not
+    # only after the agent returns its full reply. The agent blocks after the
+    # first delta until the consumer has observed that delta's frame.
+    from praisonaiagents.streaming.events import (
+        StreamEvent,
+        StreamEventEmitter,
+        StreamEventType,
+    )
+
+    first_frame_seen = asyncio.Event()
+
+    class _PausingAgent:
+        def __init__(self):
+            self.stream_emitter = StreamEventEmitter()
+            self._llm_instance = _FakeLLM()
+            self.completed = False
+
+        async def achat(self, content):
+            self.stream_emitter.emit(
+                StreamEvent(type=StreamEventType.DELTA_TEXT, content="early")
+            )
+            # Do not finish the turn until the consumer has seen the frame.
+            await first_frame_seen.wait()
+            self.completed = True
+            return "early-late"
+
+    gw = _StreamGateway()
+    agent = _PausingAgent()
+    gw._agent = agent
+    ep = GatewayApiEndpoints(gw)
+
+    def part_is_content(text, needle):
+        return text.startswith("data: ") and '"content"' in text and needle in text
+
+    async def _run():
+        response = await ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+        seen = []
+        async for part in response.body_iterator:
+            text = part if isinstance(part, str) else part.decode()
+            if part_is_content(text, "early"):
+                # We received the first token's frame while the turn is still
+                # paused (not yet completed) — genuine incremental delivery.
+                assert agent.completed is False
+                first_frame_seen.set()
+            seen.append(text)
+        return seen
+
+    parts = asyncio.run(_run())
+    assert agent.completed is True
+    assert "early" in "".join(_content_texts(parts))
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_concurrent_streams_do_not_mix_caller_text():
+    # Greptile P1 (security): two callers streaming from the SAME agent
+    # instance (shared stream_emitter) must each receive only their own tokens.
+    # The per-turn ContextVar isolation must keep the fan-out separated.
+    from praisonaiagents.streaming.events import (
+        StreamEvent,
+        StreamEventEmitter,
+        StreamEventType,
+    )
+
+    class _TaggingAgent:
+        """Emits deltas tagged with the calling turn's content prefix."""
+
+        def __init__(self):
+            self.stream_emitter = StreamEventEmitter()
+            self._llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            # Two deltas, each prefixed with this turn's content so a leak
+            # between callers is detectable.
+            for i in range(3):
+                self.stream_emitter.emit(
+                    StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        content=f"{content}-{i}",
+                    )
+                )
+                await asyncio.sleep(0)
+            return content
+
+    gw = _StreamGateway()
+    gw._agent = _TaggingAgent()
+    ep = GatewayApiEndpoints(gw)
+
+    async def _one(marker):
+        response = await ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": marker}],
+                }
+            )
+        )
+        parts = []
+        async for part in response.body_iterator:
+            parts.append(part if isinstance(part, str) else part.decode())
+        return _content_texts(parts)
+
+    async def _run():
+        return await asyncio.gather(_one("AAA"), _one("BBB"))
+
+    a_texts, b_texts = asyncio.run(_run())
+    # Each stream only carries its own marker — no cross-contamination.
+    assert all(t.startswith("AAA") for t in a_texts), a_texts
+    assert all(t.startswith("BBB") for t in b_texts), b_texts
+
+
 def test_openai_responses_reports_usage():
     ep = GatewayApiEndpoints(_FakeGateway())
     resp = asyncio.run(
@@ -498,3 +859,272 @@ def test_construct_gateway_with_api_flags():
 def test_api_config_disabled_by_default():
     assert ApiConfig().enabled is False
     assert GatewayConfig().api.enabled is False
+
+
+# ── Issue #5335: background/async runs ─────────────────────────────────
+
+
+def _run_background_flow(gw, ep, body):
+    """Submit a background response and drain the driving task on one loop."""
+
+    async def _flow():
+        submit = await ep.openai_responses(_FakeReq(body))
+        data = _body(submit)
+        # Let the spawned task run to completion on this loop.
+        entry = ep._responses[data["id"]]
+        task = entry.get("task")
+        if task is not None:
+            await task
+        return submit, data
+
+    return asyncio.run(_flow())
+
+
+def test_background_submission_returns_queued_202():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "background": True}
+    )
+    assert submit.status_code == 202
+    assert data["status"] == "queued"
+    assert data["object"] == "response"
+    assert data["id"].startswith("resp-")
+    # Persisted and retrievable by id.
+    assert data["id"] in ep._responses
+
+
+def test_background_run_completes_and_is_retrievable():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "store": True}
+    )
+    got = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": data["id"]}))
+    )
+    body = _body(got)
+    assert body["status"] == "completed"
+    assert body["output_text"] == "echo:ping"
+    assert body["usage"]["input_tokens"] == 11
+
+
+def test_synchronous_responses_still_default():
+    # No background/store -> unchanged synchronous behaviour (status completed).
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "ping"}))
+    )
+    data = _body(resp)
+    assert data["status"] == "completed"
+    assert data["output_text"] == "echo:ping"
+
+
+def test_get_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+    assert _body(resp)["error"]["type"] == "invalid_request_error"
+
+
+def test_cancel_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_cancel(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+
+
+def test_completed_empty_reply_still_has_message_output():
+    # Greptile P1: a completed sync response with empty text must still carry an
+    # assistant message so clients that read output[0] keep working.
+    class _EmptyAgent:
+        _llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            return ""
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _EmptyAgent()
+
+    ep = GatewayApiEndpoints(_Gw())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "x"}))
+    )
+    data = _body(resp)
+    assert data["status"] == "completed"
+    assert data["output_text"] == ""
+    assert len(data["output"]) == 1
+    assert data["output"][0]["role"] == "assistant"
+    assert data["output"][0]["content"][0]["text"] == ""
+
+
+def test_retrieval_message_id_stable_across_polls():
+    # Greptile P2: polling a completed background response must return the same
+    # output message id each time.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "store": True}
+    )
+
+    def _get():
+        return _body(
+            asyncio.run(
+                ep.openai_responses_get(
+                    _FakeReq(None, path_params={"id": data["id"]})
+                )
+            )
+        )
+
+    first = _get()
+    second = _get()
+    assert first["output"][0]["id"] == second["output"][0]["id"]
+
+
+def test_retrieval_scoped_to_owner_for_stable_callers():
+    # Greptile P1 security: a run submitted under one bearer token must not be
+    # retrievable by a different token.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+
+    async def _flow():
+        submit = await ep.openai_responses(
+            _FakeReq(
+                {"model": "assistant", "input": "ping", "store": True},
+                headers={"authorization": "Bearer alice-secret-token"},
+            )
+        )
+        rid = _body(submit)["id"]
+        task = ep._responses[rid].get("task")
+        if task is not None:
+            await task
+        return rid
+
+    rid = asyncio.run(_flow())
+
+    # Owner (same token) can read it.
+    owner_get = asyncio.run(
+        ep.openai_responses_get(
+            _FakeReq(
+                None,
+                headers={"authorization": "Bearer alice-secret-token"},
+                path_params={"id": rid},
+            )
+        )
+    )
+    assert _body(owner_get)["status"] == "completed"
+
+    # A different token is denied (404, not leaking existence).
+    other_get = asyncio.run(
+        ep.openai_responses_get(
+            _FakeReq(
+                None,
+                headers={"authorization": "Bearer mallory-other-token"},
+                path_params={"id": rid},
+            )
+        )
+    )
+    assert other_get.status_code == 404
+
+
+def test_rejected_background_run_marked_failed_not_completed():
+    # Greptile P1: an admission-gate rejection must surface as ``failed`` so a
+    # poller never mistakes the busy message for a successful result.
+    from praisonai_bot.bots._admission import AdmissionRejected
+
+    class _RejectingGate:
+        enabled = True
+
+        def admit(self, session_id=None):
+            gate = self
+
+            class _Ctx:
+                async def __aenter__(self):
+                    raise AdmissionRejected("gateway busy")
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            return _Ctx()
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._admission_gate = _RejectingGate()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "x", "background": True}
+    )
+    got = _body(
+        asyncio.run(
+            ep.openai_responses_get(_FakeReq(None, path_params={"id": data["id"]}))
+        )
+    )
+    assert got["status"] == "failed"
+    assert "busy" in (got.get("error", {}) or {}).get("message", "")
+
+
+def test_store_evicts_oldest_terminal_when_full():
+    # Greptile P1: the in-process store is bounded; terminal entries are evicted
+    # oldest-first once at capacity so memory cannot grow without bound.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    ep._responses_max = 3
+
+    ids = []
+    for _ in range(5):
+        _submit, data = _run_background_flow(
+            gw, ep, {"model": "assistant", "input": "ping", "store": True}
+        )
+        ids.append(data["id"])
+
+    assert len(ep._responses) <= 3
+    # The most recent submissions are retained; the oldest were evicted.
+    assert ids[-1] in ep._responses
+    assert ids[0] not in ep._responses
+
+
+def test_cancel_in_flight_background_run():
+    # A run that never completes on its own must flip to ``cancelled`` when the
+    # cancel route fires (cooperative controller + task cancel).
+    class _SlowAgent:
+        _llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            await asyncio.sleep(60)
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SlowAgent()
+
+        @staticmethod
+        async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
+            result = await agent.achat(content)
+            if on_complete is not None:
+                on_complete(agent)
+            return result
+
+    async def _flow():
+        gw = _Gw()
+        ep = GatewayApiEndpoints(gw)
+        submit = await ep.openai_responses(
+            _FakeReq({"model": "assistant", "input": "x", "background": True})
+        )
+        rid = _body(submit)["id"]
+        await asyncio.sleep(0)  # let the task start and suspend on sleep
+        cancel = await ep.openai_responses_cancel(
+            _FakeReq(None, path_params={"id": rid})
+        )
+        return _body(cancel)
+
+    data = asyncio.run(_flow())
+    assert data["status"] == "cancelled"
