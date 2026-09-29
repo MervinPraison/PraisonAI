@@ -587,6 +587,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             max_message_length=4096,
             length_unit="utf16",  # Telegram uses UTF-16 for length calculation
             supports_edit=True,  # Telegram supports message editing
+            supports_delete=True,  # Telegram supports deleting bot messages
             supports_typing=True,
             markdown_dialect="telegram_markdown_v2",
             needs_rate_limit=True,
@@ -640,8 +641,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             # Use shared security pipeline for consistent enforcement
             message = await process_inbound_telegram_message(update, self)
             if not message:
-                return  # Message was dropped by security checks
-            
+                return  # Message was dropped by security checks (incl. #5062 bot-loop guard)
+
             for handler in self._message_handlers:
                 try:
                     if asyncio.iscoroutinefunction(handler):
@@ -2661,6 +2662,18 @@ async def process_inbound_telegram_message(
                 logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
                 return None
     
+    # Bot-to-bot loop guard (#5062). A bot-authored message is dropped unless
+    # the channel opted into ``allow_bots``; once opted in, the BotLoopGuard
+    # breaks a runaway A<->B reply loop. Human senders are a zero-cost no-op.
+    # Enforced here in the shared pipeline so the gateway polling path gets the
+    # same protection as the standalone adapter.
+    if not bot.bot_loop_allows(
+        message.sender,
+        self_bot_id=str(getattr(bot._bot_user, "user_id", "") or "") if getattr(bot, "_bot_user", None) else "",
+    ):
+        logger.debug("Message dropped: bot-authored turn blocked by BotLoopGuard")
+        return None
+
     # All security checks passed
     logger.debug(f"Message security checks passed for user {user_id} in channel {channel_id}")
     return message

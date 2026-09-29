@@ -14,6 +14,87 @@ import ipaddress
 from urllib.parse import urlparse
 
 
+_WEBHOOK_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
+
+def _resolve_and_screen_webhook_host(url: str) -> List[str]:
+    """Resolve a webhook URL's hostname and reject unsafe addresses.
+
+    Returns the list of validated (public) IP strings the hostname maps to so
+    callers can *pin* the eventual connection to exactly what was screened,
+    rather than re-resolving at connect time (which reopens the DNS-rebinding
+    window). Resolves *every* address (A and AAAA / round-robin) via
+    ``getaddrinfo`` so a public A record cannot smuggle in a private AAAA.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Webhook URL must use http or https scheme")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Invalid webhook URL")
+
+    if hostname.lower() in _WEBHOOK_LOCAL_HOSTS:
+        raise ValueError("Webhook URL cannot be a localhost address")
+
+    try:
+        infos = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("Webhook URL hostname could not be resolved") from exc
+
+    resolved: List[str] = []
+    for _family, _type, _proto, _canon, sockaddr in infos:
+        ip_str = sockaddr[0]
+        ip_obj = ipaddress.ip_address(ip_str)
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_multicast
+            or ip_obj.is_reserved
+            or ip_obj.is_unspecified
+        ):
+            raise ValueError(
+                "Webhook URL resolves to a private or restricted network address"
+            )
+        resolved.append(ip_str)
+
+    if not resolved:
+        raise ValueError("Webhook URL hostname could not be resolved")
+
+    return resolved
+
+
+def validate_webhook_url(url: Optional[str]) -> Optional[str]:
+    """Validate a webhook URL, rejecting local/private/restricted targets.
+
+    Single source of truth for both the public request model and the internal
+    Job model. Re-checked at delivery time to close the submit-time TOCTOU /
+    DNS-rebinding window; the executor additionally pins the connection to the
+    validated address (see ``resolve_validated_webhook_targets``).
+    """
+    if not url:
+        return url
+
+    _resolve_and_screen_webhook_host(url)
+    return url
+
+
+def resolve_validated_webhook_targets(url: str) -> List[str]:
+    """Validate ``url`` and return the screened public IPs to connect to.
+
+    The executor uses this at delivery time to pin the HTTP connection to an
+    address that was just screened, so the kernel does not re-resolve the
+    hostname (which could return a freshly-rebound internal address between the
+    check and the connect).
+    """
+    return _resolve_and_screen_webhook_host(url)
+
+
 class JobStatus(str, Enum):
     """Status of a job."""
     QUEUED = "queued"
@@ -40,30 +121,8 @@ class JobSubmitRequest(BaseModel):
 
     @field_validator("webhook_url")
     @classmethod
-    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
-        if not v:
-            return v
-        
-        parsed = urlparse(v)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError("Webhook URL must use http or https scheme")
-            
-        hostname = parsed.hostname
-        if not hostname:
-            raise ValueError("Invalid webhook URL")
-            
-        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            raise ValueError("Webhook URL cannot be a localhost address")
-            
-        try:
-            ip = socket.gethostbyname(hostname)
-            ip_obj = ipaddress.ip_address(ip)
-            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
-                raise ValueError("Webhook URL resolves to a private or restricted network address")
-        except socket.gaierror:
-            raise ValueError("Webhook URL hostname could not be resolved")
-            
-        return v
+    def _validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_webhook_url(v)
 
 
 class JobSubmitResponse(BaseModel):
@@ -141,30 +200,8 @@ class Job(BaseModel):
     
     @field_validator("webhook_url")
     @classmethod
-    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
-        if not v:
-            return v
-        
-        parsed = urlparse(v)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError("Webhook URL must use http or https scheme")
-            
-        hostname = parsed.hostname
-        if not hostname:
-            raise ValueError("Invalid webhook URL")
-            
-        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            raise ValueError("Webhook URL cannot be a localhost address")
-            
-        try:
-            ip = socket.gethostbyname(hostname)
-            ip_obj = ipaddress.ip_address(ip)
-            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
-                raise ValueError("Webhook URL resolves to a private or restricted network address")
-        except socket.gaierror:
-            raise ValueError("Webhook URL hostname could not be resolved")
-            
-        return v
+    def _validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_webhook_url(v)
     
     # Progress tracking
     progress_percentage: float = Field(0.0)

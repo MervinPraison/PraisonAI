@@ -194,6 +194,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             max_message_length=2000,  # Discord's limit for regular messages
             length_unit="codepoints",
             supports_edit=True,  # Discord supports message editing
+            supports_delete=True,  # Discord supports deleting bot messages
             supports_typing=True,
             markdown_dialect="discord_markdown",
             needs_rate_limit=False,  # Discord.py handles rate limiting
@@ -265,7 +266,17 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         @self._client.event
         async def on_message(message):
             if message.author.bot:
-                return
+                # Never react to ourselves. Other bots are dropped unless the
+                # channel opts into bot-authored messages (#5062); when it does,
+                # the BotLoopGuard breaks a runaway A<->B reply loop.
+                _self_id = getattr(self._client.user, "id", None)
+                if _self_id is not None and message.author.id == _self_id:
+                    return
+                if not self.bot_loop_allows(
+                    self._convert_message(message).sender,
+                    self_bot_id=str(_self_id or ""),
+                ):
+                    return
             
             bot_message = self._convert_message(message)
             

@@ -53,6 +53,9 @@ class HookRegistry:
         }
         self._enabled = enabled
         self._global_timeout = 60.0
+        # Monotonic counter giving each registered hook a stable secondary sort
+        # key so equal-priority hooks keep deterministic registration order.
+        self._seq_counter = 0
         # Guard mutation/iteration of the per-event hook lists. The default
         # registry is a cross-agent process-wide singleton, so a plugin
         # (un)registering a hook on one thread can race a get_hooks() iteration
@@ -80,6 +83,8 @@ class HookRegistry:
             The hook ID
         """
         with self._lock:
+            hook._seq = self._seq_counter
+            self._seq_counter += 1
             self._hooks[hook.event].append(hook)
         logger.debug(f"Registered hook '{hook.name}' for event '{hook.event.value}'")
         return hook.id
@@ -93,7 +98,8 @@ class HookRegistry:
         description: Optional[str] = None,
         sequential: bool = False,
         timeout: float = 60.0,
-        is_async: bool = False
+        is_async: bool = False,
+        priority: int = 100
     ) -> str:
         """
         Register a Python function as a hook.
@@ -107,6 +113,7 @@ class HookRegistry:
             sequential: Whether to run sequentially
             timeout: Timeout in seconds
             is_async: Whether the function is async
+            priority: Execution order (lower runs earlier). Default 100
             
         Returns:
             The hook ID
@@ -119,7 +126,8 @@ class HookRegistry:
             description=description,
             sequential=sequential,
             timeout=timeout,
-            is_async=is_async
+            is_async=is_async,
+            priority=priority
         )
         return self.register(hook)
     
@@ -133,7 +141,8 @@ class HookRegistry:
         sequential: bool = False,
         timeout: float = 60.0,
         env: Optional[Dict[str, str]] = None,
-        shell: bool = True
+        shell: bool = True,
+        priority: int = 100
     ) -> str:
         """
         Register a shell command as a hook.
@@ -148,6 +157,7 @@ class HookRegistry:
             timeout: Timeout in seconds
             env: Additional environment variables
             shell: Whether to run in shell mode
+            priority: Execution order (lower runs earlier). Default 100
             
         Returns:
             The hook ID
@@ -161,7 +171,8 @@ class HookRegistry:
             sequential=sequential,
             timeout=timeout,
             env=env or {},
-            shell=shell
+            shell=shell,
+            priority=priority
         )
         return self.register(hook)
     
@@ -170,7 +181,8 @@ class HookRegistry:
         event: HookEvent,
         matcher: Optional[str] = None,
         sequential: bool = False,
-        timeout: float = 60.0
+        timeout: float = 60.0,
+        priority: int = 100
     ) -> Callable:
         """
         Decorator to register a function as a hook.
@@ -180,6 +192,7 @@ class HookRegistry:
             matcher: Optional regex pattern to match targets
             sequential: Whether to run sequentially
             timeout: Timeout in seconds
+            priority: Execution order (lower runs earlier). Default 100
             
         Returns:
             Decorator function
@@ -199,7 +212,8 @@ class HookRegistry:
                 matcher=matcher,
                 sequential=sequential,
                 timeout=timeout,
-                is_async=is_async
+                is_async=is_async,
+                priority=priority
             )
             
             @wraps(func)
@@ -253,6 +267,10 @@ class HookRegistry:
         with self._lock:
             hooks = list(self._hooks.get(event, []))
         
+        # Sort by priority (lower runs earlier); ties fall back to registration
+        # order via the monotonic _seq for deterministic, reproducible ordering.
+        hooks.sort(key=lambda h: (h.priority, h._seq))
+        
         if target is None:
             return [h for h in hooks if h.enabled]
         
@@ -284,20 +302,25 @@ class HookRegistry:
             Dictionary mapping event names to hook info
         """
         result = {}
-        for event in HookEvent:
-            hooks = self._hooks[event]
-            if hooks:
-                result[event.value] = [
-                    {
-                        "id": h.id,
-                        "name": h.name,
-                        "type": "command" if isinstance(h, CommandHook) else "function",
-                        "matcher": h.matcher,
-                        "enabled": h.enabled,
-                        "sequential": h.sequential
-                    }
-                    for h in hooks
-                ]
+        with self._lock:
+            for event in HookEvent:
+                hooks = list(self._hooks[event])
+                if hooks:
+                    # Present hooks in effective execution order so an operator
+                    # can see the sequence get_hooks() will run them in.
+                    hooks.sort(key=lambda h: (h.priority, h._seq))
+                    result[event.value] = [
+                        {
+                            "id": h.id,
+                            "name": h.name,
+                            "type": "command" if isinstance(h, CommandHook) else "function",
+                            "matcher": h.matcher,
+                            "enabled": h.enabled,
+                            "sequential": h.sequential,
+                            "priority": h.priority
+                        }
+                        for h in hooks
+                    ]
         return result
     
     def enable_hook(self, hook_id: str) -> bool:
@@ -359,7 +382,7 @@ def set_default_registry(registry: HookRegistry):
 def add_hook(
     event: Union[str, HookEvent],
     callback: Optional[Callable[[HookInput], HookResult]] = None,
-    priority: int = 10,
+    priority: int = 100,
     matcher: Optional[str] = None
 ) -> Union[str, Callable]:
     """Register a hook callback. Simplified API.
@@ -376,7 +399,9 @@ def add_hook(
     Args:
         event: Hook event name ('before_tool', 'after_llm', etc.) or HookEvent enum
         callback: Function to call when hook fires (optional when using as decorator)
-        priority: Execution order (lower = earlier). Default 10. (Reserved for future use)
+        priority: Execution order (lower = earlier). Default 100 — same default
+            bucket as ``register_function``/``on``, so hooks added through either
+            API keep registration order unless an explicit priority is given.
         matcher: Optional regex pattern to match specific targets (e.g., tool names)
         
     Returns:
@@ -402,7 +427,8 @@ def add_hook(
             get_default_registry().register_function(
                 event=event,
                 func=func,
-                matcher=matcher
+                matcher=matcher,
+                priority=priority
             )
             return func
         return decorator
@@ -410,7 +436,8 @@ def add_hook(
     return get_default_registry().register_function(
         event=event,
         func=callback,
-        matcher=matcher
+        matcher=matcher,
+        priority=priority
     )
 
 def remove_hook(hook_id: str) -> bool:

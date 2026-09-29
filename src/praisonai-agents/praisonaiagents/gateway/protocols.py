@@ -3074,6 +3074,57 @@ ReactionStatus = Literal["ok", "unsupported", "failed", "no_route"]
 """
 
 
+MessageActionStatus = Literal["ok", "unsupported", "failed", "no_route"]
+"""Closed set of outcomes for a message-mutation verb (``edit`` / ``delete``).
+
+Mirrors :data:`ReactionStatus` so every agent-callable message action returns
+the same typed shape:
+
+* ``ok`` — the message was edited/deleted.
+* ``unsupported`` — the channel has no matching capability
+  (``supports_edit`` / ``supports_delete``).
+* ``failed`` — the transport rejected the action (e.g. no such message, or the
+  message is not editable/deletable by this bot).
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class MessageActionResult:
+    """Outcome of an agent-initiated message mutation (Issue #5054).
+
+    Shared typed result for the ``edit`` and ``delete`` verbs of the unified
+    message-action surface. Every call resolves to exactly one
+    :data:`MessageActionStatus`, so a channel that cannot edit/delete returns a
+    typed ``unsupported`` outcome instead of raising — identical to how
+    :class:`ReactionResult` and :class:`ThreadResult` degrade.
+
+    Attributes:
+        status: The outcome (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
+        target: The resolved target the action was routed to.
+        detail: Optional model-readable explanation.
+    """
+
+    status: MessageActionStatus
+    target: str = ""
+    detail: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        """Whether the action succeeded (``status == "ok"``)."""
+        return self.status == "ok"
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["target"] = self.target
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
 @dataclass
 class ReactionResult:
     """Outcome of an agent-initiated message reaction (Issue #3917).
@@ -3259,6 +3310,51 @@ class OutboundMessengerProtocol(Protocol):
         """
         ...
 
+    async def edit(
+        self,
+        target: str,
+        message_id: str,
+        text: str,
+    ) -> "MessageActionResult":
+        """Edit a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent update its own live status message in place rather than
+        posting a follow-up — e.g. editing "Working…" to "Done ✅". Gated on the
+        channel's ``PlatformCapabilities.supports_edit``; a channel that cannot
+        edit returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to edit.
+            text: The new message text.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
+        """
+        ...
+
+    async def delete(
+        self,
+        target: str,
+        message_id: str,
+    ) -> "MessageActionResult":
+        """Delete/unsend a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent retract a message it should not have sent. Gated on the
+        channel's ``PlatformCapabilities.supports_delete``; a channel that
+        cannot delete returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to delete.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Agent-callable cross-conversation request/reply (Issue #3689)
@@ -3362,6 +3458,122 @@ class ConversationRequestProtocol(Protocol):
         Returns:
             A :class:`ConversationReply` describing the outcome.
         """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Server→client interactive request/reply over the gateway transport
+# (Issue #5351)
+#
+# A blocked HITL turn (approval / choice / free-text input) needs to reach a
+# generic gateway client — a web dashboard, TUI, or custom app — and correlate
+# the client's answer back into the waiting turn. Structured elicitation today
+# only renders through per-channel button backends; a client on the gateway
+# WebSocket cannot see or answer one, and an in-flight prompt is lost when the
+# client drops (the ``since`` cursor replays *past events*, not *still-open
+# requests*).
+#
+# Core owns only the *shape*: the typed request (:class:`GatewayServerRequest`),
+# the correlated reply (:class:`GatewayServerReply`), and the protocol seam
+# (:class:`GatewayRequestChannelProtocol`) — including the ``open_requests``
+# contract that the resume path honours so a reconnecting client is re-sent
+# every still-open (and *only* still-open) request for its sessions. The socket
+# delivery, correlation, and durable open-request set are bound by the running
+# gateway (praisonai-bot) exactly as the outbound messenger is — no heavy
+# import lives in core.
+# ---------------------------------------------------------------------------
+
+GatewayRequestKind = Literal["approval", "choice", "input"]
+"""Closed set of server→client interactive request kinds.
+
+* ``approval`` — allow/deny; the reply ``value`` is ``"allow"`` or ``"deny"``.
+* ``choice`` — select one of ``options``; the reply ``value`` is the option.
+* ``input`` — free text; the reply ``value`` is the entered text.
+"""
+
+
+@dataclass
+class GatewayServerRequest:
+    """A typed server→client interactive request (Issue #5351).
+
+    Delivered to a connected gateway client as a ``server_request`` frame while
+    a turn is blocked awaiting a human answer, and re-issued verbatim on resume
+    for as long as it stays open.
+
+    Attributes:
+        request_id: Correlation id echoed back in the :class:`GatewayServerReply`.
+        kind: One of :data:`GatewayRequestKind`.
+        prompt: Human-readable prompt to render.
+        options: Selectable options, populated only for ``kind == "choice"``.
+        session_id: Session the request belongs to (used for resume replay).
+    """
+
+    request_id: str
+    kind: GatewayRequestKind
+    prompt: str
+    options: Optional[List[str]] = None
+    session_id: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the ``server_request`` frame."""
+        data: Dict[str, Any] = {
+            "request_id": self.request_id,
+            "kind": self.kind,
+            "prompt": self.prompt,
+        }
+        if self.options is not None:
+            data["options"] = list(self.options)
+        if self.session_id:
+            data["session_id"] = self.session_id
+        return data
+
+
+@dataclass
+class GatewayServerReply:
+    """A client's correlated answer to a :class:`GatewayServerRequest`.
+
+    Attributes:
+        request_id: The id of the request being answered.
+        value: ``"allow"``/``"deny"`` for approval, the chosen option for
+            choice, or the entered text for input.
+    """
+
+    request_id: str
+    value: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {"request_id": self.request_id, "value": self.value}
+
+
+@runtime_checkable
+class GatewayRequestChannelProtocol(Protocol):
+    """Protocol for server→client interactive request/reply over the transport.
+
+    A concrete implementation is bound by the running gateway (in praisonai-bot)
+    and registered into the per-turn context so a blocked HITL turn can deliver
+    an :class:`GatewayServerRequest` to the connected client and await the
+    correlated :class:`GatewayServerReply`. ``open_requests`` returns the
+    still-open requests for a session so the gateway's resume path can re-issue
+    them alongside the event replay — a dropped connection never wedges a turn.
+    """
+
+    async def request(
+        self,
+        req: "GatewayServerRequest",
+        *,
+        timeout_s: float = 120.0,
+    ) -> Optional["GatewayServerReply"]:
+        """Deliver ``req`` to the session's client and await its reply.
+
+        Returns the correlated :class:`GatewayServerReply`, or ``None`` when no
+        reply arrives within ``timeout_s`` (the request is then cleared from the
+        open set so it is not replayed on a later reconnect).
+        """
+        ...
+
+    def open_requests(self, session_id: str) -> List["GatewayServerRequest"]:
+        """Return the still-open (unanswered) requests for ``session_id``."""
         ...
 
 
@@ -7364,6 +7576,10 @@ def _register_core_gateway_methods() -> None:
         # the same action, so both names carry the WRITE scope in lockstep.
         "abort": OperatorScope.WRITE,
         "message_abort": OperatorScope.WRITE,
+        # Issue #5351: answering a server→client interactive request (approval /
+        # choice / input) on behalf of the blocked turn mutates it, so it needs
+        # the same WRITE scope as sending a message.
+        "server_reply": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,

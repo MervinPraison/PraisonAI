@@ -29,6 +29,8 @@ __all__ = [
     "FileBackend",
     "SQLiteBackend", 
     "get_backend",
+    # Hardened stdlib SQLite connection factory (WAL-with-safe-fallback)
+    "sqlite_connect",
 ]
 
 _LAZY_IMPORTS = {
@@ -46,6 +48,7 @@ _LAZY_IMPORTS = {
     "FileBackend": ("backends", "FileBackend"),
     "SQLiteBackend": ("backends", "SQLiteBackend"),
     "get_backend": ("backends", "get_backend"),
+    "sqlite_connect": ("sqlite", "connect"),
 }
 
 

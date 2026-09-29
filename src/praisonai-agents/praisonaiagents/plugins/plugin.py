@@ -93,6 +93,7 @@ class PluginInfo:
     author: str = ""
     hooks: List[PluginHook] = field(default_factory=list)
     dependencies: List[str] = field(default_factory=list)
+    plugin_type: PluginType = PluginType.HOOK
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -102,6 +103,7 @@ class PluginInfo:
             "author": self.author,
             "hooks": [h.value for h in self.hooks],
             "dependencies": self.dependencies,
+            "plugin_type": self.plugin_type.value,
         }
 
 class Plugin(ABC):
@@ -266,6 +268,40 @@ class Plugin(ABC):
         provider specifications (for example an OpenAI function or hosted
         tool dictionary). The Agent routes each supported form through its
         normal formatter and execution boundary.
+        """
+        return []
+
+    def as_guardrail(self) -> Optional[Any]:
+        """Return a ``GuardrailProtocol`` object for a ``GUARDRAIL`` plugin.
+
+        Overriding this lets a plugin declared ``PluginType.GUARDRAIL``
+        participate in the Agent's ``GuardrailChain`` — including
+        ``validate_tool_call`` / ``validate_tool_result`` — instead of only
+        rewriting the model's final text through ``after_llm``. Return an
+        object exposing any of ``validate_input`` / ``validate_output`` /
+        ``validate_tool_call`` / ``validate_tool_result``, or ``None`` (default)
+        to opt out.
+        """
+        return None
+
+    def get_skills(self) -> List[Any]:
+        """Return skill directory paths for a ``SKILL`` plugin.
+
+        Mirrors :meth:`get_tools`. Entries are filesystem path **strings** to
+        skill directories (each containing a ``SKILL.md``); they are handed to
+        the Agent's ``SkillManager`` so an installed plugin contributes real,
+        discoverable skills. Non-string entries are ignored (the manager loads
+        by path). Empty by default (opt-in).
+        """
+        return []
+
+    def get_policies(self) -> List[Any]:
+        """Return ``Policy`` rules for a ``POLICY`` plugin.
+
+        Entries are ``praisonaiagents.policy.Policy`` objects added to the
+        Agent's ``PolicyEngine`` so a policy plugin enforces execution rules
+        rather than only answering ``on_permission_ask``. Empty by default
+        (opt-in).
         """
         return []
 

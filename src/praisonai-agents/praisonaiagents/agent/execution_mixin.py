@@ -1733,12 +1733,17 @@ Write the complete compiled report:"""
 
             # Policy/guardrail gate (protocol-driven). Mirrors the sync path in
             # _execute_tool_impl so async callers cannot bypass a PolicyEngine
-            # deny or a tool-call guardrail. The check is pure/sync (no awaits).
+            # deny or a tool-call guardrail. A user-supplied guardrail/policy may
+            # do blocking work (an LLM moderation call, a DB/network lookup), so
+            # offload to a worker thread rather than run it inline and stall the
+            # event loop for every other coroutine sharing it.
             check = getattr(self, "_check_tool_policy_and_guardrails", None)
             if check is not None:
                 # ``tools_override`` is threaded through so a run-scoped tool
                 # list cannot bypass the per-tool guardrails its tools declare.
-                policy_result = check(function_name, arguments, tools_override)
+                policy_result = await asyncio.to_thread(
+                    check, function_name, arguments, tools_override
+                )
                 if isinstance(policy_result, dict):
                     return policy_result  # Error dict
                 _, arguments = policy_result
@@ -1765,9 +1770,12 @@ Write the complete compiled report:"""
                         # Tool-result guardrail gate — the native path applies this
                         # below, but the MCP branch returns early, so gate here too
                         # or successful MCP output would bypass validation entirely.
+                        # Offloaded to a thread: a user guardrail may block on I/O.
                         apply_result_guardrails = getattr(self, "_apply_tool_result_guardrails", None)
                         if apply_result_guardrails is not None:
-                            mcp_result = apply_result_guardrails(function_name, mcp_result)
+                            mcp_result = await asyncio.to_thread(
+                                apply_result_guardrails, function_name, mcp_result
+                            )
                         return mcp_result
 
             # Try to find the function in the override tools list first, then agent's tools list.
@@ -2128,9 +2136,14 @@ Write the complete compiled report:"""
                 # sync path in tool_execution.py. Runs on the raw result before it
                 # re-enters the LLM context so a guardrail can inspect or redact
                 # unsafe tool output. Fail-closed. Zero overhead when unset.
+                # Offloaded to a thread: a user guardrail may block on I/O (an LLM
+                # moderation call, a network lookup), which would otherwise stall
+                # the event loop for every other coroutine sharing it.
                 apply_result_guardrails = getattr(self, "_apply_tool_result_guardrails", None)
                 if apply_result_guardrails is not None:
-                    result = apply_result_guardrails(function_name, result, tools_override)
+                    result = await asyncio.to_thread(
+                        apply_result_guardrails, function_name, result, tools_override
+                    )
 
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring

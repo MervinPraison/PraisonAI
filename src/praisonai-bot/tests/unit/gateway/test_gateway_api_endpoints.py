@@ -59,7 +59,7 @@ class _FakeGateway:
         return _FakeSession()
 
     @staticmethod
-    async def _dispatch_agent_turn(agent, content, on_complete=None):
+    async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
         result = await agent.achat(content)
         # Mirror the real gateway: snapshot per-turn state in the same context
         # that produced the result, before returning to the caller.
@@ -69,9 +69,10 @@ class _FakeGateway:
 
 
 class _FakeReq:
-    def __init__(self, body, headers=None):
+    def __init__(self, body, headers=None, path_params=None):
         self._body = body
         self.headers = headers or {}
+        self.path_params = path_params or {}
 
     async def json(self):
         return self._body
@@ -858,3 +859,272 @@ def test_construct_gateway_with_api_flags():
 def test_api_config_disabled_by_default():
     assert ApiConfig().enabled is False
     assert GatewayConfig().api.enabled is False
+
+
+# ── Issue #5335: background/async runs ─────────────────────────────────
+
+
+def _run_background_flow(gw, ep, body):
+    """Submit a background response and drain the driving task on one loop."""
+
+    async def _flow():
+        submit = await ep.openai_responses(_FakeReq(body))
+        data = _body(submit)
+        # Let the spawned task run to completion on this loop.
+        entry = ep._responses[data["id"]]
+        task = entry.get("task")
+        if task is not None:
+            await task
+        return submit, data
+
+    return asyncio.run(_flow())
+
+
+def test_background_submission_returns_queued_202():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "background": True}
+    )
+    assert submit.status_code == 202
+    assert data["status"] == "queued"
+    assert data["object"] == "response"
+    assert data["id"].startswith("resp-")
+    # Persisted and retrievable by id.
+    assert data["id"] in ep._responses
+
+
+def test_background_run_completes_and_is_retrievable():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "store": True}
+    )
+    got = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": data["id"]}))
+    )
+    body = _body(got)
+    assert body["status"] == "completed"
+    assert body["output_text"] == "echo:ping"
+    assert body["usage"]["input_tokens"] == 11
+
+
+def test_synchronous_responses_still_default():
+    # No background/store -> unchanged synchronous behaviour (status completed).
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "ping"}))
+    )
+    data = _body(resp)
+    assert data["status"] == "completed"
+    assert data["output_text"] == "echo:ping"
+
+
+def test_get_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_get(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+    assert _body(resp)["error"]["type"] == "invalid_request_error"
+
+
+def test_cancel_unknown_response_returns_404():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses_cancel(_FakeReq(None, path_params={"id": "resp-nope"}))
+    )
+    assert resp.status_code == 404
+
+
+def test_completed_empty_reply_still_has_message_output():
+    # Greptile P1: a completed sync response with empty text must still carry an
+    # assistant message so clients that read output[0] keep working.
+    class _EmptyAgent:
+        _llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            return ""
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _EmptyAgent()
+
+    ep = GatewayApiEndpoints(_Gw())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "x"}))
+    )
+    data = _body(resp)
+    assert data["status"] == "completed"
+    assert data["output_text"] == ""
+    assert len(data["output"]) == 1
+    assert data["output"][0]["role"] == "assistant"
+    assert data["output"][0]["content"][0]["text"] == ""
+
+
+def test_retrieval_message_id_stable_across_polls():
+    # Greptile P2: polling a completed background response must return the same
+    # output message id each time.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "ping", "store": True}
+    )
+
+    def _get():
+        return _body(
+            asyncio.run(
+                ep.openai_responses_get(
+                    _FakeReq(None, path_params={"id": data["id"]})
+                )
+            )
+        )
+
+    first = _get()
+    second = _get()
+    assert first["output"][0]["id"] == second["output"][0]["id"]
+
+
+def test_retrieval_scoped_to_owner_for_stable_callers():
+    # Greptile P1 security: a run submitted under one bearer token must not be
+    # retrievable by a different token.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+
+    async def _flow():
+        submit = await ep.openai_responses(
+            _FakeReq(
+                {"model": "assistant", "input": "ping", "store": True},
+                headers={"authorization": "Bearer alice-secret-token"},
+            )
+        )
+        rid = _body(submit)["id"]
+        task = ep._responses[rid].get("task")
+        if task is not None:
+            await task
+        return rid
+
+    rid = asyncio.run(_flow())
+
+    # Owner (same token) can read it.
+    owner_get = asyncio.run(
+        ep.openai_responses_get(
+            _FakeReq(
+                None,
+                headers={"authorization": "Bearer alice-secret-token"},
+                path_params={"id": rid},
+            )
+        )
+    )
+    assert _body(owner_get)["status"] == "completed"
+
+    # A different token is denied (404, not leaking existence).
+    other_get = asyncio.run(
+        ep.openai_responses_get(
+            _FakeReq(
+                None,
+                headers={"authorization": "Bearer mallory-other-token"},
+                path_params={"id": rid},
+            )
+        )
+    )
+    assert other_get.status_code == 404
+
+
+def test_rejected_background_run_marked_failed_not_completed():
+    # Greptile P1: an admission-gate rejection must surface as ``failed`` so a
+    # poller never mistakes the busy message for a successful result.
+    from praisonai_bot.bots._admission import AdmissionRejected
+
+    class _RejectingGate:
+        enabled = True
+
+        def admit(self, session_id=None):
+            gate = self
+
+            class _Ctx:
+                async def __aenter__(self):
+                    raise AdmissionRejected("gateway busy")
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            return _Ctx()
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._admission_gate = _RejectingGate()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    _submit, data = _run_background_flow(
+        gw, ep, {"model": "assistant", "input": "x", "background": True}
+    )
+    got = _body(
+        asyncio.run(
+            ep.openai_responses_get(_FakeReq(None, path_params={"id": data["id"]}))
+        )
+    )
+    assert got["status"] == "failed"
+    assert "busy" in (got.get("error", {}) or {}).get("message", "")
+
+
+def test_store_evicts_oldest_terminal_when_full():
+    # Greptile P1: the in-process store is bounded; terminal entries are evicted
+    # oldest-first once at capacity so memory cannot grow without bound.
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    ep._responses_max = 3
+
+    ids = []
+    for _ in range(5):
+        _submit, data = _run_background_flow(
+            gw, ep, {"model": "assistant", "input": "ping", "store": True}
+        )
+        ids.append(data["id"])
+
+    assert len(ep._responses) <= 3
+    # The most recent submissions are retained; the oldest were evicted.
+    assert ids[-1] in ep._responses
+    assert ids[0] not in ep._responses
+
+
+def test_cancel_in_flight_background_run():
+    # A run that never completes on its own must flip to ``cancelled`` when the
+    # cancel route fires (cooperative controller + task cancel).
+    class _SlowAgent:
+        _llm_instance = _FakeLLM()
+
+        async def achat(self, content):
+            await asyncio.sleep(60)
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SlowAgent()
+
+        @staticmethod
+        async def _dispatch_agent_turn(agent, content, on_complete=None, interrupt=None):
+            result = await agent.achat(content)
+            if on_complete is not None:
+                on_complete(agent)
+            return result
+
+    async def _flow():
+        gw = _Gw()
+        ep = GatewayApiEndpoints(gw)
+        submit = await ep.openai_responses(
+            _FakeReq({"model": "assistant", "input": "x", "background": True})
+        )
+        rid = _body(submit)["id"]
+        await asyncio.sleep(0)  # let the task start and suspend on sleep
+        cancel = await ep.openai_responses_cancel(
+            _FakeReq(None, path_params={"id": rid})
+        )
+        return _body(cancel)
+
+    data = asyncio.run(_flow())
+    assert data["status"] == "cancelled"

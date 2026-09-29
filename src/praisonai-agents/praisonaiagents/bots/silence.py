@@ -138,15 +138,31 @@ class BotLoopPolicy:
         """Build a policy from a config mapping (YAML/kwargs), tolerating None.
 
         Unknown keys are ignored so a forward-compatible config never breaks
-        construction. ``None`` yields the enabled default policy.
+        construction. ``None`` yields the enabled default policy. Malformed
+        numeric values (e.g. ``max_events_per_window: "abc"``) fall back to the
+        field default rather than raising, so a config typo cannot crash the
+        inbound path on the first bot message — the guard stays fail-safe.
         """
         if not data:
             return cls()
+
+        def _as_int(value: object, default: int) -> int:
+            try:
+                return int(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return default
+
+        def _as_float(value: object, default: float) -> float:
+            try:
+                return float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return default
+
         return cls(
             enabled=bool(data.get("enabled", True)),
-            max_events_per_window=int(data.get("max_events_per_window", 20)),
-            window_seconds=float(data.get("window_seconds", 60.0)),
-            cooldown_seconds=float(data.get("cooldown_seconds", 60.0)),
+            max_events_per_window=_as_int(data.get("max_events_per_window", 20), 20),
+            window_seconds=_as_float(data.get("window_seconds", 60.0), 60.0),
+            cooldown_seconds=_as_float(data.get("cooldown_seconds", 60.0), 60.0),
         )
 
 
