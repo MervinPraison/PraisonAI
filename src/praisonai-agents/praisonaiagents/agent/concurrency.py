@@ -13,14 +13,12 @@ Usage:
     async with registry.throttle("researcher"):
         await do_work()
     
-    # Or manual (pass the acquired handle back to release so a concurrent
-    # set_limit()/remove_limit() cannot redirect the release onto a fresh
-    # semaphore and inflate the cap):
-    sem = await registry.acquire("researcher")
+    # Or manual:
+    await registry.acquire("researcher")
     try:
         await do_work()
     finally:
-        registry.release("researcher", sem)
+        registry.release("researcher")
 """
 
 import asyncio
@@ -155,67 +153,29 @@ class ConcurrencyRegistry:
                 self._limiters[agent_name] = limiter
             return limiter
 
-    async def acquire(self, agent_name: str) -> Optional[threading.Semaphore]:
+    async def acquire(self, agent_name: str) -> None:
         """Acquire concurrency slot for agent. No-op if unlimited.
 
-        Waits on the loop-neutral semaphore in short, cancellable polls so the
+        Waits on the loop-neutral limiter in short, cancellable polls so the
         running event loop is never blocked while other tasks hold permits, and
         a cancelled/timed-out await never leaves a thread blocked on acquire().
-
-        Returns the exact semaphore instance acquired so the caller can release
-        that same instance (see release()). Returns None when unlimited.
         """
-<<<<<<< HEAD
-        sem = self._get_semaphore(agent_name)
-        if sem is None:
-            return None
-        while True:
-            if sem.acquire(blocking=False):
-                return sem
-=======
         limiter = self._get_limiter(agent_name)
         if limiter is None:
             return
         while True:
             if limiter.acquire(blocking=False):
                 return
->>>>>>> origin/main
             # Yield to the loop; on cancellation this raises and no permit leaks.
             await asyncio.sleep(0.005)
 
-    def acquire_sync(self, agent_name: str) -> Optional[threading.Semaphore]:
+    def acquire_sync(self, agent_name: str) -> None:
         """Synchronous acquire — for non-async code paths.
 
         Prefer async acquire() when possible. Blocks the calling thread until a
         permit is available. Safe to call whether or not a loop is running in the
-        current thread, since the semaphore is loop-neutral. Returns the exact
-        semaphore instance acquired (None when unlimited) for release().
+        current thread, since the limiter is loop-neutral.
         """
-<<<<<<< HEAD
-        sem = self._get_semaphore(agent_name)
-        if sem is not None:
-            sem.acquire()
-        return sem
-
-    def release(self, agent_name: str, sem: Optional[threading.Semaphore] = None) -> None:
-        """Release a concurrency slot for agent. No-op if unlimited.
-
-        When ``sem`` (the instance returned by a matching acquire()) is given it
-        is released directly. This matters because set_limit()/remove_limit()
-        pop-and-replace the per-name semaphore: releasing by name alone could
-        hit a *different* semaphore than the one acquire() took, silently
-        inflating its permit count and corrupting the configured cap. Passing
-        the acquired instance keeps release matched to its own acquire.
-        """
-        if sem is None:
-            with self._lock:
-                sem = self._semaphores.get(agent_name)
-        if sem is not None:
-            try:
-                sem.release()
-            except ValueError:
-                pass  # Already fully released
-=======
         limiter = self._get_limiter(agent_name)
         if limiter is not None:
             limiter.acquire()
@@ -226,7 +186,6 @@ class ConcurrencyRegistry:
             limiter = self._limiters.get(agent_name)
         if limiter is not None:
             limiter.release()
->>>>>>> origin/main
 
     @asynccontextmanager
     async def throttle(self, agent_name: str):
@@ -236,19 +195,11 @@ class ConcurrencyRegistry:
             async with registry.throttle("agent_name"):
                 await do_work()
         """
-        sem = await self.acquire(agent_name)
+        await self.acquire(agent_name)
         try:
             yield
         finally:
-            # Only release when this block actually acquired a permit. When
-            # acquire() returned None (unlimited at entry) there is nothing to
-            # release; falling back to a by-name lookup here would release a
-            # semaphore this block never acquired if a concurrent set_limit()
-            # created one meanwhile, inflating the cap past its configured
-            # limit. Release the exact instance acquired so the release stays
-            # matched to its own acquire.
-            if sem is not None:
-                self.release(agent_name, sem)
+            self.release(agent_name)
 
 
 # Singleton
