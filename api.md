@@ -1018,7 +1018,8 @@ export { // Bot types
   FailoverManager, // Enums
   SandboxStatus, // Gateway types
   type GatewayConfig, // Other types
-  type ProviderStatus, AutonomyLevel, GatewayEventType, RagRetrievalPolicy } from "./gateway";
+  type ProviderStatus, // Session-projection reducer (Issue #5324)
+  SessionProjection, AutonomyLevel, GatewayEventType, RagRetrievalPolicy } from "./gateway";
 export { LLMGuardrail, createLLMGuardrail } from "./guardrails/llm-guardrail";
 export { DisplayTypes, HooksManager, WorkflowHooksExecutor, clearAllCallbacks, clearApprovalCallback, createHooksManager, createLoggingOperationHooks, createLoggingWorkflowHooks, createTimingWorkflowHooks, createValidationOperationHooks, createWorkflowHooks, executeCallback, executeSyncCallback, getRegisteredDisplayTypes, hasApprovalCallback, registerApprovalCallback, registerDisplayCallback, requestApproval, unregisterDisplayCallback } from "./hooks";
 export { // Computer Use
