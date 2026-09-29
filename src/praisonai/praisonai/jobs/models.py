@@ -17,18 +17,15 @@ from urllib.parse import urlparse
 _WEBHOOK_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 
 
-def validate_webhook_url(url: Optional[str]) -> Optional[str]:
-    """Validate a webhook URL, rejecting local/private/restricted targets.
+def _resolve_and_screen_webhook_host(url: str) -> List[str]:
+    """Resolve a webhook URL's hostname and reject unsafe addresses.
 
-    Single source of truth for both the public request model and the internal
-    Job model. Resolves *every* address the hostname maps to (A and AAAA) via
-    ``getaddrinfo`` so a public A record cannot smuggle in a private AAAA (or a
-    round-robin private answer). Re-checked at delivery time to close the
-    submit-time TOCTOU / DNS-rebinding window.
+    Returns the list of validated (public) IP strings the hostname maps to so
+    callers can *pin* the eventual connection to exactly what was screened,
+    rather than re-resolving at connect time (which reopens the DNS-rebinding
+    window). Resolves *every* address (A and AAAA / round-robin) via
+    ``getaddrinfo`` so a public A record cannot smuggle in a private AAAA.
     """
-    if not url:
-        return url
-
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError("Webhook URL must use http or https scheme")
@@ -49,10 +46,10 @@ def validate_webhook_url(url: Optional[str]) -> Optional[str]:
     except socket.gaierror as exc:
         raise ValueError("Webhook URL hostname could not be resolved") from exc
 
-    saw_address = False
+    resolved: List[str] = []
     for _family, _type, _proto, _canon, sockaddr in infos:
-        saw_address = True
-        ip_obj = ipaddress.ip_address(sockaddr[0])
+        ip_str = sockaddr[0]
+        ip_obj = ipaddress.ip_address(ip_str)
         if (
             ip_obj.is_private
             or ip_obj.is_loopback
@@ -64,11 +61,38 @@ def validate_webhook_url(url: Optional[str]) -> Optional[str]:
             raise ValueError(
                 "Webhook URL resolves to a private or restricted network address"
             )
+        resolved.append(ip_str)
 
-    if not saw_address:
+    if not resolved:
         raise ValueError("Webhook URL hostname could not be resolved")
 
+    return resolved
+
+
+def validate_webhook_url(url: Optional[str]) -> Optional[str]:
+    """Validate a webhook URL, rejecting local/private/restricted targets.
+
+    Single source of truth for both the public request model and the internal
+    Job model. Re-checked at delivery time to close the submit-time TOCTOU /
+    DNS-rebinding window; the executor additionally pins the connection to the
+    validated address (see ``resolve_validated_webhook_targets``).
+    """
+    if not url:
+        return url
+
+    _resolve_and_screen_webhook_host(url)
     return url
+
+
+def resolve_validated_webhook_targets(url: str) -> List[str]:
+    """Validate ``url`` and return the screened public IPs to connect to.
+
+    The executor uses this at delivery time to pin the HTTP connection to an
+    address that was just screened, so the kernel does not re-resolve the
+    hostname (which could return a freshly-rebound internal address between the
+    check and the connect).
+    """
+    return _resolve_and_screen_webhook_host(url)
 
 
 class JobStatus(str, Enum):

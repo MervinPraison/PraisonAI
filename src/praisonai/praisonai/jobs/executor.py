@@ -529,9 +529,11 @@ class JobExecutor:
             # can be stale (jobs run for minutes/hours); an attacker-controlled
             # DNS record could flip a public answer to an internal one in the
             # meantime (DNS rebinding / TOCTOU) and exfiltrate ``job.result``.
-            from .models import validate_webhook_url
+            from .models import resolve_validated_webhook_targets
             try:
-                await asyncio.to_thread(validate_webhook_url, job.webhook_url)
+                safe_ips = await asyncio.to_thread(
+                    resolve_validated_webhook_targets, job.webhook_url
+                )
             except ValueError as exc:
                 logger.warning(f"Webhook target rejected for {job.id}: {exc}")
                 return
@@ -544,19 +546,39 @@ class JobExecutor:
                 "completed_at": job.completed_at.isoformat() if job.completed_at else None,
                 "duration_seconds": job.duration_seconds
             }
-            
+
+            # Pin the connection to an address we just screened so the kernel
+            # never re-resolves the hostname (which could return a freshly
+            # rebound internal address between this check and the connect).
+            # We build the request against the original URL (so the Host header
+            # and TLS SNI stay correct), then rewrite only the connect host to
+            # the validated IP and preserve SNI via the ``sni_hostname``
+            # extension.
             client = await self._get_webhook_client()
-            # Never follow redirects: a 3xx to an internal URL must not be
-            # silently chased past the validated target.
-            response = await client.post(
+            request = client.build_request(
+                "POST",
                 job.webhook_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                follow_redirects=False,
             )
-            
+            original_host = request.url.host
+            request.headers.setdefault("Host", request.url.netloc.decode("ascii"))
+            request.extensions["sni_hostname"] = original_host
+            request.url = request.url.copy_with(host=safe_ips[0])
+            # Never follow redirects: a 3xx to an internal URL must not be
+            # silently chased past the validated target.
+            response = await client.send(request, follow_redirects=False)
+
             if response.status_code >= 400:
                 logger.warning(f"Webhook failed for {job.id}: {response.status_code}")
+            elif response.is_redirect:
+                # Redirects are deliberately not followed (SSRF guard). Surface
+                # this so an undelivered notification is not silently logged as
+                # a success.
+                logger.warning(
+                    f"Webhook for {job.id} returned redirect "
+                    f"{response.status_code}; not followed, result not delivered"
+                )
             else:
                 logger.info(f"Webhook sent for {job.id}")
                     
