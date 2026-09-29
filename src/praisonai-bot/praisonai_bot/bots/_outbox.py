@@ -883,6 +883,96 @@ class OutboundQueue:
             conn.execute("DELETE FROM outbound_queue")
             conn.commit()
             return int(n)
+
+    # ── Operator introspection & targeted ops (parity with InboundDLQ) ──
+    def list(
+        self,
+        *,
+        status: Optional[str] = None,
+        target: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[OutboundEntry]:
+        """Enumerate outbound entries for operator inspection (newest first).
+
+        Optionally filter by ``status`` (e.g. ``"failed"``,
+        ``"permanent_failure"``, ``"pending"``) and/or ``target`` (exact match,
+        e.g. ``"telegram:12345"``). Purely read-only; it never mutates state.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if target is not None:
+            clauses.append("target = ?")
+            params.append(target)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(int(limit))
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, ts, idempotency_key, target, payload, metadata,
+                       status, attempts, last_attempt, error, sent_at
+                FROM outbound_queue
+                """
+                + where
+                + " ORDER BY ts DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [OutboundEntry(*row) for row in rows]
+
+    def stats(self) -> Dict[str, int]:
+        """Return a per-status count map (e.g. ``{"pending": 3, "failed": 1}``).
+
+        Only statuses with at least one entry are present. Gives operators an
+        at-a-glance breakdown of the outbox instead of a single bulk counter.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) FROM outbound_queue GROUP BY status"
+            ).fetchall()
+        return {str(status): int(count) for status, count in rows}
+
+    async def retry(self, key: str) -> bool:
+        """Requeue a single entry for the next drain.
+
+        Resets a ``failed``/``permanent_failure``/``recovered`` entry back to
+        ``pending`` and clears its ``attempts`` so the next :meth:`drain`
+        re-dispatches it — e.g. after a channel outage recovers. Returns True if
+        an entry was requeued, False if the key is unknown or already terminal
+        (``sent``). ``key`` is the tracking key form ``target:idempotency:id``.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_retry, key)
+
+    def _sync_retry(self, key: str) -> bool:
+        """Synchronous version of retry for thread pool execution."""
+        entry_id = self._extract_id_from_key(key)
+        with self._lock, closing(self._connect()) as conn:
+            cur = conn.execute(
+                """
+                UPDATE outbound_queue
+                SET status = 'pending', attempts = 0, error = NULL,
+                    last_attempt = NULL
+                WHERE id = ? AND status IN
+                      ('failed', 'permanent_failure', 'recovered')
+                """,
+                (entry_id,),
+            )
+            conn.commit()
+            self._active_claims.pop(key, None)
+            return cur.rowcount > 0
+
+    def purge_entry(self, key: str) -> bool:
+        """Delete a single entry by its tracking key. Returns True if removed."""
+        entry_id = self._extract_id_from_key(key)
+        with self._lock, closing(self._connect()) as conn:
+            cur = conn.execute(
+                "DELETE FROM outbound_queue WHERE id = ?", (entry_id,)
+            )
+            conn.commit()
+            self._active_claims.pop(key, None)
+            return cur.rowcount > 0
     
     def __repr__(self) -> str:
         return (
