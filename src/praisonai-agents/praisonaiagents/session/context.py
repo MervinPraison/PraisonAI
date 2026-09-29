@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Any
 if TYPE_CHECKING:
     from ..gateway.protocols import (
         ConversationRequestProtocol,
+        GatewayRequestChannelProtocol,
         OutboundMessengerProtocol,
         SendPolicyProtocol,
         GatewayStatusProtocol,
@@ -274,6 +275,41 @@ def clear_conversation_requester(token: Token) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Server→client interactive request channel (Issue #5351)
+#
+# The running gateway registers a concrete GatewayRequestChannelProtocol impl
+# into this task-local slot so a blocked HITL turn can deliver an approval /
+# choice / input request to the connected gateway client and await the
+# correlated reply. When unbound (CLI / one-shot runs) the elicitation simply
+# falls back to its existing path — a clean gate, never a hang.
+# ---------------------------------------------------------------------------
+
+_REQUEST_CHANNEL: ContextVar[Optional["GatewayRequestChannelProtocol"]] = ContextVar(
+    "praisonai_request_channel", default=None
+)
+
+
+def register_request_channel(
+    channel: Optional["GatewayRequestChannelProtocol"],
+) -> Token:
+    """Register the active server→client request channel for this task."""
+    return _REQUEST_CHANNEL.set(channel)
+
+
+def get_request_channel() -> Optional["GatewayRequestChannelProtocol"]:
+    """Return the active request channel, or ``None`` if no gateway is running."""
+    return _REQUEST_CHANNEL.get()
+
+
+def clear_request_channel(token: Token) -> None:
+    """Restore the previous request channel using the token from register."""
+    try:
+        _REQUEST_CHANNEL.reset(token)
+    except (LookupError, ValueError):
+        _REQUEST_CHANNEL.set(None)
+
+
+# ---------------------------------------------------------------------------
 # Outbound send-policy guard (Issue #2226)
 #
 # An optional task-local policy authorising where an agent may proactively
@@ -386,6 +422,9 @@ __all__ = [
     "register_conversation_requester",
     "get_conversation_requester",
     "clear_conversation_requester",
+    "register_request_channel",
+    "get_request_channel",
+    "clear_request_channel",
     "register_send_policy",
     "get_send_policy",
     "clear_send_policy",

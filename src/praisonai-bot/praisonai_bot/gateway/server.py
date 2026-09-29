@@ -49,6 +49,15 @@ from praisonaiagents.gateway.protocols import (
     evaluate_pressure,
 )
 
+try:  # Server→client interactive request/reply over the transport (Issue #5351).
+    from praisonaiagents.gateway.protocols import (
+        GatewayServerRequest,
+        GatewayServerReply,
+    )
+except ImportError:  # pragma: no cover - core predates the request channel
+    GatewayServerRequest = None  # type: ignore[assignment]
+    GatewayServerReply = None  # type: ignore[assignment]
+
 try:  # Central registry-driven authorization guard (Issue #5166).
     from praisonaiagents.gateway.protocols import (
         authorize_method,
@@ -734,6 +743,52 @@ class _TerminalTurn(str):
         return obj
 
 
+class _GatewayRequestChannel:
+    """Concrete ``GatewayRequestChannelProtocol`` bound to a running gateway.
+
+    Delivers a :class:`GatewayServerRequest` to the session's connected client
+    as a ``server_request`` frame, awaits the correlated ``server_reply`` on a
+    per-request Future with a bounded timeout, and keeps the request in the
+    gateway's open-request set until it is answered/times out so the resume
+    path can replay still-open requests to a reconnecting client (Issue #5351).
+    """
+
+    def __init__(self, gateway: "WebSocketGateway") -> None:
+        self._gateway = gateway
+
+    async def request(self, req: Any, *, timeout_s: float = 120.0) -> Any:
+        gw = self._gateway
+        session_id = getattr(req, "session_id", "") or ""
+        request_id = getattr(req, "request_id", "")
+        loop = asyncio.get_event_loop()
+        future: "asyncio.Future" = loop.create_future()
+        gw._open_requests.setdefault(session_id, {})[request_id] = req
+        gw._request_waiters[request_id] = future
+        try:
+            client_id = gw._session_client_id(session_id)
+            if client_id is not None:
+                await gw._send_to_client(
+                    client_id,
+                    {"type": "server_request", "request": req.as_dict()},
+                )
+            try:
+                return await asyncio.wait_for(future, timeout=timeout_s)
+            except asyncio.TimeoutError:
+                return None
+        finally:
+            gw._request_waiters.pop(request_id, None)
+            open_for_session = gw._open_requests.get(session_id)
+            if open_for_session is not None:
+                open_for_session.pop(request_id, None)
+                if not open_for_session:
+                    gw._open_requests.pop(session_id, None)
+
+    def open_requests(self, session_id: str) -> List[Any]:
+        return list(gw_reqs.values()) if (
+            gw_reqs := self._gateway._open_requests.get(session_id)
+        ) else []
+
+
 class WebSocketGateway:
     """WebSocket gateway server for multi-agent coordination.
     
@@ -1077,6 +1132,14 @@ class WebSocketGateway:
         # a per-turn timeout can cancel a runaway turn. Maps session_id ->
         # (driving asyncio.Task, InterruptController).
         self._active_turns: Dict[str, Tuple[Any, Any]] = {}
+        # Issue #5351: server→client interactive request channel. Tracks the
+        # still-open (unanswered) requests per session and the asyncio.Futures
+        # awaiting each correlated reply, so a blocked HITL turn can reach a
+        # gateway client and — critically — be replayed on reconnect. Bound
+        # lazily via ``request_channel``.
+        self._open_requests: Dict[str, Dict[str, Any]] = {}  # session_id -> {request_id: GatewayServerRequest}
+        self._request_waiters: Dict[str, "asyncio.Future"] = {}  # request_id -> Future[GatewayServerReply]
+        self._request_channel: Optional["_GatewayRequestChannel"] = None
         # Issue #2661: fingerprint of the shared secret each authenticated
         # client connected under, so rotating ``auth_token`` can force-close
         # every session stamped with a stale secret (instant credential
@@ -3829,6 +3892,12 @@ class WebSocketGateway:
                     "type": "replay",
                     "event": event.to_dict(),
                 })
+
+            # Issue #5351: re-issue every still-open interactive request for
+            # this session so a reconnecting client can re-render and answer a
+            # prompt that was in flight when it dropped — a turn is never wedged
+            # awaiting an answer the reconnected client never saw.
+            await self._replay_open_requests(client_id, session.session_id)
         
         # Keep backward compatibility with old join message
         elif msg_type == "join":
@@ -3893,7 +3962,15 @@ class WebSocketGateway:
                 
                 # Set negotiated protocol version for the session
                 session._protocol_version = negotiated_version
-                
+
+                # Rebind client_id to session for correct routing (parity with
+                # the ``hello`` path). Without this a joining client would not
+                # become the session's preferred delivery target, so a new
+                # server→client request could be sent to a stale client and the
+                # joining client would miss the next prompt (Issue #5351).
+                if hasattr(session, '_client_id'):
+                    session._client_id = client_id
+
                 self._client_sessions[client_id] = session.session_id
                 
                 # Check if resync is required
@@ -3948,6 +4025,12 @@ class WebSocketGateway:
                             "event": event_data,
                             "seq": seq,
                         })
+
+                # Issue #5351: re-issue every still-open interactive request for
+                # this session (independent of the resync/replay path) so a
+                # reconnecting client recovers a prompt that was in flight when
+                # it dropped and the turn is never wedged awaiting a lost answer.
+                await self._replay_open_requests(client_id, session.session_id)
                 
                 # If session was resumed with pending messages or was executing, restart processing
                 if session._was_resumed and (not session._inbox.empty() or session._is_executing):
@@ -4139,6 +4222,70 @@ class WebSocketGateway:
             }
             payload.update(result.to_dict())
             await self._send_to_client(client_id, payload)
+
+        elif msg_type == "server_reply":
+            # Issue #5351: a client's correlated answer to a server→client
+            # interactive request (approval / choice / input).
+            request_id = data.get("request_id")
+            value = data.get("value")
+            if not request_id or not isinstance(value, str):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "message": "server_reply requires 'request_id' and string 'value'",
+                })
+                return
+            # Locate the still-open request so ownership, scope and value can be
+            # validated against its actual session and kind. An unknown/answered
+            # request_id resolves nothing and never leaks another session's kind.
+            open_req = self._find_open_request(request_id)
+            if open_req is None:
+                await self._send_to_client(client_id, {
+                    "type": "server_reply_ack",
+                    "request_id": request_id,
+                    "status": "unknown_request",
+                })
+                return
+            req_session_id = getattr(open_req, "session_id", "") or ""
+            req_kind = getattr(open_req, "kind", "input")
+            # Session ownership: only a client bound to the request's own session
+            # may answer it — a WRITE client in another session must not resolve
+            # a foreign turn's prompt by guessing its request_id.
+            if self._client_sessions.get(client_id) != req_session_id:
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "session_mismatch",
+                    "message": "server_reply for a request not owned by this session",
+                })
+                return True
+            # Answering an approval on behalf of the turn is an approval decision
+            # and requires the APPROVALS scope (parity with approvals.resolve);
+            # choice/input answers require WRITE like sending a message.
+            required_scope = (
+                OperatorScope.APPROVALS if req_kind == "approval" else OperatorScope.WRITE
+            )
+            if not self._client_has_scope(client_id, required_scope):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": required_scope.value,
+                })
+                return True
+            # Validate the answer against the request contract so hosts receive
+            # only well-formed values (allow/deny, an offered option, or text).
+            if not self._server_reply_value_ok(open_req, value):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "invalid_value",
+                    "message": "server_reply value not permitted for this request",
+                })
+                return True
+            resolved = self._resolve_server_reply(request_id, value)
+            await self._send_to_client(client_id, {
+                "type": "server_reply_ack",
+                "request_id": request_id,
+                "status": "resolved" if resolved else "unknown_request",
+            })
 
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
@@ -4997,7 +5144,98 @@ class WebSocketGateway:
                     await ws.send_json(data)
             except Exception as e:
                 logger.error(f"Error sending to client {client_id}: {e}")
-    
+
+    @property
+    def request_channel(self) -> "_GatewayRequestChannel":
+        """Return the server→client interactive request channel (Issue #5351).
+
+        Lazily bound. A blocked HITL turn uses it to deliver an approval /
+        choice / input request to the connected gateway client and await the
+        correlated reply; still-open requests are replayed on reconnect.
+        """
+        if self._request_channel is None:
+            self._request_channel = _GatewayRequestChannel(self)
+        return self._request_channel
+
+    def _session_client_id(self, session_id: str) -> Optional[str]:
+        """Return the client_id currently bound to ``session_id`` (if any)."""
+        session = self._sessions.get(session_id)
+        client_id = getattr(session, "_client_id", None) or getattr(
+            session, "client_id", None
+        )
+        if client_id and client_id in self._clients:
+            return client_id
+        for cid, sid in self._client_sessions.items():
+            if sid == session_id and cid in self._clients:
+                return cid
+        return None
+
+    async def _replay_open_requests(self, client_id: str, session_id: str) -> None:
+        """Re-issue every still-open interactive request for ``session_id``.
+
+        Called from the ``hello``/``join`` resume paths so a reconnecting client
+        recovers any in-flight approval / choice / input prompt. Answered
+        requests are already removed from the open set, so only unanswered ones
+        are replayed (Issue #5351).
+        """
+        open_for_session = self._open_requests.get(session_id)
+        if not open_for_session:
+            return
+        for req in list(open_for_session.values()):
+            await self._send_to_client(client_id, {
+                "type": "server_request",
+                "request": req.as_dict(),
+            })
+
+    def _find_open_request(self, request_id: str) -> Optional[Any]:
+        """Return the still-open request for ``request_id`` across sessions.
+
+        Used by the ``server_reply`` handler to validate session ownership,
+        scope, and value against the request's own session/kind before it
+        resolves the waiting turn (Issue #5351).
+        """
+        for open_for_session in self._open_requests.values():
+            req = open_for_session.get(request_id)
+            if req is not None:
+                return req
+        return None
+
+    @staticmethod
+    def _server_reply_value_ok(req: Any, value: str) -> bool:
+        """Validate a ``server_reply`` value against the request contract.
+
+        * ``approval`` → ``"allow"`` or ``"deny"``.
+        * ``choice`` → one of the offered ``options`` (any value if none given).
+        * ``input`` → any string.
+        """
+        kind = getattr(req, "kind", "input")
+        if kind == "approval":
+            return value in ("allow", "deny")
+        if kind == "choice":
+            options = getattr(req, "options", None)
+            if options:
+                return value in options
+            return True
+        return True
+
+    def _resolve_server_reply(self, request_id: str, value: str) -> bool:
+        """Correlate a client ``server_reply`` back to its waiting request.
+
+        Returns ``True`` when a pending waiter was resolved. Building the typed
+        :class:`GatewayServerReply` is best-effort — a core too old to expose it
+        still resolves the Future with a minimal object carrying the same
+        fields.
+        """
+        future = self._request_waiters.get(request_id)
+        if future is None or future.done():
+            return False
+        if GatewayServerReply is not None:
+            reply: Any = GatewayServerReply(request_id=request_id, value=value)
+        else:  # pragma: no cover - core predates the reply shape
+            reply = type("_Reply", (), {"request_id": request_id, "value": value})()
+        future.set_result(reply)
+        return True
+
     def register_agent(
         self,
         agent: "Agent",

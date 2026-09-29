@@ -80,6 +80,11 @@ _LAZY_IMPORTS = {
     "ConversationReply": ("praisonaiagents.gateway.protocols", "ConversationReply"),
     "ConversationReplyStatus": ("praisonaiagents.gateway.protocols", "ConversationReplyStatus"),
     "ConversationRequestProtocol": ("praisonaiagents.gateway.protocols", "ConversationRequestProtocol"),
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind": ("praisonaiagents.gateway.protocols", "GatewayRequestKind"),
+    "GatewayServerRequest": ("praisonaiagents.gateway.protocols", "GatewayServerRequest"),
+    "GatewayServerReply": ("praisonaiagents.gateway.protocols", "GatewayServerReply"),
+    "GatewayRequestChannelProtocol": ("praisonaiagents.gateway.protocols", "GatewayRequestChannelProtocol"),
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol": ("praisonaiagents.gateway.protocols", "GatewayStatusProtocol"),
     "GatewayStatus": ("praisonaiagents.gateway.protocols", "GatewayStatus"),
@@ -415,6 +420,11 @@ __all__ = [
     "ConversationReply",
     "ConversationReplyStatus",
     "ConversationRequestProtocol",
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind",
+    "GatewayServerRequest",
+    "GatewayServerReply",
+    "GatewayRequestChannelProtocol",
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol",
     "GatewayStatus",
