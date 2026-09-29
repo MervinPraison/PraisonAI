@@ -991,6 +991,23 @@ def _parse_watchdog_timeout(value: Any) -> Optional[float]:
     return budget if budget > 0 else None
 
 
+def _parse_watchdog_timeout_scalar(value: Any) -> Optional[float]:
+    """Coerce an explicit ``gateway.watchdog_timeout`` scalar to a float.
+
+    Mirrors the ``watchdog_timeout > 0`` invariant (see ``GatewayConfig``):
+    tolerant of env-substituted strings (e.g. ``"15"``); an unparseable or
+    non-positive value falls back to None so a malformed timeout disables the
+    budget rather than raising (#5362).
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 @dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
@@ -1431,7 +1448,15 @@ class MultiChannelGatewayConfig:
             overflow_policy=str(gw_data.get("overflow_policy", "reject") or "reject"),
             drain_timeout=_parse_drain_timeout(gw_data.get("drain_timeout")),
             watchdog=_parse_watchdog_enabled(gw_data.get("watchdog")),
-            watchdog_timeout=_parse_watchdog_timeout(gw_data.get("watchdog")),
+            # Prefer an explicit ``gateway.watchdog_timeout`` scalar (as emitted
+            # by ``to_dict`` and settable directly, matching the CLI
+            # ``--watchdog-timeout`` flag); otherwise derive the budget from the
+            # ``watchdog`` block so both round-trip and block forms work (#5362).
+            watchdog_timeout=(
+                _parse_watchdog_timeout_scalar(gw_data.get("watchdog_timeout"))
+                if gw_data.get("watchdog_timeout") is not None
+                else _parse_watchdog_timeout(gw_data.get("watchdog"))
+            ),
             max_concurrent_runs_per_scope=int(
                 gw_data.get("max_concurrent_runs_per_scope", 0) or 0
             ),
