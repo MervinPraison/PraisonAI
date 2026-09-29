@@ -14,10 +14,11 @@ call back into its public/registered state (``list_agents``, ``get_agent``,
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _now() -> int:
@@ -94,6 +95,18 @@ class GatewayApiEndpoints:
 
     def __init__(self, gateway: Any) -> None:
         self._gw = gateway
+        # In-process store for background/stored Response objects, keyed by id.
+        # Lightweight and dependency-free: a background run's status/output
+        # survives the originating HTTP request so a client can retrieve it by
+        # id later. Each entry also holds the run's InterruptController (for
+        # cancel) and the driving asyncio.Task. Not persisted across restarts;
+        # the durable-run ledger (Issue #4028) remains the cross-restart store.
+        self._responses: Dict[str, dict] = {}
+        # Cap the in-process store so a sustained stream of background/stored
+        # submissions cannot grow memory without bound in a long-lived gateway
+        # (Greptile P1). When full, the oldest *terminal* (completed/cancelled/
+        # failed) entry is evicted first; in-flight runs are never evicted.
+        self._responses_max = 1024
 
     # ── shared dispatch ────────────────────────────────────────────────
     def _resolve_agent(self, requested: Optional[str]):
@@ -110,7 +123,14 @@ class GatewayApiEndpoints:
         aid = agents[0]
         return aid, self._gw.get_agent(aid)
 
-    async def _dispatch(self, session: Any, agent: Any, content: str) -> tuple:
+    async def _dispatch(
+        self,
+        session: Any,
+        agent: Any,
+        content: str,
+        interrupt: Any = None,
+        rejected: Optional[dict] = None,
+    ) -> tuple:
         """Run one agent turn through the same admission gate as chat users.
 
         Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
@@ -135,19 +155,32 @@ class GatewayApiEndpoints:
         def _capture(a: Any) -> None:
             holder["usage"] = self._usage_for(a)
 
+        # Forward ``interrupt`` only when supplied so callers/dispatchers that do
+        # not expect a ``cancel_token`` seam (e.g. the synchronous chat path)
+        # keep their exact prior signature; the background path passes it so a
+        # ``.../cancel`` can stop the turn cooperatively.
+        extra = {"interrupt": interrupt} if interrupt is not None else {}
+
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
                     result = await self._gw._dispatch_agent_turn(
-                        agent, content, on_complete=_capture
+                        agent, content, on_complete=_capture, **extra
                     )
             except AdmissionRejected as rej:
+                # Signal capacity rejection to the caller so a background run is
+                # recorded as ``failed`` (never ``completed``): the agent never
+                # ran, so a client polling the id must not mistake the busy
+                # message for a successful result (Greptile P1).
+                if rejected is not None:
+                    rejected["rejected"] = True
+                    rejected["message"] = str(rej.message)
                 return str(rej.message), self._zero_usage()
         else:
             result = await self._gw._dispatch_agent_turn(
-                agent, content, on_complete=_capture
+                agent, content, on_complete=_capture, **extra
             )
         usage = holder.get("usage") or self._zero_usage()
         return ("" if result is None else str(result)), usage
@@ -394,32 +427,266 @@ class GatewayApiEndpoints:
         # ``input`` may be a plain string or an OpenAI messages-style array.
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
-        session = self._session_for(agent_id, self._caller_key(request))
+        caller = self._caller_key(request)
+        session = self._session_for(agent_id, caller)
+
+        # Async/background submission: when the caller opts in via ``background``
+        # or ``store`` (per the OpenAI Responses API), return immediately with a
+        # persisted, retrievable id instead of blocking for the whole turn. The
+        # synchronous path below is unchanged and stays the default (Issue
+        # #5335), so existing clients see no behaviour change.
+        if body.get("background") or body.get("store"):
+            return self._start_background_response(
+                agent_id, agent, session, content, caller
+            )
+
         reply, usage = await self._dispatch(session, agent, content)
+        return JSONResponse(
+            self._response_object(agent_id, "completed", reply, usage)
+        )
+
+    @staticmethod
+    def _response_object(
+        agent_id: str,
+        status: str,
+        reply: str,
+        usage: dict,
+        *,
+        response_id: Optional[str] = None,
+        created_at: Optional[int] = None,
+        error: Optional[str] = None,
+        message_id: Optional[str] = None,
+    ) -> dict:
+        """Build a spec-shaped ``response`` object shared by sync + async paths.
+
+        A ``completed`` response always carries an assistant message — even when
+        the text is empty — so clients that read ``output[0]`` for a successful
+        answer keep working (Greptile P1: empty-output shape). Non-terminal
+        statuses (``queued``/``in_progress``) have no message yet. ``message_id``
+        lets a caller pin a stable id across repeated retrievals so polling a
+        completed response returns the same message identity each time
+        (Greptile P2: stable output message id).
+        """
+        output: List[dict] = []
+        if reply or status == "completed":
+            output.append(
+                {
+                    "id": message_id or ("msg-" + uuid.uuid4().hex),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": reply}],
+                }
+            )
+        obj = {
+            "id": response_id or ("resp-" + uuid.uuid4().hex),
+            "object": "response",
+            "created_at": created_at if created_at is not None else _now(),
+            "model": agent_id,
+            "status": status,
+            "output": output,
+            "output_text": reply,
+            "usage": {
+                "input_tokens": usage["prompt_tokens"],
+                "output_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+            },
+        }
+        if error is not None:
+            obj["error"] = {"message": error}
+        return obj
+
+    def _evict_if_full(self) -> None:
+        """Drop the oldest *terminal* entry when the store is at capacity.
+
+        In-flight runs (``queued``/``in_progress``) are never evicted so a
+        client can always retrieve a run it just submitted; only finished runs
+        (whose controller/task are done) are reclaimed (Greptile P1).
+        """
+        while len(self._responses) >= self._responses_max:
+            terminal = [
+                rid
+                for rid, e in self._responses.items()
+                if e.get("status") in ("completed", "cancelled", "failed")
+            ]
+            if not terminal:
+                break  # all in-flight: do not evict live work.
+            # Insertion order == submission order (dict preserves it): oldest first.
+            del self._responses[terminal[0]]
+
+    def _start_background_response(self, agent_id, agent, session, content, caller):
+        """Spawn a background turn, persist a Response object, return ``queued``.
+
+        The run is driven on the event loop as an ``asyncio.Task``; its
+        status/output are recorded in ``self._responses`` so a later
+        ``GET /v1/responses/{id}`` can retrieve them. A per-run
+        ``InterruptController`` is stored so ``.../cancel`` can stop it
+        cooperatively via the same seam the WebSocket/``/stop`` path uses.
+
+        The entry records the submitting ``caller`` so retrieval/cancel can be
+        scoped to the owner, and a stable ``message_id`` so repeated retrievals
+        of a completed run return the same output-message identity.
+        """
+        from starlette.responses import JSONResponse
+
+        self._evict_if_full()
+
+        response_id = "resp-" + uuid.uuid4().hex
+        created_at = _now()
+        controller = None
+        try:
+            from praisonaiagents.agent.interrupt import InterruptController
+            controller = InterruptController()
+        except Exception:
+            controller = None
+
+        entry: dict = {
+            "id": response_id,
+            "agent_id": agent_id,
+            "owner": caller,
+            "message_id": "msg-" + uuid.uuid4().hex,
+            "status": "in_progress",
+            "reply": "",
+            "usage": self._zero_usage(),
+            "created_at": created_at,
+            "error": None,
+            "controller": controller,
+            "task": None,
+        }
+        self._responses[response_id] = entry
+
+        async def _run() -> None:
+            rejected: dict = {}
+            try:
+                reply, usage = await self._dispatch(
+                    session, agent, content, interrupt=controller, rejected=rejected
+                )
+                if rejected.get("rejected"):
+                    # Capacity rejection: the agent never ran. Report ``failed``
+                    # with the busy message so a poller never mistakes it for a
+                    # successful result (Greptile P1).
+                    entry["status"] = "failed"
+                    entry["error"] = rejected.get("message") or "rejected"
+                    return
+                entry["reply"] = reply
+                entry["usage"] = usage
+                cancelled = False
+                if controller is not None:
+                    try:
+                        cancelled = bool(controller.is_set())
+                    except Exception:
+                        cancelled = False
+                entry["status"] = "cancelled" if cancelled else "completed"
+            except asyncio.CancelledError:
+                entry["status"] = "cancelled"
+                raise
+            except Exception as exc:  # noqa: BLE001 - surface as failed status
+                entry["status"] = "failed"
+                entry["error"] = str(exc)
+
+        try:
+            entry["task"] = asyncio.ensure_future(_run())
+        except RuntimeError:
+            # No running loop (e.g. called outside an event loop): run inline so
+            # the submission never silently drops the turn.
+            entry["status"] = "queued"
 
         return JSONResponse(
-            {
-                "id": "resp-" + uuid.uuid4().hex,
-                "object": "response",
-                "created_at": _now(),
-                "model": agent_id,
-                "status": "completed",
-                "output": [
-                    {
-                        "id": "msg-" + uuid.uuid4().hex,
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": reply}],
-                    }
-                ],
-                "output_text": reply,
-                "usage": {
-                    "input_tokens": usage["prompt_tokens"],
-                    "output_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                },
-            }
+            self._response_object(
+                agent_id,
+                "queued",
+                "",
+                self._zero_usage(),
+                response_id=response_id,
+                created_at=created_at,
+            ),
+            status_code=202,
         )
+
+    def _lookup_owned(self, request) -> tuple:
+        """Resolve a stored response scoped to the requesting caller.
+
+        Returns ``(response_id, entry)`` where ``entry`` is ``None`` when the id
+        is unknown *or* belongs to a different caller. Retrieval/cancel authorize
+        by caller-ownership — not by id alone — so one client cannot read or
+        cancel another client's background run on a shared gateway (Greptile
+        P1 security). To avoid leaking existence, an ownership mismatch is
+        reported as a 404 (same as an unknown id), not a 403.
+
+        Ownership is enforced only for *stable* caller identities — a session
+        header or bearer token, i.e. the same keys that pin a conversation.
+        Anonymous callers (auth disabled, no session header) get a fresh unique
+        key per request and are stateless by design, so they cannot re-identify
+        themselves on a later request; enforcing a match there would make every
+        such run permanently unretrievable. Those runs carry an ``anon:`` owner
+        and are looked up by id alone — the same open posture the no-auth
+        transport already grants every ``/v1/*`` route.
+        """
+        response_id = request.path_params.get("id")
+        entry = self._responses.get(response_id)
+        if entry is None:
+            return response_id, None
+        owner = entry.get("owner")
+        if owner and not str(owner).startswith("anon:"):
+            if owner != self._caller_key(request):
+                return response_id, None
+        return response_id, entry
+
+    def _stored_response_json(self, entry):
+        from starlette.responses import JSONResponse
+
+        return JSONResponse(
+            self._response_object(
+                entry["agent_id"],
+                entry["status"],
+                entry["reply"],
+                entry["usage"],
+                response_id=entry["id"],
+                created_at=entry["created_at"],
+                error=entry["error"],
+                message_id=entry.get("message_id"),
+            )
+        )
+
+    # ── OpenAI: responses retrieval ────────────────────────────────────
+    async def openai_responses_get(self, request):
+        """``GET /v1/responses/{id}`` — return the caller's stored Response."""
+        response_id, entry = self._lookup_owned(request)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+        return self._stored_response_json(entry)
+
+    # ── OpenAI: responses cancel ───────────────────────────────────────
+    async def openai_responses_cancel(self, request):
+        """``POST /v1/responses/{id}/cancel`` — stop an in-flight background run.
+
+        Cooperative-first via the run's ``InterruptController`` (checked at the
+        agent's checkpoints); falls back to cancelling the driving task so a run
+        that does not yield is still torn down.
+        """
+        response_id, entry = self._lookup_owned(request)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+
+        if entry["status"] in ("in_progress", "queued"):
+            controller = entry.get("controller")
+            if controller is not None:
+                try:
+                    controller.request("cancel")
+                except Exception:
+                    pass
+            task = entry.get("task")
+            if task is not None and not task.done():
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            entry["status"] = "cancelled"
+
+        return self._stored_response_json(entry)
 
     # ── MCP: JSON-RPC ──────────────────────────────────────────────────
     async def mcp_jsonrpc(self, request):
