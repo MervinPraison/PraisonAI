@@ -886,21 +886,53 @@ def _print_secret_availability(report: dict) -> None:
     print()
 
 
+def _resolve_gateway_auth_token() -> str:
+    """Resolve the loopback ``GATEWAY_AUTH_TOKEN`` from env or persisted ``.env``.
+
+    ``praisonai onboard`` / the daemon persist the auto-generated token to
+    ``~/.praisonai/.env`` rather than exporting it into every shell. Without
+    reading that file, an authenticated gateway answers ``/health`` (public)
+    but 401s ``/info`` (authenticated), so ``status --json`` would report
+    ``reachable: true`` while silently omitting ``version`` (#5363, greptile
+    P1). Prefer an already-exported env value; otherwise fall back to the
+    persisted file. Returns ``""`` when no token is available.
+    """
+    import os
+
+    token = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+    if token:
+        return token
+    env_path = os.environ.get("PRAISONAI_ENV_FILE") or os.path.expanduser(
+        "~/.praisonai/.env"
+    )
+    try:
+        with open(env_path, encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                s = raw.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                key, _, val = s.partition("=")
+                if key.strip() == "GATEWAY_AUTH_TOKEN":
+                    return val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
 def _fetch_gateway_json(host: str, port: int, path: str, timeout: float = 5.0):
     """GET a JSON gateway endpoint over loopback, returning None on failure.
 
-    Attaches the loopback-only bearer token the same way ``_print_version_skew``
-    does so authenticated gateways still answer, without leaking the credential
-    onto a remote plaintext hop.
+    Attaches the loopback-only bearer token (resolved from the environment or
+    the persisted ``~/.praisonai/.env``) so authenticated gateways still
+    answer, without leaking the credential onto a remote plaintext hop.
     """
     import json
-    import os
     import urllib.request
 
     url = f"http://{host}:{port}{path}"
     try:
         req = urllib.request.Request(url)
-        token = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+        token = _resolve_gateway_auth_token()
         if token and host in ("127.0.0.1", "localhost", "::1"):
             req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -960,6 +992,12 @@ def _build_status_snapshot(host: str, port: int) -> dict:
             snapshot["delivery"] = health.get("delivery")
         if snapshot.get("version") is None and health.get("version") is not None:
             snapshot["version"] = health.get("version")
+        # Reachable but /info didn't answer (typically an authenticated gateway
+        # whose token isn't available to this CLI) — surface it explicitly so
+        # consumers don't misread a silent missing "version" as "unversioned"
+        # (#5363, greptile P1).
+        if info is None and snapshot.get("version") is None:
+            snapshot["version_unavailable"] = "info_unreachable"
 
     return snapshot
 

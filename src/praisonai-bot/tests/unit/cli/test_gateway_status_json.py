@@ -106,3 +106,42 @@ def test_status_json_unreachable_exits_nonzero(monkeypatch, capsys):
     assert excinfo.value.exit_code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["reachable"] is False
+
+
+def test_resolve_auth_token_prefers_env(monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "env-token")
+    assert gateway_cmd._resolve_gateway_auth_token() == "env-token"
+
+
+def test_resolve_auth_token_falls_back_to_persisted_env_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# comment\nOTHER=1\nGATEWAY_AUTH_TOKEN=\"persisted-token\"\n"
+    )
+    monkeypatch.setenv("PRAISONAI_ENV_FILE", str(env_file))
+    assert gateway_cmd._resolve_gateway_auth_token() == "persisted-token"
+
+
+def test_resolve_auth_token_missing_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("PRAISONAI_ENV_FILE", str(tmp_path / "does-not-exist.env"))
+    assert gateway_cmd._resolve_gateway_auth_token() == ""
+
+
+def test_snapshot_signals_version_unavailable_when_info_unreachable(monkeypatch):
+    health = {"status": "healthy", "uptime": 1.0}
+
+    def fake_fetch(host, port, path, timeout=5.0):
+        return health if path == "/health" else None
+
+    monkeypatch.setattr(gateway_cmd, "_fetch_gateway_json", fake_fetch)
+    monkeypatch.setattr(
+        "praisonai_bot.daemon.get_daemon_status",
+        lambda: {"platform": "linux", "installed": True, "running": True},
+    )
+
+    snap = gateway_cmd._build_status_snapshot("127.0.0.1", 8765)
+    assert snap["reachable"] is True
+    assert snap.get("version") is None
+    assert snap["version_unavailable"] == "info_unreachable"
