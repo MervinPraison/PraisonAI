@@ -6429,6 +6429,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             new.__dict__[key] = copy.deepcopy(value, memo)
         return new
 
+    def __deepcopy__(self, memo):
+        """Deep-copy the LLM, giving the clone its own attribution ContextVar.
+
+        ContextVar objects are not copyable (``copy.deepcopy`` raises
+        ``TypeError: cannot pickle '_contextvars.ContextVar' object``), and
+        their value is task-local runtime state that should not be shared
+        between an agent and its clone (issue #1746 / #5052). The clone gets a
+        fresh ContextVar; every other attribute is deep-copied as usual.
+        """
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for key, value in self.__dict__.items():
+            if key == "_current_agent_name_var":
+                new._current_agent_name_var = contextvars.ContextVar(
+                    "praisonai_current_agent_name", default=None
+                )
+                continue
+            setattr(new, key, copy.deepcopy(value, memo))
+        return new
+
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
 
