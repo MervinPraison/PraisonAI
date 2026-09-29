@@ -14,10 +14,12 @@ call back into its public/registered state (``list_agents``, ``get_agent``,
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import json
 import time
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _now() -> int:
@@ -94,6 +96,18 @@ class GatewayApiEndpoints:
 
     def __init__(self, gateway: Any) -> None:
         self._gw = gateway
+        # In-process store for background/stored Response objects, keyed by id.
+        # Lightweight and dependency-free: a background run's status/output
+        # survives the originating HTTP request so a client can retrieve it by
+        # id later. Each entry also holds the run's InterruptController (for
+        # cancel) and the driving asyncio.Task. Not persisted across restarts;
+        # the durable-run ledger (Issue #4028) remains the cross-restart store.
+        self._responses: Dict[str, dict] = {}
+        # Cap the in-process store so a sustained stream of background/stored
+        # submissions cannot grow memory without bound in a long-lived gateway
+        # (Greptile P1). When full, the oldest *terminal* (completed/cancelled/
+        # failed) entry is evicted first; in-flight runs are never evicted.
+        self._responses_max = 1024
 
     # ── shared dispatch ────────────────────────────────────────────────
     def _resolve_agent(self, requested: Optional[str]):
@@ -110,7 +124,14 @@ class GatewayApiEndpoints:
         aid = agents[0]
         return aid, self._gw.get_agent(aid)
 
-    async def _dispatch(self, session: Any, agent: Any, content: str) -> tuple:
+    async def _dispatch(
+        self,
+        session: Any,
+        agent: Any,
+        content: str,
+        interrupt: Any = None,
+        rejected: Optional[dict] = None,
+    ) -> tuple:
         """Run one agent turn through the same admission gate as chat users.
 
         Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
@@ -135,22 +156,155 @@ class GatewayApiEndpoints:
         def _capture(a: Any) -> None:
             holder["usage"] = self._usage_for(a)
 
+        # Forward ``interrupt`` only when supplied so callers/dispatchers that do
+        # not expect a ``cancel_token`` seam (e.g. the synchronous chat path)
+        # keep their exact prior signature; the background path passes it so a
+        # ``.../cancel`` can stop the turn cooperatively.
+        extra = {"interrupt": interrupt} if interrupt is not None else {}
+
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
                     result = await self._gw._dispatch_agent_turn(
-                        agent, content, on_complete=_capture
+                        agent, content, on_complete=_capture, **extra
                     )
             except AdmissionRejected as rej:
+                # Signal capacity rejection to the caller so a background run is
+                # recorded as ``failed`` (never ``completed``): the agent never
+                # ran, so a client polling the id must not mistake the busy
+                # message for a successful result (Greptile P1).
+                if rejected is not None:
+                    rejected["rejected"] = True
+                    rejected["message"] = str(rej.message)
                 return str(rej.message), self._zero_usage()
         else:
             result = await self._gw._dispatch_agent_turn(
-                agent, content, on_complete=_capture
+                agent, content, on_complete=_capture, **extra
             )
         usage = holder.get("usage") or self._zero_usage()
         return ("" if result is None else str(result)), usage
+
+    def _streaming_enabled(self) -> bool:
+        """Whether token-level SSE streaming is opted in via ``gateway.api.stream``.
+
+        Off by default so the streaming surface stays byte-for-byte the buffered
+        single-chunk path until an operator explicitly enables it.
+        """
+        cfg = getattr(self._gw, "config", None)
+        api = getattr(cfg, "api", None)
+        return bool(getattr(api, "stream", False))
+
+    # Task-local marker so a stream callback only forwards events emitted by
+    # *its own* turn. One ``Agent`` instance (hence one shared
+    # ``stream_emitter``) can serve overlapping turns for several callers; the
+    # emitter fans every event out to every registered callback with no turn
+    # identity. Without isolation, caller A's SSE stream would receive caller
+    # B's tokens (Greptile P1 — concurrent streams mix caller text). The turn's
+    # execution context (native async task, or the copied context that
+    # ``asyncio.to_thread`` runs a sync agent under) carries this token, so a
+    # callback compares the running turn's token to the one it was created for
+    # and drops foreign events.
+    _stream_turn_var: "contextvars.ContextVar[Optional[object]]" = (
+        contextvars.ContextVar("praisonai_gw_stream_turn", default=None)
+    )
+
+    async def _dispatch_stream(self, session: Any, agent: Any, content: str):
+        """Run one agent turn while yielding its token deltas as they arrive.
+
+        Wires the agent's existing ``stream_emitter`` (the same surface the
+        WebSocket relay consumes) through the request hot path: a callback pushes
+        each answer text chunk onto an :class:`asyncio.Queue`, the turn runs via
+        the normal :meth:`_dispatch` (same admission gate + usage snapshot), and
+        this generator yields text chunks in real time. On completion it yields a
+        final ``("final", (reply, usage))`` marker so the caller has the buffered
+        reply (for a no-delta fallback) and the per-turn usage.
+
+        Correctness guarantees baked into the callback:
+
+        * **First token included** — the SDK emits the opening piece as
+          ``FIRST_TOKEN`` and only later pieces as ``DELTA_TEXT``; both are
+          forwarded so the client never loses the first chunk (Greptile P1).
+        * **Reasoning excluded** — deltas flagged ``is_reasoning=True`` are the
+          model's private thinking, not the answer, so they are dropped and never
+          leaked as answer content to an OpenAI-compatible client (Greptile P1).
+        * **Turn isolation** — a per-turn ContextVar token guards the callback so
+          concurrent callers sharing one agent never receive each other's text
+          (Greptile P1).
+
+        The callback may fire from a worker thread (sync ``chat`` agents), so it
+        hands chunks to the loop via ``call_soon_threadsafe``. If the agent has
+        no ``stream_emitter``, the turn still completes and only the final marker
+        is yielded — the caller then emits today's single buffered chunk.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        _TEXT_TYPES: tuple = ()
+        try:
+            from praisonaiagents.streaming.events import StreamEventType as _SET
+            _TEXT_TYPES = (_SET.DELTA_TEXT, _SET.FIRST_TOKEN)
+        except Exception:
+            _SET = None
+
+        # Unique identity for this turn; the callback only forwards events whose
+        # running context carries this same token.
+        turn_token = object()
+
+        def _on_event(event: Any) -> None:
+            if not _TEXT_TYPES:
+                return
+            if getattr(event, "type", None) not in _TEXT_TYPES:
+                return
+            # Drop reasoning/thinking deltas — they are not answer content.
+            if getattr(event, "is_reasoning", False):
+                return
+            # Only relay events produced by this turn's execution context.
+            if self._stream_turn_var.get() is not turn_token:
+                return
+            text = getattr(event, "content", None)
+            if text:
+                loop.call_soon_threadsafe(queue.put_nowait, ("delta", text))
+
+        emitter = getattr(agent, "stream_emitter", None) if _SET is not None else None
+        if emitter is not None:
+            try:
+                emitter.add_callback(_on_event)
+            except Exception:
+                emitter = None
+
+        async def _run() -> None:
+            # Stamp this turn's identity so events emitted during its execution
+            # (and only those) pass the callback's isolation check. Native async
+            # runs inherit this task's context; ``asyncio.to_thread`` copies it
+            # into the worker thread, so the sync ``chat`` path is covered too.
+            self._stream_turn_var.set(turn_token)
+            try:
+                reply, usage = await self._dispatch(session, agent, content)
+                await queue.put(("final", (reply, usage)))
+            except Exception as exc:  # surface as a terminal marker, never hang
+                await queue.put(("error", exc))
+
+        task = asyncio.ensure_future(_run())
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "delta":
+                    yield ("delta", payload)
+                elif kind == "error":
+                    raise payload
+                else:  # final
+                    yield ("final", payload)
+                    break
+        finally:
+            if emitter is not None:
+                try:
+                    emitter.remove_callback(_on_event)
+                except (ValueError, AttributeError):
+                    pass
+            if not task.done():
+                await task
 
     @staticmethod
     def _zero_usage() -> dict:
@@ -306,13 +460,16 @@ class GatewayApiEndpoints:
         """Emit a spec-shaped SSE chat-completion stream.
 
         The frames are correctly ``chat.completion.chunk`` shaped and terminate
-        with ``[DONE]`` so any OpenAI streaming client parses them. The content
-        is delivered as a single chunk once the agent turn completes (buffered)
-        rather than token-by-token: true incremental token streaming would need
-        the agent's ``stream_emitter`` wired through the gateway hot path, which
-        is deliberately out of scope here to avoid a hot-path regression. Latency
-        to first *content* therefore matches non-streaming; response correctness
-        and client compatibility are unaffected.
+        with ``[DONE]`` so any OpenAI streaming client parses them.
+
+        When token streaming is enabled (``gateway.api.stream``), the agent's
+        existing ``stream_emitter`` is wired through the hot path so each
+        ``DELTA_TEXT`` chunk is emitted as its own ``delta.content`` frame in
+        real time — genuine time-to-first-token. When streaming is off (the
+        default), or the agent produced no token deltas, the content is
+        delivered as a single buffered chunk once the turn completes, exactly as
+        before; response correctness and client compatibility are unaffected
+        either way.
 
         When the client sets ``stream_options.include_usage`` (the OpenAI
         opt-in for streamed usage), a final ``usage``-only chunk carrying the
@@ -320,6 +477,17 @@ class GatewayApiEndpoints:
         OpenAI streaming contract.
         """
         from starlette.responses import StreamingResponse
+
+        def _content_frame(created, text):
+            return {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": agent_id,
+                "choices": [
+                    {"index": 0, "delta": {"content": text}, "finish_reason": None}
+                ],
+            }
 
         async def gen():
             created = _now()
@@ -334,17 +502,28 @@ class GatewayApiEndpoints:
             }
             yield f"data: {json.dumps(first)}\n\n"
 
-            reply, usage = await self._dispatch(session, agent, content)
-            chunk = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": agent_id,
-                "choices": [
-                    {"index": 0, "delta": {"content": reply}, "finish_reason": None}
-                ],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
+            usage = self._zero_usage()
+            if self._streaming_enabled():
+                streamed_any = False
+                reply = ""
+                async for kind, payload in self._dispatch_stream(
+                    session, agent, content
+                ):
+                    if kind == "delta":
+                        streamed_any = True
+                        yield f"data: {json.dumps(_content_frame(created, payload))}\n\n"
+                    else:  # final
+                        reply, usage = payload
+                # No token deltas seen (agent didn't stream): emit the buffered
+                # reply as one chunk so content is never lost. Emitted even for
+                # an empty reply so the frame shape matches today's buffered
+                # single-chunk path exactly (Greptile P2 — empty replies must
+                # still carry a content frame).
+                if not streamed_any:
+                    yield f"data: {json.dumps(_content_frame(created, reply))}\n\n"
+            else:
+                reply, usage = await self._dispatch(session, agent, content)
+                yield f"data: {json.dumps(_content_frame(created, reply))}\n\n"
 
             final = {
                 "id": completion_id,
@@ -394,32 +573,266 @@ class GatewayApiEndpoints:
         # ``input`` may be a plain string or an OpenAI messages-style array.
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
-        session = self._session_for(agent_id, self._caller_key(request))
+        caller = self._caller_key(request)
+        session = self._session_for(agent_id, caller)
+
+        # Async/background submission: when the caller opts in via ``background``
+        # or ``store`` (per the OpenAI Responses API), return immediately with a
+        # persisted, retrievable id instead of blocking for the whole turn. The
+        # synchronous path below is unchanged and stays the default (Issue
+        # #5335), so existing clients see no behaviour change.
+        if body.get("background") or body.get("store"):
+            return self._start_background_response(
+                agent_id, agent, session, content, caller
+            )
+
         reply, usage = await self._dispatch(session, agent, content)
+        return JSONResponse(
+            self._response_object(agent_id, "completed", reply, usage)
+        )
+
+    @staticmethod
+    def _response_object(
+        agent_id: str,
+        status: str,
+        reply: str,
+        usage: dict,
+        *,
+        response_id: Optional[str] = None,
+        created_at: Optional[int] = None,
+        error: Optional[str] = None,
+        message_id: Optional[str] = None,
+    ) -> dict:
+        """Build a spec-shaped ``response`` object shared by sync + async paths.
+
+        A ``completed`` response always carries an assistant message — even when
+        the text is empty — so clients that read ``output[0]`` for a successful
+        answer keep working (Greptile P1: empty-output shape). Non-terminal
+        statuses (``queued``/``in_progress``) have no message yet. ``message_id``
+        lets a caller pin a stable id across repeated retrievals so polling a
+        completed response returns the same message identity each time
+        (Greptile P2: stable output message id).
+        """
+        output: List[dict] = []
+        if reply or status == "completed":
+            output.append(
+                {
+                    "id": message_id or ("msg-" + uuid.uuid4().hex),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": reply}],
+                }
+            )
+        obj = {
+            "id": response_id or ("resp-" + uuid.uuid4().hex),
+            "object": "response",
+            "created_at": created_at if created_at is not None else _now(),
+            "model": agent_id,
+            "status": status,
+            "output": output,
+            "output_text": reply,
+            "usage": {
+                "input_tokens": usage["prompt_tokens"],
+                "output_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+            },
+        }
+        if error is not None:
+            obj["error"] = {"message": error}
+        return obj
+
+    def _evict_if_full(self) -> None:
+        """Drop the oldest *terminal* entry when the store is at capacity.
+
+        In-flight runs (``queued``/``in_progress``) are never evicted so a
+        client can always retrieve a run it just submitted; only finished runs
+        (whose controller/task are done) are reclaimed (Greptile P1).
+        """
+        while len(self._responses) >= self._responses_max:
+            terminal = [
+                rid
+                for rid, e in self._responses.items()
+                if e.get("status") in ("completed", "cancelled", "failed")
+            ]
+            if not terminal:
+                break  # all in-flight: do not evict live work.
+            # Insertion order == submission order (dict preserves it): oldest first.
+            del self._responses[terminal[0]]
+
+    def _start_background_response(self, agent_id, agent, session, content, caller):
+        """Spawn a background turn, persist a Response object, return ``queued``.
+
+        The run is driven on the event loop as an ``asyncio.Task``; its
+        status/output are recorded in ``self._responses`` so a later
+        ``GET /v1/responses/{id}`` can retrieve them. A per-run
+        ``InterruptController`` is stored so ``.../cancel`` can stop it
+        cooperatively via the same seam the WebSocket/``/stop`` path uses.
+
+        The entry records the submitting ``caller`` so retrieval/cancel can be
+        scoped to the owner, and a stable ``message_id`` so repeated retrievals
+        of a completed run return the same output-message identity.
+        """
+        from starlette.responses import JSONResponse
+
+        self._evict_if_full()
+
+        response_id = "resp-" + uuid.uuid4().hex
+        created_at = _now()
+        controller = None
+        try:
+            from praisonaiagents.agent.interrupt import InterruptController
+            controller = InterruptController()
+        except Exception:
+            controller = None
+
+        entry: dict = {
+            "id": response_id,
+            "agent_id": agent_id,
+            "owner": caller,
+            "message_id": "msg-" + uuid.uuid4().hex,
+            "status": "in_progress",
+            "reply": "",
+            "usage": self._zero_usage(),
+            "created_at": created_at,
+            "error": None,
+            "controller": controller,
+            "task": None,
+        }
+        self._responses[response_id] = entry
+
+        async def _run() -> None:
+            rejected: dict = {}
+            try:
+                reply, usage = await self._dispatch(
+                    session, agent, content, interrupt=controller, rejected=rejected
+                )
+                if rejected.get("rejected"):
+                    # Capacity rejection: the agent never ran. Report ``failed``
+                    # with the busy message so a poller never mistakes it for a
+                    # successful result (Greptile P1).
+                    entry["status"] = "failed"
+                    entry["error"] = rejected.get("message") or "rejected"
+                    return
+                entry["reply"] = reply
+                entry["usage"] = usage
+                cancelled = False
+                if controller is not None:
+                    try:
+                        cancelled = bool(controller.is_set())
+                    except Exception:
+                        cancelled = False
+                entry["status"] = "cancelled" if cancelled else "completed"
+            except asyncio.CancelledError:
+                entry["status"] = "cancelled"
+                raise
+            except Exception as exc:  # noqa: BLE001 - surface as failed status
+                entry["status"] = "failed"
+                entry["error"] = str(exc)
+
+        try:
+            entry["task"] = asyncio.ensure_future(_run())
+        except RuntimeError:
+            # No running loop (e.g. called outside an event loop): run inline so
+            # the submission never silently drops the turn.
+            entry["status"] = "queued"
 
         return JSONResponse(
-            {
-                "id": "resp-" + uuid.uuid4().hex,
-                "object": "response",
-                "created_at": _now(),
-                "model": agent_id,
-                "status": "completed",
-                "output": [
-                    {
-                        "id": "msg-" + uuid.uuid4().hex,
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": reply}],
-                    }
-                ],
-                "output_text": reply,
-                "usage": {
-                    "input_tokens": usage["prompt_tokens"],
-                    "output_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                },
-            }
+            self._response_object(
+                agent_id,
+                "queued",
+                "",
+                self._zero_usage(),
+                response_id=response_id,
+                created_at=created_at,
+            ),
+            status_code=202,
         )
+
+    def _lookup_owned(self, request) -> tuple:
+        """Resolve a stored response scoped to the requesting caller.
+
+        Returns ``(response_id, entry)`` where ``entry`` is ``None`` when the id
+        is unknown *or* belongs to a different caller. Retrieval/cancel authorize
+        by caller-ownership — not by id alone — so one client cannot read or
+        cancel another client's background run on a shared gateway (Greptile
+        P1 security). To avoid leaking existence, an ownership mismatch is
+        reported as a 404 (same as an unknown id), not a 403.
+
+        Ownership is enforced only for *stable* caller identities — a session
+        header or bearer token, i.e. the same keys that pin a conversation.
+        Anonymous callers (auth disabled, no session header) get a fresh unique
+        key per request and are stateless by design, so they cannot re-identify
+        themselves on a later request; enforcing a match there would make every
+        such run permanently unretrievable. Those runs carry an ``anon:`` owner
+        and are looked up by id alone — the same open posture the no-auth
+        transport already grants every ``/v1/*`` route.
+        """
+        response_id = request.path_params.get("id")
+        entry = self._responses.get(response_id)
+        if entry is None:
+            return response_id, None
+        owner = entry.get("owner")
+        if owner and not str(owner).startswith("anon:"):
+            if owner != self._caller_key(request):
+                return response_id, None
+        return response_id, entry
+
+    def _stored_response_json(self, entry):
+        from starlette.responses import JSONResponse
+
+        return JSONResponse(
+            self._response_object(
+                entry["agent_id"],
+                entry["status"],
+                entry["reply"],
+                entry["usage"],
+                response_id=entry["id"],
+                created_at=entry["created_at"],
+                error=entry["error"],
+                message_id=entry.get("message_id"),
+            )
+        )
+
+    # ── OpenAI: responses retrieval ────────────────────────────────────
+    async def openai_responses_get(self, request):
+        """``GET /v1/responses/{id}`` — return the caller's stored Response."""
+        response_id, entry = self._lookup_owned(request)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+        return self._stored_response_json(entry)
+
+    # ── OpenAI: responses cancel ───────────────────────────────────────
+    async def openai_responses_cancel(self, request):
+        """``POST /v1/responses/{id}/cancel`` — stop an in-flight background run.
+
+        Cooperative-first via the run's ``InterruptController`` (checked at the
+        agent's checkpoints); falls back to cancelling the driving task so a run
+        that does not yield is still torn down.
+        """
+        response_id, entry = self._lookup_owned(request)
+        if entry is None:
+            return self._openai_error(
+                f"No such response: {response_id}", 404, "invalid_request_error"
+            )
+
+        if entry["status"] in ("in_progress", "queued"):
+            controller = entry.get("controller")
+            if controller is not None:
+                try:
+                    controller.request("cancel")
+                except Exception:
+                    pass
+            task = entry.get("task")
+            if task is not None and not task.done():
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            entry["status"] = "cancelled"
+
+        return self._stored_response_json(entry)
 
     # ── MCP: JSON-RPC ──────────────────────────────────────────────────
     async def mcp_jsonrpc(self, request):

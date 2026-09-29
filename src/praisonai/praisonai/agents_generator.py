@@ -39,13 +39,19 @@ def _strict_validation_enabled() -> bool:
     return os.getenv("PRAISONAI_VALIDATE_STRICT", "false").lower() == "true"
 
 
-def _list_to_dict(entries: list, prefix: str, kind: str) -> dict:
+def _list_to_dict(entries: list, prefix: str, kind: str, strict: bool | None = None) -> dict:
     """Convert a list of named entries to a dict, preserving duplicates.
 
     Duplicate ``name`` keys would otherwise silently clobber each other. Instead
-    we raise under ``PRAISONAI_VALIDATE_STRICT`` or warn loudly and keep both by
-    suffixing the colliding key, so a multi-agent YAML never quietly shrinks.
+    we raise under strict validation or warn loudly and keep both by suffixing
+    the colliding key, so a multi-agent YAML never quietly shrinks.
+
+    ``strict`` is the per-run resolved strictness (arg / cli_config first). When
+    ``None`` (module-level callers with no instance) we fall back to the
+    process-global env var so behaviour is unchanged.
     """
+    if strict is None:
+        strict = _strict_validation_enabled()
     normalized: dict = {}
     duplicates: list = []
     for i, entry in enumerate(entries):
@@ -58,20 +64,28 @@ def _list_to_dict(entries: list, prefix: str, kind: str) -> dict:
         normalized[key] = entry
     if duplicates:
         msg = f"Duplicate {kind} name(s) in YAML: {sorted(set(duplicates))}"
-        if _strict_validation_enabled():
+        if strict:
             raise ValueError(msg)
         logger.warning("%s — kept both by suffixing keys; rename to silence.", msg)
     return normalized
 
 
-def _normalize_yaml_config(config: dict) -> dict:
-    """Normalise list-format agents/tasks YAML to dict format expected by merge/run."""
+def _normalize_yaml_config(config: dict, strict: bool | None = None) -> dict:
+    """Normalise list-format agents/tasks YAML to dict format expected by merge/run.
+
+    ``strict`` carries the per-run strictness so normalization and downstream
+    ``ConfigValidator`` agree within a single run. When ``None`` we fall back to
+    the process-global env var (module-level callers / backward compatibility).
+    """
     if not isinstance(config, dict):
         return config
 
+    if strict is None:
+        strict = _strict_validation_enabled()
+
     agents = config.get("agents")
     if isinstance(agents, list):
-        config["agents"] = _list_to_dict(agents, "agent", "agent")
+        config["agents"] = _list_to_dict(agents, "agent", "agent", strict=strict)
 
     for bucket_key in ("agents", "roles"):
         bucket = config.get(bucket_key)
@@ -82,7 +96,7 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     roles = config.get("roles")
     if isinstance(roles, list):
-        config["roles"] = _list_to_dict(roles, "role", "role")
+        config["roles"] = _list_to_dict(roles, "role", "role", strict=strict)
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
@@ -103,7 +117,7 @@ def _normalize_yaml_config(config: dict) -> dict:
                     f"Task {task.get('name', f'task_{i}')!r} references "
                     f"unknown agent {agent_key!r}; skipping."
                 )
-                if _strict_validation_enabled():
+                if strict:
                     raise ValueError(msg)
                 logger.warning(msg)
                 continue
@@ -113,7 +127,7 @@ def _normalize_yaml_config(config: dict) -> dict:
                 dup_msg = (
                     f"Duplicate task name {task_name!r} for agent {agent_key!r} in YAML"
                 )
-                if _strict_validation_enabled():
+                if strict:
                     raise ValueError(dup_msg)
                 logger.warning("%s — kept both by suffixing keys; rename to silence.", dup_msg)
                 task_name = f"{task_name}__dup_{i}"
@@ -414,31 +428,69 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
 
         @functools.wraps(fn)
         def _sync_wrapped(*args, **kwargs):
-            executor = executor_factory()
-            future = executor.submit(fn, *args, **kwargs)
-            try:
-                return future.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                # Best-effort cancel; only effective if the future has not started.
-                # A started sync call cannot be interrupted, so warn operators that
-                # the worker may keep running (and its side effects may still occur).
-                cancelled = future.cancel()
-                if not cancelled and on_leaked is not None:
-                    # The worker is stuck and OS-owned; let the generator recycle
-                    # the pool so new submissions are not permanently queued behind
-                    # leaked threads.
-                    on_leaked()
-                logger.warning(
-                    "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
-                    "executing in the background.",
-                    getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds, cancelled,
-                )
-                raise ToolTimeoutError(
-                    tool_name=getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds=timeout_seconds,
-                    background_work_may_continue=not cancelled,
-                )
+            tool_name = getattr(fn, "__name__", repr(fn))
+            # A concurrent recycle (or close()) can shut the captured pool down
+            # between capture and submit. Retry once against a freshly-minted
+            # pool; a second failure is genuinely fatal. Surfacing the failure
+            # as ToolTimeoutError keeps the module contract (see the docstring
+            # above) intact instead of leaking RuntimeError/CancelledError.
+            for attempt in (0, 1):
+                try:
+                    executor = executor_factory()
+                    future = executor.submit(fn, *args, **kwargs)
+                except RuntimeError:
+                    # Either "cannot schedule new futures after shutdown" (the
+                    # captured pool was recycled between capture and submit) or
+                    # the generator was closed and refuses to mint a new pool
+                    # (executor_factory() raises). Both are recoverable on the
+                    # first attempt via a fresh pool; a second failure is fatal.
+                    # Keep the factory call inside this try so a close() landing
+                    # between the two attempts still surfaces as ToolTimeoutError
+                    # rather than leaking RuntimeError to the caller.
+                    if attempt == 0:
+                        continue
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
+                try:
+                    return future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    # Best-effort cancel; only effective if the future has not started.
+                    # A started sync call cannot be interrupted, so warn operators that
+                    # the worker may keep running (and its side effects may still occur).
+                    cancelled = future.cancel()
+                    if not cancelled and on_leaked is not None:
+                        # The worker is stuck and OS-owned; let the generator recycle
+                        # the pool so new submissions are not permanently queued behind
+                        # leaked threads.
+                        on_leaked()
+                    logger.warning(
+                        "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
+                        "executing in the background.",
+                        tool_name,
+                        timeout_seconds, cancelled,
+                    )
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=not cancelled,
+                    )
+                except concurrent.futures.CancelledError:
+                    # A concurrent pool recycle (shutdown(cancel_futures=True))
+                    # cancelled our still-queued future before it ran. The tool
+                    # never executed, so retry once against a freshly-minted pool
+                    # rather than losing a required result. If the retry is also
+                    # cancelled, surface as a timeout so the tool's declared
+                    # return-type contract is not silently downgraded.
+                    if attempt == 0:
+                        continue
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
         return _sync_wrapped
 
     # Framework tool object (CrewAI/LangChain BaseTool, praisonai @tool). These
@@ -519,7 +571,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None, strict_validation=None, tool_timeout_workers=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -535,6 +587,8 @@ class AgentsGenerator:
             cli_config (dict, optional): CLI configuration to override YAML settings. Defaults to None.
             adapter_registry (FrameworkAdapterRegistry, optional): Registry for framework adapters. Defaults to process default.
             tool_resolver (ToolResolver, optional): Canonical tool resolver. Defaults to the shared context-local resolver so discovery runs once per run.
+            strict_validation (bool, optional): Per-run override for strict YAML validation. Precedence: this arg > cli_config['strict_validation'] > PRAISONAI_VALIDATE_STRICT env var. Lets multi-tenant hosts scope strictness per request without mutating os.environ.
+            tool_timeout_workers (int, optional): Per-run override for the sync-tool timeout pool size. Precedence: this arg > cli_config['tool_timeout_workers'] > PRAISONAI_TOOL_TIMEOUT_WORKERS env var. Lets multi-tenant hosts scope the pool per request.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -554,6 +608,22 @@ class AgentsGenerator:
         self.agent_yaml = agent_yaml
         self.tools = tools or []  # Store tool class names as a list
         self.cli_config = cli_config or {}  # Store CLI configuration overrides
+
+        # Per-run behaviour toggles. Precedence: explicit arg > cli_config > env
+        # var fallback. This lets multi-tenant `praisonai serve` hosts scope
+        # strictness and pool size per request via the existing DI seams instead
+        # of relying on process-global os.environ (which cannot isolate tenants).
+        self._strict_validation = (
+            strict_validation
+            if strict_validation is not None
+            else self.cli_config.get("strict_validation")
+        )
+        self._tool_timeout_workers = (
+            tool_timeout_workers
+            if tool_timeout_workers is not None
+            else self.cli_config.get("tool_timeout_workers")
+        )
+
         # Use namespaced logger - no hot-path basicConfig calls
         from ._logging import get_logger
         self.logger = get_logger("agents_generator")
@@ -593,10 +663,12 @@ class AgentsGenerator:
         self._tool_timeout_executor = tool_timeout_executor
         self._owns_tool_timeout_executor = tool_timeout_executor is None
         self._tool_timeout_executor_lock = threading.Lock()
+        # Set by close() to permanently refuse resurrecting an owned pool.
+        self._closed = False
         # Track workers permanently held by stuck sync tools. Once half the pool
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
-        self._max_leaked_workers = max(1, _resolve_tool_timeout_workers() // 2)
+        self._max_leaked_workers = max(1, self._resolve_tool_timeout_workers() // 2)
         # Stable per-generator identity for timeout-wrapper ownership. A bound
         # method (self._get_tool_timeout_executor) yields a fresh object with a
         # different id() on every access, so it cannot be used as a reliable
@@ -606,6 +678,37 @@ class AgentsGenerator:
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
+
+    def _is_strict(self) -> bool:
+        """Whether strict validation is enabled for this run.
+
+        Per-run precedence: explicit arg / cli_config first, then the
+        process-global env var as fallback. Multi-tenant hosts can therefore
+        demand strict validation for one tenant without forcing it on another.
+        """
+        override = getattr(self, "_strict_validation", None)
+        if override is not None:
+            return bool(override)
+        return _strict_validation_enabled()
+
+    def _resolve_tool_timeout_workers(self) -> int:
+        """Resolve this run's sync-tool timeout pool size.
+
+        Per-run precedence: explicit arg / cli_config first, then the
+        process-global env var as fallback. A per-run value lets a large tenant
+        get a bigger pool without inflating it for every other tenant sharing
+        the process.
+        """
+        override = getattr(self, "_tool_timeout_workers", None)
+        if override is not None:
+            try:
+                return max(1, int(override))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid tool_timeout_workers=%r; falling back to env/default.",
+                    override,
+                )
+        return _resolve_tool_timeout_workers()
 
     def _get_tool_timeout_executor(self):
         """Lazily create this generator's bounded sync-tool-timeout thread pool.
@@ -620,6 +723,20 @@ class AgentsGenerator:
         import concurrent.futures
 
         with self._tool_timeout_executor_lock:
+            # Refuse to resurrect the pool after close(). Without this a tool
+            # object still reachable past the `with ... as gen:` block (via a
+            # framework lifecycle hook, shared registry, or retained callback)
+            # would find _tool_timeout_executor is None, build a fresh unowned
+            # pool, and leak its daemon threads per request in a long-lived
+            # server worker. Mirrors AsyncBridge._closed (_async_bridge.py:118).
+            if getattr(self, "_closed", False):
+                raise RuntimeError(
+                    "AgentsGenerator is closed; refusing to construct a new "
+                    "tool-timeout executor. This tool was invoked after "
+                    "close(); hold a live generator (e.g. keep the "
+                    "`with ... as gen:` block open) for the lifetime of any "
+                    "tool it wraps."
+                )
             recycle = (
                 self._owns_tool_timeout_executor
                 and self._tool_timeout_executor is not None
@@ -633,7 +750,7 @@ class AgentsGenerator:
                 # Resolve once so the pool size and the leak threshold that
                 # governs its recycling always agree, even if the env var was
                 # changed between construction and (re)creation.
-                workers = _resolve_tool_timeout_workers()
+                workers = self._resolve_tool_timeout_workers()
                 self._tool_timeout_executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=workers,
                     thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
@@ -664,7 +781,14 @@ class AgentsGenerator:
         with self._tool_timeout_executor_lock:
             if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
                 self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
-                self._tool_timeout_executor = None
+            self._tool_timeout_executor = None
+            # Poison ownership and mark closed so a tool invoked after close()
+            # cannot silently resurrect an unowned pool (see
+            # _get_tool_timeout_executor). The `with ... as gen:` block that
+            # would have called close() has already exited, so nothing would
+            # ever tear a resurrected pool down.
+            self._owns_tool_timeout_executor = False
+            self._closed = True
 
     def __enter__(self):
         return self
@@ -740,14 +864,13 @@ class AgentsGenerator:
         for key in agent_level_fields:
             if key not in cli_config:
                 continue
-            # The legacy parser always supplies 16000, even when the user did
-            # not pass --max-tokens. Do not let that default overwrite a
-            # per-agent or nested YAML budget; only a marked explicit value or
-            # a non-default value is a real CLI override.
+            # The legacy parser fills in a default when the user did not pass
+            # --max-tokens. Do not let that default overwrite a per-agent or
+            # nested YAML budget; only a value the parser marked as explicitly
+            # supplied on the command line is a real CLI override.
             if (
                 key == 'max_tokens'
                 and not cli_config.get('_max_tokens_explicit')
-                and cli_config[key] == 16000
             ):
                 continue
             agent_overrides[key] = cli_config[key]
@@ -948,14 +1071,34 @@ class AgentsGenerator:
         # Expose the per-run wrap so adapters that inject *more* tools after this
         # point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the same
         # timeout guard instead of silently bypassing it; expose the per-agent
-        # resolver for heterogeneous budgets. Both keys are written every time so
-        # the inactive path is cleared rather than left holding a prior closure.
-        self.cli_config = {
-            **(self.cli_config or {}),
+        # resolver for heterogeneous budgets. These are private per-run closures
+        # (bound to this generator's timeout executor), NOT user configuration —
+        # keep them off the user-facing ``self.cli_config`` dict so a caller who
+        # passed a shared cli_config template never gets it back stamped with
+        # instance-bound lambdas (cross-run / cross-tenant leak). They are merged
+        # into the cli_config kwarg only at dispatch (see _dispatch_cli_config)
+        # so adapters still read them via the same keys. Both are written every
+        # time so the inactive path is cleared rather than left holding a prior
+        # closure.
+        self._run_ctx = {
             "_tool_timeout_wrap": wrap,
             "_agent_tool_wrap_resolver": resolver,
         }
         return tools_dict
+
+    def _dispatch_cli_config(self):
+        """Merge the private per-run context onto the user cli_config for adapters.
+
+        Adapters read ``_tool_timeout_wrap`` / ``_agent_tool_wrap_resolver`` off
+        their ``cli_config`` kwarg. Build a fresh merged dict at dispatch so the
+        closures reach the adapter without persisting onto the caller-owned
+        ``self.cli_config`` (which stays "user overrides only").
+        """
+        base = self.cli_config or {}
+        run_ctx = getattr(self, "_run_ctx", None)
+        if not run_ctx:
+            return base
+        return {**base, **run_ctx}
 
     def _resolve_effective_tool_timeout(self, config):
         """Resolve the effective per-tool timeout in seconds.
@@ -1269,9 +1412,9 @@ class AgentsGenerator:
         # Use existing tool resolver if available
         validator = ConfigValidator(tool_resolver=self.tool_resolver)
         
-        # Check for strict mode from environment or config
-        import os
-        strict_mode = os.getenv('PRAISONAI_VALIDATE_STRICT', 'false').lower() == 'true'
+        # Check for strict mode: per-run override (arg / cli_config) first, then
+        # the process-global env var as fallback. See _is_strict().
+        strict_mode = self._is_strict()
         
         # Validate configuration
         result = validator.validate_config(config, strict=strict_mode)
@@ -1311,7 +1454,10 @@ class AgentsGenerator:
             with open(self.agent_file, 'r') as f:
                 config = _yaml_safe_load(f)
 
-        config = _normalize_yaml_config(config or {})
+        # Pass the per-run strictness so YAML normalization and the downstream
+        # ConfigValidator agree within one run (multi-tenant isolation). See
+        # _is_strict(); module-level callers still fall back to the env var.
+        config = _normalize_yaml_config(config or {}, strict=self._is_strict())
 
         # Apply CLI config overrides to both paths (agent_yaml and agent_file)
         if self.cli_config:
@@ -1407,8 +1553,14 @@ class AgentsGenerator:
             workflow_label = self._adapter_registry.resolve_or_default(
                 self.framework or config.get('framework')
             ).lower()
+            # Isolate this sync workflow run's sync->async work onto its own
+            # loop+thread, matching the sequential/hierarchical and async
+            # workflow paths, so a stuck coroutine in one agent/tenant does not
+            # park the shared default bridge for the rest.
+            from ._async_bridge import scoped_bridge
             with observability_session(workflow_label):
-                return self._run_yaml_workflow(config)
+                with scoped_bridge():
+                    return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
@@ -1435,7 +1587,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
     async def _aload_config(self):
@@ -1504,7 +1656,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
 
@@ -1689,7 +1841,14 @@ class AgentsGenerator:
         workflow, input_data = self._build_yaml_workflow(config)
 
         self.logger.debug(f"Running workflow: {workflow.name}")
-        result = workflow.start(input_data)
+        # Isolate this sync run's sync→async work onto its own loop+thread,
+        # mirroring generate_crew_and_kickoff. workflow.start(...) drives async
+        # internals through run_sync on the process-wide shared bridge; without
+        # scoped_bridge() a stuck workflow-tool coroutine would park the shared
+        # default loop for every other tenant's run_sync submission.
+        from ._async_bridge import scoped_bridge
+        with scoped_bridge():
+            result = workflow.start(input_data)
 
         return self._finalise_workflow_result(result)
 

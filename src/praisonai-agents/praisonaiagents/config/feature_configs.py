@@ -1395,13 +1395,21 @@ class HooksConfig:
     
     # Middleware list
     middleware: List[Any] = field(default_factory=list)
-    
+
+    # Optional per-agent HookRegistry for event-based hooks (BEFORE_TOOL,
+    # AFTER_AGENT, ...). When None the agent uses the process-wide default
+    # registry (so plugins bridged into it still fire). Set this to a private
+    # ``HookRegistry()`` to keep event hooks registered for THIS agent from
+    # firing on unrelated agents that share the default registry.
+    registry: Optional[Any] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
             "on_step": str(self.on_step) if self.on_step else None,
             "on_tool_call": str(self.on_tool_call) if self.on_tool_call else None,
             "middleware": [str(m) for m in self.middleware],
+            "registry": type(self.registry).__name__ if self.registry is not None else None,
         }
 
 

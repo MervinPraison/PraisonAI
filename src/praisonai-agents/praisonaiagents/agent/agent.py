@@ -1373,12 +1373,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 array_mode=ArrayMode.PASSTHROUGH,
                 default=None,
             )
+        # Per-agent event-hook registry (isolates BEFORE_TOOL/AFTER_AGENT/...
+        # hooks so they never fire on unrelated agents sharing the default
+        # registry). A bare HookRegistry passed as ``hooks=`` still works too.
+        _hooks_registry = None
         if _hooks_config is not None:
             if isinstance(_hooks_config, list):
                 _hooks_list = _hooks_config
             elif isinstance(_hooks_config, HooksConfig):
                 step_callback = _hooks_config.on_step
                 _hooks_list = list(_hooks_config.middleware or [])
+                _hooks_registry = getattr(_hooks_config, "registry", None)
                 # Route on_step / on_tool_call onto the SAME middleware chain
                 # that already powers ``hooks=[...]`` (MiddlewareManager). Both
                 # keys used to be stored-and-never-called, so the TypeError that
@@ -2101,7 +2106,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Lazy init for HookRunner and StreamEventEmitter (zero overhead when not used)
         self.__hook_runner = None  # Will be initialized on first access
         self.__stream_emitter = None  # Will be initialized on first access
-        self._hooks_registry_param = hooks  # Store for lazy init
+        # Prefer a per-agent registry declared via HooksConfig(registry=...) so
+        # this agent's event hooks stay isolated; else fall back to the raw
+        # ``hooks`` value (a bare HookRegistry still isolates, anything else
+        # resolves to the shared default registry in the _hook_runner property).
+        self._hooks_registry_param = _hooks_registry if _hooks_registry is not None else hooks
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
@@ -2595,6 +2604,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self._on_budget_exceeded = _on_budget_exceeded
         # Thread-safe cost/token tracking (Gap 1a fix)
         self._cost_lock = threading.Lock()
+        # Serializes the read-modify-write of _auto_save_last_index. Auto-save
+        # now runs via asyncio.to_thread, so two concurrent async runs sharing
+        # one Agent could otherwise read the same last-saved index in separate
+        # worker threads and each persist the same turns, duplicating history.
+        self._auto_save_lock = threading.Lock()
         self._total_cost = 0.0
         self._total_tokens_in = 0
         self._total_tokens_out = 0
@@ -2881,7 +2895,10 @@ Your Goal: {self.goal}
                     # Reuse the caller's manager as-is (no disk I/O side-effect).
                     _mgr = self._approval_permissions
                 else:
-                    _mgr = PermissionManager(agent_name=self.name)
+                    _mgr = PermissionManager(
+                        agent_name=self.name,
+                        workspace_root=os.getcwd(),
+                    )
                     if isinstance(self._approval_permissions, dict):
                         _mgr.load_rules_from_config(self._approval_permissions)
                     elif isinstance(self._approval_permissions, (list, tuple)):
@@ -3052,6 +3069,12 @@ Your Goal: {self.goal}
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory
         self._policy = policy
+        # Route enabled GUARDRAIL/POLICY/SKILL plugins into their typed
+        # subsystems now that guardrail (_setup_guardrail), _skills and _policy
+        # are all set. A plugin declared PluginType.GUARDRAIL/POLICY/SKILL thus
+        # participates in the GuardrailChain / PolicyEngine / SkillManager, not
+        # just a generic lifecycle hook. No-op when no such plugin is enabled.
+        self._merge_plugin_subsystems()
         self._output_style = output_style
         # Backward-compatible: `thinking_budget` property mirrors the legacy int
         # budget when supplied via the alias (Issue #4452); the unified effort is
@@ -3232,7 +3255,7 @@ Your Goal: {self.goal}
         for k, v in self.__dict__.items():
             if k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
-            elif k == "_cost_lock":
+            elif k in ("_cost_lock", "_auto_save_lock"):
                 object.__setattr__(result, k, threading.Lock())
             elif k == "_approvals_lock":
                 object.__setattr__(result, k, asyncio.Lock())
@@ -4156,12 +4179,44 @@ Summary:"""
                     except Exception:
                         pass
 
+        # Gate every code-mode tool call through the SAME PolicyEngine,
+        # permission deny-rules and per-tool ``input_guardrails`` the direct
+        # tool-call loop runs. The approval framework the proxy already honours
+        # does not cover these, so without this hook a model could reach an
+        # allow-listed tool from code and bypass a guardrail that blocks the
+        # same call on the normal path.
+        #
+        # Contract (mirrors the direct path in ``_check_tool_approval_sync``):
+        #   returns ``(denial_reason, arguments)`` where ``denial_reason`` is a
+        #   string to block or ``None`` to allow, and ``arguments`` is the
+        #   possibly-guardrail-rewritten kwargs dict the tool must run with. The
+        #   proxy uses the returned args so a sanitising guardrail's rewrite is
+        #   honoured (not discarded) exactly as on the direct path. BYPASS mode
+        #   skips the permission-deny gate, matching the direct contract, so a
+        #   call permitted directly is not rejected only in code mode. Only runs
+        #   in the tool-capable modes.
+        policy_hook = None
+        if code_tools and code_execution_mode in _tool_capable:
+            def policy_hook(name, arguments):
+                if not self._is_bypass_mode():
+                    deny = self._check_permission_manager_deny(name, arguments)
+                    if isinstance(deny, dict):
+                        return deny.get("error", "denied by permission policy"), arguments
+                verdict = self._check_tool_policy_and_guardrails(name, arguments)
+                if isinstance(verdict, dict):
+                    return verdict.get("error", "denied by policy"), arguments
+                # ``verdict`` is ``(None, rewritten_args)`` when allowed; hand the
+                # possibly-rewritten args back so the proxy dispatches with them.
+                _, rewritten = verdict
+                return None, rewritten
+
         # An unknown code_mode raises out of here rather than silently
         # producing nothing, which is the failure this whole change is about.
         new_tools = build_code_execution_tools(
             code_mode=code_execution_mode,
             allowed_tools=allowed if code_tools else [],
             registry=scoped_registry,
+            policy_hook=policy_hook,
         )
 
         existing = {getattr(t, "__name__", None) for t in (self.tools or [])}
@@ -5339,8 +5394,11 @@ Summary:"""
                         f"response_len={len(response_str)}"
                     )
                 
-                # Auto-save session after each async iteration (memory integration)
-                self._auto_save_session()
+                # Auto-save session after each async iteration (memory integration).
+                # Offloaded to a worker thread so the synchronous FileLock/JSON
+                # write never stalls the shared event loop (mirrors the goal-
+                # completion-judge offload below).
+                await asyncio.to_thread(self._auto_save_session)
 
                 # ─────────────────────────────────────────────────────────────
                 # GOAL COMPLETION JUDGE (opt-in): independent acceptance-criteria
@@ -5480,8 +5538,8 @@ Summary:"""
                 # Yield control to allow other async tasks to run
                 await asyncio.sleep(0)
             
-            # Final auto-save before returning
-            self._auto_save_session()
+            # Final auto-save before returning (offloaded off the event loop).
+            await asyncio.to_thread(self._auto_save_session)
             
             # Max iterations reached
             return AutonomyResult(
@@ -7083,8 +7141,16 @@ Answer:"""
             return GuardrailResult(success=True, result=task_output)
 
         try:
-            # Call the guardrail function
-            result = self._guardrail_fn(task_output)
+            # Call the guardrail function, awaiting it if the caller supplied an
+            # async def. Calling a coroutine function synchronously would only
+            # build a coroutine object (never running its body), which then
+            # crashes GuardrailResult.from_tuple and is misreported as a
+            # validation failure.
+            if asyncio.iscoroutinefunction(self._guardrail_fn):
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                result = run_coroutine_from_any_context(self._guardrail_fn(task_output))
+            else:
+                result = self._guardrail_fn(task_output)
 
             # Convert the result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
