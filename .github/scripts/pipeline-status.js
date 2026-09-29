@@ -220,7 +220,12 @@ function isUpstreamHeadRepo(pr, owner, repo) {
 }
 
 async function syncOpenPullRequests(github, owner, repo, options, core) {
-  const { maxPrs = 20, dispatchMergeGate = true } = options || {};
+  const {
+    maxPrs = 20,
+    dispatchMergeGate = true,
+    syncFn = syncPipelineLabels,
+    dispatchFn = dispatchMergeGateForOldestReady,
+  } = options || {};
   await ensurePipelineLabels(github, owner, repo, core);
   let prs;
   if (maxPrs <= 100) {
@@ -229,6 +234,8 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
       repo,
       state: 'open',
       per_page: 100,
+      sort: 'created',
+      direction: 'asc',
     }));
   } else {
     prs = await github.paginate(github.rest.pulls.list, {
@@ -236,6 +243,8 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
       repo,
       state: 'open',
       per_page: 100,
+      sort: 'created',
+      direction: 'asc',
     });
   }
   let synced = 0;
@@ -243,7 +252,7 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
   for (const pr of prs) {
     if (synced >= maxPrs) break;
     if (pr.draft) continue;
-    const result = await syncPipelineLabels(github, owner, repo, pr.number, core);
+    const result = await syncFn(github, owner, repo, pr.number, core);
     if (result.ready && isUpstreamHeadRepo(pr, owner, repo)) {
       readyCandidates.push({
         prNumber: pr.number,
@@ -255,7 +264,7 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
   }
   let dispatched = 0;
   if (dispatchMergeGate && readyCandidates.length) {
-    dispatched = await dispatchMergeGateForOldestReady(
+    dispatched = await dispatchFn(
       github, owner, repo, readyCandidates, core
     );
   }
