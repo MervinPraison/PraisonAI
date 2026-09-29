@@ -1146,6 +1146,33 @@ Respond with ONLY a valid JSON tool call in this format:
             model = getattr(response, "model", None)
         return model or self.model
 
+    def _select_active_profile(self, kwargs: dict):
+        """Pick the profile a fresh call should start on, honoring rotation.
+
+        Defaults to the construction-time ``self._current_profile`` so existing
+        behaviour and multi-agent safety are unchanged (the shared instance
+        state is never mutated). Only when the manager is configured with
+        ``rotate_on_success`` do we re-select via ``get_next_profile()`` so a
+        long-lived, shared ``LLM`` actually spreads successful traffic across
+        the equal-priority tier instead of pinning its first profile forever.
+        The chosen profile travels in per-call kwargs, never on ``self``.
+        """
+        profile = self._current_profile
+        manager = self._failover_manager
+        if manager is None:
+            return profile, kwargs
+        rotate = getattr(getattr(manager, "config", None), "rotate_on_success", False)
+        if not rotate:
+            return profile, kwargs
+        try:
+            rotated = manager.get_next_profile()
+        except Exception:  # pragma: no cover - defensive
+            return profile, kwargs
+        if rotated and rotated != profile:
+            profile = rotated
+            kwargs = self._apply_profile_to_kwargs(rotated, kwargs)
+        return profile, kwargs
+
     def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict) -> dict:
         """Return a new kwargs dict with profile overrides applied.
 
@@ -1384,8 +1411,10 @@ Respond with ONLY a valid JSON tool call in this format:
         last_error = None
         # Track the failover profile per call (never self._current_profile) so
         # concurrent calls on one shared LLM cannot corrupt each other's
-        # failover bookkeeping (issue #3613 gap 2).
-        active_profile = self._current_profile
+        # failover bookkeeping (issue #3613 gap 2). When rotate_on_success is
+        # configured, pick the next profile in the tier so a shared instance
+        # actually rotates instead of pinning its construction-time profile.
+        active_profile, kwargs = self._select_active_profile(kwargs)
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -1468,8 +1497,10 @@ Respond with ONLY a valid JSON tool call in this format:
         last_error = None
         # Track the failover profile per call (never self._current_profile) so
         # concurrent coroutines on one shared LLM cannot corrupt each other's
-        # failover bookkeeping (issue #3613 gap 2).
-        active_profile = self._current_profile
+        # failover bookkeeping (issue #3613 gap 2). When rotate_on_success is
+        # configured, pick the next profile in the tier so a shared instance
+        # actually rotates instead of pinning its construction-time profile.
+        active_profile, kwargs = self._select_active_profile(kwargs)
 
         for attempt in range(self._max_retries + 1):
             try:
