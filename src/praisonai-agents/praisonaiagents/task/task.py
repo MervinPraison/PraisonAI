@@ -889,8 +889,16 @@ Context:
             return GuardrailResult(success=True, result=task_output)
 
         try:
-            # Call the guardrail function
-            result = self._guardrail_fn(task_output)
+            # Call the guardrail function, awaiting it if the caller supplied an
+            # async def. Calling a coroutine function synchronously would only
+            # build a coroutine object (never running its body), which then
+            # crashes GuardrailResult.from_tuple and is misreported as a
+            # validation failure. This mirrors how Task.callback already detects
+            # and awaits coroutine callbacks.
+            if asyncio.iscoroutinefunction(self._guardrail_fn):
+                result = self._run_async_guardrail(task_output)
+            else:
+                result = self._guardrail_fn(task_output)
 
             # Check if result is already a GuardrailResult
             if isinstance(result, GuardrailResult):
@@ -914,7 +922,18 @@ Context:
                 result=None,
                 error=f"Guardrail validation error: {str(e)}"
             )
-    
+
+    def _run_async_guardrail(self, task_output):
+        """Run an async def guardrail from the synchronous guardrail path.
+
+        The async orchestration path already offloads _process_guardrail to a
+        worker thread (no running loop there), so asyncio.run is safe. If called
+        while a loop is running in this thread, surface a clear error instead of
+        the misattributed 'coroutine was never awaited' failure.
+        """
+        from ..utils.async_bridge import run_coroutine_from_any_context
+        return run_coroutine_from_any_context(self._guardrail_fn(task_output))
+
     async def _execute_callback_with_metadata(self, task_output):
         """Execute callback with metadata support while maintaining backward compatibility.
         

@@ -13,6 +13,18 @@ from .config import PolicyConfig
 
 logger = get_logger(__name__)
 
+
+def _normalize_host(host: str) -> str:
+    """Normalize a hostname for consistent egress matching.
+
+    DNS hostnames are case-insensitive and a single trailing dot denotes the
+    root; treating ``API.Example.com.`` and ``api.example.com`` as the same
+    host prevents policy bypass via case/trailing-dot variants.
+    """
+    if not isinstance(host, str):
+        return host
+    return host.strip().rstrip(".").lower()
+
 class PolicyEngine:
     """
     Policy Engine for execution control.
@@ -185,6 +197,34 @@ class PolicyEngine:
             {"operation": operation, "file_path": file_path}
         )
     
+    def check_network(
+        self,
+        host: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> PolicyResult:
+        """
+        Check if an outbound network request to a host is allowed.
+        
+        This is the deterministic egress decision every outbound request
+        (tool HTTP call, MCP request, provider/LLM call) can be routed
+        through. It mirrors ``check_tool``/``check_file`` and evaluates a
+        ``net:<host>`` resource against the configured policies.
+        
+        Args:
+            host: Destination host (e.g., "api.example.com")
+            context: Additional context (e.g., purpose, agent_id)
+            
+        Returns:
+            PolicyResult indicating if the egress is allowed
+        """
+        normalized = _normalize_host(host)
+        # Destination host stays authoritative: a caller-supplied context can
+        # add metadata but must not override the host seen by rule conditions.
+        return self.check(
+            f"net:{normalized}",
+            {**(context or {}), "host": normalized}
+        )
+    
     def clear(self):
         """Remove all policies."""
         self._policies.clear()
@@ -306,6 +346,67 @@ def create_allow_tools_policy(
     ]
     
     return Policy(name=name, rules=rules, priority=10)
+
+def create_network_policy(
+    allow_hosts: Optional[List[str]] = None,
+    deny_hosts: Optional[List[str]] = None,
+    name: str = "network_egress"
+) -> Policy:
+    """
+    Create a network-egress policy for outbound host access.
+    
+    Semantics (evaluated by ``PolicyEngine.check_network``):
+    - ``deny_hosts`` wins: a match on the deny-list is always denied.
+    - A non-empty ``allow_hosts`` means default-deny: only hosts matching
+      the allow-list are permitted; everything else is denied.
+    - If ``allow_hosts`` is empty/None, hosts not on the deny-list fall
+      through to the engine's default action (allow unless strict_mode).
+    
+    Host patterns support fnmatch wildcards (e.g. ``*.mycorp.com``).
+    
+    Args:
+        allow_hosts: Hosts permitted egress (non-empty => default-deny)
+        deny_hosts: Hosts always denied (takes precedence over allow)
+        name: Policy name
+        
+    Returns:
+        Policy
+    """
+    # Normalize patterns so they match the normalized host that
+    # ``check_network`` evaluates (case-insensitive, no trailing dot).
+    allow_hosts = [_normalize_host(h) for h in (allow_hosts or [])]
+    deny_hosts = [_normalize_host(h) for h in (deny_hosts or [])]
+    rules: List[PolicyRule] = []
+    
+    # Deny-list wins: highest priority.
+    for pattern in deny_hosts:
+        rules.append(PolicyRule(
+            action=PolicyAction.DENY,
+            resource=f"net:{pattern}",
+            reason=f"Host denied by egress policy: {pattern}",
+            name=f"deny_host_{pattern}",
+            priority=100
+        ))
+    
+    if allow_hosts:
+        # Allow the listed hosts...
+        for pattern in allow_hosts:
+            rules.append(PolicyRule(
+                action=PolicyAction.ALLOW,
+                resource=f"net:{pattern}",
+                name=f"allow_host_{pattern}",
+                priority=10
+            ))
+        # ...and default-deny everything else.
+        rules.append(PolicyRule(
+            action=PolicyAction.DENY,
+            resource="net:*",
+            reason="Host not in egress allow-list",
+            name="deny_host_default",
+            priority=0
+        ))
+    
+    return Policy(name=name, rules=rules, priority=100)
 
 def create_read_only_policy(name: str = "read_only") -> Policy:
     """

@@ -617,6 +617,74 @@ class PluginManager:
     def get_all_tools(self) -> List[Any]:
         """Get all tools from all enabled plugins."""
         return [tool for _plugin_name, tool in self.get_all_tools_with_sources()]
+
+    def _enabled_of_type(self, plugin_type: "PluginType") -> List[Tuple[str, Plugin]]:
+        """Snapshot enabled ``(name, plugin)`` pairs of a given declared type.
+
+        Dispatch key for the typed subsystems: a plugin only contributes a
+        guardrail / skill / policy when it *declares* the matching
+        ``PluginType`` in its ``PluginInfo``. Snapshotting under the lock keeps
+        this safe against concurrent register/unregister in multi-agent runs.
+        """
+        from .plugin import PluginType
+
+        with self._lock:
+            result: List[Tuple[str, Plugin]] = []
+            for name, plugin in self._plugins.items():
+                if not self._enabled.get(name, False):
+                    continue
+                try:
+                    declared = getattr(plugin.info, "plugin_type", PluginType.HOOK)
+                except Exception:
+                    declared = PluginType.HOOK
+                if declared == plugin_type:
+                    result.append((name, plugin))
+            return result
+
+    def get_all_guardrails(self) -> List[Any]:
+        """Guardrail objects contributed by enabled ``GUARDRAIL`` plugins.
+
+        Calls ``as_guardrail()`` on each enabled plugin declared
+        ``PluginType.GUARDRAIL`` and returns the non-``None`` guardrail objects
+        the Agent folds into its ``GuardrailChain`` (so they see
+        ``validate_tool_call`` / ``validate_tool_result``, not just final text).
+        """
+        from .plugin import PluginType
+
+        guardrails: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.GUARDRAIL):
+            try:
+                g = plugin.as_guardrail()
+            except Exception as e:
+                logger.error(f"Error getting guardrail from plugin {name}: {e}")
+                continue
+            if g is not None:
+                guardrails.append(g)
+        return guardrails
+
+    def get_all_skills(self) -> List[Any]:
+        """Skill sources/dirs contributed by enabled ``SKILL`` plugins."""
+        from .plugin import PluginType
+
+        skills: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.SKILL):
+            try:
+                skills.extend(plugin.get_skills() or [])
+            except Exception as e:
+                logger.error(f"Error getting skills from plugin {name}: {e}")
+        return skills
+
+    def get_all_policies(self) -> List[Any]:
+        """Policy rules contributed by enabled ``POLICY`` plugins."""
+        from .plugin import PluginType
+
+        policies: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.POLICY):
+            try:
+                policies.extend(plugin.get_policies() or [])
+            except Exception as e:
+                logger.error(f"Error getting policies from plugin {name}: {e}")
+        return policies
     
     def shutdown(self):
         """Shutdown all plugins."""

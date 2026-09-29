@@ -11,10 +11,14 @@ import json
 import pytest
 
 from praisonaiagents.tools import send_message
-from praisonaiagents.tools.messaging_tools import _parse_media
+from praisonaiagents.tools.messaging_tools import (
+    _parse_media,
+    MESSAGE_ACTION_AUTHORITY,
+)
 from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
+    MessageActionResult,
     ReactionResult,
     ThreadResult,
     TargetInfo,
@@ -39,6 +43,8 @@ class FakeMessenger:
         self.sent = []
         self.reactions = []
         self.threads = []
+        self.edited = []
+        self.deleted = []
 
     async def send(self, target, text, *, media=None):
         self.sent.append((target, text, media))
@@ -63,6 +69,14 @@ class FakeMessenger:
     async def create_thread(self, target, name):
         self.threads.append((target, name))
         return ThreadResult(status="ok", target=target, thread_id="T1")
+
+    async def edit(self, target, message_id, text):
+        self.edited.append((target, message_id, text))
+        return MessageActionResult(status="ok", target=target)
+
+    async def delete(self, target, message_id):
+        self.deleted.append((target, message_id))
+        return MessageActionResult(status="ok", target=target)
 
 
 def test_messenger_satisfies_protocol():
@@ -194,6 +208,147 @@ def test_react_unsupported_when_messenger_lacks_react():
         out = send_message("origin", "\U0001F44D", action="react")
         parsed = json.loads(out)
         assert parsed["status"] == "unsupported"
+    finally:
+        clear_outbound_messenger(token)
+
+
+# ---------------------------------------------------------------------------
+# Unified, authorised message-action surface (Issue #5054)
+# ---------------------------------------------------------------------------
+
+
+def test_action_authority_table_is_closed_and_declares_every_verb():
+    # Every verb the tool dispatches MUST appear in the authority map, and each
+    # entry declares one of the known authority classes (fail-closed contract).
+    expected = {"list", "send", "react", "unreact", "thread", "edit", "delete"}
+    assert set(MESSAGE_ACTION_AUTHORITY) == expected
+    assert set(MESSAGE_ACTION_AUTHORITY.values()) <= {
+        "read-only",
+        "current-conversation",
+        "own-prior-message",
+    }
+    # The sensitive mutation verbs are classified as the most-restricted class.
+    assert MESSAGE_ACTION_AUTHORITY["edit"] == "own-prior-message"
+    assert MESSAGE_ACTION_AUTHORITY["delete"] == "own-prior-message"
+
+
+def test_unknown_action_is_rejected_fail_closed():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("origin", "hi", action="pin")
+        assert "Unknown action" in out
+        # Nothing was dispatched for the unknown verb.
+        assert messenger.sent == []
+        assert messenger.edited == []
+        assert messenger.deleted == []
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_thread_action_routes_to_messenger():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("slack:C1", "rollout", action="thread")
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["thread_id"] == "T1"
+        assert messenger.threads == [("slack:C1", "rollout")]
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_thread_without_title_is_typed_failure():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("slack:C1", "   ", action="thread")
+        assert json.loads(out)["status"] == "failed"
+        assert messenger.threads == []
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_edit_action_routes_to_messenger():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message(
+            "origin", "Done (updated)", action="edit", message_id="98"
+        )
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert messenger.edited == [("origin", "98", "Done (updated)")]
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_delete_action_routes_to_messenger():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("origin", "", action="delete", message_id="77")
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert messenger.deleted == [("origin", "77")]
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_edit_without_message_id_is_typed_failure():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("origin", "new text", action="edit")
+        parsed = json.loads(out)
+        assert parsed["status"] == "failed"
+        assert messenger.edited == []
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_edit_delete_unsupported_on_legacy_messenger():
+    class LegacyMessenger:
+        async def send(self, target, text, *, media=None):
+            return DeliveryResult(ok=True, target=target)
+
+        def list_targets(self):
+            return []
+
+    token = register_outbound_messenger(LegacyMessenger())
+    try:
+        out = send_message("origin", "x", action="edit", message_id="1")
+        assert json.loads(out)["status"] == "unsupported"
+        out2 = send_message("origin", "", action="delete", message_id="1")
+        assert json.loads(out2)["status"] == "unsupported"
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_edit_delete_denied_by_send_policy():
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(SendPolicy(default="deny", allow=["origin"]))
+    try:
+        out = send_message(
+            "slack:#exec", "x", action="edit", message_id="1"
+        )
+        assert json.loads(out)["status"] == "failed"
+        assert messenger.edited == []
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
+def test_react_with_explicit_message_id_is_forwarded():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        send_message(
+            "slack:C1", "\U0001F44D", action="react", message_id="42"
+        )
+        assert messenger.reactions == [("slack:C1", "\U0001F44D", "42", False)]
     finally:
         clear_outbound_messenger(token)
 

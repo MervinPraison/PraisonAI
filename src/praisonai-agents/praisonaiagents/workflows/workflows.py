@@ -6137,9 +6137,13 @@ class WorkflowManager:
             "saved_at_iso": datetime.now().isoformat()
         }
         
-        with open(checkpoint_file, 'w') as f:
-            json.dump(checkpoint_data, f, indent=2, default=str)
-        
+        # Atomic write: serialise to a temp file and os.replace into place so a
+        # crash/OOM/kill mid-write cannot destroy the previous good checkpoint
+        # (which would force the workflow to restart from step 0 and re-run and
+        # re-bill completed steps).
+        from ..utils.atomic_io import atomic_write_json
+        atomic_write_json(str(checkpoint_file), checkpoint_data, indent=2, default=str)
+
         self._log(f"Saved checkpoint '{name}' at step {completed_steps}")
         return str(checkpoint_file)
     
