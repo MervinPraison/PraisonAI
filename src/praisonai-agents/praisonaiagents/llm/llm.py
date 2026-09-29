@@ -913,7 +913,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
             "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
+            "payment required", "subscription", "plan limit"
         ]):
             return "billing"
         
@@ -941,15 +941,16 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Empty or malformed responses
         if any(indicator in error_str for indicator in [
-            "empty response", "no response", "invalid response format",
-            "json decode error", "unexpected end of json", "malformed response"
+            "empty response", "no response", "no content", "blank output",
+            "null response", "invalid response format"
         ]):
             return "empty_response"
         
         # Service overloaded
         if any(indicator in error_str for indicator in [
             "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "503", "502", "500"
+            "server overloaded", "server busy", "try again later",
+            "503", "502", "500"
         ]):
             return "overloaded"
         
@@ -963,6 +964,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Format errors
         if any(indicator in error_str for indicator in [
             "validation error", "invalid format", "parse error",
+            "parsing error", "decode error", "unexpected end of json",
             "malformed", "invalid json", "schema error"
         ]):
             return "format_error"
@@ -1050,12 +1052,18 @@ Respond with ONLY a valid JSON tool call in this format:
             )
         
         # Auth errors - try profile rotation if available
-        if error_kind == "auth" and self._failover_manager:
+        if error_kind == "auth":
+            if self._failover_manager:
+                return FailoverDecision(
+                    action="rotate_profile",
+                    reason=error_kind,
+                    backoff_ms=1000,  # Brief delay before trying new profile
+                    is_retryable=True
+                )
             return FailoverDecision(
-                action="rotate_profile",
+                action="surface_error",
                 reason=error_kind,
-                backoff_ms=1000,  # Brief delay before trying new profile
-                is_retryable=True
+                is_retryable=False
             )
         
         # Overloaded/timeout - retry with exponential backoff
@@ -1912,6 +1920,97 @@ Respond with ONLY a valid JSON tool call in this format:
                     param_strs.append(f"{pname}{req}: {ptype}")
                 schemas.append(f"- {name}({', '.join(param_strs)})")
         return '\n'.join(schemas) if schemas else "None"
+
+    def _param_accepts_string(self, function_name, param_name, tools) -> bool:
+        """True when a tool declares this parameter as accepting a string.
+
+        Used to decide whether an argument whose value matches a previous tool's
+        name is a legitimate string or a weak model's way of referring to that
+        tool's result. A declared string parameter is left alone.
+        """
+        try:
+            for tool in tools or []:
+                fn = tool.get("function") if isinstance(tool, dict) else None
+                if not fn or fn.get("name") != function_name:
+                    continue
+                spec = (fn.get("parameters") or {}).get("properties", {}).get(param_name)
+                if not isinstance(spec, dict):
+                    return False
+                return self._schema_accepts_string(spec)
+        except Exception:  # noqa: BLE001 -- never break a tool call on a schema read
+            return False
+        return False
+
+    def _schema_accepts_string(self, spec) -> bool:
+        """True when a JSON-Schema fragment can accept a string value.
+
+        Handles the shapes this repo's own generator emits: a bare
+        ``{"type": "string"}``, a list type ``{"type": ["string", "null"]}``,
+        and the ``anyOf``/``oneOf``/``allOf`` unions produced for ``Optional[str]``
+        and ``Union`` parameters (``tools/schema.py``). Without the union case an
+        ``Optional[str]`` argument was still treated as a result reference and
+        silently overwritten.
+        """
+        if not isinstance(spec, dict):
+            return False
+        declared = spec.get("type")
+        if isinstance(declared, list):
+            if "string" in declared:
+                return True
+        elif declared == "string":
+            return True
+        # enum without an explicit type is string-typed in JSON Schema practice
+        if declared is None and isinstance(spec.get("enum"), list):
+            if any(isinstance(v, str) for v in spec["enum"]):
+                return True
+        for key in ("anyOf", "oneOf", "allOf"):
+            members = spec.get(key)
+            if isinstance(members, list) and any(
+                    self._schema_accepts_string(m) for m in members):
+                return True
+        return False
+
+    def _force_tool_usage_message(self, response_text, tool_calls, formatted_tools,
+                                  iteration_count):
+        """The nudge to send when a model ignored tools it should have used.
+
+        Returns the message content, or None when no nudge is warranted. Shared
+        so every response path applies the same policy -- this lived inline in
+        get_response only, so an agent that was awaited instead of called
+        silently lost a setting it had accepted.
+        """
+        if not self._should_force_tool_usage(
+                response_text, tool_calls, formatted_tools, iteration_count):
+            return None
+        tool_names = self._get_tool_names_for_prompt(formatted_tools)
+        logging.debug(
+            f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
+        return self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
+
+    def _tool_repair_message(self, tool_calls, formatted_tools):
+        """The correction to send when a model produced an invalid tool call.
+
+        Returns the message content and charges the repair budget, or None when
+        the calls are valid or the budget is spent. Shared for the same reason
+        as _force_tool_usage_message.
+        """
+        repair_attempt_count = getattr(self, '_current_repair_count', 0)
+        if not (tool_calls and self.max_tool_repairs > 0
+                and repair_attempt_count < self.max_tool_repairs):
+            return None
+        validation_errors = [e for e in
+                             (self._validate_tool_call(tc, formatted_tools) for tc in tool_calls)
+                             if e]
+        if not validation_errors:
+            return None
+        error_msg = "; ".join(validation_errors)
+        tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
+        logging.debug(
+            f"[OLLAMA_RELIABILITY] Tool call repair attempt "
+            f"{repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
+        self._current_repair_count = repair_attempt_count + 1
+        return self.TOOL_CALL_REPAIR_PROMPT.format(
+            error=error_msg, tool_schemas=tool_schemas)
 
     def _should_force_tool_usage(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> bool:
         """
@@ -4870,6 +4969,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     max_fallback_iterations = kwargs.pop("max_iterations", self.max_iter)
                     while fallback_iterations < max_fallback_iterations:
                         fallback_iterations += 1
+                        messages = self._manage_context_in_loop(messages)
                         # Chaining references are scoped to one assistant turn;
                         # do not let a later turn reuse an earlier result.
                         ollama_tool_result_mapping = {}
@@ -5557,7 +5657,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Force tool usage / repair: applied AFTER both the streaming
                     # and non-streaming branches converge so a streaming-with-tools
-                    # provider still honours the policy the sync path applies.
+                    # provider still honours the policy the sync path applies. Both
+                    # lived inline in get_response only, so `max_tool_repairs` and
+                    # `force_tool_usage` were accepted from the caller -- and set by
+                    # OllamaAdapter for every Ollama LLM -- then silently ignored the
+                    # moment the agent was awaited.
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:
                         logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered (async). Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
@@ -5578,6 +5682,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         iteration_count += 1
                         tool_calls = None  # Clear invalid tool calls
                         continue
+                    self._current_repair_count = 0
 
                 # For Ollama, if response is empty but we have tools, prompt for tool usage
                 if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
