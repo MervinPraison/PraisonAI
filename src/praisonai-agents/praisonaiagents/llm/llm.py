@@ -604,6 +604,12 @@ Respond with ONLY a valid JSON tool call in this format:
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_name", default=None)
         )
+        # ``current_agent_id`` is a stable per-instance identity used as the
+        # token aggregation key so unrelated agents sharing a display name are
+        # not merged into one cost bucket (issue #5069).
+        self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("current_agent_id", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -2003,11 +2009,12 @@ Respond with ONLY a valid JSON tool call in this format:
         if tool_calls:
             return False
         
-        if self.force_tool_usage == 'never':
+        force_tool_usage = getattr(self, 'force_tool_usage', 'never')
+        if force_tool_usage == 'never':
             return False
-        elif self.force_tool_usage == 'always':
+        elif force_tool_usage == 'always':
             return True
-        elif self.force_tool_usage == 'auto':
+        elif force_tool_usage == 'auto':
             # Auto mode: only for Ollama on first iteration when model ignores tools
             return self._is_ollama_provider() and iteration_count == 0
         return False
@@ -2032,10 +2039,11 @@ Respond with ONLY a valid JSON tool call in this format:
         `_current_repair_count`). Returns None when the budget is spent or the
         tool calls validate cleanly. Shared by the sync and async loops.
         """
-        if not tool_calls or self.max_tool_repairs <= 0:
+        max_tool_repairs = getattr(self, 'max_tool_repairs', 0)
+        if not tool_calls or max_tool_repairs <= 0:
             return None
         repair_attempt_count = getattr(self, '_current_repair_count', 0)
-        if repair_attempt_count >= self.max_tool_repairs:
+        if repair_attempt_count >= max_tool_repairs:
             return None
         validation_errors = []
         for tc in tool_calls:
@@ -6484,18 +6492,49 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def current_agent_name(self, agent_name: Optional[str]) -> None:
         self._current_agent_name_var.set(agent_name)
 
-    def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking."""
+    @property
+    def current_agent_id(self) -> Optional[str]:
+        """Task/thread-local stable identity of the agent attributing tokens.
+
+        Used as the token aggregation key so unrelated agents sharing a display
+        name are not merged into one cost bucket (issue #5069).
+        """
+        return self._current_agent_id_var.get()
+
+    def set_current_agent(self, agent_name: Optional[str], agent_id: Optional[str] = None):
+        """Set the current agent name (and optional stable id) for token tracking.
+
+        Stored in ContextVars, so attribution is local to the current asyncio
+        task / thread: a single LLM instance shared by several concurrently
+        running agents attributes each response to the agent that issued it,
+        instead of whichever agent last called this method (issue #5052).
+        """
         self._current_agent_name_var.set(agent_name)
+        self._current_agent_id_var.set(agent_id)
 
     def __deepcopy__(self, memo):
-        """Deep-copy the LLM while giving the clone a fresh attribution ContextVar.
+        """Deep-copy safely: give the clone fresh non-copyable primitives.
 
-        ``contextvars.ContextVar`` objects cannot be pickled/deep-copied, so a
-        naive ``copy.deepcopy`` of an already-built LLM raises. The clone also
-        wants its own task-local attribution state rather than sharing the
-        source's, so we install a new ContextVar on the copy (issue #5052).
+        Two kinds of attribute cannot be deep-copied and must be rebuilt on the
+        clone rather than shared with the original:
+
+        * ``_current_agent_name_var`` / ``_current_agent_id_var`` are
+          :class:`contextvars.ContextVar` objects (``TypeError: cannot pickle
+          '_contextvars.ContextVar' object``) carrying task-local runtime state,
+          so the clone gets brand-new ones and starts with independent (empty)
+          attribution (issue #5052 / #5069).
+        * ``threading`` locks (e.g. a lock-bearing subclass such as
+          :class:`~praisonaiagents.model_harness.ScriptedModel`, whose
+          ``_script_lock`` is an ``RLock``) also cannot be deep-copied
+          (``TypeError: cannot pickle '_thread.RLock' object``). Each is replaced
+          with a fresh lock of the same kind so the clone is independently
+          synchronised, mirroring ``Agent.__deepcopy__``.
         """
+        import threading
+
+        lock_type = type(threading.Lock())
+        rlock_type = type(threading.RLock())
+
         cls = self.__class__
         new = cls.__new__(cls)
         memo[id(self)] = new
@@ -6504,29 +6543,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 new.__dict__[key] = contextvars.ContextVar(
                     "current_agent_name", default=None
                 )
-                continue
-            new.__dict__[key] = copy.deepcopy(value, memo)
-        return new
-
-    def __deepcopy__(self, memo):
-        """Deep-copy the LLM, giving the clone its own attribution ContextVar.
-
-        ContextVar objects are not copyable (``copy.deepcopy`` raises
-        ``TypeError: cannot pickle '_contextvars.ContextVar' object``), and
-        their value is task-local runtime state that should not be shared
-        between an agent and its clone (issue #1746 / #5052). The clone gets a
-        fresh ContextVar; every other attribute is deep-copied as usual.
-        """
-        cls = self.__class__
-        new = cls.__new__(cls)
-        memo[id(self)] = new
-        for key, value in self.__dict__.items():
-            if key == "_current_agent_name_var":
-                new._current_agent_name_var = contextvars.ContextVar(
-                    "praisonai_current_agent_name", default=None
+            elif key == "_current_agent_id_var":
+                new.__dict__[key] = contextvars.ContextVar(
+                    "current_agent_id", default=None
                 )
-                continue
-            setattr(new, key, copy.deepcopy(value, memo))
+            elif isinstance(value, rlock_type):
+                new.__dict__[key] = threading.RLock()
+            elif isinstance(value, lock_type):
+                new.__dict__[key] = threading.Lock()
+            else:
+                new.__dict__[key] = copy.deepcopy(value, memo)
         return new
 
     def _resolve_openai_compatible_model(self) -> str:
