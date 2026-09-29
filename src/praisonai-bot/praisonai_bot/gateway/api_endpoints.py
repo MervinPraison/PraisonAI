@@ -15,6 +15,7 @@ call back into its public/registered state (``list_agents``, ``get_agent``,
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import time
 import uuid
@@ -185,6 +186,126 @@ class GatewayApiEndpoints:
         usage = holder.get("usage") or self._zero_usage()
         return ("" if result is None else str(result)), usage
 
+    def _streaming_enabled(self) -> bool:
+        """Whether token-level SSE streaming is opted in via ``gateway.api.stream``.
+
+        Off by default so the streaming surface stays byte-for-byte the buffered
+        single-chunk path until an operator explicitly enables it.
+        """
+        cfg = getattr(self._gw, "config", None)
+        api = getattr(cfg, "api", None)
+        return bool(getattr(api, "stream", False))
+
+    # Task-local marker so a stream callback only forwards events emitted by
+    # *its own* turn. One ``Agent`` instance (hence one shared
+    # ``stream_emitter``) can serve overlapping turns for several callers; the
+    # emitter fans every event out to every registered callback with no turn
+    # identity. Without isolation, caller A's SSE stream would receive caller
+    # B's tokens (Greptile P1 — concurrent streams mix caller text). The turn's
+    # execution context (native async task, or the copied context that
+    # ``asyncio.to_thread`` runs a sync agent under) carries this token, so a
+    # callback compares the running turn's token to the one it was created for
+    # and drops foreign events.
+    _stream_turn_var: "contextvars.ContextVar[Optional[object]]" = (
+        contextvars.ContextVar("praisonai_gw_stream_turn", default=None)
+    )
+
+    async def _dispatch_stream(self, session: Any, agent: Any, content: str):
+        """Run one agent turn while yielding its token deltas as they arrive.
+
+        Wires the agent's existing ``stream_emitter`` (the same surface the
+        WebSocket relay consumes) through the request hot path: a callback pushes
+        each answer text chunk onto an :class:`asyncio.Queue`, the turn runs via
+        the normal :meth:`_dispatch` (same admission gate + usage snapshot), and
+        this generator yields text chunks in real time. On completion it yields a
+        final ``("final", (reply, usage))`` marker so the caller has the buffered
+        reply (for a no-delta fallback) and the per-turn usage.
+
+        Correctness guarantees baked into the callback:
+
+        * **First token included** — the SDK emits the opening piece as
+          ``FIRST_TOKEN`` and only later pieces as ``DELTA_TEXT``; both are
+          forwarded so the client never loses the first chunk (Greptile P1).
+        * **Reasoning excluded** — deltas flagged ``is_reasoning=True`` are the
+          model's private thinking, not the answer, so they are dropped and never
+          leaked as answer content to an OpenAI-compatible client (Greptile P1).
+        * **Turn isolation** — a per-turn ContextVar token guards the callback so
+          concurrent callers sharing one agent never receive each other's text
+          (Greptile P1).
+
+        The callback may fire from a worker thread (sync ``chat`` agents), so it
+        hands chunks to the loop via ``call_soon_threadsafe``. If the agent has
+        no ``stream_emitter``, the turn still completes and only the final marker
+        is yielded — the caller then emits today's single buffered chunk.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        _TEXT_TYPES: tuple = ()
+        try:
+            from praisonaiagents.streaming.events import StreamEventType as _SET
+            _TEXT_TYPES = (_SET.DELTA_TEXT, _SET.FIRST_TOKEN)
+        except Exception:
+            _SET = None
+
+        # Unique identity for this turn; the callback only forwards events whose
+        # running context carries this same token.
+        turn_token = object()
+
+        def _on_event(event: Any) -> None:
+            if not _TEXT_TYPES:
+                return
+            if getattr(event, "type", None) not in _TEXT_TYPES:
+                return
+            # Drop reasoning/thinking deltas — they are not answer content.
+            if getattr(event, "is_reasoning", False):
+                return
+            # Only relay events produced by this turn's execution context.
+            if self._stream_turn_var.get() is not turn_token:
+                return
+            text = getattr(event, "content", None)
+            if text:
+                loop.call_soon_threadsafe(queue.put_nowait, ("delta", text))
+
+        emitter = getattr(agent, "stream_emitter", None) if _SET is not None else None
+        if emitter is not None:
+            try:
+                emitter.add_callback(_on_event)
+            except Exception:
+                emitter = None
+
+        async def _run() -> None:
+            # Stamp this turn's identity so events emitted during its execution
+            # (and only those) pass the callback's isolation check. Native async
+            # runs inherit this task's context; ``asyncio.to_thread`` copies it
+            # into the worker thread, so the sync ``chat`` path is covered too.
+            self._stream_turn_var.set(turn_token)
+            try:
+                reply, usage = await self._dispatch(session, agent, content)
+                await queue.put(("final", (reply, usage)))
+            except Exception as exc:  # surface as a terminal marker, never hang
+                await queue.put(("error", exc))
+
+        task = asyncio.ensure_future(_run())
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "delta":
+                    yield ("delta", payload)
+                elif kind == "error":
+                    raise payload
+                else:  # final
+                    yield ("final", payload)
+                    break
+        finally:
+            if emitter is not None:
+                try:
+                    emitter.remove_callback(_on_event)
+                except (ValueError, AttributeError):
+                    pass
+            if not task.done():
+                await task
+
     @staticmethod
     def _zero_usage() -> dict:
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -339,13 +460,16 @@ class GatewayApiEndpoints:
         """Emit a spec-shaped SSE chat-completion stream.
 
         The frames are correctly ``chat.completion.chunk`` shaped and terminate
-        with ``[DONE]`` so any OpenAI streaming client parses them. The content
-        is delivered as a single chunk once the agent turn completes (buffered)
-        rather than token-by-token: true incremental token streaming would need
-        the agent's ``stream_emitter`` wired through the gateway hot path, which
-        is deliberately out of scope here to avoid a hot-path regression. Latency
-        to first *content* therefore matches non-streaming; response correctness
-        and client compatibility are unaffected.
+        with ``[DONE]`` so any OpenAI streaming client parses them.
+
+        When token streaming is enabled (``gateway.api.stream``), the agent's
+        existing ``stream_emitter`` is wired through the hot path so each
+        ``DELTA_TEXT`` chunk is emitted as its own ``delta.content`` frame in
+        real time — genuine time-to-first-token. When streaming is off (the
+        default), or the agent produced no token deltas, the content is
+        delivered as a single buffered chunk once the turn completes, exactly as
+        before; response correctness and client compatibility are unaffected
+        either way.
 
         When the client sets ``stream_options.include_usage`` (the OpenAI
         opt-in for streamed usage), a final ``usage``-only chunk carrying the
@@ -353,6 +477,17 @@ class GatewayApiEndpoints:
         OpenAI streaming contract.
         """
         from starlette.responses import StreamingResponse
+
+        def _content_frame(created, text):
+            return {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": agent_id,
+                "choices": [
+                    {"index": 0, "delta": {"content": text}, "finish_reason": None}
+                ],
+            }
 
         async def gen():
             created = _now()
@@ -367,17 +502,28 @@ class GatewayApiEndpoints:
             }
             yield f"data: {json.dumps(first)}\n\n"
 
-            reply, usage = await self._dispatch(session, agent, content)
-            chunk = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": agent_id,
-                "choices": [
-                    {"index": 0, "delta": {"content": reply}, "finish_reason": None}
-                ],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
+            usage = self._zero_usage()
+            if self._streaming_enabled():
+                streamed_any = False
+                reply = ""
+                async for kind, payload in self._dispatch_stream(
+                    session, agent, content
+                ):
+                    if kind == "delta":
+                        streamed_any = True
+                        yield f"data: {json.dumps(_content_frame(created, payload))}\n\n"
+                    else:  # final
+                        reply, usage = payload
+                # No token deltas seen (agent didn't stream): emit the buffered
+                # reply as one chunk so content is never lost. Emitted even for
+                # an empty reply so the frame shape matches today's buffered
+                # single-chunk path exactly (Greptile P2 — empty replies must
+                # still carry a content frame).
+                if not streamed_any:
+                    yield f"data: {json.dumps(_content_frame(created, reply))}\n\n"
+            else:
+                reply, usage = await self._dispatch(session, agent, content)
+                yield f"data: {json.dumps(_content_frame(created, reply))}\n\n"
 
             final = {
                 "id": completion_id,

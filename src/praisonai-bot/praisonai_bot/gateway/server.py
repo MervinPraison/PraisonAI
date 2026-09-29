@@ -10862,6 +10862,9 @@ class WebSocketGateway:
                 self.config.api.openai = bool(api_yaml["openai"])
             if "mcp" in api_yaml:
                 self.config.api.mcp = bool(api_yaml["mcp"])
+            # Opt-in token-level SSE streaming on ``/v1/chat/completions``.
+            if "stream" in api_yaml:
+                self.config.api.stream = bool(api_yaml["stream"])
         _openai_ovr = getattr(self, "_openai_api_override", None)
         if _openai_ovr is not None:
             self.config.api.openai = bool(_openai_ovr)
