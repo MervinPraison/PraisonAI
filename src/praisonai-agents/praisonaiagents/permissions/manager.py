@@ -113,12 +113,19 @@ class PermissionManager:
                 logger.warning(f"Failed to load rules: {e}")
     
     def _save_rules(self):
-        """Save rules to disk."""
+        """Save rules to disk atomically.
+
+        Serialises to a temp file and ``os.replace``\\ s it into place so a
+        non-serialisable value (``TypeError``), an OOM kill, or a crash
+        mid-write can never truncate the previous good rules file. A downgraded
+        ``deny`` rule after restart is a security regression, so the old bytes
+        must survive any failed save.
+        """
+        from ..utils.atomic_io import atomic_write_json
         path = self._get_rules_path()
         try:
-            with open(path, "w") as f:
-                json.dump([r.to_dict() for r in self._rules], f, indent=2)
-        except IOError as e:
+            atomic_write_json(path, [r.to_dict() for r in self._rules], indent=2)
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to save rules: {e}")
     
     def save_rules(self):
@@ -140,7 +147,8 @@ class PermissionManager:
                 logger.warning(f"Failed to load approvals: {e}")
     
     def _save_approvals(self):
-        """Save approvals to disk."""
+        """Save approvals to disk atomically (see :meth:`_save_rules`)."""
+        from ..utils.atomic_io import atomic_write_json
         path = self._get_approvals_path()
         try:
             # Filter out expired and one-time approvals
@@ -148,9 +156,8 @@ class PermissionManager:
                 a for a in self._approvals
                 if a.is_valid() and a.scope in ("session", "always")
             ]
-            with open(path, "w") as f:
-                json.dump([a.to_dict() for a in persistent], f, indent=2)
-        except IOError as e:
+            atomic_write_json(path, [a.to_dict() for a in persistent], indent=2)
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to save approvals: {e}")
     
     def add_rule(self, rule: PermissionRule) -> str:
