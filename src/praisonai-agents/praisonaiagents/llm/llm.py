@@ -222,6 +222,24 @@ class LLM:
     
     # Class-level flag for one-time logging configuration
     _logging_configured = False
+
+    # Current agent name for per-call token/cost attribution is stored in a
+    # PER-INSTANCE ContextVar (see __init__: self._current_agent_name_var).
+    #
+    # ContextVar, not a plain attribute: a single LLM instance can back two
+    # different Agents (Agent(llm=<shared LLM>) is supported), and
+    # PraisonAIAgents.arun_all_tasks dispatches tasks concurrently via
+    # asyncio.gather on one thread. With a plain attribute, task A sets
+    # "Researcher", awaits the network call, task B sets "Writer" on the SAME
+    # object, and when A's response returns it reads "Writer" -- A's tokens get
+    # attributed to B. A ContextVar is copied per task at gather/create_task
+    # time, so each concurrently-gathered coroutine keeps its own value across
+    # the await (same reasoning as _tools_scope_depths in agents/agents.py).
+    #
+    # Per-instance (not class-level): two distinct LLM instances -- including an
+    # original and its clone -- must keep independent attribution state within
+    # the same context, otherwise the last writer's agent name leaks across LLMs.
+
     
     # Class-level cache for LiteLLM module (avoids repeated import overhead)
     _litellm_module = None
