@@ -214,6 +214,11 @@ async function dispatchMergeGateForOldestReady(github, owner, repo, readyCandida
   return 0;
 }
 
+function isUpstreamHeadRepo(pr, owner, repo) {
+  const headFull = pr.head?.repo?.full_name;
+  return !headFull || headFull === `${owner}/${repo}`;
+}
+
 async function syncOpenPullRequests(github, owner, repo, options, core) {
   const { maxPrs = 20, dispatchMergeGate = true } = options || {};
   await ensurePipelineLabels(github, owner, repo, core);
@@ -238,9 +243,8 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
   for (const pr of prs) {
     if (synced >= maxPrs) break;
     if (pr.draft) continue;
-    if (pr.head?.repo?.full_name && pr.head.repo.full_name !== `${owner}/${repo}`) continue;
     const result = await syncPipelineLabels(github, owner, repo, pr.number, core);
-    if (result.ready) {
+    if (result.ready && isUpstreamHeadRepo(pr, owner, repo)) {
       readyCandidates.push({
         prNumber: pr.number,
         createdAt: result.createdAt || new Date(pr.created_at).getTime(),
@@ -263,6 +267,7 @@ module.exports = {
   STAGE_LABELS,
   BLOCKER_LABELS,
   ALL_PIPELINE_LABELS,
+  isUpstreamHeadRepo,
   deriveStage,
   deriveBlockerLabels,
   computePipelineLabels,

@@ -1,6 +1,6 @@
 name: Pipeline Status Sync
 
-# Sync pipeline/* stage and blocker labels on open internal PRs.
+# Sync pipeline/* stage and blocker labels on open PRs (fork heads included; merge gate only for upstream branches).
 
 on:
   schedule:
