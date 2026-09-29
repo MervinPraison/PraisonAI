@@ -73,6 +73,9 @@ _LAZY_IMPORTS = {
     # Agent/gateway-callable thread creation (Issue #3987)
     "ThreadResult": ("praisonaiagents.gateway.protocols", "ThreadResult"),
     "ThreadStatus": ("praisonaiagents.gateway.protocols", "ThreadStatus"),
+    # Agent-callable message mutation: edit/delete (Issue #5054)
+    "MessageActionResult": ("praisonaiagents.gateway.protocols", "MessageActionResult"),
+    "MessageActionStatus": ("praisonaiagents.gateway.protocols", "MessageActionStatus"),
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply": ("praisonaiagents.gateway.protocols", "ConversationReply"),
     "ConversationReplyStatus": ("praisonaiagents.gateway.protocols", "ConversationReplyStatus"),
@@ -405,6 +408,8 @@ __all__ = [
     "ReactionResult",
     "ReactionStatus",
     "ThreadResult",
+    "MessageActionResult",
+    "MessageActionStatus",
     "ThreadStatus",
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply",

@@ -587,6 +587,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             max_message_length=4096,
             length_unit="utf16",  # Telegram uses UTF-16 for length calculation
             supports_edit=True,  # Telegram supports message editing
+            supports_delete=True,  # Telegram supports deleting bot messages
             supports_typing=True,
             markdown_dialect="telegram_markdown_v2",
             needs_rate_limit=True,

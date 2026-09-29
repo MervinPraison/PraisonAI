@@ -330,6 +330,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         return PlatformCapabilities(
             max_message_length=40000,
             supports_edit=True,
+            supports_delete=True,  # Slack supports chat.delete of bot messages
             markdown_dialect="slack",
             reconciles_unknown_send=True,
         )
