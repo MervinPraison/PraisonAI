@@ -607,6 +607,9 @@ Respond with ONLY a valid JSON tool call in this format:
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_name", default=None)
         )
+        self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar("current_agent_id", default=None)
+        )
 
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
@@ -6641,18 +6644,38 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             self._current_agent_name_var = var
         var.set(agent_name)
 
-    def set_current_agent(self, agent_name: Optional[str]):
-        """Set the current agent name for token tracking (task-local)."""
+    @property
+    def current_agent_id(self) -> Optional[str]:
+        """Stable per-agent identity for token aggregation (issue #5052)."""
+        var = getattr(self, "_current_agent_id_var", None)
+        if var is None:
+            return None
+        return var.get()
+
+    @current_agent_id.setter
+    def current_agent_id(self, agent_id: Optional[str]) -> None:
+        var = getattr(self, "_current_agent_id_var", None)
+        if var is None:
+            var = contextvars.ContextVar("current_agent_id", default=None)
+            self._current_agent_id_var = var
+        var.set(agent_id)
+
+    def set_current_agent(
+        self,
+        agent_name: Optional[str],
+        agent_id: Optional[str] = None,
+    ) -> None:
+        """Set task-local agent attribution for token tracking."""
         self.current_agent_name = agent_name
+        self.current_agent_id = agent_id
 
     def __deepcopy__(self, memo):
-        """Deep-copy the LLM while giving the clone a fresh attribution ContextVar.
+        """Deep-copy the LLM while giving the clone fresh attribution ContextVars.
 
         ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
         not copyable, so ``Agent.__deepcopy__`` (which recursively copies
         ``_llm_instance``) would raise ``TypeError: cannot pickle ContextVar``.
-        The attribution value is runtime/task-local anyway, so the clone starts
-        with its own independent, empty ContextVar (issue #5052).
+        Thread locks on LLM subclasses get fresh locks (issue #1746 / #5052).
         """
         cls = self.__class__
         new = cls.__new__(cls)
@@ -6661,6 +6684,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if key == "_current_agent_name_var":
                 new.__dict__[key] = contextvars.ContextVar(
                     "current_agent_name", default=None
+                )
+                continue
+            if key == "_current_agent_id_var":
+                new.__dict__[key] = contextvars.ContextVar(
+                    "current_agent_id", default=None
                 )
                 continue
             if type(value) is type(threading.RLock()):
