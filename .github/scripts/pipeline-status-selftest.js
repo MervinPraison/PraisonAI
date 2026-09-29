@@ -85,4 +85,21 @@ assert(
   ])
 );
 
+assert(
+  'upstream head repo',
+  ps.isUpstreamHeadRepo(
+    { head: { repo: { full_name: 'MervinPraison/PraisonAI' } } },
+    'MervinPraison',
+    'PraisonAI'
+  )
+);
+assert(
+  'fork head repo still synced (not upstream)',
+  !ps.isUpstreamHeadRepo(
+    { head: { repo: { full_name: 'ai-mrscraper/PraisonAI' } } },
+    'MervinPraison',
+    'PraisonAI'
+  )
+);
+
 process.exit(failed ? 1 : 0);
