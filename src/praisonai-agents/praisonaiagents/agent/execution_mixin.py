@@ -200,8 +200,12 @@ class ExecutionMixin:
                 response = await self.achat(prompt, **kwargs)
                 response_str = str(response) if response else ""
                 
-                # Auto-save session after chat
-                self._auto_save_session()
+                # Auto-save session after chat. Offloaded to a worker thread so
+                # the synchronous FileLock/JSON read-modify-write never stalls
+                # the shared event loop (the session store is a process-wide
+                # singleton, so a blocking write here blocks every concurrent
+                # async agent task on the same loop).
+                await asyncio.to_thread(self._auto_save_session)
                 
                 # Wrap in AutonomyResult for consistent API
                 from .autonomy import AutonomyResult
@@ -472,7 +476,8 @@ class ExecutionMixin:
                             extra={"session_id": sid, "managed_session_id": msid},
                             exc_info=True,
                         )
-            self._auto_save_session()
+            # Offload the blocking session write off the event loop.
+            await asyncio.to_thread(self._auto_save_session)
 
         return result
 

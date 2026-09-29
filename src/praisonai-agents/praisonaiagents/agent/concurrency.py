@@ -156,7 +156,7 @@ class ConcurrencyRegistry:
     async def acquire(self, agent_name: str) -> None:
         """Acquire concurrency slot for agent. No-op if unlimited.
 
-        Waits on the loop-neutral semaphore in short, cancellable polls so the
+        Waits on the loop-neutral limiter in short, cancellable polls so the
         running event loop is never blocked while other tasks hold permits, and
         a cancelled/timed-out await never leaves a thread blocked on acquire().
         """
@@ -174,7 +174,7 @@ class ConcurrencyRegistry:
 
         Prefer async acquire() when possible. Blocks the calling thread until a
         permit is available. Safe to call whether or not a loop is running in the
-        current thread, since the semaphore is loop-neutral.
+        current thread, since the limiter is loop-neutral.
         """
         limiter = self._get_limiter(agent_name)
         if limiter is not None:
