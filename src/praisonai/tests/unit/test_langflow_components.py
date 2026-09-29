@@ -37,5 +37,7 @@ def test_praisonai_agents_component():
     agents_comp.memory = False
     
     built_agents = agents_comp.build_agents()
+    assert built_agents.name == "AgentTeamTest"
     assert built_agents.process == "sequential"
     assert len(built_agents.agents) == 1
+    assert len(built_agents.tasks) == 1
