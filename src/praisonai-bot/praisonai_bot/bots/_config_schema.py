@@ -444,6 +444,13 @@ class ChannelConfigSchema(BaseModel):
     group_policy: str = "mention_only"  # respond_all, mention_only, command_only, observe (record unmentioned msgs as context)
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
     silence_token: Optional[str] = None  # Custom silence token (defaults to NO_REPLY)
+    # Bot-to-bot inbound (#5062). Off by default: bot-authored inbound messages
+    # are dropped as before. When ``allow_bots: true`` the channel accepts
+    # bot-authored messages and the core ``BotLoopGuard`` auto-breaks a runaway
+    # A<->B reply loop using ``bot_loop_protection``'s sliding-window pair budget
+    # (enabled / max_events_per_window / window_seconds / cooldown_seconds).
+    allow_bots: bool = False
+    bot_loop_protection: Optional[Dict[str, Any]] = None
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)  # Changed to List for consistency

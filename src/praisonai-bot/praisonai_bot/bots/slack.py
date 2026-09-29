@@ -364,6 +364,13 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             display_name=auth_response.get("bot_id", auth_response["user"]),
             is_bot=True,
         )
+        # Slack tags our own outbound posts with this ``bot_id`` when they echo
+        # back through the events API. Inbound events surface the sender via
+        # ``bot_id`` (not ``user_id``), so the self-message drop in
+        # ``_bot_sender_allowed`` must compare against this, not ``user_id``
+        # (#5062) — otherwise ``allow_bots: true`` would let the agent answer
+        # its own messages until the loop budget is exhausted.
+        self._self_bot_id = str(auth_response.get("bot_id") or "")
         
         # Initialize bot context for pairing system
         self._bot_context = BotContext(
@@ -375,7 +382,10 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         @self._app.event("message")
         async def handle_message(event, say):
             if event.get("bot_id"):
-                return
+                # Bot-authored: drop unless the channel opts in (#5062). When it
+                # does, the BotLoopGuard breaks a runaway A<->B reply loop.
+                if not self._bot_sender_allowed(event):
+                    return
             
             bot_message = self._convert_event_to_message(event)
 
@@ -648,7 +658,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         @self._app.event("app_mention")
         async def handle_mention(event, say):
             if event.get("bot_id"):
-                return
+                # Bot-authored @mention: drop unless the channel opts in (#5062).
+                if not self._bot_sender_allowed(event):
+                    return
 
             bot_message = self._convert_event_to_message(event)
             bot_message._channel_type = "slack"
@@ -1275,6 +1287,25 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
     
+    def _bot_sender_allowed(self, event: Dict[str, Any]) -> bool:
+        """Whether a bot-authored Slack event may be dispatched (#5062).
+
+        Slack surfaces the sending app via ``bot_id`` (not ``user``), so the
+        loop-guard pair is keyed on that. Our own posts echo back with our
+        ``bot_id``; those are always dropped (self-messages) regardless of
+        ``allow_bots`` to avoid the agent answering itself. Otherwise returns
+        ``False`` (drop) unless the channel opted into bot-authored messages and
+        the pair is still within the ``BotLoopGuard`` budget.
+        """
+        sender_bot_id = str(event.get("bot_id") or event.get("user") or "")
+        self_id = str(getattr(self, "_self_bot_id", "") or "")
+        # Never react to ourselves: Slack echoes our own posts back with our
+        # authenticated ``bot_id`` (#5062).
+        if self_id and sender_bot_id == self_id:
+            return False
+        sender = BotUser(user_id=sender_bot_id, is_bot=True)
+        return self.bot_loop_allows(sender, self_bot_id=self_id)
+
     def _convert_event_to_message(self, event: Dict[str, Any]) -> BotMessage:
         """Convert Slack event to BotMessage."""
         sender = BotUser(
