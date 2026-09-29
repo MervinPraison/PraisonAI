@@ -835,6 +835,41 @@ class GatewayClient:
             except asyncio.TimeoutError:
                 continue
     
+    async def project(
+        self,
+        snapshot: Optional[Dict[str, Any]] = None,
+        *,
+        max_tracked_runs: int = 200,
+    ) -> "AsyncIterator[Any]":
+        """Yield a de-duplicated, gap-aware, memory-bounded session view.
+
+        Drives the pure core reducer
+        (:class:`praisonaiagents.gateway.SessionProjection`) from
+        :meth:`events`, turning the raw event stream into a correct, resumable
+        state that consumers can render directly — no per-client snapshot+event
+        reconciliation, final-message de-duplication, or bounded retention to
+        re-implement (Issue #5324).
+
+        Args:
+            snapshot: Optional initial snapshot (``{"messages": [...],
+                "cursor": N}``) to seed the projection before folding live
+                events. When omitted, the view starts empty and builds up from
+                the stream.
+            max_tracked_runs: Cap on tracked finished runs (LRU) for
+                long-lived sessions; active streams are never evicted.
+
+        Yields:
+            An immutable ``SessionProjectionState`` after the initial snapshot
+            (if any) and after every subsequent event.
+        """
+        from praisonaiagents.gateway import SessionProjection
+
+        proj = SessionProjection(max_tracked_runs=max_tracked_runs)
+        if snapshot is not None:
+            yield proj.apply_snapshot(snapshot)
+        async for event in self.events():
+            yield proj.apply(event)
+
     async def resync(self) -> None:
         """Force a full resynchronization.
         

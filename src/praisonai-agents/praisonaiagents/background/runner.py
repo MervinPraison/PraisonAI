@@ -69,6 +69,13 @@ class BackgroundRunner:
         """
         self.config = config or BackgroundConfig()
         self._tasks: Dict[str, BackgroundTask] = {}
+        # Guards every read/write of ``_tasks``. This runner is a process-wide
+        # singleton (``get_background_runner``) whose sync wrappers insert on a
+        # separate background-loop thread via ``run_coroutine_threadsafe`` while
+        # other surfaces read/mutate the dict on their own thread; without this
+        # a concurrent insert + iterate/delete can raise
+        # ``RuntimeError: dictionary changed size during iteration``.
+        self._tasks_lock: threading.Lock = threading.Lock()
         # Lazily create asyncio.Semaphore() to avoid Python 3.9 event loop issues
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._semaphore_lock: threading.Lock = threading.Lock()  # Thread-safe initialization
@@ -86,17 +93,20 @@ class BackgroundRunner:
     @property
     def tasks(self) -> List[BackgroundTask]:
         """Get all tasks."""
-        return list(self._tasks.values())
+        with self._tasks_lock:
+            return list(self._tasks.values())
     
     @property
     def running_tasks(self) -> List[BackgroundTask]:
         """Get currently running tasks."""
-        return [t for t in self._tasks.values() if t.is_running]
+        with self._tasks_lock:
+            return [t for t in self._tasks.values() if t.is_running]
     
     @property
     def pending_tasks(self) -> List[BackgroundTask]:
         """Get pending tasks."""
-        return [t for t in self._tasks.values() if t.status == TaskStatus.PENDING]
+        with self._tasks_lock:
+            return [t for t in self._tasks.values() if t.status == TaskStatus.PENDING]
     
     async def submit(
         self,
@@ -133,7 +143,8 @@ class BackgroundRunner:
             }
         )
         
-        self._tasks[task.id] = task
+        with self._tasks_lock:
+            self._tasks[task.id] = task
         
         # Create the execution coroutine
         async def execute():
@@ -235,7 +246,8 @@ class BackgroundRunner:
     
     def get_task(self, task_id: str) -> Optional[BackgroundTask]:
         """Get a task by ID."""
-        return self._tasks.get(task_id)
+        with self._tasks_lock:
+            return self._tasks.get(task_id)
     
     async def cancel_task(self, task_id: str) -> bool:
         """
@@ -247,7 +259,8 @@ class BackgroundRunner:
         Returns:
             True if cancelled, False if not found or already completed
         """
-        task = self._tasks.get(task_id)
+        with self._tasks_lock:
+            task = self._tasks.get(task_id)
         if task is None:
             return False
         
@@ -276,10 +289,12 @@ class BackgroundRunner:
         Returns:
             List of completed tasks
         """
-        futures = [t._future for t in self._tasks.values() if t._future]
+        with self._tasks_lock:
+            futures = [t._future for t in self._tasks.values() if t._future]
         
         if not futures:
-            return list(self._tasks.values())
+            with self._tasks_lock:
+                return list(self._tasks.values())
         
         try:
             await asyncio.wait_for(
@@ -289,16 +304,18 @@ class BackgroundRunner:
         except asyncio.TimeoutError:
             pass
         
-        return list(self._tasks.values())
+        with self._tasks_lock:
+            return list(self._tasks.values())
     
     def clear_completed(self):
         """Remove completed tasks from tracking."""
-        completed_ids = [
-            task_id for task_id, task in self._tasks.items()
-            if task.is_completed
-        ]
-        for task_id in completed_ids:
-            del self._tasks[task_id]
+        with self._tasks_lock:
+            completed_ids = [
+                task_id for task_id, task in self._tasks.items()
+                if task.is_completed
+            ]
+            for task_id in completed_ids:
+                del self._tasks[task_id]
     
     def list_tasks(self, status: Optional[TaskStatus] = None) -> List[Dict[str, Any]]:
         """
@@ -310,7 +327,8 @@ class BackgroundRunner:
         Returns:
             List of task dictionaries
         """
-        tasks = self._tasks.values()
+        with self._tasks_lock:
+            tasks = list(self._tasks.values())
         
         if status:
             tasks = [t for t in tasks if t.status == status]

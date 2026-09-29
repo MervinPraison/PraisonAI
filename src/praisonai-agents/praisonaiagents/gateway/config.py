@@ -753,10 +753,17 @@ class ApiConfig:
             backed by the gateway's live agents and sessions.
         mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing the gateway's
             registered agents as callable tools.
+        stream: Emit true token-level deltas on the OpenAI-compatible
+            ``/v1/chat/completions`` SSE surface (``stream:true``) by wiring the
+            agent's existing ``stream_emitter`` through the gateway hot path.
+            Off by default: streaming responses stay byte-for-byte the buffered
+            single-chunk path, so enabling it never regresses non-streaming
+            latency or correctness.
     """
 
     openai: bool = False
     mcp: bool = False
+    stream: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -765,7 +772,7 @@ class ApiConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        return {"openai": self.openai, "mcp": self.mcp}
+        return {"openai": self.openai, "mcp": self.mcp, "stream": self.stream}
 
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> "ApiConfig":
@@ -775,6 +782,7 @@ class ApiConfig:
         return cls(
             openai=bool(data.get("openai", False)),
             mcp=bool(data.get("mcp", False)),
+            stream=bool(data.get("stream", False)),
         )
 
 

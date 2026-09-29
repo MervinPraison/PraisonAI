@@ -11,6 +11,13 @@ from typing import Optional, Sequence
 from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registry_module
 
 
+# Sentinel default for --max-tokens so we can tell "user passed the value"
+# apart from "argparse filled in the default". A bare 16000 default made an
+# explicit ``--max-tokens 16000`` indistinguishable from an omission, and the
+# downstream resolver silently dropped it.
+_MAX_TOKENS_SENTINEL = object()
+
+
 # Authoritative list of verbs the legacy argparse dispatcher implements. Kept as
 # a module-level constant so the unified dispatcher (``praisonai.__main__``) can
 # consult the same oracle: a token that is one of these is an *implemented* verb
@@ -144,7 +151,7 @@ def build_argument_parser(in_test_env: bool):
     parser.add_argument("--planning-tools", type=str, help="Tools for planning research (path to tools.py or comma-separated tool names)")
     parser.add_argument("--planning-reasoning", action="store_true", help="Enable chain-of-thought reasoning in planning")
     parser.add_argument("--auto-approve-plan", action="store_true", help="Auto-approve generated plans without user confirmation")
-    parser.add_argument("--max-tokens", type=int, default=16000, help="Maximum output tokens for agent responses (default: 16000)")
+    parser.add_argument("--max-tokens", type=int, default=_MAX_TOKENS_SENTINEL, help="Maximum output tokens for agent responses (default: 16000)")
     parser.add_argument("--final-agent", type=str, help="Final agent instruction to process the output (e.g., 'Write a detailed blog post')")
 
     # Memory arguments
@@ -372,4 +379,21 @@ def build_argument_parser(in_test_env: bool):
         args, unknown_args = parser.parse_known_args([])
     else:
         args, unknown_args = parser.parse_known_args()
+    _normalize_max_tokens(args)
     return args, unknown_args, special_commands
+
+
+def _normalize_max_tokens(args) -> None:
+    """Record whether --max-tokens was passed and resolve the sentinel default.
+
+    Writes ``_max_tokens_explicit`` onto the namespace so downstream resolvers
+    can honour an explicit ``--max-tokens 16000`` instead of treating it as an
+    omission via a fragile value-equality check.
+    """
+    from praisonai.framework_adapters.praisonai_adapter import _DEFAULT_MAX_TOKENS
+
+    raw = getattr(args, "max_tokens", _MAX_TOKENS_SENTINEL)
+    explicit = raw is not _MAX_TOKENS_SENTINEL
+    args._max_tokens_explicit = explicit
+    if not explicit:
+        args.max_tokens = _DEFAULT_MAX_TOKENS

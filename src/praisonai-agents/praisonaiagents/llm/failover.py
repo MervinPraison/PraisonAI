@@ -359,10 +359,17 @@ class FailoverManager:
                 if profile.cooldown_until and current_time >= profile.cooldown_until:
                     profile.reset()
             
-            # Find first available profile
-            for profile in self._profiles:
-                if profile.is_available:
-                    return profile
+            # Find available profiles (already priority-sorted by add_profile).
+            available = [p for p in self._profiles if p.is_available]
+            if available:
+                if self.config.rotate_on_success:
+                    # Round-robin among the current highest-priority tier only,
+                    # so equal-priority credentials configured to spread load
+                    # actually share traffic instead of one absorbing all of it.
+                    top_priority = available[0].priority
+                    tier = [p for p in available if p.priority == top_priority]
+                    return tier[self._current_index % len(tier)]
+                return available[0]
             
             # If none available, return the one with shortest remaining cooldown
             available_profiles = [p for p in self._profiles if p.status != ProviderStatus.DISABLED]
@@ -443,6 +450,10 @@ class FailoverManager:
             profile: The profile that succeeded
         """
         with self._lock:
+            # Advance the round-robin cursor so the next get_next_profile()
+            # hands work to a different equal-priority credential.
+            if self.config.rotate_on_success:
+                self._current_index += 1
             if profile.status != ProviderStatus.AVAILABLE:
                 # Snapshot the cooldown this success is recovering from BEFORE
                 # resetting, so we can avoid clobbering a newer fleet-wide bench.

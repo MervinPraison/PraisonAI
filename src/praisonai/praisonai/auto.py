@@ -1144,6 +1144,35 @@ class AutoGenerator(BaseAutoGenerator):
         full_path = os.path.abspath(self.agent_file)
         return full_path
 
+    # Name-shape heuristics for code-execution tools that ship in core (or a
+    # plugin) but are not yet listed in ``TOOL_CATEGORIES['code_execution']``.
+    # Used to close the drift gap where a new dangerous tool (e.g.
+    # ``execute_code_with_tools``, ``python_repl``, ``shell_exec``) would
+    # otherwise slip past the static allowlist.
+    _DANGEROUS_TOOL_NAME_HINTS = (
+        "execute_", "exec_", "shell_", "_shell", "_repl", "sandbox_", "_exec",
+    )
+
+    def _dangerous_tool_names(self) -> set:
+        """Return the set of code-execution tool names to strip by default.
+
+        Unions the static ``TOOL_CATEGORIES['code_execution']`` floor with any
+        code-execution tool discovered in the *live* registry (matched by name
+        shape), so a new dangerous tool shipped in core is stripped even though
+        the static list has not been updated. Falls back to the static list
+        alone when the resolver is unavailable.
+        """
+        dangerous = set(TOOL_CATEGORIES.get("code_execution", []))
+        try:
+            live = self._available_tools()
+        except Exception:  # pragma: no cover - defensive
+            live = []
+        for name in live:
+            lowered = name.lower()
+            if any(hint in lowered for hint in self._DANGEROUS_TOOL_NAME_HINTS):
+                dangerous.add(name)
+        return dangerous
+
     def _enforce_tool_allowlist(self, role_details: Dict[str, Any]) -> Dict[str, Any]:
         """Strip dangerous shell/exec tools unless the task asked for code execution.
 
@@ -1160,7 +1189,7 @@ class AutoGenerator(BaseAutoGenerator):
         if not requested:
             return role_details
 
-        dangerous = set(TOOL_CATEGORIES.get("code_execution", []))
+        dangerous = self._dangerous_tool_names()
         # Opt-in signal: did the topic ask for code execution?
         try:
             code_exec_requested = "code_execution" in {

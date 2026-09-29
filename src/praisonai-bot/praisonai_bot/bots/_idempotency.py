@@ -57,6 +57,29 @@ _DEFAULT_TTL_SECONDS = 86_400.0  # 24h, matching the in-memory default
 # ``inflight`` rows are reclaimed; a ``recorded`` key dedups until its TTL.
 _DEFAULT_INFLIGHT_LEASE_SECONDS = 900.0  # 15 min
 
+# Bounded retries for the non-Lua ``WATCH``/``MULTI`` fallback so a persistently
+# contended key can never spin forever; on exhaustion the caller treats it as a
+# degraded fact (the claim self-heals via the inflight lease).
+_WATCH_RETRIES = 8
+
+
+class _NoWatchError(Exception):
+    """Stable sentinel used in place of ``redis.WatchError`` when the redis
+    package is unavailable, so a real connection error inside the watched-
+    transaction fallback is *not* misread as a transaction abort and retried."""
+
+
+def _watch_error_type():
+    """The ``redis.WatchError`` type when redis is installed, else the stable
+    :class:`_NoWatchError` sentinel (one shared class so ``except`` in the store
+    and a raise in tests reference the same type)."""
+    try:
+        from redis import WatchError
+
+        return WatchError
+    except Exception:  # pragma: no cover - redis present in this package's deps
+        return _NoWatchError
+
 
 class SqliteIdempotencyStore:
     """SQLite-backed durable :class:`IdempotencyStoreProtocol`.
@@ -191,6 +214,337 @@ class SqliteIdempotencyStore:
             conn.commit()
 
 
+class RedisIdempotencyStore:
+    """Cluster-wide inbound-dedup :class:`IdempotencyStoreProtocol` (Issue #5154).
+
+    The SQLite store only dedups across replicas when every replica shares one
+    state file; without a shared volume the *same* webhook fanned to two
+    replicas is admitted on each and processed twice. This store keeps the
+    exactly-once claim in Redis so admission is cluster-wide by construction,
+    keyed on the deterministic idempotency key ``(platform, account,
+    channel_id, message_id)``.
+
+    It reuses the proven ``RedisTurnLock`` lease shape: ``reserve`` is a single
+    ``SET NX PX`` (atomic claim + owner token + TTL), so both a redelivery and a
+    concurrent duplicate on another replica are rejected crash-safely; a claim
+    orphaned by a crash between ``reserve`` and ``record``/``release`` expires
+    after ``inflight_lease_seconds`` and the provider's retry re-runs — the same
+    self-healing the SQLite store gets from its inflight lease, here for free via
+    the key TTL. ``record`` upgrades the claim to a long-lived ``recorded`` value
+    (TTL ``ttl_seconds``); ``release`` drops the claim only if we still own it
+    (compare-and-del), so a reclaimed lease is never deleted out from under a
+    replica that took over.
+
+    The heavy Redis client lives in the wrapper (as with ``RedisTurnLock``);
+    core owns only the protocol. This store is *synchronous* to match the
+    synchronous :class:`IdempotencyStoreProtocol` seam (the gateway's
+    ``_hook_reserve``/``_hook_record``/``_hook_release`` are sync), so it takes a
+    synchronous ``redis.Redis`` client, not the async one the turn lock uses.
+    """
+
+    _RECORDED = "recorded"
+
+    # Lua: delete only if the stored value still equals our token, so we never
+    # release a claim another replica reclaimed after our lease expired.
+    _RELEASE_LUA = (
+        "if redis.call('get', KEYS[1]) == ARGV[1] then "
+        "return redis.call('del', KEYS[1]) else return 0 end"
+    )
+
+    # Lua: commit ``recorded`` only if the key is still our in-flight token *or*
+    # is already this same ``recorded`` value (idempotent re-record) *or* is
+    # gone. If another replica reclaimed the key after our lease expired (its
+    # own token), we must NOT overwrite its live claim — doing so would admit a
+    # second run for the same delivery and break exactly-once. In that case the
+    # commit is a no-op and this replica's now-orphaned run does not clobber the
+    # replica that legitimately took over.
+    _RECORD_LUA = (
+        "local v = redis.call('get', KEYS[1]); "
+        "if v == false or v == ARGV[1] or v == ARGV[2] then "
+        "redis.call('set', KEYS[1], ARGV[2], 'PX', ARGV[3]); return 1 "
+        "else return 0 end"
+    )
+
+    def __init__(
+        self,
+        client,
+        *,
+        prefix: str = "praison:hookidem:",
+        ttl_seconds: float = _DEFAULT_TTL_SECONDS,
+        inflight_lease_seconds: float = _DEFAULT_INFLIGHT_LEASE_SECONDS,
+    ) -> None:
+        import uuid
+
+        self._client = client
+        self._prefix = prefix
+        self._ttl_ms = max(1, int(float(ttl_seconds) * 1000))
+        self._inflight_ms = max(1, int(float(inflight_lease_seconds) * 1000))
+        # A per-instance owner token distinguishes *our* in-flight claim from a
+        # ``recorded`` value and from another replica's claim, so ``release`` is
+        # a safe compare-and-del.
+        self._token = uuid.uuid4().hex
+
+    def _redis_key(self, key: str) -> str:
+        return f"{self._prefix}{key}"
+
+    def reserve(self, key: str) -> bool:
+        """Atomically claim ``key`` cluster-wide via ``SET NX PX``.
+
+        Returns ``False`` when the key is already recorded *or* currently claimed
+        by any replica — the ``NX`` insert fails, rejecting both a redelivery and
+        a concurrent duplicate. A claim orphaned by a crash expires after the
+        inflight lease, after which a retry's ``reserve`` succeeds again.
+
+        A *runtime* Redis outage (the client was reachable at build time but has
+        since dropped) must not 500 the inbound hook path. It **fails open** —
+        admits the delivery and records the degraded fact — mirroring the
+        turn-lock's fail-open: cross-replica dedup is temporarily best-effort
+        until Redis recovers, but ingress keeps working instead of wedging.
+        """
+        try:
+            admitted = bool(
+                self._client.set(
+                    self._redis_key(key),
+                    self._token,
+                    nx=True,
+                    px=self._inflight_ms,
+                )
+            )
+            self._mark_runtime_recovered()
+            return admitted
+        except Exception as e:
+            self._mark_runtime_degraded("reserve", e)
+            return True
+
+    def record(self, key: str) -> None:
+        """Commit ``key`` as processed (long-lived ``recorded`` value, TTL).
+
+        Owner-checked: only overwrites the key when it is still our in-flight
+        token, already this same ``recorded`` value, or gone. If our inflight
+        lease expired and another replica reclaimed the key (its token), the
+        commit is a no-op so we never clobber the replica that took over — the
+        exactly-once fix for the stale-owner race.
+        """
+        redis_key = self._redis_key(key)
+        try:
+            self._client.eval(
+                self._RECORD_LUA,
+                1,
+                redis_key,
+                self._token,
+                self._RECORDED,
+                self._ttl_ms,
+            )
+            self._mark_runtime_recovered()
+        except Exception as e:
+            # Fallback for clients without ``eval``: an *atomic* owner-checked
+            # compare-and-set via a ``WATCH``/``MULTI`` optimistic transaction,
+            # so a concurrent reclaim between the ownership read and the write
+            # aborts the commit (``WatchError``) instead of clobbering the new
+            # owner. A raw Redis outage is swallowed as a degraded fact — a
+            # missed ``record`` self-heals via the inflight lease expiring,
+            # after which a redelivery re-runs.
+            if self._record_via_watch(redis_key):
+                self._mark_runtime_recovered()
+            else:
+                self._mark_runtime_degraded("record", e)
+
+    def _record_via_watch(self, redis_key: str) -> bool:
+        """Owner-checked commit without Lua, atomic via ``WATCH``/``MULTI``.
+
+        Returns ``True`` when the commit completed (or was a legitimate no-op
+        because another owner reclaimed the key), ``False`` when the client
+        cannot support a watched transaction or Redis is unreachable — the
+        caller then treats it as a runtime-degraded fact. The optimistic
+        transaction guarantees the same exactly-once safety as ``_RECORD_LUA``:
+        if the value changes under us between ``WATCH`` and ``EXEC`` the
+        transaction aborts, so we never overwrite a replica that reclaimed the
+        key after our lease expired.
+        """
+        pipeline = getattr(self._client, "pipeline", None)
+        if pipeline is None:
+            return False
+        WatchError = _watch_error_type()
+        try:
+            with pipeline() as pipe:
+                for _ in range(_WATCH_RETRIES):
+                    try:
+                        pipe.watch(redis_key)
+                        current = pipe.get(redis_key)
+                        if current not in (None, self._token, self._RECORDED):
+                            # Another owner reclaimed the key: legitimate no-op.
+                            pipe.unwatch()
+                            return True
+                        pipe.multi()
+                        pipe.set(redis_key, self._RECORDED, px=self._ttl_ms)
+                        pipe.execute()
+                        return True
+                    except WatchError:
+                        # Value changed under us; re-read and re-decide.
+                        continue
+        except Exception:
+            return False
+        return False
+
+    def release(self, key: str) -> None:
+        """Drop our in-flight claim so a failed delivery can be retried.
+
+        Compare-and-del on our owner token: a ``recorded`` value or a claim a
+        replica reclaimed after our lease expired is a harmless no-op, never
+        another replica's live claim. A runtime Redis outage is swallowed as a
+        degraded fact — the orphaned claim self-heals via the inflight lease.
+        """
+        redis_key = self._redis_key(key)
+        try:
+            self._client.eval(self._RELEASE_LUA, 1, redis_key, self._token)
+            self._mark_runtime_recovered()
+        except Exception as e:
+            # Fallback for clients without ``eval``: an *atomic* owner-checked
+            # compare-and-del via a ``WATCH``/``MULTI`` optimistic transaction,
+            # so a concurrent reclaim between the ownership read and the delete
+            # aborts instead of dropping the new owner's live claim.
+            if self._release_via_watch(redis_key):
+                self._mark_runtime_recovered()
+            else:
+                self._mark_runtime_degraded("release", e)
+
+    def _release_via_watch(self, redis_key: str) -> bool:
+        """Owner-checked delete without Lua, atomic via ``WATCH``/``MULTI``.
+
+        Returns ``True`` when the delete completed (or was a legitimate no-op
+        because we no longer own the key), ``False`` when the client cannot
+        support a watched transaction or Redis is unreachable. Like
+        :meth:`_record_via_watch`, the optimistic transaction aborts if the
+        value changes under us, so we never delete a claim a replica reclaimed
+        after our lease expired.
+        """
+        pipeline = getattr(self._client, "pipeline", None)
+        if pipeline is None:
+            return False
+        WatchError = _watch_error_type()
+        try:
+            with pipeline() as pipe:
+                for _ in range(_WATCH_RETRIES):
+                    try:
+                        pipe.watch(redis_key)
+                        if pipe.get(redis_key) != self._token:
+                            pipe.unwatch()
+                            return True  # not ours: legitimate no-op
+                        pipe.multi()
+                        pipe.delete(redis_key)
+                        pipe.execute()
+                        return True
+                    except WatchError:
+                        continue
+        except Exception:
+            return False
+        return False
+
+    def _mark_runtime_recovered(self) -> None:
+        """Clear a prior *runtime* degradation after a successful Redis op.
+
+        The build-time / runtime degraded fact must not stick after Redis
+        recovers, or ``gateway status`` / ``doctor`` would keep reporting
+        best-effort dedup indefinitely and a later outage would emit no fresh
+        warning (Greptile P2). A successful ``reserve``/``record``/``release``
+        proves the client is reachable again, so we reset the flag and clear the
+        registry entry (idempotent — a no-op when never degraded).
+        """
+        if not getattr(self, "_runtime_degraded", False):
+            return
+        self._runtime_degraded = False
+        logger.info(
+            "Redis idempotency store recovered; cross-replica dedup restored."
+        )
+        try:
+            from ._session import clear_durability_degraded
+
+            clear_durability_degraded("idempotency")
+        except Exception as e:  # pragma: no cover - registry is best-effort
+            logger.debug("Failed to clear idempotency runtime degradation: %s", e)
+
+    def _mark_runtime_degraded(self, op: str, error: Exception) -> None:
+        """Record a *runtime* Redis outage once (Issue #5154 fail-open).
+
+        Distinct from the build-time fallback in :func:`build_idempotency_store`:
+        the client was reachable at construction but has since dropped. Rather
+        than propagating the error through the HTTP hook path (a 500, or a
+        processed-but-unrecorded run that the provider retries into a duplicate),
+        we degrade to best-effort dedup and surface the fact via the durability
+        registry so ``gateway status`` / ``doctor`` report it — never silent.
+        """
+        if getattr(self, "_runtime_degraded", False):
+            return
+        self._runtime_degraded = True
+        logger.warning(
+            "Redis idempotency store degraded at runtime during %s (%s); "
+            "inbound dedup is best-effort until Redis recovers.",
+            op,
+            error,
+        )
+        try:
+            from ._session import record_durability_degraded
+
+            record_durability_degraded(
+                "idempotency",
+                reason=(
+                    "redis idempotency backend unreachable at runtime "
+                    "(dedup best-effort until it recovers)"
+                ),
+            )
+        except Exception as e:  # pragma: no cover - registry is best-effort
+            logger.debug("Failed to record idempotency runtime degradation: %s", e)
+
+
+def _build_redis_client(redis_config, url):
+    """Construct a synchronous ``redis.Redis`` client, or ``None`` on failure.
+
+    Mirrors ``build_turn_lock``'s client construction but for the *sync* client
+    (the idempotency seam is synchronous). Any missing dependency or connection
+    failure returns ``None`` so the caller can fail open to the durable SQLite
+    store rather than wedging inbound delivery.
+    """
+    try:
+        import redis
+    except ImportError:
+        logger.warning(
+            "Idempotency store_backend='redis' selected but the redis package "
+            "is not installed; falling back to durable SQLite. "
+            "Install with: pip install redis"
+        )
+        return None
+    try:
+        if url:
+            client = redis.from_url(url, decode_responses=True)
+        elif redis_config is not None and getattr(redis_config, "url", None):
+            client = redis.from_url(redis_config.url, decode_responses=True)
+        elif redis_config is not None:
+            client = redis.Redis(
+                host=getattr(redis_config, "host", "localhost"),
+                port=getattr(redis_config, "port", 6379),
+                db=getattr(redis_config, "db", 0),
+                password=getattr(redis_config, "password", None),
+                decode_responses=True,
+            )
+        else:
+            logger.warning(
+                "Idempotency store_backend='redis' selected but no Redis URL or "
+                "RedisConfig is available; falling back to durable SQLite."
+            )
+            return None
+        # Verify connectivity up front so an unreachable Redis fails open at
+        # build time (surfaced as a degraded fact) rather than on first reserve.
+        client.ping()
+        return client
+    except Exception as e:  # pragma: no cover - construction is defensive
+        logger.warning(
+            "Failed to build Redis idempotency store, falling back to durable "
+            "SQLite: %s",
+            e,
+        )
+        return None
+
+
 def build_idempotency_store(
     backend: Union[str, None] = None,
     *,
@@ -198,6 +552,8 @@ def build_idempotency_store(
     max_size: int = _DEFAULT_MAX_SIZE,
     ttl_seconds: float = _DEFAULT_TTL_SECONDS,
     inflight_lease_seconds: float = _DEFAULT_INFLIGHT_LEASE_SECONDS,
+    redis_config=None,
+    redis_url: Union[str, None] = None,
 ):
     """Build an idempotency store for the given ``backend``.
 
@@ -206,10 +562,15 @@ def build_idempotency_store(
     survives a restart within a provider's retry window rather than silently
     re-processing a redelivered webhook. ``"memory"`` stays available as an
     **explicit** opt-in for tests / ephemeral runs, and ``"sqlite"`` forces the
-    durable store. If the durable store genuinely cannot be initialised, this
-    records a *durability-degraded* fact (surfaced by ``gateway doctor`` /
-    ``gateway status``) and falls back to in-memory so inbound delivery keeps
-    working — degradation is reported, not silent.
+    durable store. ``"redis"`` selects the cluster-wide
+    :class:`RedisIdempotencyStore` (Issue #5154) so a webhook fanned to multiple
+    replicas is admitted exactly once, reusing the gateway's ``RedisConfig`` (or
+    the ``redis_url`` override) exactly as ``build_turn_lock`` does. If the
+    durable store genuinely cannot be initialised — or, for ``"redis"``, if
+    Redis is unreachable — this records a *durability-degraded* fact (surfaced
+    by ``gateway doctor`` / ``gateway status``) and falls back (Redis→durable
+    SQLite→in-memory) so inbound delivery keeps working — degradation is
+    reported, not silent.
     """
     from praisonaiagents.gateway import InMemoryIdempotencyStore
 
@@ -273,22 +634,37 @@ def build_idempotency_store(
         store, _durable = _sqlite()
         return store
     if backend == "redis":
-        # A cross-replica Redis idempotency backend is not yet implemented in
-        # the wrapper (unlike ``RedisTurnLock`` for the turn lock). Selecting it
-        # must therefore never *silently* downgrade to per-replica dedup — that
-        # is the "silent failure > crash" trap (#4768): the operator asked for
-        # cross-replica idempotency and would otherwise see a green health
-        # surface while duplicate deliveries run the same turn twice. Mirror the
-        # SQLite-failure path: record the durability-degraded fact so
-        # ``health()`` / ``gateway status`` / ``gateway doctor`` report it, then
-        # fall back to the durable SQLite store (still cross-restart dedup, and
-        # cross-replica when the state file is shared) rather than in-memory.
+        # Cross-replica exactly-once admission (Issue #5154). Try the real
+        # cluster-wide store first; only if Redis is unreachable / the package
+        # is missing do we fall back — and never *silently*: the operator asked
+        # for cross-replica dedup and would otherwise see a green health surface
+        # while duplicate deliveries run the same turn twice (the "silent
+        # failure > crash" trap, #4768). So on fallback we mirror the
+        # SQLite-failure path and record the degraded fact.
+        client = _build_redis_client(redis_config, redis_url)
+        if client is not None:
+            prefix = (
+                getattr(redis_config, "prefix", "praison:")
+                if redis_config is not None
+                else "praison:"
+            )
+            store = RedisIdempotencyStore(
+                client,
+                prefix=f"{prefix}hookidem:",
+                ttl_seconds=ttl_seconds,
+                inflight_lease_seconds=inflight_lease_seconds,
+            )
+            # Cross-replica dedup is now active: clear any prior idempotency
+            # degradation so a recovered gateway stops reporting a downgrade.
+            from ._session import clear_durability_degraded
+
+            clear_durability_degraded("idempotency")
+            return store
         logger.warning(
-            "Idempotency store_backend='redis' is not implemented; inbound "
-            "dedup runs per-replica (durable SQLite fallback). A message "
-            "delivered to multiple replicas that do not share the state file "
-            "may be processed more than once. Install a shared state dir or "
-            "use a single replica until a Redis backend is available."
+            "Idempotency store_backend='redis' selected but Redis is "
+            "unavailable; inbound dedup falls back per-replica (durable SQLite). "
+            "A message delivered to multiple replicas that do not share the "
+            "state file may be processed more than once until Redis recovers."
         )
         # Build the SQLite fallback first: its success path clears any prior
         # idempotency degradation, so we must record the redis-unavailable fact
