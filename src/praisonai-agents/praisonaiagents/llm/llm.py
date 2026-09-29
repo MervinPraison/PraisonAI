@@ -2103,10 +2103,11 @@ Respond with ONLY a valid JSON tool call in this format:
         `_current_repair_count`). Returns None when the budget is spent or the
         tool calls validate cleanly. Shared by the sync and async loops.
         """
-        if not tool_calls or self.max_tool_repairs <= 0:
+        max_tool_repairs = getattr(self, 'max_tool_repairs', 0)
+        if not tool_calls or max_tool_repairs <= 0:
             return None
         repair_attempt_count = getattr(self, '_current_repair_count', 0)
-        if repair_attempt_count >= self.max_tool_repairs:
+        if repair_attempt_count >= max_tool_repairs:
             return None
         validation_errors = []
         for tc in tool_calls:
