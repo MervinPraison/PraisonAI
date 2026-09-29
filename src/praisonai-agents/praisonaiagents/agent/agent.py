@@ -1373,12 +1373,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 array_mode=ArrayMode.PASSTHROUGH,
                 default=None,
             )
+        # Per-agent event-hook registry (isolates BEFORE_TOOL/AFTER_AGENT/...
+        # hooks so they never fire on unrelated agents sharing the default
+        # registry). A bare HookRegistry passed as ``hooks=`` still works too.
+        _hooks_registry = None
         if _hooks_config is not None:
             if isinstance(_hooks_config, list):
                 _hooks_list = _hooks_config
             elif isinstance(_hooks_config, HooksConfig):
                 step_callback = _hooks_config.on_step
                 _hooks_list = list(_hooks_config.middleware or [])
+                _hooks_registry = getattr(_hooks_config, "registry", None)
                 # Route on_step / on_tool_call onto the SAME middleware chain
                 # that already powers ``hooks=[...]`` (MiddlewareManager). Both
                 # keys used to be stored-and-never-called, so the TypeError that
@@ -2101,7 +2106,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Lazy init for HookRunner and StreamEventEmitter (zero overhead when not used)
         self.__hook_runner = None  # Will be initialized on first access
         self.__stream_emitter = None  # Will be initialized on first access
-        self._hooks_registry_param = hooks  # Store for lazy init
+        # Prefer a per-agent registry declared via HooksConfig(registry=...) so
+        # this agent's event hooks stay isolated; else fall back to the raw
+        # ``hooks`` value (a bare HookRegistry still isolates, anything else
+        # resolves to the shared default registry in the _hook_runner property).
+        self._hooks_registry_param = _hooks_registry if _hooks_registry is not None else hooks
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
