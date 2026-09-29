@@ -73,10 +73,18 @@ _LAZY_IMPORTS = {
     # Agent/gateway-callable thread creation (Issue #3987)
     "ThreadResult": ("praisonaiagents.gateway.protocols", "ThreadResult"),
     "ThreadStatus": ("praisonaiagents.gateway.protocols", "ThreadStatus"),
+    # Agent-callable message mutation: edit/delete (Issue #5054)
+    "MessageActionResult": ("praisonaiagents.gateway.protocols", "MessageActionResult"),
+    "MessageActionStatus": ("praisonaiagents.gateway.protocols", "MessageActionStatus"),
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply": ("praisonaiagents.gateway.protocols", "ConversationReply"),
     "ConversationReplyStatus": ("praisonaiagents.gateway.protocols", "ConversationReplyStatus"),
     "ConversationRequestProtocol": ("praisonaiagents.gateway.protocols", "ConversationRequestProtocol"),
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind": ("praisonaiagents.gateway.protocols", "GatewayRequestKind"),
+    "GatewayServerRequest": ("praisonaiagents.gateway.protocols", "GatewayServerRequest"),
+    "GatewayServerReply": ("praisonaiagents.gateway.protocols", "GatewayServerReply"),
+    "GatewayRequestChannelProtocol": ("praisonaiagents.gateway.protocols", "GatewayRequestChannelProtocol"),
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol": ("praisonaiagents.gateway.protocols", "GatewayStatusProtocol"),
     "GatewayStatus": ("praisonaiagents.gateway.protocols", "GatewayStatus"),
@@ -405,11 +413,18 @@ __all__ = [
     "ReactionResult",
     "ReactionStatus",
     "ThreadResult",
+    "MessageActionResult",
+    "MessageActionStatus",
     "ThreadStatus",
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply",
     "ConversationReplyStatus",
     "ConversationRequestProtocol",
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind",
+    "GatewayServerRequest",
+    "GatewayServerReply",
+    "GatewayRequestChannelProtocol",
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol",
     "GatewayStatus",

@@ -331,6 +331,7 @@ class AgentOS:
             from praisonai.api.agent_invoke import (
                 _supports_session_isolation,
                 _clone_agent,
+                bind_session,
             )
             # ``clone_for_channel`` intentionally drops handoffs (nested Agents
             # can't be safely deep-copied and would share RLocks). To avoid
@@ -340,22 +341,12 @@ class AgentOS:
             if _supports_session_isolation(template) and not has_handoffs:
                 try:
                     agent = _clone_agent(template)
+                    agent = bind_session(agent, request.session_id)
                 except Exception as e:
                     raise HTTPException(
                         status_code=500,
                         detail=f"Failed to isolate agent for session: {e}",
                     )
-                agent.chat_history = []
-                if hasattr(agent, "_session_store_initialized"):
-                    agent._session_store_initialized = False
-                if request.session_id:
-                    agent._session_id = request.session_id
-                    if hasattr(agent, "_history_session_id"):
-                        agent._history_session_id = request.session_id
-                else:
-                    agent._session_id = None
-                    if hasattr(agent, "_history_session_id"):
-                        agent._history_session_id = None
             else:
                 agent = template
 

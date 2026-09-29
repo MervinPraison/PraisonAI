@@ -108,10 +108,11 @@ class PlanStorage:
         
         # Convert plan to markdown
         markdown = plan.to_markdown()
-        
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(markdown)
-            
+
+        # Atomic write so a crash mid-write never truncates the previous plan.
+        from ..utils.atomic_io import atomic_write_text
+        atomic_write_text(path, markdown)
+
         plan.file_path = path
         logger.debug(f"Saved plan to {path}")
         
@@ -227,10 +228,11 @@ class PlanStorage:
         """
         filename = f"{name}.json"
         path = os.path.join(self.todos_dir, filename)
-        
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(todo.to_json())
-            
+
+        # Atomic write so a crash mid-write never truncates the previous todos.
+        from ..utils.atomic_io import atomic_write_text
+        atomic_write_text(path, todo.to_json())
+
         logger.debug(f"Saved todo list to {path}")
         return path
     

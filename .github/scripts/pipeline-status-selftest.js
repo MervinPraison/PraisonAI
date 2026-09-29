@@ -73,4 +73,16 @@ assert(
   )
 );
 
+assert(
+  'external example only path',
+  mg.isExternalExampleOnlyChange([{ filename: 'examples/tools/external/arxiv/tool.py' }])
+);
+assert(
+  'mixed paths not external-example only',
+  !mg.isExternalExampleOnlyChange([
+    { filename: 'examples/tools/external/foo.py' },
+    { filename: 'src/praisonai-agents/foo.py' },
+  ])
+);
+
 process.exit(failed ? 1 : 0);
