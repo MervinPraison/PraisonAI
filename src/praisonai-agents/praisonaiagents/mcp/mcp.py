@@ -210,7 +210,27 @@ class MCPToolRunner(threading.Thread):
                 return f"Error: MCP tool call timed out after {self.timeout} seconds"
             if not success:
                 return f"Error: {result}"
-            
+
+            # A tool that fails at the application level returns a normal
+            # CallToolResult with isError=True per the MCP spec. Surface it as a
+            # structured error so retry/circuit-breaker/hook logic treats it as a
+            # failure instead of a successful string result (issue #5319).
+            if getattr(result, 'isError', False):
+                if hasattr(result, 'content') and result.content:
+                    if hasattr(result.content[0], 'text'):
+                        error_text = result.content[0].text
+                    else:
+                        error_text = str(result.content[0])
+                else:
+                    error_text = str(result)
+                # Guarantee a non-empty error string: an isError result with an
+                # empty text block would otherwise yield {"error": ""}, which
+                # retry/circuit-breaker/hook logic can misread as a success
+                # (issue #5319).
+                if not error_text:
+                    error_text = f"MCP tool '{tool_name}' reported an error (isError=True)"
+                return {"error": error_text, "mcp_error": True}
+
             # Process result
             if hasattr(result, 'content') and result.content:
                 if hasattr(result.content[0], 'text'):
