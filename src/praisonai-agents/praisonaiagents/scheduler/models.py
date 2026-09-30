@@ -407,6 +407,16 @@ class ScheduleJob:
                  into a single normal fire on recovery. ``None`` (default)
                  disables the check, so existing jobs are byte-for-byte
                  unchanged and keep firing exactly as before.
+        hold_until: Optional epoch instant before which the job is parked and
+                 not due, even when its schedule would otherwise fire. Set when
+                 a run fails with a provider rate-limit / quota signal (the
+                 provider's own ``Retry-After`` / reset window plus a small
+                 slack): the recurring job stops re-firing and re-failing every
+                 tick against a benched provider. Intervening fires coalesce
+                 into the first legal instant after the hold; the executor
+                 clears it on the first run that reaches the model (proof the
+                 window reopened). ``None`` (default) keeps today's behaviour,
+                 so jobs that never hit a quota wall are unchanged.
     """
 
     name: str = ""
@@ -439,6 +449,7 @@ class ScheduleJob:
     misfire_grace_seconds: Optional[float] = None
     backend: Optional[str] = None
     backend_options: Dict[str, Any] = field(default_factory=dict)
+    hold_until: Optional[float] = None
 
     # ── bounded-run retirement ───────────────────────────────────────
 
@@ -564,6 +575,11 @@ class ScheduleJob:
             d["backend"] = self.backend
             if self.backend_options:
                 d["backend_options"] = dict(self.backend_options)
+        # Provider-quota hold. Only persist when parked so a job that never hit
+        # a quota wall stays byte-for-byte unchanged; the parked instant must
+        # survive a restart so a benched job stays parked across processes.
+        if self.hold_until is not None:
+            d["hold_until"] = self.hold_until
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -624,6 +640,7 @@ class ScheduleJob:
                 if isinstance(d.get("backend_options"), dict)
                 else {}
             ),
+            hold_until=d.get("hold_until"),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0

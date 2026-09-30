@@ -108,6 +108,26 @@ def test_merge_watchdog_overrides_cli_wins_over_yaml():
     assert merged["enabled"] is True
 
 
+def test_merge_watchdog_config_field_enables_when_yaml_absent():
+    # Issue #5362: GatewayConfig(watchdog=True) enables the backstop when no
+    # CLI flag and no YAML key are set (yaml_present=False).
+    gw = _make_gateway()
+    gw.config.watchdog = True
+    merged = gw._merge_watchdog_overrides(None, yaml_present=False)
+    assert merged["enabled"] is True
+
+
+def test_explicit_yaml_scalar_false_beats_config_field():
+    # Issue #5362: an explicit ``watchdog: false`` (yaml_present=True) must not
+    # be re-enabled by GatewayConfig(watchdog=True).
+    gw = _make_gateway()
+    gw.config.watchdog = True
+    merged = gw._merge_watchdog_overrides(
+        {"enabled": False}, yaml_present=True
+    )
+    assert merged["enabled"] is False
+
+
 def test_arm_and_disarm_are_safe_without_watchdog():
     gw = _make_gateway()
     # No watchdog configured: both are no-ops and must not raise.

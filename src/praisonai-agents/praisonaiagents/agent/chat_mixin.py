@@ -5728,6 +5728,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         return llm_summarize_async
 
+    def _resolve_compaction_max_tokens(self, execution_cfg):
+        """
+        Resolve the compaction trigger budget.
+
+        An explicit ``ExecutionConfig.max_context_tokens`` always wins. When it
+        is unset, size the trigger to the active model's context window (reusing
+        the model-aware ``budgeter`` the in-loop path already uses) instead of a
+        flat default, so large-context models are not compacted prematurely.
+        Falls back to a static default only for the offline / unknown-model case.
+        """
+        _explicit = getattr(execution_cfg, 'max_context_tokens', None)
+        if _explicit:
+            return _explicit
+        try:
+            from ..context.budgeter import get_model_limit, get_output_reserve
+            model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+            limit = get_model_limit(model_name)
+            reserve = get_output_reserve(model_name)
+            return max(1, int(limit * 0.8) - reserve)
+        except Exception:
+            return 8000
+
     def _apply_context_compaction(self, messages, hook_event_class):
         """
         Apply context compaction to messages if enabled (sync version).
@@ -5747,7 +5769,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from ..compaction import ContextCompactor
             from ..compaction.strategy import CompactionStrategy
             
-            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg)
             _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
             
             # Create LLM summarization function if strategy is LLM_SUMMARIZE
@@ -5779,17 +5801,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Perform compaction
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                import asyncio
-                try:
-                    # Run async compaction in event loop
-                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
-                except RuntimeError:
-                    # If already in async context, fall back to sync (naive) compaction
-                    logging.warning(
-                        f"[compaction] {self.name}: LLM_SUMMARIZE fell back to naive summarization "
-                        f"(asyncio.run not available in sync context)"
-                    )
-                    compacted_msgs, _cr = _compactor.compact(messages)
+                # Drive the async summariser through the shared bridge so it runs
+                # correctly whether or not a loop is already running (FastAPI /
+                # Jupyter / a bot handler). The previous code caught bare
+                # RuntimeError from ``asyncio.run`` ("event loop already
+                # running") and silently downgraded LLM summarisation to naive
+                # truncation whenever a loop was live; the bridge removes that
+                # spurious fallback so the real summariser always runs. Provider
+                # errors inside the summariser remain best-effort (see
+                # ``_llm_summarize_async``, which falls back to a naive summary on
+                # failure) — compaction never hard-fails the turn.
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                compacted_msgs, _cr = run_coroutine_from_any_context(
+                    _compactor.compact_async(messages)
+                )
             else:
                 compacted_msgs, _cr = _compactor.compact(messages)
             
@@ -5834,7 +5859,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from ..compaction import ContextCompactor
             from ..compaction.strategy import CompactionStrategy
             
-            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg)
             _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
             
             # Create LLM summarization function if strategy is LLM_SUMMARIZE

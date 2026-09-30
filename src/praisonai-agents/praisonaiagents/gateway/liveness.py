@@ -52,6 +52,7 @@ from .protocols import GATEWAY_RESTART_EXIT_CODE
 __all__ = [
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    "StartupWatchdog",
 ]
 
 
@@ -431,6 +432,274 @@ class LoopWatchdog:
         if dump_file:
             try:
                 # Line-buffered append; keep the fd open across the dump.
+                with open(dump_file, "a", encoding="utf-8") as fh:
+                    fh.write(header)
+                    fh.flush()
+                    faulthandler.dump_traceback(file=fh, all_threads=True)
+            except Exception:  # pragma: no cover - fail open
+                pass
+
+
+class StartupWatchdog:
+    """Front-rung liveness guard for the pre-loop startup window (Issue #5265).
+
+    :class:`LoopWatchdog` only becomes meaningful once the asyncio event loop
+    is running — it probes the loop via ``loop.call_soon_threadsafe``, so it can
+    do nothing before a loop exists. That leaves the window between process
+    entry and "loop is live" (heavy imports, config/secret loading, the initial
+    adapter ``connect()``\\ s) uncovered. A wedge there — a hanging SDK import, a
+    blocking synchronous DNS/network call while minting credentials, a deadlock
+    inside ``connect()`` — leaves the process *alive but making no progress*: it
+    holds no serving loop, answers no probes, and never exits, so an external
+    supervisor never restarts it. It becomes a silent zombie with no diagnostics.
+
+    This primitive closes that gap. It arms a wall-clock **deadline** on a
+    dedicated daemon OS thread *before* the heavy work begins, so it keeps
+    working precisely when the main thread is wedged. If the deadline elapses
+    without :meth:`confirm_loop_live`, it dumps all-thread stacks via
+    :mod:`faulthandler` (so the hang is diagnosable) and hands the process back
+    to the supervisor via ``os._exit`` with a restart-intent code. A legitimately
+    slow-but-alive boot extends the deadline via :meth:`report_startup_progress`
+    (bounded, so a truly wedged phase still trips). :meth:`confirm_loop_live`
+    disarms it the instant the serving loop begins — at which point
+    :class:`LoopWatchdog` takes over.
+
+    Design mirrors :class:`LoopWatchdog`: **opt-in** (nothing arms it unless the
+    embedder calls :meth:`arm`), **fail-open** (any error inside the watchdog
+    must never kill a healthy startup), and **stdlib-only** (it must run when the
+    rest of the process cannot, so its correctness cannot depend on the code it
+    guards). Typical use at the gateway entry point::
+
+        sw = StartupWatchdog()
+        sw.arm(deadline_s=config.startup_watchdog_timeout)
+        load_config(config);   sw.report_startup_progress("config loaded")
+        connect_adapters();    sw.report_startup_progress("adapters connected")
+        loop = asyncio.new_event_loop()
+        LoopWatchdog().arm(loop)
+        sw.confirm_loop_live()  # disarm; loop watchdog now owns liveness
+        loop.run_forever()
+    """
+
+    def __init__(
+        self,
+        *,
+        on_expire: Literal["dump_and_exit", "dump_only"] = "dump_and_exit",
+        exit_code: int = GATEWAY_RESTART_EXIT_CODE,
+        dump_file: Optional[str] = None,
+        max_extensions: int = 10,
+    ) -> None:
+        if on_expire not in ("dump_and_exit", "dump_only"):
+            raise ValueError(
+                "on_expire must be 'dump_and_exit' or 'dump_only'"
+            )
+        if max_extensions < 0:
+            raise ValueError("max_extensions must be >= 0")
+        self.on_expire = on_expire
+        self.exit_code = exit_code
+        self.dump_file = dump_file
+        self.max_extensions = max_extensions
+        self._thread: Optional[threading.Thread] = None
+        # Each armed generation gets its own stop event handed straight to the
+        # thread, so a confirm/re-arm race can never let a stale generation
+        # observe a fresh generation's cleared flag and self-exit (mirrors the
+        # per-generation discipline of LoopWatchdog's deadline mode). The stop
+        # event, once set, stays set: a healthy confirm/disarm is monotonic.
+        self._stop = threading.Event()
+        # A separate wake event carries progress reports: it is briefly set to
+        # nudge the waiting thread to re-read the (extended) deadline, then
+        # cleared. Keeping it distinct from _stop means a progress nudge can
+        # never be mistaken for a disarm (and vice versa).
+        self._wake = threading.Event()
+        self._deadline_s = 0.0
+        self._extensions_used = 0
+        # Progress reports enqueue here; the watchdog thread drains this under
+        # the lock so budget is spent exactly once per report even when several
+        # reports batch between two wakes.
+        self._pending_progress = 0
+        self._expired = False
+        self._confirmed = False
+        self._lock = threading.Lock()
+
+    @property
+    def armed(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def expired(self) -> bool:
+        """True once the startup deadline expired (mainly for ``dump_only``)."""
+        return self._expired
+
+    @property
+    def confirmed(self) -> bool:
+        """True once :meth:`confirm_loop_live` has disarmed the watchdog."""
+        return self._confirmed
+
+    def arm(self, *, deadline_s: float, dump_stacks: bool = True) -> None:
+        """Arm a startup deadline on a dedicated daemon thread. Fail-open.
+
+        Idempotent: arming while already armed is a no-op. A non-finite or
+        non-positive ``deadline_s`` is ignored (nothing to guard). ``dump_stacks``
+        toggles the all-thread stack dump on expiry.
+        """
+        if not math.isfinite(deadline_s) or deadline_s <= 0:
+            return
+        with self._lock:
+            if self.armed:
+                return
+            stop = threading.Event()
+            wake = threading.Event()
+            self._stop = stop
+            self._wake = wake
+            self._deadline_s = deadline_s
+            self._extensions_used = 0
+            self._pending_progress = 0
+            self._expired = False
+            self._confirmed = False
+            self._dump_stacks_on_expire = dump_stacks
+            try:
+                thread = threading.Thread(
+                    target=self._run,
+                    args=(stop, wake),
+                    name="praisonai-startup-watchdog",
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:  # pragma: no cover - fail open
+                self._thread = None
+                return
+            self._thread = thread
+
+    def report_startup_progress(self, phase: str) -> None:
+        """Signal forward progress, extending the deadline by one interval.
+
+        A legitimately slow boot (e.g. many adapters, cold DNS) calls this at
+        each phase so it is not killed. Extensions are bounded by
+        ``max_extensions`` so a phase that itself wedges still trips the
+        deadline. Fail-open and a no-op when not armed.
+
+        Budget accounting is done by the watchdog thread, not here: each report
+        merely enqueues a pending nudge. If several reports land before the
+        thread wakes, each still costs exactly one extension *and* each still
+        earns one fresh deadline window when the thread drains them — so a later
+        slow-but-progressing phase can never find the budget spent on resets it
+        never received (Issue #5265 review: "progress reports lose extensions").
+        """
+        if not self.armed:
+            return
+        with self._lock:
+            self._pending_progress += 1
+            wake = self._wake
+        # Wake the waiting thread so it drains the pending nudges, spends budget,
+        # and resets its window once per still-affordable report. The thread
+        # keeps waiting against its own (still-unset) stop event.
+        wake.set()
+
+    def confirm_loop_live(self) -> None:
+        """Disarm the startup watchdog; the event loop is now live.
+
+        Called immediately before :class:`LoopWatchdog` is armed. Safe to call
+        multiple times / when not armed. Sets the *current* generation's stop
+        event so that exact thread suppresses its self-exit even if it is
+        mid-dump, then drops the reference.
+        """
+        with self._lock:
+            self._confirmed = True
+            self._stop.set()
+            # Nudge the thread out of its wait immediately so the join is prompt.
+            self._wake.set()
+            thread = self._thread
+            self._thread = None
+        if thread is not None and thread is not threading.current_thread():
+            try:
+                thread.join(timeout=1.0)
+            except Exception:  # pragma: no cover - fail open
+                pass
+
+    def _run(self, stop: "threading.Event", wake: "threading.Event") -> None:
+        # Wait out the deadline against *this generation's* events. ``stop`` is
+        # set (and stays set) by a confirm/disarm — that must break us out and
+        # suppress the self-exit. ``wake`` is a transient progress nudge — on
+        # each wake we drain the queued progress reports, spending one extension
+        # of budget per report and resetting the window each time we can still
+        # afford it. A plain timeout with neither event set (and no affordable
+        # pending progress) means the startup genuinely wedged.
+        start = time.monotonic()
+        while not stop.is_set():
+            remaining = (start + self._deadline_s) - time.monotonic()
+            if remaining <= 0:
+                break
+            if wake.wait(remaining):
+                wake.clear()
+                if stop.is_set():
+                    return
+                # Drain queued progress reports. Each report costs one extension
+                # and, while budget remains, grants one fresh deadline window —
+                # so batched reports never lose the resets they paid for.
+                extended = False
+                with self._lock:
+                    pending = self._pending_progress
+                    self._pending_progress = 0
+                    for _ in range(pending):
+                        if self._extensions_used >= self.max_extensions:
+                            break
+                        self._extensions_used += 1
+                        extended = True
+                if extended:
+                    start = time.monotonic()
+                # Whether or not budget remained, loop back and re-check the
+                # (possibly unchanged) deadline against this generation's stop.
+                continue
+        self._on_expire(stop)
+
+    def _on_expire(self, stop: "threading.Event") -> None:
+        # Only fire if this generation was not disarmed. A confirm_loop_live()
+        # that raced in has set this exact event, so a stale generation stays
+        # inert and never self-exits a healthy startup.
+        if stop.is_set():
+            return
+        self._expired = True
+        if getattr(self, "_dump_stacks_on_expire", True):
+            try:
+                self._dump_stacks()
+            except Exception:  # pragma: no cover - fail open
+                pass
+        if self.on_expire == "dump_and_exit":
+            # If confirm_loop_live() raced in while we were dumping, honour it.
+            if stop.is_set():
+                return
+            try:
+                sys.stderr.flush()
+            except Exception:  # pragma: no cover - fail open
+                pass
+            # Final re-check the instant before the irreversible os._exit: the
+            # flush above can block (e.g. a full pipe) long enough for a
+            # concurrent confirm_loop_live() to land. A startup that has just
+            # confirmed a live loop must never be terminated (Issue #5265
+            # review: "confirmation cannot prevent late exit").
+            if stop.is_set():
+                return
+            os._exit(self.exit_code)
+
+    def _dump_stacks(self) -> None:
+        reason = (
+            f"gateway startup did not confirm a live event loop within "
+            f"~{self._deadline_s:.0f}s"
+        )
+        header = (
+            f"praisonai-startup-watchdog: {reason}; "
+            f"dumping all-thread stacks\n"
+        )
+        try:
+            sys.stderr.write(header)
+        except Exception:  # pragma: no cover - fail open
+            pass
+        try:
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        except Exception:  # pragma: no cover - fail open
+            pass
+        dump_file = self.dump_file
+        if dump_file:
+            try:
                 with open(dump_file, "a", encoding="utf-8") as fh:
                     fh.write(header)
                     fh.flush()

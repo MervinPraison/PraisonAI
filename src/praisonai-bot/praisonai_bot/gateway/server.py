@@ -1331,6 +1331,15 @@ class WebSocketGateway:
         self._ledger_heartbeat_task: Optional[asyncio.Task] = None
         self._ledger_heartbeat_interval: float = 15.0
 
+        # Issue #5153: shed the coldest *already-persisted* live sessions before
+        # the cgroup memory ceiling OOM-kills the process. Reuses the core
+        # planner (``plan_pressure_evictions``) + the concrete stdlib cgroup
+        # reader that the bot warm-agent cache already uses; folded into the
+        # existing liveness-heartbeat tick, so there is no new task and it is a
+        # no-op on hosts without a cgroup limit or without a session store.
+        self._memory_pressure: Optional[Any] = None
+        self._pressure_headroom: float = 0.9
+
     @property
     def is_running(self) -> bool:
         return self._is_running
@@ -2988,7 +2997,10 @@ class WebSocketGateway:
         return merged
 
     def _merge_watchdog_overrides(
-        self, watchdog_cfg: Optional[Dict[str, Any]]
+        self,
+        watchdog_cfg: Optional[Dict[str, Any]],
+        *,
+        yaml_present: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Fold CLI watchdog overrides into the YAML ``watchdog`` block (#3410).
 
@@ -3001,6 +3013,21 @@ class WebSocketGateway:
         """
         enable = getattr(self, "_watchdog_override", None)
         timeout = getattr(self, "_watchdog_timeout_override", None)
+        # Issue #5362: fall back to the public ``GatewayConfig`` fields so a
+        # Python embedder building ``GatewayConfig(watchdog=True, …)`` enables
+        # the backstop without a YAML block or CLI flag. Precedence: CLI flag >
+        # explicit YAML (block *or* scalar, incl. ``watchdog: false``) > Python
+        # config field. ``yaml_present`` distinguishes an explicit scalar/block
+        # from an absent key so an explicit ``watchdog: false`` is honoured and
+        # not silently re-enabled by ``GatewayConfig(watchdog=True)``.
+        if enable is None and not yaml_present:
+            cfg_enable = getattr(self.config, "watchdog", None)
+            if cfg_enable:
+                enable = True
+        if timeout is None:
+            cfg_timeout = getattr(self.config, "watchdog_timeout", None)
+            if cfg_timeout is not None:
+                timeout = cfg_timeout
         if enable is None and timeout is None:
             return watchdog_cfg
 
@@ -5057,38 +5084,210 @@ class WebSocketGateway:
         ``LIVENESS_TIMEOUT`` and its state released. A connection with no bound
         session yet (stalled pre-``hello``/``join`` handshake) is evaluated
         against its per-connection ``_client_last_seen`` clock so it too ages
-        out. No-op when the policy is disabled (``interval_ms == 0``).
+        out. Heartbeat/reap is a no-op when the policy is disabled
+        (``interval_ms == 0``), but the loop still runs so the memory-pressure
+        sweep (issue #5153) keeps shedding cold sessions — that OOM guard must
+        not depend on liveness being enabled.
         """
         policy = self._liveness_policy()
-        if not policy.enabled:
-            return
+        # When liveness is disabled we still need a housekeeping cadence for the
+        # pressure sweep; fall back to the config's interval (or the policy
+        # default) rather than exiting, so shedding is never silently disabled.
         interval = policy.interval_seconds
+        if not policy.enabled:
+            from praisonaiagents.gateway.protocols import LivenessPolicy
+
+            interval = LivenessPolicy().interval_seconds
         while self._is_running:
             try:
                 await asyncio.sleep(interval)
                 if self._draining:
                     continue
                 now = time.time()
-                for client_id in list(self._clients.keys()):
-                    session_id = self._client_sessions.get(client_id)
-                    session = self._sessions.get(session_id) if session_id else None
-                    if session is not None:
-                        last_activity = session.last_activity
-                    else:
-                        # No bound session yet (pre-``hello``/``join``): fall
-                        # back to the per-connection last-seen clock so a
-                        # stalled handshake ages out instead of living forever.
-                        last_activity = self._client_last_seen.get(client_id, now)
-                    if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
-                        await self._reap_session(client_id)
-                    else:
-                        await self._send_to_client(
-                            client_id, {"type": EventType.PING.value}
+                if policy.enabled:
+                    for client_id in list(self._clients.keys()):
+                        session_id = self._client_sessions.get(client_id)
+                        session = (
+                            self._sessions.get(session_id) if session_id else None
                         )
+                        if session is not None:
+                            last_activity = session.last_activity
+                        else:
+                            # No bound session yet (pre-``hello``/``join``): fall
+                            # back to the per-connection last-seen clock so a
+                            # stalled handshake ages out instead of living forever.
+                            last_activity = self._client_last_seen.get(client_id, now)
+                        if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
+                            await self._reap_session(client_id)
+                        else:
+                            await self._send_to_client(
+                                client_id, {"type": EventType.PING.value}
+                            )
+                # Issue #5153: on the same housekeeping tick, shed the coldest
+                # already-persisted sessions if the resident set is approaching
+                # the cgroup budget — before the kernel OOM-kills the process.
+                # Runs regardless of whether liveness ping/reap is enabled.
+                self._sweep_sessions_under_pressure()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Liveness heartbeat/reaper iteration failed")
+
+    def _sweep_sessions_under_pressure(self) -> int:
+        """Soft-evict the coldest already-persisted live sessions under RSS pressure.
+
+        Issue #5153: the gateway's own runtime enactor for the core planner,
+        mirroring ``BotSessionManager.sweep_under_pressure`` (the warm-agent
+        cache). It reads the real container budget/anonymous RSS from a
+        :class:`praisonaiagents.gateway.MemoryPressureProtocol` (the stdlib
+        ``CgroupMemoryPressure`` reader), asks
+        :func:`praisonaiagents.gateway.plan_pressure_evictions` which sessions to
+        shed, and evicts them LRU-first via ``close_session(persist=True)`` — the
+        transcript is left durable so the next ``join`` transparently rehydrates
+        it. It re-samples RSS as it goes and stops as soon as RSS is back within
+        ``headroom`` of the budget, so it sheds the minimum.
+
+        Persistence-gated: a session is only evictable when a session store is
+        configured (its transcript is durable and rebuildable), it is not
+        currently executing a turn (never abort live work), and **no live
+        WebSocket is bound to it** — a connected client's next ordinary
+        ``message`` looks the session up in ``_sessions`` directly and would be
+        silently dropped (only ``hello``/``join`` rehydrate), so evicting a
+        bound session would strand that client. A no-op (returns ``0``) when no
+        store is configured or the platform reports no cgroup budget, preserving
+        today's behaviour exactly.
+        """
+        # No durable store ⇒ nothing is rebuildable ⇒ evicting would lose data.
+        if self._session_store is None or not self._sessions:
+            return 0
+        try:
+            from praisonaiagents.gateway import (
+                WarmSession,
+                plan_pressure_evictions,
+            )
+        except Exception:  # pragma: no cover — old/absent core
+            return 0
+        if self._memory_pressure is None:
+            try:
+                from .memory_pressure import CgroupMemoryPressure
+
+                self._memory_pressure = CgroupMemoryPressure()
+            except Exception:  # pragma: no cover — defensive
+                return 0
+        mp = self._memory_pressure
+        try:
+            budget = mp.cgroup_limit_mb()
+            rss = mp.anon_rss_mb()
+        except Exception:  # pragma: no cover — defensive
+            return 0
+        headroom = self._pressure_headroom
+        # Sessions with a live WebSocket bound to them are excluded from the
+        # eviction candidate set: evicting them would strand the connection
+        # (Finding: ordinary ``message`` frames do not rehydrate). Only cold,
+        # disconnected-but-resumable sessions are candidates.
+        bound_session_ids = set(self._client_sessions.values())
+        warm = [
+            WarmSession(
+                session_id=sid,
+                last_activity=session.last_activity,
+                in_flight=bool(getattr(session, "_is_executing", False)),
+                flushed=True,
+            )
+            for sid, session in self._sessions.items()
+            if sid not in bound_session_ids
+        ]
+        if not warm:
+            return 0
+        plan = plan_pressure_evictions(budget, rss, warm, headroom_ratio=headroom)
+        if not plan:
+            return 0
+        try:
+            target = float(budget) * float(headroom)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            target = 0.0
+        evicted = 0
+        for sid in plan:
+            session = self._sessions.get(sid)
+            # Re-check at enact time: a turn may have started, the session may
+            # already be gone, or a client may have (re)bound to it since the
+            # plan was computed. Never abort live work (an executing turn) and
+            # never strand a now-bound connection.
+            if session is None or getattr(session, "_is_executing", False):
+                continue
+            if sid in set(self._client_sessions.values()):
+                continue
+            if self._evict_persisted_session(sid):
+                evicted += 1
+                try:
+                    if mp.anon_rss_mb() <= target:
+                        break
+                except Exception:  # pragma: no cover — defensive
+                    break
+        if evicted:
+            logger.info(
+                "WebSocketGateway: soft-evicted %d cold session(s) under "
+                "memory pressure (durable, rehydrate on next join)",
+                evicted,
+            )
+        return evicted
+
+    def _evict_persisted_session(self, session_id: str) -> bool:
+        """Remove ``session_id`` from memory **only after** its transcript is durable.
+
+        Unlike ``close_session(persist=True)`` — which best-effort persists but
+        still drops the in-memory session even when the store write fails — this
+        enactor refuses to evict a session whose final snapshot could not be
+        persisted. Under memory pressure the live session may hold the only copy
+        of recent messages/events, so a failed persist must leave it in memory
+        (no data loss) rather than count it as safely shed. ``add_message``
+        signals failure two ways — a raised exception *or* a falsy return
+        (``SessionStoreProtocol.add_message`` returns ``bool`` and both built-in
+        stores return ``False`` on a failed write); both must retain the session.
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            return False
+        store = self._session_store
+        if store is None:  # pragma: no cover — guarded by caller
+            return False
+        try:
+            persisted = store.add_message(
+                session_id=session_id,
+                role="system",
+                content="Session closed",
+                metadata={"session_data": session.to_dict()},
+            )
+        except Exception as exc:  # persist raised ⇒ keep session in memory
+            logger.warning(
+                "WebSocketGateway: skipped pressure eviction of %s — "
+                "persistence failed (%s); session retained in memory",
+                session_id,
+                exc,
+            )
+            return False
+        # A store may report a failed write via a falsy return instead of
+        # raising; treat that identically so we never drop the only live copy.
+        # ``None`` (legacy stores with no return) is treated as success to
+        # preserve today's behaviour for stores that persist without reporting.
+        if persisted is False:
+            logger.warning(
+                "WebSocketGateway: skipped pressure eviction of %s — "
+                "store reported a failed write; session retained in memory",
+                session_id,
+            )
+            return False
+        # Durable now: mark resumable, close, and drop from the live set.
+        try:
+            session.close()
+        except Exception:  # pragma: no cover — defensive
+            pass
+        resume_window = self.config.session_config.resume_window
+        self._session_ttls[session_id] = time.time() + resume_window
+        self._sessions.pop(session_id, None)
+        logger.info(
+            "Session %s persisted, resumable for %ss", session_id, resume_window
+        )
+        return True
 
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to a specific client through its bounded outbound queue."""
@@ -10879,6 +11078,13 @@ class WebSocketGateway:
         drain_timeout_cfg = getattr(self, "_drain_timeout_override", None)
         if drain_timeout_cfg is None:
             drain_timeout_cfg = gw_cfg.get("drain_timeout")
+        # Issue #5362: a Python embedder building ``GatewayConfig(drain_timeout=…)``
+        # directly (no YAML key, no CLI flag) must still take effect, closing the
+        # CLI/YAML/Python parity gap for the drain window. Only fall back when
+        # the YAML key is *absent* — an explicit ``drain_timeout: null`` is an
+        # operator choice to disable the drain and must win over the field.
+        if drain_timeout_cfg is None and "drain_timeout" not in gw_cfg:
+            drain_timeout_cfg = getattr(self.config, "drain_timeout", None)
         # YAML/env-substituted values may arrive as strings (e.g. "30");
         # coerce once so later ``> 0`` comparisons never raise TypeError.
         if drain_timeout_cfg is not None:
@@ -11043,8 +11249,26 @@ class WebSocketGateway:
         # ``watchdog:`` block nested under ``gateway:``; a CLI ``--watchdog``
         # override (stamped on the instance) wins over / synthesises the YAML.
         # No-op unless enabled, so always-on gateways are unchanged.
+        # Issue #5362: distinguish an explicit YAML key (block *or* scalar,
+        # including ``watchdog: false``) from an absent one so an explicit
+        # scalar disable is honoured over the Python ``GatewayConfig`` field.
+        watchdog_yaml_present = "watchdog" in gw_cfg
         watchdog_cfg = gw_cfg.get("watchdog")
-        watchdog_cfg = self._merge_watchdog_overrides(watchdog_cfg)
+        # Normalise a scalar (``watchdog: true`` / ``false``) into the block
+        # form ``_configure_watchdog`` expects, so an explicit scalar carries
+        # its enabled decision rather than being ignored as a non-dict.
+        if watchdog_yaml_present and not isinstance(watchdog_cfg, dict):
+            _wd_scalar = watchdog_cfg
+            if isinstance(_wd_scalar, str):
+                _wd_enabled = _wd_scalar.strip().lower() in (
+                    "1", "true", "yes", "on"
+                )
+            else:
+                _wd_enabled = bool(_wd_scalar)
+            watchdog_cfg = {"enabled": _wd_enabled}
+        watchdog_cfg = self._merge_watchdog_overrides(
+            watchdog_cfg, yaml_present=watchdog_yaml_present
+        )
         self._configure_watchdog(watchdog_cfg)
 
         # Start channels + WebSocket server concurrently

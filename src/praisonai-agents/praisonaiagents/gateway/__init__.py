@@ -35,6 +35,14 @@ _LAZY_IMPORTS = {
     "SessionProjection": ("praisonaiagents.gateway.session_projection", "SessionProjection"),
     "SessionProjectionState": ("praisonaiagents.gateway.session_projection", "SessionProjectionState"),
     "RunView": ("praisonaiagents.gateway.session_projection", "RunView"),
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef": ("praisonaiagents.gateway.addressing", "SessionRef"),
+    "build_session_path": ("praisonaiagents.gateway.addressing", "build_session_path"),
+    "parse_session_path": ("praisonaiagents.gateway.addressing", "parse_session_path"),
+    "derive_short_id": ("praisonaiagents.gateway.addressing", "derive_short_id"),
+    "slugify": ("praisonaiagents.gateway.addressing", "slugify"),
+    "RESERVED_NAMES": ("praisonaiagents.gateway.addressing", "RESERVED_NAMES"),
+    "SHORT_ID_LEN": ("praisonaiagents.gateway.addressing", "SHORT_ID_LEN"),
     "GatewayCloseCode": ("praisonaiagents.gateway.protocols", "GatewayCloseCode"),
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor": ("praisonaiagents.gateway.protocols", "GatewayMethodDescriptor"),
@@ -239,6 +247,8 @@ _LAZY_IMPORTS = {
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy": ("praisonaiagents.gateway.liveness", "LoopWatchdogPolicy"),
     "LoopWatchdog": ("praisonaiagents.gateway.liveness", "LoopWatchdog"),
+    # liveness.py — Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog": ("praisonaiagents.gateway.liveness", "StartupWatchdog"),
     # degraded_state.py — Unified degraded-capability registry (Issue #3518)
     "DegradedOwner": ("praisonaiagents.gateway.degraded_state", "DegradedOwner"),
     "DegradedCapabilityProtocol": ("praisonaiagents.gateway.degraded_state", "DegradedCapabilityProtocol"),
@@ -385,6 +395,14 @@ __all__ = [
     "SessionProjection",
     "SessionProjectionState",
     "RunView",
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef",
+    "build_session_path",
+    "parse_session_path",
+    "derive_short_id",
+    "slugify",
+    "RESERVED_NAMES",
+    "SHORT_ID_LEN",
     "GatewayCloseCode",
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor",
@@ -580,6 +598,8 @@ __all__ = [
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    # Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog",
     # Unified degraded-capability registry (Issue #3518)
     "DegradedOwner",
     "DegradedCapabilityProtocol",

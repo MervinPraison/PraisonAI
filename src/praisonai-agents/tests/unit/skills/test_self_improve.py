@@ -270,22 +270,28 @@ def test_dispatch_skill_review_inline_runs_synchronously():
 
 
 def test_dispatch_skill_review_background_runs_off_path():
+    import threading
     import time
 
     agent = Agent(instructions="x", self_improve="background")
     done = []
+    # Gate the review body so the assertion is on ordering, not wall-clock:
+    # the caller must return *before* the review is released, proving the turn
+    # ran off-path. This is deterministic — it never depends on how fast the
+    # runner schedules the background thread (AGENTS.md §4.6: no timing-based
+    # tests), unlike an absolute ``elapsed < 0.1`` bound that flaked on slow CI.
+    release = threading.Event()
 
-    def slow_review(p, r, t):
-        time.sleep(0.15)
+    def gated_review(p, r, t):
+        release.wait(5.0)
         done.append((p, r, t))
 
-    start = time.time()
-    agent._dispatch_skill_review(slow_review, "p", "r", ["shell"])
-    elapsed = time.time() - start
-    # Caller is not blocked by the review turn.
-    assert elapsed < 0.1
-    # But the review still runs on the background runner.
-    for _ in range(50):
+    agent._dispatch_skill_review(gated_review, "p", "r", ["shell"])
+    # Caller returned while the review is still blocked → it did not run inline.
+    assert done == []
+    # Release it and confirm the review still runs on the background runner.
+    release.set()
+    for _ in range(250):
         if done:
             break
         time.sleep(0.02)

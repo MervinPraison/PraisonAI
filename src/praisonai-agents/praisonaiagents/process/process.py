@@ -844,6 +844,13 @@ Subtask: {st.name}
                                 break
                 else:
                     logging.debug(f"No subtasks created yet for {current_task.name}")
+                    # Mirror the sync workflow(): default a mid-workflow loop
+                    # task (reached via next_tasks/condition, not the start task)
+                    # with no explicit input_file to the tasks.csv convention so
+                    # its subtasks are still expanded instead of being silently
+                    # skipped (issue #5319).
+                    if current_task is not start_task and not current_task.input_file:
+                        current_task.input_file = "tasks.csv"
                     # Create subtasks if needed
                     if current_task.input_file:
                         self._create_loop_subtasks(current_task)

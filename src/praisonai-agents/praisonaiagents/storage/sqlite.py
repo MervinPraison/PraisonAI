@@ -151,6 +151,343 @@ def apply_wal_with_fallback(
     return mode
 
 
+# Maximum forensic backups of a malformed file kept before the oldest is
+# pruned, so a boot-loop on a permanently-bad file cannot fill the disk.
+_MAX_FORENSIC_BACKUPS = 3
+# A malformed file is repaired at most this many times before the guard gives
+# up (records the exhaustion in a sidecar ledger) and stops re-repairing on
+# every boot, so a permanently-bad file is not churned each start.
+_MAX_REPAIR_ATTEMPTS = 3
+
+
+def _is_transient_lock_error(exc: Exception) -> bool:
+    """True if an error is a transient lock/busy condition, not corruption.
+
+    A healthy database that a peer momentarily locks raises ``database is
+    locked`` / ``database is busy``. Treating that as corruption would trigger a
+    needless forensic copy and repair on a file that was never corrupt, so the
+    guard must distinguish it from a genuine "malformed image" error.
+    """
+    text = str(exc).lower()
+    return "locked" in text or "database is busy" in text
+
+
+def quick_check(conn) -> bool:
+    """Return True if ``PRAGMA quick_check`` reports the database is intact.
+
+    ``quick_check`` is the cheap structural probe (it skips the exhaustive
+    per-row index cross-check that ``integrity_check`` does), so it is safe to
+    run once on open without touching the hot path. Any SQLite-level error
+    (a malformed header, "database disk image is malformed", an I/O error) is
+    treated as *not intact* so the caller can route to backup/repair. A
+    transient lock/busy error is re-raised so callers can tell "locked" (leave
+    alone) apart from "corrupt" (back up + repair).
+    """
+    try:
+        row = conn.execute("PRAGMA quick_check(1)").fetchone()
+    except Exception as exc:  # DatabaseError / OperationalError on a bad file
+        if _is_transient_lock_error(exc):
+            raise
+        logger.warning("quick_check raised for database (%s); treating as corrupt.", exc)
+        return False
+    return bool(row) and str(row[0]).lower() == "ok"
+
+
+def _sidecar_paths(path: str):
+    """Return the WAL/SHM sidecar paths for a database file."""
+    return [path + "-wal", path + "-shm"]
+
+
+def _forensic_backup(path: str) -> Optional[str]:
+    """Copy a malformed database (+WAL/SHM sidecars) aside for forensics.
+
+    Mirrors the JSON store's ``_quarantine_corrupt`` behaviour: the raw,
+    possibly-recoverable bytes are preserved as ``<file>.corrupt-<epoch_ms>``
+    instead of being clobbered by a repair. Fails **closed** — returns ``None``
+    without copying — when free disk space is below the file size plus a margin,
+    so a corruption event never itself fills the disk. Retention-capped so a
+    boot-loop cannot accumulate unbounded copies.
+    """
+    import shutil
+    import time as _time
+
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    try:
+        free = shutil.disk_usage(os.path.dirname(path) or ".").free
+    except OSError:
+        free = None
+    # Fail closed on low disk: need room for the file plus a small margin.
+    if free is not None and free < size * 2 + (1 << 20):
+        logger.error(
+            "Skipping forensic backup of %s: insufficient free disk space.", path
+        )
+        return None
+
+    base = f"{path}.corrupt-{int(_time.time() * 1000)}"
+    dest = base
+    attempt = 1
+    while os.path.exists(dest):
+        dest = f"{base}-{attempt}"
+        attempt += 1
+    try:
+        shutil.copy2(path, dest)
+    except OSError as exc:
+        logger.error("Forensic backup of %s failed: %s", path, exc)
+        return None
+    # Best-effort sidecar preservation; their absence is not fatal. Each sidecar
+    # is ``path + suffix`` (e.g. ``-wal``), copied next to the primary backup so
+    # a later analysis can replay the write-ahead log.
+    for sidecar in _sidecar_paths(path):
+        if os.path.exists(sidecar):
+            suffix = sidecar[len(path):]
+            try:
+                shutil.copy2(sidecar, dest + suffix)
+            except OSError:
+                pass
+    _prune_forensic_backups(path)
+    return dest
+
+
+def _prune_forensic_backups(path: str) -> None:
+    """Keep only the newest ``_MAX_FORENSIC_BACKUPS`` forensic copies."""
+    directory = os.path.dirname(path) or "."
+    prefix = os.path.basename(path) + ".corrupt-"
+    try:
+        entries = [
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if name.startswith(prefix)
+        ]
+    except OSError:
+        return
+    # Only prune the primary DB copies (no sidecar suffix like ``-wal``).
+    copies = [p for p in entries if not (p.endswith("-wal") or p.endswith("-shm"))]
+    if len(copies) <= _MAX_FORENSIC_BACKUPS:
+        return
+    copies.sort(key=lambda p: os.path.getmtime(p))
+    for stale in copies[: len(copies) - _MAX_FORENSIC_BACKUPS]:
+        # Remove the primary copy together with its own ``-wal``/``-shm``
+        # sidecars so a WAL database's forensic sidecars cannot accumulate past
+        # the retention cap.
+        for target in (stale, stale + "-wal", stale + "-shm"):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+
+
+def _repair_ledger_path(path: str) -> str:
+    return path + ".repair"
+
+
+def _repair_budget_ok(path: str) -> bool:
+    """Return True while the file still has repair attempts left in its budget.
+
+    A sidecar ledger (``<file>.repair``) records how many repairs have been
+    attempted so a permanently-malformed file is not re-repaired on every boot
+    (bounded persistent retry). Missing/unreadable ledger means a fresh budget.
+    """
+    try:
+        with open(_repair_ledger_path(path), "r", encoding="utf-8") as fh:
+            attempts = int(fh.read().strip() or "0")
+    except (OSError, ValueError):
+        attempts = 0
+    return attempts < _MAX_REPAIR_ATTEMPTS
+
+
+def _record_repair_attempt(path: str) -> None:
+    try:
+        with open(_repair_ledger_path(path), "r", encoding="utf-8") as fh:
+            attempts = int(fh.read().strip() or "0")
+    except (OSError, ValueError):
+        attempts = 0
+    try:
+        with open(_repair_ledger_path(path), "w", encoding="utf-8") as fh:
+            fh.write(str(attempts + 1))
+    except OSError:
+        pass
+
+
+def _clear_repair_ledger(path: str) -> None:
+    for p in (_repair_ledger_path(path),):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _repair_via_online_backup(path: str) -> bool:
+    """Attempt a least-destructive repair of a malformed database in place.
+
+    Recovers what SQLite's online-backup API can read into a fresh snapshot and
+    promotes it back with an atomic ``os.replace`` so the canonical file is only
+    swapped for a *verified-intact* rebuild — a failed attempt never touches the
+    original bytes (which are already preserved by :func:`_forensic_backup`).
+    Returns True only when the rebuilt file itself passes ``quick_check``.
+    """
+    import sqlite3
+
+    _record_repair_attempt(path)
+    # A per-attempt-unique snapshot name so two concurrent repairs of the same
+    # file never delete or promote each other's in-flight rebuild.
+    snapshot = f"{path}.repair-tmp-{os.getpid()}-{id(path)}"
+    try:
+        os.remove(snapshot)
+    except OSError:
+        pass
+    src = dst = None
+    try:
+        src = sqlite3.connect(path)
+        dst = sqlite3.connect(snapshot)
+        src.backup(dst)  # copies all readable pages into the fresh file
+        dst.commit()
+    except Exception as exc:
+        logger.warning("Online-backup repair of %s failed to read pages: %s", path, exc)
+        for c in (src, dst):
+            try:
+                if c is not None:
+                    c.close()
+            except Exception:
+                pass
+        try:
+            os.remove(snapshot)
+        except OSError:
+            pass
+        return False
+    finally:
+        for c in (src, dst):
+            try:
+                if c is not None:
+                    c.close()
+            except Exception:
+                pass
+
+    # Verify the rebuilt snapshot before promoting it over the canonical file.
+    verify = None
+    try:
+        verify = sqlite3.connect(snapshot)
+        intact = quick_check(verify)
+    except Exception:
+        intact = False
+    finally:
+        try:
+            if verify is not None:
+                verify.close()
+        except Exception:
+            pass
+    if not intact:
+        try:
+            os.remove(snapshot)
+        except OSError:
+            pass
+        return False
+
+    try:
+        # Drop stale sidecars of the malformed file so they cannot be replayed
+        # over the rebuilt database. The malformed original + its sidecars are
+        # already forensically backed up before we get here.
+        for sidecar in _sidecar_paths(path):
+            try:
+                os.remove(sidecar)
+            except OSError:
+                pass
+        os.replace(snapshot, path)
+    except OSError as exc:
+        logger.error("Could not promote repaired snapshot for %s: %s", path, exc)
+        return False
+    _clear_repair_ledger(path)
+    logger.warning("Repaired malformed SQLite database %s via online backup.", path)
+    return True
+
+
+def _quarantine_unrepairable(path: str) -> None:
+    """Move an unrepairable malformed file aside so a fresh DB can be created.
+
+    When the online-backup API cannot rebuild an intact snapshot (e.g. a
+    corrupt header that reads as "file is not a database"), the malformed bytes
+    are already preserved by :func:`_forensic_backup`; renaming the canonical
+    file out of the way lets the store open a fresh, empty database instead of
+    crashing on the first ``CREATE TABLE`` — mirroring the JSON store's
+    quarantine-and-continue behaviour (Issue #5387). Sidecars go too so a stale
+    ``-wal`` cannot be replayed over the new file.
+    """
+    for sidecar in _sidecar_paths(path):
+        try:
+            os.remove(sidecar)
+        except OSError:
+            pass
+    try:
+        os.remove(path)
+    except OSError as exc:
+        logger.error("Could not clear unrepairable malformed file %s: %s", path, exc)
+
+
+def _guard_integrity(path: str, *, repair: bool, backup: bool) -> None:
+    """Detect and (optionally) repair a malformed database before first use.
+
+    Runs a cheap ``quick_check`` on open; on failure it forensically backs up
+    the malformed file (+sidecars) and attempts a bounded, least-destructive
+    online-backup repair. If the file cannot be repaired, its (already backed
+    up) bytes are quarantined so the store can open a fresh database rather than
+    crash on first use. A no-op for ``:memory:``/absent/empty files. A transient
+    lock/busy error is treated as "healthy but busy" and left untouched.
+    """
+    import sqlite3
+
+    if not path or path == ":memory:" or not os.path.exists(path):
+        return
+    try:
+        if os.path.getsize(path) == 0:
+            return
+    except OSError:
+        return
+
+    probe = None
+    try:
+        probe = sqlite3.connect(path)
+        if quick_check(probe):
+            return
+    except Exception as exc:
+        # A transient lock is not corruption — never back up or repair a file
+        # that a peer merely holds open. Leave it exactly as-is.
+        if _is_transient_lock_error(exc):
+            logger.info(
+                "SQLite database %s is locked/busy on probe; skipping guard.", path
+            )
+            return
+    finally:
+        try:
+            if probe is not None:
+                probe.close()
+        except Exception:
+            pass
+
+    logger.error("SQLite database %s failed integrity check; corrupt.", path)
+
+    # Fail closed: if a forensic backup was requested but could not be taken
+    # (low disk, copy error), do NOT proceed to repair — repair's atomic
+    # promotion would otherwise destroy the only copy of the malformed bytes.
+    if backup:
+        if _forensic_backup(path) is None:
+            logger.error(
+                "Forensic backup of %s failed; skipping repair to preserve "
+                "the malformed file for recovery.",
+                path,
+            )
+            return
+
+    if repair and _repair_budget_ok(path):
+        if _repair_via_online_backup(path):
+            return
+        # Repair could not rebuild an intact snapshot. The malformed bytes are
+        # safely backed up, so quarantine the canonical file to let the durable
+        # store open a fresh database instead of crashing on first query.
+        _quarantine_unrepairable(path)
+
+
 def connect(
     path,
     *,
@@ -158,6 +495,9 @@ def connect(
     isolation_level: Optional[str] = "",
     busy_timeout_ms: int = 5000,
     synchronous: str = "FULL",
+    guard: bool = False,
+    repair: bool = True,
+    backup: bool = True,
     **kwargs,
 ):
     """Open a hardened SQLite connection used by core durable stores.
@@ -177,6 +517,14 @@ def connect(
         synchronous: ``PRAGMA synchronous`` level. Defaults to ``FULL`` so
             committed writes survive an OS/power crash (matches pre-hardening
             durability). Pass ``"NORMAL"`` for higher throughput under WAL.
+        guard: When True, run a one-time ``quick_check`` on open and, on a
+            malformed file, forensically back it up and attempt a bounded
+            least-destructive online-backup repair before connecting (Issue
+            #5387). Off by default so existing callers are unchanged.
+        repair: Attempt an online-backup repair on corruption (only when
+            ``guard`` is set). Bounded by a sidecar attempt-ledger.
+        backup: Take a retention-capped, disk-space-aware forensic backup of the
+            malformed file before repair (only when ``guard`` is set).
         **kwargs: Forwarded to ``sqlite3.connect``.
     """
     import sqlite3  # lazy import — stdlib, no heavy dependency
@@ -184,6 +532,12 @@ def connect(
     db_path = path
     if isinstance(path, (str, os.PathLike)) and str(path) != ":memory:":
         db_path = str(path)
+
+    if guard:
+        try:
+            _guard_integrity(str(db_path), repair=repair, backup=backup)
+        except Exception as exc:  # detection/repair must never block open
+            logger.debug("Integrity guard skipped for %s: %s", db_path, exc)
 
     connect_kwargs = dict(kwargs)
     connect_kwargs["check_same_thread"] = check_same_thread

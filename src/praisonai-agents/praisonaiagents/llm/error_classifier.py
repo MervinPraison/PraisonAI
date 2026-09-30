@@ -588,12 +588,48 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
     return 0
 
 
-def extract_retry_after(error: Exception) -> Optional[float]:
+def _retry_after_http_date_delay(value: str) -> Optional[float]:
+    """Return seconds until an HTTP-date ``Retry-After`` value, else ``None``.
+
+    RFC 7231 allows ``Retry-After`` to be either delta-seconds or an absolute
+    HTTP-date. Delta-seconds is handled by the caller; this parses the date
+    form using the stdlib (no new dependency) and returns the non-negative
+    delay from now. A value in the past or unparseable yields ``None`` so the
+    caller falls through to its other signals.
+    """
+    try:
+        from email.utils import parsedate_to_datetime
+    except Exception:  # pragma: no cover - stdlib always present
+        return None
+    try:
+        when = parsedate_to_datetime(value.strip())
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    import time as _time
+    from datetime import timezone
+
+    # An HTTP-date is UTC; a naive parse result is treated as UTC per the RFC.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delay = when.timestamp() - _time.time()
+    return delay if delay > 0 else None
+
+
+def extract_retry_after(
+    error: Exception, cap_seconds: float = 300.0,
+) -> Optional[float]:
     """Extract Retry-After header value from rate limit errors.
-    
+
     Args:
         error: Exception potentially containing Retry-After info
-        
+        cap_seconds: Upper bound applied to the parsed value. Defaults to 300s
+            (5 minutes) for in-tick backoff callers. A scheduler *hold* passes a
+            larger cap so a job can be parked past a long provider reset window
+            (e.g. an hourly quota) instead of re-firing every tick — capping at
+            5 minutes there would defeat the park.
+
     Returns:
         Delay in seconds if found, None otherwise
     """
@@ -608,14 +644,21 @@ def extract_retry_after(error: Exception) -> Optional[float]:
             retry_after = None
         if retry_after is not None:
             try:
-                return min(float(retry_after), 300.0)  # Cap at 5 minutes
+                return min(float(retry_after), cap_seconds)
             except (ValueError, TypeError):
-                pass  # Not a plain number (could be an HTTP-date); fall through
+                # Not a plain delta-seconds value — RFC 7231 also permits an
+                # HTTP-date. Parse it so a provider that sends an absolute reset
+                # instant still yields a usable delay (else a long quota window
+                # would leave the job un-parked). A past/unparseable date yields
+                # no delay and falls through to the other signals.
+                delay = _retry_after_http_date_delay(str(retry_after))
+                if delay is not None:
+                    return min(delay, cap_seconds)
 
     # 2. Some SDKs expose a numeric ``retry_after`` attribute directly.
     retry_after_attr = getattr(error, "retry_after", None)
     if isinstance(retry_after_attr, (int, float)):
-        return min(float(retry_after_attr), 300.0)
+        return min(float(retry_after_attr), cap_seconds)
 
     error_str = str(error)
     
@@ -632,7 +675,7 @@ def extract_retry_after(error: Exception) -> Optional[float]:
         if match:
             try:
                 delay = float(match.group(1))
-                return min(delay, 300.0)  # Cap at 5 minutes
+                return min(delay, cap_seconds)
             except (ValueError, IndexError):
                 continue
     

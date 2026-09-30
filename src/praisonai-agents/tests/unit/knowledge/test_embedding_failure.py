@@ -37,7 +37,7 @@ def test_add_returns_failure_when_embedding_raises():
         raise RuntimeError("403 model_not_found")
 
     with patch("praisonaiagents.embedding.embedding", side_effect=boom):
-        result = adapter.add("Paris is the capital of France.")
+        result = adapter.add("Paris is the capital of France.", user_id="u1")
 
     assert isinstance(result, AddResult)
     assert result.success is False
@@ -54,7 +54,7 @@ def test_search_returns_empty_when_embedding_raises():
         raise RuntimeError("embedding down")
 
     with patch("praisonaiagents.embedding.embedding", side_effect=boom):
-        result = adapter.search("Paris")
+        result = adapter.search("Paris", user_id="u1")
 
     assert isinstance(result, SearchResult)
     assert result.results == []
@@ -72,7 +72,7 @@ def test_add_uses_configurable_embedding_model(monkeypatch):
         return MagicMock(embeddings=[[0.1, 0.2, 0.3]])
 
     with patch("praisonaiagents.embedding.embedding", side_effect=fake_embedding):
-        result = adapter.add("hello")
+        result = adapter.add("hello", user_id="u1")
 
     assert captured["model"] == "custom-embed-model"
     assert result.success is True

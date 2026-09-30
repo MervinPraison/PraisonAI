@@ -210,7 +210,27 @@ class MCPToolRunner(threading.Thread):
                 return f"Error: MCP tool call timed out after {self.timeout} seconds"
             if not success:
                 return f"Error: {result}"
-            
+
+            # A tool that fails at the application level returns a normal
+            # CallToolResult with isError=True per the MCP spec. Surface it as a
+            # structured error so retry/circuit-breaker/hook logic treats it as a
+            # failure instead of a successful string result (issue #5319).
+            if getattr(result, 'isError', False):
+                if hasattr(result, 'content') and result.content:
+                    if hasattr(result.content[0], 'text'):
+                        error_text = result.content[0].text
+                    else:
+                        error_text = str(result.content[0])
+                else:
+                    error_text = str(result)
+                # Guarantee a non-empty error string: an isError result with an
+                # empty text block would otherwise yield {"error": ""}, which
+                # retry/circuit-breaker/hook logic can misread as a success
+                # (issue #5319).
+                if not error_text:
+                    error_text = f"MCP tool '{tool_name}' reported an error (isError=True)"
+                return {"error": error_text, "mcp_error": True}
+
             # Process result
             if hasattr(result, 'content') and result.content:
                 if hasattr(result.content[0], 'text'):
@@ -401,8 +421,8 @@ class MCP:
         base = re.sub(r'\.(cmd|exe|bat|ps1)$', '', base, flags=re.IGNORECASE).lower()
         return base in cls._COLD_START_LAUNCHERS
 
-    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False, 
-                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False,
+                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, max_response_bytes: Optional[int] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -422,6 +442,7 @@ class MCP:
             debug: Enable debug logging for MCP operations (default: False)
             allowed_tools: Include whitelist - only these tools will be available (default: None = all tools)
             disabled_tools: Exclude blacklist - these tools will be filtered out (default: None = no exclusions)
+            max_response_bytes: Maximum body size for each Streamable HTTP response.
             **kwargs: Additional parameters for StdioServerParameters
             
         Note:
@@ -438,6 +459,12 @@ class MCP:
         # Handle backward compatibility with named parameter 'command'
         if command_or_string is None and command is not None:
             command_or_string = command
+
+        if max_response_bytes is not None:
+            if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes <= 0:
+                raise ValueError("max_response_bytes must be a positive integer")
+            if not isinstance(command_or_string, str) or not re.match(r'^https?://', command_or_string):
+                raise ValueError("max_response_bytes is only supported for Streamable HTTP MCP servers")
 
         # Set up logging - default to WARNING level to hide INFO messages
         if debug:
@@ -510,6 +537,8 @@ class MCP:
             # single source of truth (see mcp_transport.get_transport_type).
             from .mcp_transport import get_transport_type
             if get_transport_type(command_or_string) == "sse" and 'transport_type' not in kwargs:
+                if max_response_bytes is not None:
+                    raise ValueError("max_response_bytes is only supported for Streamable HTTP MCP servers")
                 # Legacy SSE URL - use SSE transport for backward compatibility
                 from .mcp_sse import SSEMCPClient
                 self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
@@ -533,6 +562,8 @@ class MCP:
                     transport_options['session'] = kwargs.pop('session')
                 if 'resumability' in kwargs:
                     transport_options['resumability'] = kwargs.pop('resumability')
+                if max_response_bytes is not None:
+                    transport_options['max_response_bytes'] = max_response_bytes
                 
                 self.http_stream_client = HTTPStreamMCPClient(
                     command_or_string, 

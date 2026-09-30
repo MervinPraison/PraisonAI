@@ -7582,6 +7582,10 @@ def _register_core_gateway_methods() -> None:
         "server_reply": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
+        # Resolve a friendly reference (short id / slug / label / ``main``
+        # sentinel, optionally agent-scoped) to a concrete session id (Issue
+        # #5383). Read-only lookup: it reveals no more than session.status.
+        "session.resolve": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,
         "pairing.approve": OperatorScope.PAIRING,
         "pairing.revoke": OperatorScope.PAIRING,

@@ -189,6 +189,12 @@ class StreamingConfigSchema(BaseModel):
     flood_backoff_factor: float = 2.0  # Multiply interval on each flood/429
     max_interval: float = 30.0  # Cap for the adaptively-widened interval
     strip_reasoning_tags: bool = True  # Strip <think>/<reasoning> from output
+    # Opt-in privacy-safe activity surface (PROGRESS mode). Retained here so the
+    # documented ``activity_status: {enabled, phrases}`` block (and the inline
+    # ``activity_phrases`` catalogue) reach ``StreamingConfig.from_dict`` instead
+    # of being silently dropped by the schema. Off by default.
+    activity_status: Optional[Dict[str, Any]] = None
+    activity_phrases: Optional[Dict[str, str]] = None
     
     @field_validator("mode")
     @classmethod

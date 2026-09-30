@@ -101,10 +101,14 @@ class SqliteTranscriptStore(DefaultSessionStore):
             # readers proceed concurrently with a writer where available.
             from ..storage.sqlite import connect as _sqlite_connect
 
+            # guard=True: quick_check on open + forensic backup + bounded
+            # least-destructive repair so a malformed transcript DB recovers
+            # instead of taking the durable path down (Issue #5387).
             conn = _sqlite_connect(
                 self.db_path,
                 isolation_level=None,
                 busy_timeout_ms=int(self.lock_timeout * 1000),
+                guard=True,
             )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS sessions ("
