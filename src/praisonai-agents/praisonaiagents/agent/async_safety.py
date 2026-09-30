@@ -27,27 +27,15 @@ def run_async_in_sync_context(coro):
     tool loop, otherwise a bare un-awaited coroutine would be handed to the
     model as the tool result and the tool body would never run (silent data
     loss).
+
+    Delegates to the single canonical bridge
+    (:func:`utils.async_bridge.run_coroutine_from_any_context`) so all sync→async
+    call sites share one implementation: the caller's ``contextvars`` (trace /
+    session / approval context) are carried into the coroutine, and the timeout
+    is enforced *inside* the worker loop rather than only on ``future.result``.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No event loop - safe to use asyncio.run()
-        return asyncio.run(coro)
-
-    # Event loop exists - avoid deadlock by running in dedicated thread
-    import concurrent.futures
-
-    def run_in_thread():
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        future = executor.submit(run_in_thread)
-        return future.result(timeout=300)  # 5 minute timeout
+    from ..utils.async_bridge import run_coroutine_from_any_context
+    return run_coroutine_from_any_context(coro)
 
 
 class DualLock:
