@@ -59,6 +59,50 @@ class TestContextCompactorExists:
         assert result.compacted_tokens < result.original_tokens
 
 
+class TestCompactionMaxTokensResolution:
+    """When max_context_tokens is unset, trigger must size to the model window."""
+
+    def _make_agent(self, model):
+        from praisonaiagents.agent.agent import Agent
+        return Agent(name="t", instructions="t", llm=model)
+
+    def test_explicit_max_context_tokens_wins(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        agent = self._make_agent("gpt-4o")
+        cfg = ExecutionConfig(context_compaction=True, max_context_tokens=8000)
+        assert agent._resolve_compaction_max_tokens(cfg) == 8000
+
+    def test_unset_derives_from_large_model_window(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        agent = self._make_agent("gpt-4o")  # 128k window
+        cfg = ExecutionConfig(context_compaction=True)  # max_context_tokens unset
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # Must be far above the old flat 8000 for a large-context model.
+        assert resolved > 8000
+
+    def test_unset_does_not_trigger_within_window(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.compaction import ContextCompactor
+        agent = self._make_agent("gpt-4o")  # 128k window
+        cfg = ExecutionConfig(context_compaction=True)
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # ~30k tokens of conversation should fit comfortably in a 128k model.
+        msgs = [{"role": "user", "content": "A" * 4 * 30000}]
+        compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.needs_compaction(msgs) is False
+
+    def test_unset_triggers_when_budget_approached(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.compaction import ContextCompactor
+        agent = self._make_agent("gpt-4o")
+        cfg = ExecutionConfig(context_compaction=True)
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # Well beyond the working budget must trigger compaction.
+        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
+        compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.needs_compaction(msgs) is True
+
+
 class TestCompactionHookEvents:
     """BEFORE_COMPACTION and AFTER_COMPACTION must be defined in HookEvent."""
 
