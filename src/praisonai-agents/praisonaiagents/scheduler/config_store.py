@@ -15,7 +15,7 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due, resolve_schedule_timezone
+from .due import is_due as _is_due, is_misfire as _is_misfire, resolve_schedule_timezone
 from .hook_emit import emit_schedule_add, emit_schedule_remove
 
 logger = get_logger(__name__)
@@ -202,6 +202,10 @@ class ConfigYamlScheduleStore:
         # a later ``remove(job.id)`` by the runner is then a no-op, so a spent
         # one-shot yields exactly one SCHEDULE_REMOVE.
         auto_removed: List[ScheduleJob] = []
+        # (job_id, job_name) for occurrences suppressed by the misfire policy.
+        # Logged as ``missed`` history after the lock so a dropped occurrence is
+        # observable instead of vanishing silently.
+        missed: List[tuple] = []
         with self._lock, self._file_lock():
             # Re-read from disk so we observe cross-process claims/leases.
             self._reload_locked()
@@ -223,6 +227,16 @@ class ConfigYamlScheduleStore:
                         auto_removed.append(self._jobs.pop(job.id))
                         self._job_state.pop(job.id, None)
                         changed = True
+                    continue
+                # Misfire policy: an occurrence that landed while the process
+                # was down and is now older than ``misfire_grace_seconds`` is
+                # recorded as ``missed`` (observable) rather than fired stale or
+                # dropped silently. Advance past the slot so it is not seen due
+                # again on the next poll.
+                if _is_misfire(job, now, self._default_timezone):
+                    job.last_run_at = now
+                    missed.append((job.id, job.name))
+                    changed = True
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
@@ -254,6 +268,14 @@ class ConfigYamlScheduleStore:
                     return []
         for job in auto_removed:
             emit_schedule_remove(job)
+        # Record suppressed occurrences so a missed run is visible in history
+        # rather than silently dropped (log_run takes only the thread lock).
+        for job_id, job_name in missed:
+            self.log_run(
+                job_id=job_id,
+                status="missed",
+                job_name=job_name,
+            )
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:
