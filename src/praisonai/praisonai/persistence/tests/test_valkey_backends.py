@@ -490,3 +490,44 @@ class TestRegistryValkey:
     def test_state_store_valkey_registered(self):
         """Test STATE_STORES registry contains 'valkey'."""
         assert "valkey" in STATE_STORES.list_registered()
+
+
+class TestCreateValkeyClient:
+    """Tests for the shared create_valkey_client factory."""
+
+    _MODULE = "praisonai.persistence._valkey_client"
+
+    def test_passes_client_info_tag_to_configuration(self):
+        """Factory must set client_info_tag='praisonai' so the server reports lib-name."""
+        from praisonai.persistence import _valkey_client
+
+        captured = {}
+
+        def fake_config(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        mock_client_cls = MagicMock()
+        with patch.multiple(
+            _valkey_client,
+            GlideClientSync=mock_client_cls,
+            GlideClientConfiguration=fake_config,
+            NodeAddress=lambda host, port: (host, port),
+            ServerCredentials=lambda password: ("creds", password),
+        ):
+            _valkey_client.create_valkey_client(host="h", port=1234, password="pw", db=2)
+
+        assert captured["client_info_tag"] == "praisonai"
+        assert captured["client_name"] == "praisonai_persistence_client"
+        assert captured["database_id"] == 2
+        mock_client_cls.create.assert_called_once()
+
+    def test_raises_import_error_when_glide_missing(self):
+        """Factory raises a helpful ImportError when valkey-glide-sync is not installed."""
+        import pytest
+
+        from praisonai.persistence import _valkey_client
+
+        with patch.object(_valkey_client, "GlideClientSync", None):
+            with pytest.raises(ImportError, match="valkey-glide-sync"):
+                _valkey_client.create_valkey_client()
