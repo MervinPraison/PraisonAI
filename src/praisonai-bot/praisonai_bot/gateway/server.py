@@ -2988,7 +2988,10 @@ class WebSocketGateway:
         return merged
 
     def _merge_watchdog_overrides(
-        self, watchdog_cfg: Optional[Dict[str, Any]]
+        self,
+        watchdog_cfg: Optional[Dict[str, Any]],
+        *,
+        yaml_present: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Fold CLI watchdog overrides into the YAML ``watchdog`` block (#3410).
 
@@ -3001,6 +3004,21 @@ class WebSocketGateway:
         """
         enable = getattr(self, "_watchdog_override", None)
         timeout = getattr(self, "_watchdog_timeout_override", None)
+        # Issue #5362: fall back to the public ``GatewayConfig`` fields so a
+        # Python embedder building ``GatewayConfig(watchdog=True, …)`` enables
+        # the backstop without a YAML block or CLI flag. Precedence: CLI flag >
+        # explicit YAML (block *or* scalar, incl. ``watchdog: false``) > Python
+        # config field. ``yaml_present`` distinguishes an explicit scalar/block
+        # from an absent key so an explicit ``watchdog: false`` is honoured and
+        # not silently re-enabled by ``GatewayConfig(watchdog=True)``.
+        if enable is None and not yaml_present:
+            cfg_enable = getattr(self.config, "watchdog", None)
+            if cfg_enable:
+                enable = True
+        if timeout is None:
+            cfg_timeout = getattr(self.config, "watchdog_timeout", None)
+            if cfg_timeout is not None:
+                timeout = cfg_timeout
         if enable is None and timeout is None:
             return watchdog_cfg
 
@@ -10879,6 +10897,13 @@ class WebSocketGateway:
         drain_timeout_cfg = getattr(self, "_drain_timeout_override", None)
         if drain_timeout_cfg is None:
             drain_timeout_cfg = gw_cfg.get("drain_timeout")
+        # Issue #5362: a Python embedder building ``GatewayConfig(drain_timeout=…)``
+        # directly (no YAML key, no CLI flag) must still take effect, closing the
+        # CLI/YAML/Python parity gap for the drain window. Only fall back when
+        # the YAML key is *absent* — an explicit ``drain_timeout: null`` is an
+        # operator choice to disable the drain and must win over the field.
+        if drain_timeout_cfg is None and "drain_timeout" not in gw_cfg:
+            drain_timeout_cfg = getattr(self.config, "drain_timeout", None)
         # YAML/env-substituted values may arrive as strings (e.g. "30");
         # coerce once so later ``> 0`` comparisons never raise TypeError.
         if drain_timeout_cfg is not None:
@@ -11043,8 +11068,26 @@ class WebSocketGateway:
         # ``watchdog:`` block nested under ``gateway:``; a CLI ``--watchdog``
         # override (stamped on the instance) wins over / synthesises the YAML.
         # No-op unless enabled, so always-on gateways are unchanged.
+        # Issue #5362: distinguish an explicit YAML key (block *or* scalar,
+        # including ``watchdog: false``) from an absent one so an explicit
+        # scalar disable is honoured over the Python ``GatewayConfig`` field.
+        watchdog_yaml_present = "watchdog" in gw_cfg
         watchdog_cfg = gw_cfg.get("watchdog")
-        watchdog_cfg = self._merge_watchdog_overrides(watchdog_cfg)
+        # Normalise a scalar (``watchdog: true`` / ``false``) into the block
+        # form ``_configure_watchdog`` expects, so an explicit scalar carries
+        # its enabled decision rather than being ignored as a non-dict.
+        if watchdog_yaml_present and not isinstance(watchdog_cfg, dict):
+            _wd_scalar = watchdog_cfg
+            if isinstance(_wd_scalar, str):
+                _wd_enabled = _wd_scalar.strip().lower() in (
+                    "1", "true", "yes", "on"
+                )
+            else:
+                _wd_enabled = bool(_wd_scalar)
+            watchdog_cfg = {"enabled": _wd_enabled}
+        watchdog_cfg = self._merge_watchdog_overrides(
+            watchdog_cfg, yaml_present=watchdog_yaml_present
+        )
         self._configure_watchdog(watchdog_cfg)
 
         # Start channels + WebSocket server concurrently
