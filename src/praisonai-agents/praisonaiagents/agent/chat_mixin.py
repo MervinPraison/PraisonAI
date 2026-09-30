@@ -5781,10 +5781,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
                 # Drive the async summariser through the shared bridge so it runs
                 # correctly whether or not a loop is already running (FastAPI /
-                # Jupyter / a bot handler). We deliberately do NOT catch bare
-                # RuntimeError here: a RuntimeError raised by the summariser
-                # itself (e.g. a provider 500) must surface, not be silently
-                # downgraded to naive truncation.
+                # Jupyter / a bot handler). The previous code caught bare
+                # RuntimeError from ``asyncio.run`` ("event loop already
+                # running") and silently downgraded LLM summarisation to naive
+                # truncation whenever a loop was live; the bridge removes that
+                # spurious fallback so the real summariser always runs. Provider
+                # errors inside the summariser remain best-effort (see
+                # ``_llm_summarize_async``, which falls back to a naive summary on
+                # failure) — compaction never hard-fails the turn.
                 from ..utils.async_bridge import run_coroutine_from_any_context
                 compacted_msgs, _cr = run_coroutine_from_any_context(
                     _compactor.compact_async(messages)

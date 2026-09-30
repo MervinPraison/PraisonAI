@@ -31,11 +31,17 @@ def run_async_in_sync_context(coro):
     Delegates to the single canonical bridge
     (:func:`utils.async_bridge.run_coroutine_from_any_context`) so all sync→async
     call sites share one implementation: the caller's ``contextvars`` (trace /
-    session / approval context) are carried into the coroutine, and the timeout
-    is enforced *inside* the worker loop rather than only on ``future.result``.
+    session / approval context) are carried into the coroutine, and the running
+    loop is handled on a dedicated worker thread rather than raising.
+
+    ``timeout=None`` is passed deliberately: this helper backs the sync
+    tool-calling path, where a tool's own timeout policy (or lack of one) already
+    governs how long a tool may run. Imposing the bridge's default 5-minute
+    deadline here would silently cancel long-running tools that previously had no
+    limit — a backward-incompatible regression — so the bridge adds none.
     """
     from ..utils.async_bridge import run_coroutine_from_any_context
-    return run_coroutine_from_any_context(coro)
+    return run_coroutine_from_any_context(coro, timeout=None)
 
 
 class DualLock:

@@ -27,8 +27,10 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
       deadlock on the caller's loop. The caller's ``contextvars`` are copied
       into that thread so trace/session/approval context set by the caller is
       visible inside the coroutine, and the timeout is enforced *inside* the
-      worker loop via ``asyncio.wait_for`` so the caller does not block past
-      ``timeout`` waiting on a stuck worker.
+      worker loop via ``asyncio.wait_for``. The caller also waits on the worker
+      with the same ``timeout`` as a hard backstop, so a coroutine that ignores
+      cancellation (e.g. a blocking C call that never yields) can still not pin
+      the caller past ``timeout``.
 
     Args:
         coro: The coroutine to execute
@@ -63,9 +65,17 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = executor.submit(ctx.run, asyncio.run, _wrapped())
     try:
-        # Timeout is enforced inside the worker loop by asyncio.wait_for, so we
-        # wait on the result without a second (blocking) timeout here.
-        return future.result()
+        # The timeout is normally enforced *inside* the worker loop by
+        # asyncio.wait_for. But a coroutine that ignores cancellation (a blocking
+        # C call, a shielded/uncancellable await) can keep the worker alive past
+        # the deadline, in which case that inner wait_for never fires. We
+        # therefore also bound the caller's wait here so a stuck worker can never
+        # pin the caller indefinitely.
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError as exc:
+        raise TimeoutError(
+            f"Coroutine did not complete within {timeout}s"
+        ) from exc
     finally:
         # Never block on a stuck worker: don't wait for it to wind down.
         executor.shutdown(wait=False)
