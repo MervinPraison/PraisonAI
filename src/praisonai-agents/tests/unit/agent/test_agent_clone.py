@@ -114,6 +114,31 @@ class TestAgentDeepCopy:
         assert agent._llm_instance.current_agent_name == "Original"
         assert cloned._llm_instance.current_agent_name == "Clone"
 
+    def test_deepcopy_agent_with_lock_bearing_llm_subclass_does_not_raise(self):
+        """A lock-bearing LLM subclass (e.g. ScriptedModel, whose _script_lock is
+        an RLock) must deep-copy without ``TypeError: cannot pickle
+        '_thread.RLock' object``. LLM.__deepcopy__ replaces threading locks with
+        fresh ones so the clone is independently synchronised, mirroring
+        Agent.__deepcopy__.
+        """
+        from praisonaiagents.model_harness import ScriptedModel
+
+        model = ScriptedModel(["done"])
+        agent = self._make_agent(llm=model)
+
+        cloned = copy.deepcopy(agent)
+
+        assert cloned is not agent
+        cloned_llm = cloned._llm_instance
+        assert cloned_llm is not model
+        # The clone gets its own lock, not the original (sharing would serialise
+        # unrelated instances against each other).
+        assert cloned_llm._script_lock is not model._script_lock
+        assert isinstance(cloned_llm._script_lock, type(threading.RLock()))
+        # Script state is copied but independent.
+        assert cloned_llm._script == model._script
+        assert cloned_llm._script is not model._script
+
     def test_multiple_clones_are_isolated(self):
         """Regression: creating two clones (simulating 2nd+ gateway channel) must work."""
         agent = self._make_agent()

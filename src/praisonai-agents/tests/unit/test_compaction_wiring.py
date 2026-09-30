@@ -59,6 +59,107 @@ class TestContextCompactorExists:
         assert result.compacted_tokens < result.original_tokens
 
 
+class TestCompactionMaxTokensResolution:
+    """When max_context_tokens is unset, trigger must size to the model window."""
+
+    def _make_agent(self, model):
+        from praisonaiagents.agent.agent import Agent
+        return Agent(name="t", instructions="t", llm=model)
+
+    def test_explicit_max_context_tokens_wins(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        agent = self._make_agent("gpt-4o")
+        cfg = ExecutionConfig(context_compaction=True, max_context_tokens=8000)
+        assert agent._resolve_compaction_max_tokens(cfg) == 8000
+
+    def test_unset_derives_from_large_model_window(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        agent = self._make_agent("gpt-4o")  # 128k window
+        cfg = ExecutionConfig(context_compaction=True)  # max_context_tokens unset
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # Must be far above the old flat 8000 for a large-context model.
+        assert resolved > 8000
+
+    def test_unset_does_not_trigger_within_window(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.compaction import ContextCompactor
+        agent = self._make_agent("gpt-4o")  # 128k window
+        cfg = ExecutionConfig(context_compaction=True)
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # ~30k tokens of conversation should fit comfortably in a 128k model.
+        msgs = [{"role": "user", "content": "A" * 4 * 30000}]
+        compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.needs_compaction(msgs) is False
+
+    def test_unset_triggers_when_budget_approached(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.compaction import ContextCompactor
+        agent = self._make_agent("gpt-4o")
+        cfg = ExecutionConfig(context_compaction=True)
+        resolved = agent._resolve_compaction_max_tokens(cfg)
+        # Well beyond the working budget must trigger compaction.
+        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
+        compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.needs_compaction(msgs) is True
+
+
+class TestCompactionEntryPointWiring:
+    """Both sync and async entry points must pass the resolved model-aware
+    budget to ContextCompactor when max_context_tokens is unset.
+
+    These guard against a regression where an entry point stops forwarding the
+    resolved budget (e.g. reverting to a flat default), which the resolver-only
+    tests above would not catch.
+    """
+
+    def _make_agent(self, model):
+        from praisonaiagents.agent.agent import Agent
+        return Agent(name="t", instructions="t", llm=model)
+
+    def _capture_max_tokens(self):
+        captured = {}
+
+        class _FakeCompactor:
+            def __init__(self, max_tokens=None, strategy=None, llm_summarize_fn=None):
+                captured["max_tokens"] = max_tokens
+
+            def needs_compaction(self, messages):
+                return False  # short-circuit; we only assert the wired budget
+
+        return captured, _FakeCompactor
+
+    def test_sync_entry_point_wires_resolved_budget(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.hooks.types import HookEvent
+
+        agent = self._make_agent("gpt-4o")  # 128k window
+        agent.execution = ExecutionConfig(context_compaction=True)  # unset limit
+        expected = agent._resolve_compaction_max_tokens(agent.execution)
+        assert expected > 8000  # model-aware, not the old flat default
+
+        captured, fake = self._capture_max_tokens()
+        with patch("praisonaiagents.compaction.ContextCompactor", fake):
+            agent._apply_context_compaction([{"role": "user", "content": "hi"}], HookEvent)
+        assert captured["max_tokens"] == expected
+
+    @pytest.mark.asyncio
+    async def test_async_entry_point_wires_resolved_budget(self):
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.hooks.types import HookEvent
+
+        agent = self._make_agent("gpt-4o")  # 128k window
+        agent.execution = ExecutionConfig(context_compaction=True)  # unset limit
+        expected = agent._resolve_compaction_max_tokens(agent.execution)
+        assert expected > 8000
+
+        captured, fake = self._capture_max_tokens()
+        with patch("praisonaiagents.compaction.ContextCompactor", fake):
+            await agent._apply_context_compaction_async(
+                [{"role": "user", "content": "hi"}], HookEvent
+            )
+        assert captured["max_tokens"] == expected
+
+
 class TestCompactionHookEvents:
     """BEFORE_COMPACTION and AFTER_COMPACTION must be defined in HookEvent."""
 

@@ -636,3 +636,83 @@ class TestAttachmentConfig:
         assert m.gateway.attachments.max_attachments == 3
         assert m.gateway.attachments.max_attachment_bytes == 2048
         assert m.gateway.attachments.allowed_types == ["image/"]
+
+
+class TestDrainWatchdogParity:
+    """Drain/watchdog GatewayConfig ↔ YAML parity and round-trip (#5362)."""
+
+    def test_python_fields_default_off(self):
+        from praisonaiagents.gateway import GatewayConfig
+
+        gc = GatewayConfig()
+        assert gc.drain_timeout is None
+        assert gc.watchdog is False
+        assert gc.watchdog_timeout is None
+
+    def test_watchdog_timeout_survives_round_trip(self):
+        """to_dict → from_dict must not silently drop watchdog_timeout."""
+        from praisonaiagents.gateway.config import (
+            GatewayConfig,
+            MultiChannelGatewayConfig,
+        )
+
+        gc = GatewayConfig(watchdog=True, watchdog_timeout=60.0)
+        round_tripped = MultiChannelGatewayConfig.from_dict(
+            {"gateway": gc.to_dict()}
+        ).gateway
+        assert round_tripped.watchdog is True
+        assert round_tripped.watchdog_timeout == 60.0
+
+    def test_watchdog_timeout_scalar_key_parsed(self):
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"watchdog": True, "watchdog_timeout": "15"}}
+        )
+        assert m.gateway.watchdog is True
+        assert m.gateway.watchdog_timeout == 15.0
+
+    def test_watchdog_block_still_derives_budget(self):
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {
+                "gateway": {
+                    "watchdog": {
+                        "enabled": True,
+                        "liveness_interval": 5.0,
+                        "liveness_strikes": 4,
+                    }
+                }
+            }
+        )
+        assert m.gateway.watchdog is True
+        assert m.gateway.watchdog_timeout == 20.0
+
+    def test_scalar_watchdog_timeout_non_positive_is_none(self):
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"watchdog": True, "watchdog_timeout": 0}}
+        )
+        assert m.gateway.watchdog_timeout is None
+
+    def test_drain_timeout_round_trip(self):
+        from praisonaiagents.gateway.config import (
+            GatewayConfig,
+            MultiChannelGatewayConfig,
+        )
+
+        gc = GatewayConfig(drain_timeout=20.0)
+        round_tripped = MultiChannelGatewayConfig.from_dict(
+            {"gateway": gc.to_dict()}
+        ).gateway
+        assert round_tripped.drain_timeout == 20.0
+
+    def test_scalar_watchdog_false_parsed(self):
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"watchdog": False}}
+        )
+        assert m.gateway.watchdog is False

@@ -31,6 +31,18 @@ _LAZY_IMPORTS = {
     "SessionVisibility": ("praisonaiagents.gateway.protocols", "SessionVisibility"),
     "SessionSharingRole": ("praisonaiagents.gateway.protocols", "SessionSharingRole"),
     "SessionObserverProtocol": ("praisonaiagents.gateway.protocols", "SessionObserverProtocol"),
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection": ("praisonaiagents.gateway.session_projection", "SessionProjection"),
+    "SessionProjectionState": ("praisonaiagents.gateway.session_projection", "SessionProjectionState"),
+    "RunView": ("praisonaiagents.gateway.session_projection", "RunView"),
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef": ("praisonaiagents.gateway.addressing", "SessionRef"),
+    "build_session_path": ("praisonaiagents.gateway.addressing", "build_session_path"),
+    "parse_session_path": ("praisonaiagents.gateway.addressing", "parse_session_path"),
+    "derive_short_id": ("praisonaiagents.gateway.addressing", "derive_short_id"),
+    "slugify": ("praisonaiagents.gateway.addressing", "slugify"),
+    "RESERVED_NAMES": ("praisonaiagents.gateway.addressing", "RESERVED_NAMES"),
+    "SHORT_ID_LEN": ("praisonaiagents.gateway.addressing", "SHORT_ID_LEN"),
     "GatewayCloseCode": ("praisonaiagents.gateway.protocols", "GatewayCloseCode"),
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor": ("praisonaiagents.gateway.protocols", "GatewayMethodDescriptor"),
@@ -78,10 +90,18 @@ _LAZY_IMPORTS = {
     # Agent/gateway-callable thread creation (Issue #3987)
     "ThreadResult": ("praisonaiagents.gateway.protocols", "ThreadResult"),
     "ThreadStatus": ("praisonaiagents.gateway.protocols", "ThreadStatus"),
+    # Agent-callable message mutation: edit/delete (Issue #5054)
+    "MessageActionResult": ("praisonaiagents.gateway.protocols", "MessageActionResult"),
+    "MessageActionStatus": ("praisonaiagents.gateway.protocols", "MessageActionStatus"),
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply": ("praisonaiagents.gateway.protocols", "ConversationReply"),
     "ConversationReplyStatus": ("praisonaiagents.gateway.protocols", "ConversationReplyStatus"),
     "ConversationRequestProtocol": ("praisonaiagents.gateway.protocols", "ConversationRequestProtocol"),
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind": ("praisonaiagents.gateway.protocols", "GatewayRequestKind"),
+    "GatewayServerRequest": ("praisonaiagents.gateway.protocols", "GatewayServerRequest"),
+    "GatewayServerReply": ("praisonaiagents.gateway.protocols", "GatewayServerReply"),
+    "GatewayRequestChannelProtocol": ("praisonaiagents.gateway.protocols", "GatewayRequestChannelProtocol"),
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol": ("praisonaiagents.gateway.protocols", "GatewayStatusProtocol"),
     "GatewayStatus": ("praisonaiagents.gateway.protocols", "GatewayStatus"),
@@ -232,6 +252,8 @@ _LAZY_IMPORTS = {
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy": ("praisonaiagents.gateway.liveness", "LoopWatchdogPolicy"),
     "LoopWatchdog": ("praisonaiagents.gateway.liveness", "LoopWatchdog"),
+    # liveness.py — Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog": ("praisonaiagents.gateway.liveness", "StartupWatchdog"),
     # degraded_state.py — Unified degraded-capability registry (Issue #3518)
     "DegradedOwner": ("praisonaiagents.gateway.degraded_state", "DegradedOwner"),
     "DegradedCapabilityProtocol": ("praisonaiagents.gateway.degraded_state", "DegradedCapabilityProtocol"),
@@ -374,6 +396,18 @@ __all__ = [
     "SessionVisibility",
     "SessionSharingRole",
     "SessionObserverProtocol",
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection",
+    "SessionProjectionState",
+    "RunView",
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef",
+    "build_session_path",
+    "parse_session_path",
+    "derive_short_id",
+    "slugify",
+    "RESERVED_NAMES",
+    "SHORT_ID_LEN",
     "GatewayCloseCode",
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor",
@@ -415,11 +449,18 @@ __all__ = [
     "ReactionResult",
     "ReactionStatus",
     "ThreadResult",
+    "MessageActionResult",
+    "MessageActionStatus",
     "ThreadStatus",
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply",
     "ConversationReplyStatus",
     "ConversationRequestProtocol",
+    # Server→client interactive request/reply over the transport (Issue #5351)
+    "GatewayRequestKind",
+    "GatewayServerRequest",
+    "GatewayServerReply",
+    "GatewayRequestChannelProtocol",
     # Agent-facing live status/health (Issue #3688)
     "GatewayStatusProtocol",
     "GatewayStatus",
@@ -567,6 +608,8 @@ __all__ = [
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    # Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog",
     # Unified degraded-capability registry (Issue #3518)
     "DegradedOwner",
     "DegradedCapabilityProtocol",

@@ -567,6 +567,11 @@ class ScheduledAgentExecutor:
             logger.warning("Job '%s' execution failed: %s", job.id, e)
             err = str(e)
             duration = time.time() - started
+            # Provider-quota hold: a 429 / quota failure parks the job past the
+            # provider's own reset window so it stops re-firing and re-failing
+            # every tick against a benched provider. ``e`` (not ``err``) is
+            # passed so the classifier can read the response headers.
+            held_until = self._maybe_hold_on_rate_limit(job, e)
             self._runner.mark_run(job, status="failed", error=err, duration=duration)
             if self._on_failure:
                 self._on_failure(job, err)
@@ -574,11 +579,19 @@ class ScheduledAgentExecutor:
                 job=job, status="failed", error=err, duration=duration,
             )
             await asyncio.to_thread(self._audit_output, job, failed)
-            await self._maybe_deliver_failure(job, failed)
+            if held_until is not None:
+                await self._maybe_deliver_hold(job, failed, held_until)
+            else:
+                await self._maybe_deliver_failure(job, failed)
             return failed
         finally:
             if _restore_tools is not None:
                 _restore_tools()
+
+        # The turn reached the model and returned — clear any prior quota hold
+        # (proof the provider's window reopened), fingerprinted so a stale error
+        # can't keep the job parked.
+        self._clear_quota_hold(job)
 
         # Success - calculate duration before delivery
         duration = time.time() - started
@@ -871,6 +884,15 @@ class ScheduledAgentExecutor:
         if succeeded and pending_state_updates:
             self._persist_job_state(job, prior_state, pending_state_updates)
 
+        # Provider-quota hold: a backend turn that reached the model reopens the
+        # window (clear any prior hold); a 429/quota error parks the job past
+        # the provider's reset window like the native-agent path.
+        held_until: Optional[float] = None
+        if succeeded:
+            self._clear_quota_hold(job)
+        else:
+            held_until = self._maybe_hold_on_rate_limit(job, Exception(str(error)))
+
         status = "succeeded" if succeeded else "failed"
         self._runner.mark_run(
             job,
@@ -896,7 +918,10 @@ class ScheduledAgentExecutor:
         )
         await asyncio.to_thread(self._audit_output, job, result)
         if not succeeded:
-            await self._maybe_deliver_failure(job, result)
+            if held_until is not None:
+                await self._maybe_deliver_hold(job, result, held_until)
+            else:
+                await self._maybe_deliver_failure(job, result)
         return result
 
     async def _execute_command(
@@ -1364,6 +1389,118 @@ class ScheduledAgentExecutor:
                 )
 
         return None, _restore
+
+    # ── provider-quota hold helpers ──────────────────────────────────
+
+    def _maybe_hold_on_rate_limit(
+        self, job: "ScheduleJob", error: Exception,
+    ) -> Optional[float]:
+        """Park ``job`` past a provider's rate-limit window on a 429/quota fail.
+
+        Returns the epoch the job is parked until when a hold was applied, else
+        ``None`` (non-quota failure, no usable reset window, or policy disabled).
+        The decision is the core pure helper ``quota_hold_from_failure`` — the
+        reschedule contract lives next to ``is_due``; here we only apply it to
+        the in-memory job so the subsequent ``mark_run`` persists it. The parked
+        instant coalesces intervening fires: ``is_due`` returns ``False`` until
+        it elapses, so the job stops re-firing and re-failing every tick.
+        """
+        policy = self._run_policy
+        if policy is None or not getattr(policy, "hold_on_rate_limit", False):
+            return None
+        try:
+            from praisonaiagents.scheduler import quota_hold_from_failure
+        except Exception:  # pragma: no cover - core primitive always present
+            return None
+        slack = getattr(policy, "hold_slack_seconds", 60.0)
+        hold_until = quota_hold_from_failure(error, time.time(), slack)
+        if hold_until is None:
+            return None
+        # Coalesce: never shorten an existing (later) hold. A fingerprint of the
+        # schedule ties the hold to the job's current cadence so a stale error
+        # cannot keep re-parking a job whose schedule changed underneath it.
+        prior = getattr(job, "hold_until", None)
+        if isinstance(prior, (int, float)) and prior > hold_until:
+            hold_until = prior
+        try:
+            job.hold_until = hold_until
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Could not set quota hold for job '%s': %s", job.id, e)
+            return None
+        logger.info(
+            "Job '%s' held until %.0f after provider rate-limit", job.id, hold_until,
+        )
+        return hold_until
+
+    @staticmethod
+    def _clear_quota_hold(job: "ScheduleJob") -> None:
+        """Clear a prior quota hold once a run reaches the model.
+
+        A completed model turn is proof the provider's window reopened, so the
+        park is lifted; the subsequent ``mark_run`` persists the cleared field.
+        No-op when the job was never parked.
+        """
+        if getattr(job, "hold_until", None) is not None:
+            try:
+                job.hold_until = None
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    async def _maybe_deliver_hold(
+        self, job: "ScheduleJob", result: JobResult, held_until: float,
+    ) -> None:
+        """Emit one "held until N" notice for a parked job via the incident path.
+
+        Reuses the same de-duplicating incident/alert plumbing as
+        :meth:`_maybe_deliver_failure` so a benched provider produces a single
+        notice, not one alert per skipped tick. Falls back to nothing extra when
+        failure delivery is disabled — the hold itself still applies.
+        """
+        if self._run_policy is None or not self._run_policy.deliver_on_failure:
+            return
+        delivery = getattr(job, "delivery", None)
+        if not delivery or not self._can_deliver(delivery):
+            return
+        # A hold is a distinct operational state (the job is now silenced for a
+        # whole provider-reset window) and is emitted at most once per window:
+        # ``is_due`` coalesces intervening fires, so this method only runs on the
+        # tick that *newly* parks the job. It must therefore NOT be gated on the
+        # failure ``alert_after_failures`` threshold — otherwise a job configured
+        # to alert only after N failures would park silently and the operator
+        # would never learn it was held (greptile #3). We still fold the failure
+        # through the incident tracker so failure/recovery accounting stays
+        # consistent, but deliver the hold notice regardless of its alert state.
+        pending: Optional[Dict[str, Any]] = None
+        observed = self._observe_incident(job, result)
+        if observed is not None:
+            _incident, pending = observed
+        try:
+            when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(held_until))
+        except Exception:  # pragma: no cover - defensive
+            when = str(held_until)
+        summary = (
+            f"⏸️ Scheduled job '{getattr(job, 'name', job.id)}' held until "
+            f"{when} (provider rate-limited): {result.error or 'quota exceeded'}"
+        )
+        try:
+            if await self._dispatch_delivery(delivery, summary):
+                result.delivered = True
+                self._commit_incident(job, pending)
+                logger.info("Delivered hold notice for job '%s'", job.id)
+            else:
+                result.delivery_error = (
+                    f"hold-notice delivery to {delivery.channel}:"
+                    f"{delivery.channel_id} did not complete"
+                )
+                logger.warning(
+                    "Hold-notice delivery did not complete for job '%s'; "
+                    "leaving incident un-alerted to retry", job.id,
+                )
+        except Exception as e:  # pragma: no cover - defensive
+            result.delivery_error = str(e)
+            logger.warning(
+                "Hold-notice delivery failed for job '%s': %s", job.id, e,
+            )
 
     # ── run-policy helpers ───────────────────────────────────────────
 

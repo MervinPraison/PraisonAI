@@ -54,23 +54,72 @@ class PraisonAIDB:
         database_url: Optional[str] = None,
         state_url: Optional[str] = None,
         knowledge_url: Optional[str] = None,
+        *,
+        conversation_options: Optional[Dict[str, Any]] = None,
+        state_options: Optional[Dict[str, Any]] = None,
+        knowledge_options: Optional[Dict[str, Any]] = None,
+        database_backend: Optional[str] = None,
+        state_backend: Optional[str] = None,
+        knowledge_backend: Optional[str] = None,
         **options
     ):
         """
         Initialize PraisonDB adapter.
-        
+
         Args:
             database_url: URL for conversation storage (postgres, mysql, sqlite)
             state_url: URL for state storage (redis, etc.)
             knowledge_url: URL for knowledge/vector storage (qdrant, etc.)
-            **options: Additional backend-specific options
+            conversation_options: Backend-specific kwargs for the conversation store
+            state_options: Backend-specific kwargs for the state store
+            knowledge_options: Backend-specific kwargs for the knowledge store
+            database_backend: Explicit conversation backend name. Wins over URL
+                scheme detection — use it to reach a registered backend whose URL
+                scheme is not auto-inferable (e.g. a custom driver).
+            state_backend: Explicit state backend name (e.g. ``"mongodb"``,
+                ``"dynamodb"``, ``"firestore"``, ``"gcs"``, ``"memory"``). Wins
+                over URL scheme detection.
+            knowledge_backend: Explicit knowledge/vector backend name (e.g.
+                ``"chroma"``, ``"pinecone"``, ``"lancedb"``, ``"pgvector"``).
+                Wins over URL scheme detection.
+            **options: Deprecated. Backend-specific options broadcast to EVERY
+                configured store. This corrupts multi-backend setups because one
+                backend's kwarg (e.g. Postgres ``ssl_mode``) is also handed to an
+                unrelated store (e.g. Redis). Prefer the per-store dicts above.
         """
         self._database_url = database_url
         self._state_url = state_url
         self._knowledge_url = knowledge_url
+        self._database_backend = database_backend
+        self._state_backend = state_backend
+        self._knowledge_backend = knowledge_backend
         # Pop adapter-level options before forwarding the rest to the backend
         # store factories, so they are never passed through as backend kwargs.
         init_retry_cooldown = options.pop("init_retry_cooldown", 30.0)
+
+        # Per-store options keep backend-specific kwargs from colliding across
+        # unrelated stores (mirrors persistence.config.PersistenceConfig).
+        self._conversation_options: Dict[str, Any] = dict(conversation_options or {})
+        self._state_options: Dict[str, Any] = dict(state_options or {})
+        self._knowledge_options: Dict[str, Any] = dict(knowledge_options or {})
+
+        if options:
+            # Legacy broadcast path: kept for back-compat but warns, because
+            # sharing one dict across three factories cross-contaminates backends.
+            import warnings
+            warnings.warn(
+                "PraisonAIDB(**options) applies the same kwargs to every backend, "
+                "which corrupts multi-backend setups. Pass per-store dicts instead: "
+                "conversation_options=..., state_options=..., knowledge_options=...",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            for key, value in options.items():
+                self._conversation_options.setdefault(key, value)
+                self._state_options.setdefault(key, value)
+                self._knowledge_options.setdefault(key, value)
+
+        # Retained for back-compat with any external references to ._options.
         self._options = options
         
         # Lazy-loaded stores
@@ -122,7 +171,13 @@ class PraisonAIDB:
         self._database_url = None
         self._state_url = None
         self._knowledge_url = None
+        self._database_backend = None
+        self._state_backend = None
+        self._knowledge_backend = None
         self._options = {}
+        self._conversation_options = {}
+        self._state_options = {}
+        self._knowledge_options = {}
         self._conversation_store = conversation_store
         self._state_store = state_store
         self._knowledge_store = knowledge_store
@@ -145,25 +200,42 @@ class PraisonAIDB:
             create_knowledge_store,
         )
 
-        # Initialize conversation store
-        if self._database_url:
-            backend = self._detect_backend(self._database_url)
+        # Initialize conversation store. An explicit *_backend override always
+        # wins over URL-scheme detection so callers can reach a registered
+        # backend whose scheme isn't auto-inferable. A backend is also built when
+        # only the override is given (no URL): URL-less stores (e.g. ``memory``,
+        # ``dynamodb``, ``firestore``) read their config from ``**options``, so
+        # gating solely on the URL would make the override unreachable.
+        if self._database_url or self._database_backend:
+            backend = self._database_backend or self._detect_backend(
+                self._database_url, kind="conversation"
+            )
             self._conversation_store = create_conversation_store(
-                backend, url=self._database_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._database_url, backend),
+                **self._conversation_options,
             )
 
         # Initialize state store
-        if self._state_url:
-            backend = self._detect_backend(self._state_url)
+        if self._state_url or self._state_backend:
+            backend = self._state_backend or self._detect_backend(
+                self._state_url, kind="state"
+            )
             self._state_store = create_state_store(
-                backend, url=self._state_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._state_url, backend),
+                **self._state_options,
             )
 
         # Initialize knowledge store
-        if self._knowledge_url:
-            backend = self._detect_backend(self._knowledge_url)
+        if self._knowledge_url or self._knowledge_backend:
+            backend = self._knowledge_backend or self._detect_backend(
+                self._knowledge_url, kind="knowledge"
+            )
             self._knowledge_store = create_knowledge_store(
-                backend, url=self._knowledge_url, **self._options
+                backend,
+                url=self._normalize_store_url(self._knowledge_url, backend),
+                **self._knowledge_options,
             )
 
     # DBAPI/driver exception class names that indicate a *transient* connection
@@ -284,9 +356,77 @@ class PraisonAIDB:
         # callers on any loop can never construct stores concurrently.
         await asyncio.to_thread(self._init_stores)
     
-    def _detect_backend(self, url: str) -> str:
-        """Detect backend type from URL.
-        
+    # Per-kind URL scheme -> registered backend name. These map the schemes a
+    # user naturally writes for a state/knowledge URL onto the names the
+    # persistence registry actually registers, so PraisonAIDB(state_url=...) /
+    # PraisonAIDB(knowledge_url=...) can reach backends beyond the handful the
+    # generic http(s) sniffing covered. An explicit *_backend override still
+    # wins over this table (see _build_stores).
+    #
+    # Only schemes whose backend factory can actually construct a working store
+    # from the URL alone are listed. Backends that need out-of-band config the
+    # URL cannot carry — GCS (``bucket_name``), Cosmos DB (``connection_string``
+    # + database/collection) — are intentionally omitted: they raise a helpful
+    # error pointing the caller at the explicit ``state_backend=``/
+    # ``knowledge_backend=`` override (plus options) instead of failing with an
+    # opaque TypeError/ValueError deep inside the driver.
+    _STATE_URL_SCHEMES = {
+        "redis": "redis",
+        "rediss": "redis",
+        "valkey": "valkey",
+        "dynamodb": "dynamodb",
+        "firestore": "firestore",
+        "mongodb": "mongodb",
+        "mongodb+srv": "mongodb",
+        "upstash": "upstash",
+        "memory": "memory",
+    }
+    _KNOWLEDGE_URL_SCHEMES = {
+        "chroma": "chroma",
+        "chromadb": "chroma",
+        "qdrant": "qdrant",
+        "weaviate": "weaviate",
+        "lancedb": "lancedb",
+        "milvus": "milvus",
+        "pgvector": "pgvector",
+        "surrealdb": "surrealdb_vector",
+        "redis": "redis",
+        "valkey": "valkey",
+    }
+    # A handful of backends consume the connection URL directly (their factory
+    # forwards ``url=`` to a driver), so the friendly scheme a user writes must be
+    # rewritten to the driver's expected scheme before the URL is forwarded.
+    # pgvector runs over PostgreSQL: ``pgvector://host/db`` -> ``postgresql://…``
+    # so psycopg2's connection pool accepts it. Backends that ignore ``url`` (the
+    # SDK factory pops it) are unaffected.
+    _URL_SCHEME_REWRITE = {
+        "pgvector": "postgresql",
+    }
+
+    def _normalize_store_url(self, url: Optional[str], backend: str) -> Optional[str]:
+        """Rewrite a friendly scheme to the driver scheme the backend expects.
+
+        Only applies when the backend's factory forwards ``url=`` to a driver
+        that would reject the friendly scheme (see ``_URL_SCHEME_REWRITE``);
+        every other URL is returned unchanged.
+        """
+        if not url or "://" not in url:
+            return url
+        scheme, rest = url.split("://", 1)
+        target = self._URL_SCHEME_REWRITE.get(scheme.lower())
+        if target is not None:
+            return f"{target}://{rest}"
+        return url
+
+    def _detect_backend(self, url: str, *, kind: Optional[str] = None) -> str:
+        """Detect backend type from URL, optionally scoped to a store ``kind``.
+
+        ``kind`` is one of ``"conversation"``, ``"state"`` or ``"knowledge"``.
+        When given a state/knowledge URL, kind-specific schemes (e.g.
+        ``mongodb://`` for state, ``chroma://`` for knowledge) are matched so the
+        URL resolves to a backend that store kind actually registers. ``kind``
+        defaults to ``None`` (conversation-style detection) for backward compat.
+
         Supports cloud-native serverless providers:
         - Neon (*.neon.tech) -> postgres
         - CockroachDB (*.cockroachlabs.cloud) -> postgres
@@ -296,7 +436,16 @@ class PraisonAIDB:
         - Turso/libSQL (libsql://) -> turso
         """
         url_lower = url.lower()
-        
+        scheme = url_lower.split("://", 1)[0] if "://" in url_lower else ""
+
+        # Kind-specific schemes take priority so e.g. state_url="mongodb://…"
+        # resolves to a state backend rather than falling through the generic
+        # http(s) path or raising.
+        if kind == "state" and scheme in self._STATE_URL_SCHEMES:
+            return self._STATE_URL_SCHEMES[scheme]
+        if kind == "knowledge" and scheme in self._KNOWLEDGE_URL_SCHEMES:
+            return self._KNOWLEDGE_URL_SCHEMES[scheme]
+
         # Turso/libSQL — unique scheme
         if url_lower.startswith("libsql://"):
             return "turso"
@@ -323,12 +472,24 @@ class PraisonAIDB:
             raise ValueError(
                 f"Unable to infer DB backend from URL {url!r}; "
                 "use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
+                + (
+                    "; or pass an explicit "
+                    f"{kind}_backend= to select a registered {kind} backend"
+                    if kind in ("state", "knowledge")
+                    else ""
+                )
             )
         
         # Unknown scheme - fail loudly
         raise ValueError(
             f"Unable to infer DB backend from URL {url!r}; "
             "supported schemes: postgres://, mysql://, sqlite://, redis://, libsql://, http(s)://"
+            + (
+                "; or pass an explicit "
+                f"{kind}_backend= to select a registered {kind} backend"
+                if kind in ("state", "knowledge")
+                else ""
+            )
         )
     
     def on_agent_start(
@@ -687,22 +848,9 @@ class PraisonAIDB:
             return runs[: max(limit, 0)]
         return runs
     
-    def export_session(
-        self,
-        session_id: str,
-    ) -> Dict[str, Any]:
-        """Export a session as a dictionary."""
-        self._init_stores()
-        
-        if not self._conversation_store:
-            return {}
-        
-        session = self._conversation_store.get_session(session_id)
-        if not session:
-            return {}
-        
-        messages = self._conversation_store.get_messages(session_id)
-        
+    @staticmethod
+    def _session_to_dict(session: Any, messages: Any) -> Dict[str, Any]:
+        """Serialise a conversation session + its messages to a plain dict."""
         return {
             "session_id": session.session_id,
             "user_id": session.user_id,
@@ -718,26 +866,16 @@ class PraisonAIDB:
                     "metadata": msg.metadata,
                     "created_at": msg.created_at
                 }
-                for msg in messages
+                for msg in (messages or [])
             ]
         }
-    
-    def import_session(
-        self,
-        data: Dict[str, Any],
-    ) -> str:
-        """Import a session from a dictionary."""
-        self._init_stores()
-        
-        if not self._conversation_store:
-            raise ValueError("No conversation store configured")
-        
+
+    def _build_import(self, data: Dict[str, Any]):
+        """Build the session + messages to import; returns (session_id, session, messages)."""
         from ..persistence.conversation.base import ConversationSession, ConversationMessage
         import uuid
-        
+
         session_id = data.get("session_id") or f"imported-{uuid.uuid4().hex[:8]}"
-        
-        # Create session
         session = ConversationSession(
             session_id=session_id,
             user_id=data.get("user_id", "default"),
@@ -745,16 +883,8 @@ class PraisonAIDB:
             name=data.get("name", f"Imported Session {session_id}"),
             metadata=data.get("metadata", {})
         )
-        self._call_store(
-            self._conversation_store,
-            "create_session",
-            "async_create_session",
-            session,
-        )
-        
-        # Import messages with new IDs to avoid conflicts
-        for msg_data in data.get("messages", []):
-            msg = ConversationMessage(
+        messages = [
+            ConversationMessage(
                 id=f"msg-{uuid.uuid4().hex[:12]}",  # Always generate new ID
                 session_id=session_id,
                 role=msg_data.get("role", "user"),
@@ -762,14 +892,83 @@ class PraisonAIDB:
                 metadata=msg_data.get("metadata", {}),
                 created_at=msg_data.get("created_at", time.time())
             )
-            self._call_store(
-                self._conversation_store,
-                "add_message",
-                "async_add_message",
-                session_id,
-                msg,
-            )
-        
+            for msg_data in data.get("messages", [])
+        ]
+        return session_id, session, messages
+
+    def export_session(
+        self,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        """Export a session as a dictionary.
+
+        Routes through :meth:`_call_store` so it works on async conversation
+        stores (``mode="async"``) from a sync caller instead of leaking
+        un-awaited coroutines.
+        """
+        self._init_stores()
+        store = self._conversation_store
+        if not store:
+            return {}
+
+        session = self._call_store(store, "get_session", "async_get_session", session_id)
+        if not session:
+            return {}
+
+        messages = self._call_store(store, "get_messages", "async_get_messages", session_id)
+        return self._session_to_dict(session, messages)
+
+    async def aexport_session(
+        self,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        """Async: export a session as a dictionary."""
+        await self._ainit_stores()
+        store = self._conversation_store
+        if not store:
+            return {}
+
+        session = await self._dispatch_async(
+            store, "get_session", "async_get_session", session_id
+        )
+        if not session:
+            return {}
+
+        messages = await self._dispatch_async(
+            store, "get_messages", "async_get_messages", session_id
+        )
+        return self._session_to_dict(session, messages)
+
+    def import_session(
+        self,
+        data: Dict[str, Any],
+    ) -> str:
+        """Import a session from a dictionary."""
+        self._init_stores()
+        store = self._conversation_store
+        if not store:
+            raise ValueError("No conversation store configured")
+
+        session_id, session, messages = self._build_import(data)
+        self._call_store(store, "create_session", "async_create_session", session)
+        for msg in messages:
+            self._call_store(store, "add_message", "async_add_message", session_id, msg)
+        return session_id
+
+    async def aimport_session(
+        self,
+        data: Dict[str, Any],
+    ) -> str:
+        """Async: import a session from a dictionary."""
+        await self._ainit_stores()
+        store = self._conversation_store
+        if not store:
+            raise ValueError("No conversation store configured")
+
+        session_id, session, messages = self._build_import(data)
+        await self._dispatch_async(store, "create_session", "async_create_session", session)
+        for msg in messages:
+            await self._dispatch_async(store, "add_message", "async_add_message", session_id, msg)
         return session_id
     
     # --- Tracing/Observability ---
@@ -1444,7 +1643,7 @@ class SQLiteDB(PraisonAIDB):
         url = database_url or path
         super().__init__(database_url=url, **options)
     
-    def _detect_backend(self, url: str) -> str:
+    def _detect_backend(self, url: str, *, kind: Optional[str] = None) -> str:
         return "sqlite"
 
 
@@ -1543,8 +1742,21 @@ class TursoDB(PraisonAIDB):
             raise ValueError(
                 "Turso database URL required. Provide database_url or set TURSO_DATABASE_URL."
             )
-        options["auth_token"] = token
-        super().__init__(database_url=url, **options)
+        # Scope the auth token to the conversation store only. Stuffing it into
+        # the shared **options bag would leak it into an unrelated state/knowledge
+        # store factory as an unexpected kwarg.
+        conversation_options = dict(options.pop("conversation_options", None) or {})
+        # Only override when we actually resolved a token, and never clobber a
+        # token the caller already placed in conversation_options — otherwise a
+        # None from the (turso_auth_token / TURSO_AUTH_TOKEN) lookup would wipe
+        # an explicitly-supplied credential.
+        if token is not None:
+            conversation_options["auth_token"] = token
+        super().__init__(
+            database_url=url,
+            conversation_options=conversation_options,
+            **options,
+        )
 
 
 # Backward-compatible aliases

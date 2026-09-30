@@ -267,17 +267,13 @@ class EventBus:
             The published Event object
         """
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
-        
-        # Fast path: if no subscribers and no durable sinks, return a minimal
-        # event without expensive operations.
-        if not self._subscribers and not self._sinks:
-            return Event(
-                type=type_str,
-                data=data or {},
-                source=source,
-                metadata=metadata or {},
-            )
-        
+
+        # No pre-history no-subscriber shortcut here, matching publish_event's
+        # already-fixed shape: an event that was published happened, whether or
+        # not anyone was listening, and skipping the history append below would
+        # make it vanish from get_history(). The append is O(1) under a lock and
+        # the list is capped, so the only work worth skipping is subscriber
+        # matching/dispatch -- which the guard after the append still skips.
         event = Event(
             type=type_str,
             data=data or {},
@@ -336,24 +332,20 @@ class EventBus:
         """
         Get recent event history.
 
-        Only events published while at least one subscriber was registered are
-        recorded. #2066 added a fast path that skips history (and the lock, and
-        Event construction) when ``has_subscribers`` is False, because memory
-        and sub-agent lifecycle publishes were paying uuid4 + lock + append on
-        every call with nothing listening.
-
-        The consequence is worth stating plainly, because it is surprising in
-        the case you would most want history -- debugging after the fact, with
-        nothing subscribed: publishing three events to a bus with no
-        subscribers and then calling this returns an empty list, not three
-        events. Subscribe (even a no-op) before publishing if you need a record.
+        Every event passed to ``publish``/``publish_event``/``publish_async`` is
+        recorded here (capped at ``_max_history``), regardless of whether any
+        subscriber was registered at publish time. History is a debugging record
+        of what the system did; it does not silently depend on who was watching.
+        Both the sync and async publish paths append before any no-subscriber
+        fast path runs, so publishing to a bus with nothing subscribed still
+        shows up here.
 
         Args:
             event_type: Optional filter by event type
             limit: Maximum number of events to return
 
         Returns:
-            List of recent events published while subscribers existed
+            List of recent events published (subscribed or not)
         """
         with self._lock:
             events = self._event_history.copy()

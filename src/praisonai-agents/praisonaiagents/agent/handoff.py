@@ -569,17 +569,13 @@ class Handoff:
         handoffs to the same agent serialize on the event loop instead of
         blocking it, keeping each seeded ``achat`` turn atomic.
 
-        ``DualLock`` keeps its sync (threading ``RLock``) and async (per-loop
-        ``asyncio.Lock``) sides independent, so the async lock alone would NOT
-        exclude a concurrent *synchronous* handoff running on another thread —
-        both could seed/restore the same shared ``chat_history`` at once, and a
-        cross-thread sync seed landing *between* our apply and restore would
-        corrupt the awaited turn. To close that gap we ALSO hold the sync
-        thread-lock for the whole seeded turn. The async lock (acquired first)
-        has already serialized every same-loop async handoff to this target, so
-        the thread-lock here only ever contends with a genuine cross-thread sync
-        handoff to the same agent — exactly the case that must be mutually
-        excluded — which is a rare mixed sync+async fan-out to one shared target.
+        ``DualLock`` backs ``sync()`` and ``async_lock()`` onto one shared mutex,
+        so ``async_lock()`` alone already excludes a concurrent *synchronous*
+        handoff on another thread. We still take the inner ``sync()`` so the
+        seed/restore reads as one explicit critical section; because
+        ``async_lock()`` registers the event-loop thread as the mutex owner, that
+        nested ``sync()`` is treated as re-entrant on the same thread instead of
+        self-deadlocking against the mutex the async side already holds.
         """
         lock = _get_handoff_seed_lock(self.agent)
         async with lock.async_lock():

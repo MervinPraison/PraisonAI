@@ -203,6 +203,59 @@ def test_positional_args_visible_to_approval(registry):
         remove_approval_requirement("fetch")
 
 
+def test_positional_call_with_allow_policy_hook_does_not_break(registry):
+    # Regression: an active policy hook that ALLOWS a call without rewriting its
+    # arguments must not force keyword-only redispatch. Because the hook is
+    # handed a *copy* of the bound kwargs, an identity check on its return would
+    # always trigger a rebind and corrupt a positional call to a decorated tool
+    # (mapping the value onto ``*args``/``**kwargs`` param names). The proxy must
+    # compare by value and dispatch the original positional call unchanged.
+    def allow_no_rewrite(name, arguments):
+        return None, arguments
+
+    proxy = ToolProxy(["fetch"], registry=registry, policy_hook=allow_no_rewrite)
+    assert proxy.fetch("a") == 1
+    assert proxy.fetch(url="b") == 2
+
+
+def test_policy_hook_guardrail_rewrite_is_honoured(registry):
+    # A guardrail that rewrites an argument must apply to the actual tool call
+    # (not be discarded), on both the positional and keyword forms.
+    def rewrite(name, arguments):
+        new = dict(arguments)
+        new["url"] = "c"
+        return None, new
+
+    proxy = ToolProxy(["fetch"], registry=registry, policy_hook=rewrite)
+    assert proxy.fetch("a") == 3
+    assert proxy.fetch(url="b") == 3
+
+
+def test_policy_hook_denies(registry):
+    def deny(name, arguments):
+        return "blocked by policy", arguments
+
+    proxy = ToolProxy(["fetch"], registry=registry, policy_hook=deny)
+    with pytest.raises(PermissionError):
+        proxy.fetch("a")
+
+
+def test_legacy_bare_string_policy_hook_still_supported(registry):
+    # Older/third-party hooks return a bare denial string / None (no tuple).
+    def legacy_deny(name, arguments):
+        return "nope"
+
+    proxy = ToolProxy(["fetch"], registry=registry, policy_hook=legacy_deny)
+    with pytest.raises(PermissionError):
+        proxy.fetch("a")
+
+    def legacy_allow(name, arguments):
+        return None
+
+    proxy_ok = ToolProxy(["fetch"], registry=registry, policy_hook=legacy_allow)
+    assert proxy_ok.fetch("a") == 1
+
+
 def test_init_reinitialization_bypass_blocked(registry):
     # Sandboxed code must not be able to call tools.__init__([...]) to re-bind
     # the proxy's allow-list/registry and reach a disallowed tool.

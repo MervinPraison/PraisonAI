@@ -617,6 +617,74 @@ class PluginManager:
     def get_all_tools(self) -> List[Any]:
         """Get all tools from all enabled plugins."""
         return [tool for _plugin_name, tool in self.get_all_tools_with_sources()]
+
+    def _enabled_of_type(self, plugin_type: "PluginType") -> List[Tuple[str, Plugin]]:
+        """Snapshot enabled ``(name, plugin)`` pairs of a given declared type.
+
+        Dispatch key for the typed subsystems: a plugin only contributes a
+        guardrail / skill / policy when it *declares* the matching
+        ``PluginType`` in its ``PluginInfo``. Snapshotting under the lock keeps
+        this safe against concurrent register/unregister in multi-agent runs.
+        """
+        from .plugin import PluginType
+
+        with self._lock:
+            result: List[Tuple[str, Plugin]] = []
+            for name, plugin in self._plugins.items():
+                if not self._enabled.get(name, False):
+                    continue
+                try:
+                    declared = getattr(plugin.info, "plugin_type", PluginType.HOOK)
+                except Exception:
+                    declared = PluginType.HOOK
+                if declared == plugin_type:
+                    result.append((name, plugin))
+            return result
+
+    def get_all_guardrails(self) -> List[Any]:
+        """Guardrail objects contributed by enabled ``GUARDRAIL`` plugins.
+
+        Calls ``as_guardrail()`` on each enabled plugin declared
+        ``PluginType.GUARDRAIL`` and returns the non-``None`` guardrail objects
+        the Agent folds into its ``GuardrailChain`` (so they see
+        ``validate_tool_call`` / ``validate_tool_result``, not just final text).
+        """
+        from .plugin import PluginType
+
+        guardrails: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.GUARDRAIL):
+            try:
+                g = plugin.as_guardrail()
+            except Exception as e:
+                logger.error(f"Error getting guardrail from plugin {name}: {e}")
+                continue
+            if g is not None:
+                guardrails.append(g)
+        return guardrails
+
+    def get_all_skills(self) -> List[Any]:
+        """Skill sources/dirs contributed by enabled ``SKILL`` plugins."""
+        from .plugin import PluginType
+
+        skills: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.SKILL):
+            try:
+                skills.extend(plugin.get_skills() or [])
+            except Exception as e:
+                logger.error(f"Error getting skills from plugin {name}: {e}")
+        return skills
+
+    def get_all_policies(self) -> List[Any]:
+        """Policy rules contributed by enabled ``POLICY`` plugins."""
+        from .plugin import PluginType
+
+        policies: List[Any] = []
+        for name, plugin in self._enabled_of_type(PluginType.POLICY):
+            try:
+                policies.extend(plugin.get_policies() or [])
+            except Exception as e:
+                logger.error(f"Error getting policies from plugin {name}: {e}")
+        return policies
     
     def shutdown(self):
         """Shutdown all plugins."""
@@ -1237,6 +1305,51 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             })
             return HookResult.allow()
         yield HookEvent.CLI_BACKEND_EXECUTE, cli_backend_execute_hook
+
+    # Generic, declaration-driven tail. The explicit branches above give
+    # rewrite/deny semantics to the conversation/tool/channel events that need
+    # them. Everything else a plugin declares in ``PluginInfo.hooks`` — the
+    # gateway/schedule/kanban/compaction/subagent/model-fallback lifecycle — is
+    # observe-only, so a single loop bridges it by method name (``event.value``)
+    # without a hand-written branch per event. This keeps the coverage matrix
+    # from drifting: any future emitted event becomes first-class the moment a
+    # plugin declares it and defines the matching method.
+    yielded = {
+        HookEvent.BEFORE_AGENT, HookEvent.AFTER_AGENT,
+        HookEvent.BEFORE_LLM, HookEvent.AFTER_LLM,
+        HookEvent.BEFORE_TOOL, HookEvent.AFTER_TOOL,
+        HookEvent.BEFORE_TOOL_DEFINITIONS,
+        HookEvent.MESSAGE_RECEIVED, HookEvent.MESSAGE_SENDING,
+        HookEvent.MESSAGE_SENT, HookEvent.MESSAGE_UNDELIVERED,
+        HookEvent.ON_PERMISSION_ASK, HookEvent.ON_CONFIG, HookEvent.ON_AUTH,
+        HookEvent.SESSION_START, HookEvent.SESSION_END, HookEvent.ON_ERROR,
+        HookEvent.CLI_BACKEND_EXECUTE,
+    }
+
+    def _make_observe_hook(method):
+        def observe_hook(data, _m=method):
+            payload = data.to_dict() if hasattr(data, "to_dict") else {}
+            _m(payload)
+            return HookResult.allow()
+        return observe_hook
+
+    declared = getattr(plugin.info, "hooks", None) or []
+    seen: set = set()
+    for event in declared:
+        if not isinstance(event, HookEvent) or event in yielded or event in seen:
+            continue
+        seen.add(event)
+        method = getattr(plugin, event.value, None)
+        if not callable(method):
+            continue
+        parent = getattr(base, event.value, None)
+        own = getattr(type(plugin), event.value, None)
+        # A base no-op that the plugin did not override yields nothing (avoids
+        # registering dead hooks). Methods with no base counterpart (e.g.
+        # ``kanban_task_created``) are treated as genuine overrides.
+        if parent is not None and own is parent:
+            continue
+        yield event, _make_observe_hook(method)
 
 
 # Global plugin manager instance

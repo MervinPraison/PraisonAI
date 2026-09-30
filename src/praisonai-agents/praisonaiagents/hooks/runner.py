@@ -102,25 +102,41 @@ class HookRunner:
         if not hooks:
             return []
         
-        # Separate sequential and parallel hooks
-        sequential_hooks = [h for h in hooks if h.sequential]
-        parallel_hooks = [h for h in hooks if not h.sequential]
-        
-        results = []
-        
-        # Execute parallel hooks first
-        if parallel_hooks:
-            parallel_results = await self._execute_parallel(
-                parallel_hooks, event, input_data
-            )
-            results.extend(parallel_results)
-        
-        # Execute sequential hooks
-        if sequential_hooks:
-            sequential_results = await self._execute_sequential(
-                sequential_hooks, event, input_data
-            )
-            results.extend(sequential_results)
+        # The registry hands us hooks already sorted by (priority, _seq), so the
+        # list is in the exact order the operator asked them to run. Preserve
+        # that global order across parallel/sequential boundaries: walk the list
+        # and run each *contiguous* run of same-mode hooks together. A redact
+        # (sequential, priority 10) that must precede a trace (parallel,
+        # priority 20) therefore still runs first — splitting all parallel hooks
+        # to the front would have leaked the unredacted input to the tracer.
+        # Adjacent parallel hooks are still gathered concurrently; only their
+        # position relative to a lower-priority sequential hook is respected.
+        results: List[HookExecutionResult] = []
+        current_input = input_data
+        i = 0
+        n = len(hooks)
+        while i < n:
+            j = i + 1
+            is_seq = hooks[i].sequential
+            while j < n and hooks[j].sequential == is_seq:
+                j += 1
+            run = hooks[i:j]
+            if is_seq:
+                run_results = await self._execute_sequential(run, event, current_input)
+                # A sequential run may have blocked; stop the whole chain so a
+                # later parallel group never runs after a denial (matches the
+                # sequential-hook break semantics).
+                results.extend(run_results)
+                if any(
+                    r.output and r.output.is_denied() for r in run_results
+                ):
+                    break
+            else:
+                run_results = await self._execute_parallel(
+                    run, event, current_input
+                )
+                results.extend(run_results)
+            i = j
         
         return results
     

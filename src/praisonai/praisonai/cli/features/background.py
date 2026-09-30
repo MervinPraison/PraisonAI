@@ -299,18 +299,20 @@ def handle_background_command(args: List[str], verbose: bool = False):
     
     handler = BackgroundHandler(verbose=verbose)
     
+    from praisonai._async_bridge import run_cli_coro
+
     try:
         if parsed.subcommand == "list":
-            asyncio.run(handler.list_tasks(status=parsed.status))
+            run_cli_coro(handler.list_tasks(status=parsed.status))
         
         elif parsed.subcommand == "status":
-            asyncio.run(handler.get_status(parsed.task_id))
+            run_cli_coro(handler.get_status(parsed.task_id))
         
         elif parsed.subcommand == "cancel":
-            asyncio.run(handler.cancel_task(parsed.task_id))
+            run_cli_coro(handler.cancel_task(parsed.task_id))
         
         elif parsed.subcommand == "clear":
-            asyncio.run(handler.clear_completed())
+            run_cli_coro(handler.clear_completed())
         
         elif parsed.subcommand == "submit":
             # Parse input and config

@@ -189,6 +189,18 @@ class ApprovalProtocol(Protocol):
         """
         ...
 
+    # Backends MAY also implement an optional synchronous entry point:
+    #
+    #     def request_approval_sync(self, request, timeout=None) -> ApprovalDecision
+    #
+    # It is deliberately NOT declared on this runtime-checkable Protocol so an
+    # async-only backend still satisfies ``isinstance(b, ApprovalProtocol)``.
+    # When present, the per-call ``timeout`` (seconds; ``None`` = wait forever)
+    # is passed explicitly by the caller so shared backend state is never
+    # mutated — mutating a shared backend's timeout leaks between agents.
+    # Legacy sync backends without the ``timeout`` parameter are still
+    # supported; the caller falls back to a no-argument call on ``TypeError``.
+
 
 @runtime_checkable
 class ApprovalStoreProtocol(Protocol):

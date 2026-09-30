@@ -592,3 +592,63 @@ class TestPermissionManager:
         
         assert len(data["rules"]) == 1
         assert len(data["approvals"]) == 1
+
+
+class TestDoomLoopGateWiring:
+    """The tool-execution gate must consult the manager's doom-loop detector."""
+
+    def _make_agent(self, manager):
+        from praisonaiagents.agent.tool_execution import ToolExecutionMixin
+
+        class _Agent(ToolExecutionMixin):
+            def __init__(self, mgr):
+                self.name = "A"
+                self._permission_manager = mgr
+
+        return _Agent(manager)
+
+    def test_doom_loop_recorded_once_per_call(self):
+        """The detector is consulted exactly once with the given args."""
+        calls = []
+
+        class _Result:
+            is_loop = False
+            reason = ""
+
+        class _FakeManager:
+            def check_doom_loop(self, function_name, arguments):
+                calls.append((function_name, arguments))
+                return _Result()
+
+        agent = self._make_agent(_FakeManager())
+        denial = agent._check_permission_manager_doom_loop("bash", {"command": "ls"})
+
+        assert denial is None
+        assert calls == [("bash", {"command": "ls"})]
+
+    def test_doom_loop_denies_when_detector_flags_a_loop(self):
+        """A genuine loop must produce a blocking denial dict."""
+        class _Result:
+            is_loop = True
+            reason = "repeated tool call"
+
+        class _FakeManager:
+            def check_doom_loop(self, function_name, arguments):
+                return _Result()
+
+        agent = self._make_agent(_FakeManager())
+        denial = agent._check_permission_manager_doom_loop("bash", {"command": "ls"})
+
+        assert denial is not None
+        assert denial.get("loop_blocked") is True
+        assert denial.get("permission_denied") is True
+
+    def test_no_manager_is_a_noop(self):
+        from praisonaiagents.agent.tool_execution import ToolExecutionMixin
+
+        class _Agent(ToolExecutionMixin):
+            def __init__(self):
+                self.name = "A"
+                self._permission_manager = None
+
+        assert _Agent()._check_permission_manager_doom_loop("bash", {}) is None
