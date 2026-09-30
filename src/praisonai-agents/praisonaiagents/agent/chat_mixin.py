@@ -3229,6 +3229,37 @@ Your Goal: {self.goal}"""
                 if _cancel is not None:
                     _cancel.close()
 
+    def _build_before_agent_input(self, prompt, tools):
+        """Build the BeforeAgentInput shared by the sync/async chat paths.
+
+        Centralises hook-input construction so field semantics (including the
+        tools_available source) are defined once instead of drifting between
+        _chat_impl and _achat_impl. Contains no await, so both paths reuse it.
+        """
+        from ..hooks import HookEvent, BeforeAgentInput
+        return BeforeAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt if isinstance(prompt, str) else str(prompt),
+            conversation_history=self.chat_history,
+            tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
+        )
+
+    def _apply_hook_prompt_updates(self, hook_results, prompt, attachments):
+        """Apply BEFORE_AGENT hook prompt modifications, returning (prompt, llm_prompt).
+
+        Shared by the sync/async chat paths; contains no await so the async
+        method keeps its own `await self._hook_runner.execute(...)` dispatch.
+        """
+        for res in hook_results:
+            if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
+                prompt = res.output.modified_input["prompt"]
+        llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+        return prompt, llm_prompt
+
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
@@ -3268,28 +3299,16 @@ Your Goal: {self.goal}"""
         self._start_run(prompt_str)
 
         # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
-        from ..hooks import HookEvent, BeforeAgentInput
+        from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
-            before_agent_input = BeforeAgentInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.BEFORE_AGENT,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                prompt=prompt_str,
-                conversation_history=self.chat_history,
-                tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-            )
+            before_agent_input = self._build_before_agent_input(prompt_str, tools)
             hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, before_agent_input)
             if self._hook_runner.is_blocked(hook_results):
                 logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return None
 
             # Update prompt if modified by hooks
-            for res in hook_results:
-                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
-                    prompt = res.output.modified_input["prompt"]
-                    llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, attachments)
 
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
@@ -4037,28 +4056,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         
         # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
-        from ..hooks import HookEvent, BeforeAgentInput
+        from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
-            before_agent_input = BeforeAgentInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.BEFORE_AGENT,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                prompt=prompt if isinstance(prompt, str) else str(prompt),
-                conversation_history=self.chat_history,
-                tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
-            )
+            before_agent_input = self._build_before_agent_input(prompt, tools)
             hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
             if self._hook_runner.is_blocked(hook_results):
                 logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return None
 
             # Update prompt if modified by hooks
-            for res in hook_results:
-                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
-                    prompt = res.output.modified_input["prompt"]
-                    llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, attachments)
         
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
