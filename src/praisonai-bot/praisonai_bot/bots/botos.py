@@ -706,12 +706,14 @@ class BotOS:
                     _status = "succeeded"
                     _result = None
                     _error = None
+                    _exc: Optional[Exception] = None
                     _delivered = False
                     try:
                         _result, _delivered = await self._execute_schedule_job(job)
                     except Exception as e:
                         _status = "failed"
                         _error = str(e)
+                        _exc = e
                         logger.warning(f"BotOS: schedule job {job.name} failed: {e}")
                     finally:
                         # Release the lease so it does not linger until expiry.
@@ -731,6 +733,15 @@ class BotOS:
                                     f"{job.name}: {e}"
                                 )
                     _duration = _time.time() - _start
+                    # Provider-quota hold: park a job past a 429/quota reset
+                    # window so this loop stops re-firing and re-failing every
+                    # tick against a benched provider — the same core decision
+                    # the gateway executor applies (issue #5386). A success
+                    # clears any prior park (the window reopened); the hold is
+                    # written by the mark_run below.
+                    self._apply_schedule_quota_hold(
+                        job, succeeded=_status == "succeeded", error=_exc,
+                    )
                     runner.mark_run(
                         job,
                         status=_status,
@@ -825,6 +836,52 @@ class BotOS:
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
+
+    @staticmethod
+    def _apply_schedule_quota_hold(
+        job: Any, *, succeeded: bool, error: Optional[Exception],
+    ) -> None:
+        """Park a due-loop job past a provider rate-limit window (issue #5386).
+
+        The BotOS schedule loop runs ``agent.chat`` directly rather than through
+        :class:`ScheduledAgentExecutor`, so it needs the same provider-quota
+        hold or a benched provider is hammered every tick. Uses the *core* pure
+        decision ``quota_hold_from_failure`` (no new surface): a 429/quota
+        failure carrying a reset hint sets ``job.hold_until`` (never shortening
+        an existing later park), which the subsequent ``mark_run`` persists so
+        ``is_due`` coalesces intervening fires. A success clears any prior park
+        (proof the window reopened). A no-op when core is unavailable or the
+        failure is not a quota signal, so today's behaviour is unchanged.
+        """
+        if succeeded:
+            if getattr(job, "hold_until", None) is not None:
+                try:
+                    job.hold_until = None
+                except Exception:  # pragma: no cover - defensive
+                    pass
+            return
+        if error is None:
+            return
+        try:
+            from praisonaiagents.scheduler import quota_hold_from_failure
+        except Exception:  # pragma: no cover - core primitive always present
+            return
+        import time as _time
+        hold_until = quota_hold_from_failure(error, _time.time())
+        if hold_until is None:
+            return
+        prior = getattr(job, "hold_until", None)
+        if isinstance(prior, (int, float)) and prior > hold_until:
+            hold_until = prior
+        try:
+            job.hold_until = hold_until
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"BotOS: could not set quota hold for {job.name}: {e}")
+            return
+        logger.info(
+            "BotOS: job '%s' held until %.0f after provider rate-limit",
+            job.name, hold_until,
+        )
 
     @staticmethod
     def _enforce_pinned_model(job: Any, agent: Any) -> Optional[Any]:

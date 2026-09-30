@@ -1461,13 +1461,19 @@ class ScheduledAgentExecutor:
         delivery = getattr(job, "delivery", None)
         if not delivery or not self._can_deliver(delivery):
             return
+        # A hold is a distinct operational state (the job is now silenced for a
+        # whole provider-reset window) and is emitted at most once per window:
+        # ``is_due`` coalesces intervening fires, so this method only runs on the
+        # tick that *newly* parks the job. It must therefore NOT be gated on the
+        # failure ``alert_after_failures`` threshold — otherwise a job configured
+        # to alert only after N failures would park silently and the operator
+        # would never learn it was held (greptile #3). We still fold the failure
+        # through the incident tracker so failure/recovery accounting stays
+        # consistent, but deliver the hold notice regardless of its alert state.
         pending: Optional[Dict[str, Any]] = None
         observed = self._observe_incident(job, result)
         if observed is not None:
-            incident, pending = observed
-            if incident is None or getattr(incident, "state", None) != "alerted":
-                self._commit_incident(job, pending)
-                return
+            _incident, pending = observed
         try:
             when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(held_until))
         except Exception:  # pragma: no cover - defensive

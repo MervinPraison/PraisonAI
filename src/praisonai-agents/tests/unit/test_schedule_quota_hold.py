@@ -43,6 +43,33 @@ def test_retry_after_parsed_from_message_string():
     assert hold == now + 30 + 10
 
 
+def test_retry_after_http_date_parks_past_window():
+    # RFC 7231 allows Retry-After as an absolute HTTP-date, not just
+    # delta-seconds. A provider that sends the reset instant as a date must
+    # still park the job (greptile #2) — else a long quota window is ignored.
+    import time
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+
+    now = time.time()
+    reset = format_datetime(
+        datetime.now(timezone.utc) + timedelta(seconds=1800)
+    )
+    hold = quota_hold_from_failure(_RateLimited(reset), now, slack_seconds=60.0)
+    assert hold is not None
+    # ~1800s window + 60s slack, allowing a little scheduling drift.
+    assert now + 1800 + 60 - 5 <= hold <= now + 1800 + 60 + 5
+
+
+def test_retry_after_past_http_date_does_not_hold():
+    # An HTTP-date already in the past yields no usable window → no park.
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(seconds=120))
+    assert quota_hold_from_failure(_RateLimited(past), 0.0) is None
+
+
 def test_non_quota_failure_never_holds():
     assert quota_hold_from_failure(Exception("boom: invalid request"), 0.0) is None
     assert quota_hold_from_failure(Exception("connection reset"), 0.0) is None

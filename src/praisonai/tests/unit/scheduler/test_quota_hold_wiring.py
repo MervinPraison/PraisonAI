@@ -110,3 +110,63 @@ def test_no_policy_no_park():
     ex = _executor(FakeAgent(_RateLimited(3600)))
     _run(ex._execute_one(job))
     assert job.hold_until is None
+
+
+# ── hold-notice delivery (greptile #3) ───────────────────────────────
+
+
+class _StatefulRunner(FakeRunner):
+    """Runner whose store supports per-job state (enables the incident tracker)."""
+
+    def __init__(self):
+        super().__init__()
+
+        class _Store:
+            def __init__(self):
+                self._state = {}
+
+            def get_state(self, job_id):
+                return dict(self._state.get(job_id, {}))
+
+            def set_state(self, job_id, state):
+                self._state[job_id] = dict(state)
+
+        self._store = _Store()
+
+
+def _job_with_delivery():
+    return ScheduleJob(
+        name="quota-job",
+        schedule=Schedule(kind="every", every_seconds=1),
+        message="do it",
+        delivery=DeliveryTarget(channel="slack", channel_id="C1"),
+    )
+
+
+def test_hold_notice_delivered_even_below_alert_threshold():
+    # greptile #3: with ``alert_after_failures`` > 1 the first quota failure
+    # parks the job but its incident is still below the *failure*-alert
+    # threshold. The hold is nonetheless a distinct state emitted once per
+    # window (is_due coalesces the rest), so the operator must still be told —
+    # the notice must NOT be gated on the failure-alert threshold.
+    sent: List[str] = []
+
+    def deliver(_target, text):
+        sent.append(text)
+        return True
+
+    runner = _StatefulRunner()
+    ex = ScheduledAgentExecutor(
+        runner=runner,
+        agent_resolver=lambda aid: FakeAgent(),
+        run_policy=RunPolicy(alert_after_failures=5),
+        delivery_handler=deliver,
+    )
+    job = _job_with_delivery()
+    from praisonai_bot.scheduler.executor import JobResult
+
+    result = JobResult(job=job, status="failed", error="429", duration=0.0)
+    _run(ex._maybe_deliver_hold(job, result, held_until=9_999_999_999.0))
+
+    assert len(sent) == 1
+    assert "held until" in sent[0]
