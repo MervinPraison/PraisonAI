@@ -8,7 +8,6 @@ import re
 import inspect
 import asyncio
 import threading
-import contextvars
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -599,11 +598,11 @@ Respond with ONLY a valid JSON tool call in this format:
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
-        # Agent attribution is task-local: a single LLM instance is shared by
-        # concurrent agents (gateway channels, asyncio.gather), so a plain
-        # attribute would let one agent's set_current_agent() overwrite another's
-        # while it is still awaiting its own completion, misattributing tokens
-        # (issue #5052). A ContextVar isolates the value per async task/context.
+        # Agent attribution is task-local: a single LLM instance is often shared
+        # by several concurrently-running agents (gateway channels, asyncio.gather),
+        # so a plain attribute would let one agent's set_current_agent() clobber
+        # another's mid-await and misattribute token spend (issues #5052/#3933).
+        # A ContextVar keeps the value isolated per asyncio task / thread.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_name", default=None)
         )
@@ -6623,11 +6622,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     
     @property
     def current_agent_name(self) -> Optional[str]:
-        """The agent name attributed to the current async task/context.
+        """Task-local name of the agent currently driving this LLM.
 
-        Backed by a per-instance ContextVar (issue #5052) so concurrent agents
-        sharing one LLM instance keep independent, task-local attribution and do
-        not clobber each other's value while awaiting their own completions.
+        Backed by a per-instance ContextVar so concurrent agents sharing one
+        LLM instance each read/write their own value instead of racing on a
+        shared attribute (issues #5052/#3933).
         """
         var = getattr(self, "_current_agent_name_var", None)
         if var is None:
@@ -6673,32 +6672,35 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Deep-copy the LLM while giving the clone fresh attribution ContextVars.
 
         ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
-        not copyable, so ``Agent.__deepcopy__`` (which recursively copies
-        ``_llm_instance``) would raise ``TypeError: cannot pickle ContextVar``.
-        Thread locks on LLM subclasses get fresh locks (issue #1746 / #5052).
+        not copyable/pickleable, so ``Agent.__deepcopy__`` (which recursively
+        copies ``_llm_instance`` per gateway channel, issue #5052) would raise
+        ``TypeError: cannot pickle ContextVar``. Every other attribute is copied
+        normally, brand-new ContextVars start the clone's attribution clean, and
+        thread locks on LLM subclasses (RateLimiter/FailoverManager) get fresh
+        locks so configured LLMs clone cleanly (issues #1746 / #5052 / #3933).
         """
         cls = self.__class__
-        new = cls.__new__(cls)
-        memo[id(self)] = new
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
         for key, value in self.__dict__.items():
             if key == "_current_agent_name_var":
-                new.__dict__[key] = contextvars.ContextVar(
+                clone.__dict__[key] = contextvars.ContextVar(
                     "current_agent_name", default=None
                 )
                 continue
             if key == "_current_agent_id_var":
-                new.__dict__[key] = contextvars.ContextVar(
+                clone.__dict__[key] = contextvars.ContextVar(
                     "current_agent_id", default=None
                 )
                 continue
             if type(value) is type(threading.RLock()):
-                new.__dict__[key] = threading.RLock()
+                clone.__dict__[key] = threading.RLock()
                 continue
             if type(value) is type(threading.Lock()):
-                new.__dict__[key] = threading.Lock()
+                clone.__dict__[key] = threading.Lock()
                 continue
-            new.__dict__[key] = copy.deepcopy(value, memo)
-        return new
+            clone.__dict__[key] = copy.deepcopy(value, memo)
+        return clone
 
     def _resolve_openai_compatible_model(self) -> str:
         """Route a bare model name through the OpenAI-compatible client.
