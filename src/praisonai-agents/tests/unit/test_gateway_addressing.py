@@ -29,6 +29,22 @@ def test_derive_short_id_none_without_hex_tail():
     assert derive_short_id("main") is None
 
 
+def test_derive_short_id_none_when_hex_not_at_end():
+    # A hex run followed by non-hex chars (a file-like key) must NOT be
+    # shortened, so it can round-trip losslessly via the literal escape hatch.
+    assert derive_short_id("report-deadbeef.js") is None
+    assert derive_short_id("deadbeef.txt") is None
+
+
+def test_file_like_key_with_hex_run_roundtrips():
+    # Regression: ``report-deadbeef.js`` must not collapse to ``deadbeef``.
+    key = "report-deadbeef.js"
+    path = build_session_path("bot", key)
+    assert path == "chat/bot/!report-deadbeef.js"
+    ref = parse_session_path(path)
+    assert ref == SessionRef(agent_id="bot", literal_key=key)
+
+
 def test_slugify():
     assert slugify("Quarterly Report") == "quarterly-report"
     assert slugify("  Hello,  World!! ") == "hello-world"
@@ -125,6 +141,14 @@ def test_parse_invalid():
     assert parse_session_path("") is None
     assert parse_session_path("just-one-segment") is None
     assert parse_session_path("/") is None
+
+
+def test_parse_rejects_surplus_segments():
+    # A canonical address is at most ``<ns>/<agent>/<ref>``; a longer path is
+    # malformed and must be rejected rather than silently using its last two
+    # segments (which would resolve to the wrong agent).
+    assert parse_session_path("chat/other/assistant/deadbeef") is None
+    assert parse_session_path("a/b/c/d/e") is None
 
 
 def test_agent_id_with_special_chars_roundtrips():

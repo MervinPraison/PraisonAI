@@ -48,8 +48,11 @@ SHORT_ID_LEN = 8
 # A resolver treats these as a friendly sentinel, not a short-id lookup.
 RESERVED_NAMES = frozenset({"main", "global", "default", "root"})
 
-# Trailing run of hex digits in a key — the opaque UUID tail we shorten from.
-_HEX_TAIL_RE = re.compile(r"([0-9a-fA-F]{%d,})[^0-9a-fA-F]*$" % SHORT_ID_LEN)
+# Trailing run of hex digits that terminates the key — the opaque UUID tail we
+# shorten from. Anchored at end-of-string so a *hex run followed by non-hex*
+# (e.g. ``report-deadbeef.js``) is NOT shortened and instead round-trips via the
+# literal-key escape hatch; only a genuine hex terminus (a UUID tail) is lossy.
+_HEX_TAIL_RE = re.compile(r"([0-9a-fA-F]{%d,})$" % SHORT_ID_LEN)
 
 # A ``slug-shortId`` final segment: optional slug, then a hex short id.
 _SLUG_SHORT_RE = re.compile(r"^(?:(?P<slug>.+)-)?(?P<short>[0-9a-fA-F]{%d})$" % SHORT_ID_LEN)
@@ -83,12 +86,15 @@ class SessionRef:
 
 
 def derive_short_id(session_key: str) -> Optional[str]:
-    """Derive a stable short id from the trailing hex of ``session_key``.
+    """Derive a stable short id from the terminating hex run of ``session_key``.
 
-    Returns the last :data:`SHORT_ID_LEN` hex chars of the key's trailing hex
-    run (e.g. the UUID tail), lower-cased. Returns ``None`` when the key has no
-    hex tail long enough to shorten — the caller then falls back to the literal
-    key or reserved-name form.
+    Returns the last :data:`SHORT_ID_LEN` hex chars of the key's *terminating*
+    hex run (e.g. a UUID tail), lower-cased. The run must end the key: a key
+    whose hex is followed by non-hex characters (e.g. ``report-deadbeef.js``)
+    is deliberately not shortened, so it round-trips via the literal-key escape
+    hatch instead of silently losing its suffix. Returns ``None`` when the key
+    has no terminating hex run long enough to shorten — the caller then falls
+    back to the literal key or reserved-name form.
     """
     if not session_key:
         return None
@@ -169,8 +175,13 @@ def parse_session_path(path: str) -> Optional[SessionRef]:
     if not path:
         return None
     parts = [p for p in path.strip().strip("/").split("/") if p]
-    if len(parts) >= 3:
-        # Drop a leading namespace segment; agent + final ref remain.
+    # ``build_session_path`` percent-escapes the namespace and agent into single
+    # segments, so a canonical address is exactly ``<ns>/<agent>/<ref>`` (3) or
+    # ``<agent>/<ref>`` (2). Reject anything longer so a malformed link like
+    # ``chat/x/y/z`` never silently acquires a different meaning by using only
+    # its last two segments.
+    if len(parts) == 3:
+        # Drop the leading namespace segment; agent + final ref remain.
         agent_id = unquote(parts[-2])
         final = parts[-1]
     elif len(parts) == 2:
