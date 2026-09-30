@@ -5801,17 +5801,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Perform compaction
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                import asyncio
-                try:
-                    # Run async compaction in event loop
-                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
-                except RuntimeError:
-                    # If already in async context, fall back to sync (naive) compaction
-                    logging.warning(
-                        f"[compaction] {self.name}: LLM_SUMMARIZE fell back to naive summarization "
-                        f"(asyncio.run not available in sync context)"
-                    )
-                    compacted_msgs, _cr = _compactor.compact(messages)
+                # Drive the async summariser through the shared bridge so it runs
+                # correctly whether or not a loop is already running (FastAPI /
+                # Jupyter / a bot handler). The previous code caught bare
+                # RuntimeError from ``asyncio.run`` ("event loop already
+                # running") and silently downgraded LLM summarisation to naive
+                # truncation whenever a loop was live; the bridge removes that
+                # spurious fallback so the real summariser always runs. Provider
+                # errors inside the summariser remain best-effort (see
+                # ``_llm_summarize_async``, which falls back to a naive summary on
+                # failure) — compaction never hard-fails the turn.
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                compacted_msgs, _cr = run_coroutine_from_any_context(
+                    _compactor.compact_async(messages)
+                )
             else:
                 compacted_msgs, _cr = _compactor.compact(messages)
             
