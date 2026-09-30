@@ -10,6 +10,23 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
 
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    """Coerce a persisted/hand-edited value to ``Optional[float]``.
+
+    A hand-written config.yaml may quote a numeric field (``'3600'``) so it
+    arrives as a string. Left as-is it would raise ``TypeError`` in a later
+    numeric comparison (e.g. the misfire age check), aborting the whole claim
+    pass and starving every other due job. Coerce leniently: ``None`` stays
+    ``None``; a non-numeric value is treated as unset rather than exploding.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class Schedule:
     """When to run a scheduled job.
@@ -598,7 +615,9 @@ class ScheduleJob:
             context_from=context_from,
             context_max_chars=d.get("context_max_chars", 4000),
             on_missing_context=d.get("on_missing_context", "run"),
-            misfire_grace_seconds=d.get("misfire_grace_seconds"),
+            misfire_grace_seconds=_coerce_optional_float(
+                d.get("misfire_grace_seconds")
+            ),
             backend=d.get("backend"),
             backend_options=(
                 dict(d["backend_options"])

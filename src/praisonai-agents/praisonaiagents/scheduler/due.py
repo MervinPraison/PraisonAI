@@ -147,10 +147,25 @@ def is_misfire(
     recovery, the pre-existing behaviour.
 
     With no grace set this is always ``False`` — existing jobs keep firing
-    exactly as before.
+    exactly as before. A first run (``last_run_at is None``) is never a misfire
+    for any kind: there is no missed *recurrence* to suppress, only the initial
+    fire, which must always run (matching ``is_due``'s never-run branches).
     """
     grace = getattr(job, "misfire_grace_seconds", None)
     if grace is None:
+        return False
+    # A first run is the initial fire, not a recovered recurrence — always let
+    # it run. ``every`` already encodes this (``scheduled_instant`` returns
+    # ``None`` with no ``last_run_at``); make it explicit for ``cron``/``at``
+    # too so a never-run job past a stale slot is not marked missed unfired.
+    if getattr(job, "last_run_at", None) is None:
+        return False
+    # Tolerate a mis-typed grace (e.g. a hand-edited quoted YAML value that
+    # slipped past coercion): a bad policy value must never raise and abort the
+    # whole claim pass — treat it as "no misfire" so other due jobs still fire.
+    try:
+        grace_val = float(grace)
+    except (TypeError, ValueError):
         return False
     instant = scheduled_instant(job, now, default_timezone)
     if instant is None:
@@ -158,7 +173,7 @@ def is_misfire(
     age = now - instant
     if age <= 0:
         return False
-    return age > grace
+    return age > grace_val
 
 
 def is_due(

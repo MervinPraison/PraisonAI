@@ -79,6 +79,40 @@ class TestIsMisfire:
         job = _interval_job(every=60, grace=1)  # never run
         assert is_misfire(job, time.time()) is False
 
+    def test_string_grace_does_not_raise(self):
+        # A hand-edited quoted YAML value (``'90'``) reaching is_misfire as a
+        # string must not raise TypeError and abort the claim pass — it is
+        # coerced, so a genuinely stale slot is still detected.
+        t0 = 1000.0
+        job = _interval_job(every=60, last_run_at=t0, grace=90)
+        job.misfire_grace_seconds = "90"  # simulate un-coerced legacy value
+        assert is_misfire(job, t0 + 300) is True
+
+    def test_non_numeric_grace_is_not_misfire(self):
+        # A non-numeric junk value must fail safe to "not a misfire" rather
+        # than raising and starving other due jobs in the same pass.
+        t0 = 1000.0
+        job = _interval_job(every=60, last_run_at=t0, grace=90)
+        job.misfire_grace_seconds = "notanumber"
+        assert is_misfire(job, t0 + 300) is False
+
+
+class TestGraceCoercion:
+    def test_quoted_grace_coerced_to_float(self):
+        # from_dict must coerce a quoted YAML numeric to float so the later
+        # age comparison never raises.
+        d = _interval_job(every=60, grace=None).to_dict()
+        d["misfire_grace_seconds"] = "3600"
+        restored = ScheduleJob.from_dict(d)
+        assert restored.misfire_grace_seconds == 3600.0
+        assert isinstance(restored.misfire_grace_seconds, float)
+
+    def test_junk_grace_coerced_to_none(self):
+        d = _interval_job(every=60, grace=None).to_dict()
+        d["misfire_grace_seconds"] = "not-a-number"
+        restored = ScheduleJob.from_dict(d)
+        assert restored.misfire_grace_seconds is None
+
 
 class TestClaimMisfire:
     def test_stale_occurrence_recorded_missed_not_claimed(self):
@@ -150,6 +184,31 @@ class TestClaimMisfire:
             history = store.get_history(job_id=job.id)
             assert len(history) == 1
             assert history[0].status == "missed"
+
+    @pytest.mark.skipif(
+        __import__("importlib").util.find_spec("croniter") is None,
+        reason="croniter not installed",
+    )
+    def test_cron_first_run_fires_despite_stale_slot(self):
+        # A never-run cron job first polled after its slot has aged past grace
+        # must still fire its initial run — the first fire is not a recovered
+        # recurrence to suppress.
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = ScheduleJob(
+                name="brief",
+                schedule=Schedule(kind="cron", cron_expr="0 7 * * *", tz="UTC"),
+                message="brief",
+                misfire_grace_seconds=600,
+                # created far in the past so the first 07:00 slot is already
+                # due; last_run_at left None → never run.
+                created_at=time.time() - 3 * 86400,
+            )
+            store.add(job)
+            claimed = store.claim_due(time.time(), owner_id="A")
+            assert len(claimed) == 1
+            # No missed record for a first run.
+            assert store.get_history(job_id=job.id) == []
 
 
 class TestSerialisation:
