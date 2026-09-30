@@ -10,6 +10,23 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
 
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    """Coerce a persisted/hand-edited value to ``Optional[float]``.
+
+    A hand-written config.yaml may quote a numeric field (``'3600'``) so it
+    arrives as a string. Left as-is it would raise ``TypeError`` in a later
+    numeric comparison (e.g. the misfire age check), aborting the whole claim
+    pass and starving every other due job. Coerce leniently: ``None`` stays
+    ``None``; a non-numeric value is treated as unset rather than exploding.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class Schedule:
     """When to run a scheduled job.
@@ -198,12 +215,16 @@ class RunRecord:
         job_id: ID of the job that was executed.
         job_name: Human-readable name of the job.
         status: Execution status. One of ``"succeeded"``, ``"failed"``,
-                ``"skipped"``, or ``"no_change"``. ``"no_change"`` is the
-                stateful "monitor mode" outcome — a watched source was
+                ``"skipped"``, ``"no_change"``, or ``"missed"``. ``"no_change"``
+                is the stateful "monitor mode" outcome — a watched source was
                 unchanged since the last tick, so the model turn was suppressed
                 silently (no tokens, no delivery). It is distinct from
                 ``"skipped"`` (a generic gate go/no-go) so an operator can tell
                 "nothing changed" apart from "the gate said don't run".
+                ``"missed"`` records a recurring occurrence that landed while
+                the process was down and fell outside the job's
+                ``misfire_grace_seconds`` — it was not run, but is recorded
+                (not silently dropped) so an operator can see the gap.
         result: Agent response text (truncated if very long).
         error: Error message if status is ``"failed"``.
         duration: Wall-clock seconds for execution.
@@ -213,7 +234,7 @@ class RunRecord:
 
     job_id: str
     job_name: str = ""
-    status: Literal["succeeded", "failed", "skipped", "no_change"] = "succeeded"
+    status: Literal["succeeded", "failed", "skipped", "no_change", "missed"] = "succeeded"
     result: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
@@ -374,6 +395,18 @@ class ScheduleJob:
                  ``skipped`` (no tokens, no delivery) so a downstream never runs
                  on empty inputs. Consistent with the existing ``skipped``
                  outcome.
+        misfire_grace_seconds: Misfire policy for a recurring occurrence missed
+                 while the process was down — the maximum age (seconds) of the
+                 occurrence being recovered for it to still run. When the slot
+                 the job is firing for is older than this on recovery, the
+                 occurrence is recorded as ``missed`` (an observable
+                 :class:`RunRecord`) rather than fired — so a daily brief whose
+                 gateway was down for hours does not surface a stale run long
+                 after it was useful, yet the gap is never silently dropped. An
+                 occurrence still within the window (or a first run) coalesces
+                 into a single normal fire on recovery. ``None`` (default)
+                 disables the check, so existing jobs are byte-for-byte
+                 unchanged and keep firing exactly as before.
         hold_until: Optional epoch instant before which the job is parked and
                  not due, even when its schedule would otherwise fire. Set when
                  a run fails with a provider rate-limit / quota signal (the
@@ -413,6 +446,7 @@ class ScheduleJob:
     context_from: Optional[List[str]] = None
     context_max_chars: int = 4000
     on_missing_context: Literal["run", "skip"] = "run"
+    misfire_grace_seconds: Optional[float] = None
     backend: Optional[str] = None
     backend_options: Dict[str, Any] = field(default_factory=dict)
     hold_until: Optional[float] = None
@@ -530,6 +564,10 @@ class ScheduleJob:
                 d["context_max_chars"] = self.context_max_chars
             if self.on_missing_context != "run":
                 d["on_missing_context"] = self.on_missing_context
+        # Misfire policy. Only persist when configured so a job with no misfire
+        # grace stays byte-for-byte unchanged.
+        if self.misfire_grace_seconds is not None:
+            d["misfire_grace_seconds"] = self.misfire_grace_seconds
         # External CLI backend action. Only persist when configured so agent
         # and command jobs stay byte-for-byte unchanged; options are opaque to
         # the core (the executor validates them against the backend registry).
@@ -593,6 +631,9 @@ class ScheduleJob:
             context_from=context_from,
             context_max_chars=d.get("context_max_chars", 4000),
             on_missing_context=d.get("on_missing_context", "run"),
+            misfire_grace_seconds=_coerce_optional_float(
+                d.get("misfire_grace_seconds")
+            ),
             backend=d.get("backend"),
             backend_options=(
                 dict(d["backend_options"])

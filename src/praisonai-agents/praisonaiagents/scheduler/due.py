@@ -76,6 +76,106 @@ def next_fire_time(
     return croniter(cron_expr, base_datetime).get_next(datetime).timestamp()
 
 
+def scheduled_instant(
+    job: Any,
+    now: float,
+    default_timezone: str | None = None,
+) -> float | None:
+    """Return the epoch of the occurrence this due job is firing *for*.
+
+    When a recurring job becomes due at ``now`` it is firing for a specific
+    scheduled slot that may lie in the past (the process was down when the
+    slot arrived). This returns that slot's canonical instant so a misfire
+    policy can decide whether recovery is still within an acceptable grace
+    window. ``None`` is returned when there is no meaningful past slot (a
+    never-run interval job, or a kind/expression that cannot be evaluated).
+
+    - ``every``: the *first* slot that came due after ``last_run_at``
+      (``last_run_at + every_seconds``). Its age measures how long the job has
+      been overdue — the meaningful lateness for a coalesced recovery.
+    - ``cron``: the last cron fire at or before ``now`` (the slot being
+      recovered for a daily/weekly schedule).
+    - ``at``: the target instant itself.
+    """
+    sched = job.schedule
+    if sched.kind == "every":
+        if sched.every_seconds is None or job.last_run_at is None:
+            return None
+        if now - job.last_run_at < sched.every_seconds:
+            return None
+        return job.last_run_at + sched.every_seconds
+    if sched.kind == "at":
+        if sched.at is None:
+            return None
+        try:
+            return localize_wall_clock(
+                datetime.fromisoformat(sched.at),
+                sched.tz or default_timezone,
+            ).timestamp()
+        except (ValueError, TypeError):
+            return None
+    if sched.kind == "cron":
+        if sched.cron_expr is None:
+            return None
+        try:
+            from croniter import croniter  # type: ignore[import-untyped]
+        except ImportError:
+            return None
+        try:
+            base_datetime = datetime.fromtimestamp(
+                now, resolve_schedule_timezone(sched.tz or default_timezone)
+            )
+            return croniter(sched.cron_expr, base_datetime).get_prev(datetime).timestamp()
+        except (ValueError, KeyError, TypeError):
+            return None
+    return None
+
+
+def is_misfire(
+    job: Any,
+    now: float,
+    default_timezone: str | None = None,
+) -> bool:
+    """Whether a *due* job's occurrence should be suppressed as a misfire.
+
+    Shared by every atomic-claim store so the misfire decision is defined once.
+    Returns ``True`` when the occurrence the job is firing for is older than
+    ``misfire_grace_seconds`` — a stale run whose slot passed while the process
+    was down. Such an occurrence is recorded as ``missed`` (observable) instead
+    of firing a late, no-longer-useful run. An occurrence still within the
+    grace window (or a first run) coalesces into a single normal fire on
+    recovery, the pre-existing behaviour.
+
+    With no grace set this is always ``False`` — existing jobs keep firing
+    exactly as before. A first run (``last_run_at is None``) is never a misfire
+    for any kind: there is no missed *recurrence* to suppress, only the initial
+    fire, which must always run (matching ``is_due``'s never-run branches).
+    """
+    grace = getattr(job, "misfire_grace_seconds", None)
+    if grace is None:
+        return False
+    # A first run is the initial fire, not a recovered recurrence — always let
+    # it run. ``every`` already encodes this (``scheduled_instant`` returns
+    # ``None`` with no ``last_run_at``); make it explicit for ``cron``/``at``
+    # too so a never-run job past a stale slot is not marked missed unfired.
+    if getattr(job, "last_run_at", None) is None:
+        return False
+    # Tolerate a mis-typed grace (e.g. a hand-edited quoted YAML value that
+    # slipped past coercion): a bad policy value must never raise and abort the
+    # whole claim pass — treat it as "no misfire" so other due jobs still fire.
+    try:
+        grace_val = float(grace)
+    except (TypeError, ValueError):
+        return False
+    instant = scheduled_instant(job, now, default_timezone)
+    if instant is None:
+        return False
+    age = now - instant
+    if age <= 0:
+        return False
+    return age > grace_val
+
+
 # Upper bound on a single quota hold (24h) so a bogus/huge provider Retry-After
 # cannot park a recurring job indefinitely.
 _MAX_HOLD_SECONDS = 86_400.0
