@@ -173,3 +173,160 @@ def test_lazy_export_from_storage_package():
     from praisonaiagents.storage import sqlite_connect
 
     assert sqlite_connect is connect
+
+
+# ── corruption detection / repair / backup (Issue #5387) ──────────────
+
+
+def _corrupt_file(path: str) -> None:
+    """Overwrite a database's header/pages with garbage so it is malformed."""
+    with open(path, "r+b") as fh:
+        fh.write(b"this is not a valid sqlite header" + b"\x00" * 200)
+
+
+def _make_db(path: str, rows: int = 5) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    conn.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(rows)])
+    conn.commit()
+    conn.close()
+
+
+def test_quick_check_reports_ok_for_healthy_db(tmp_path):
+    from praisonaiagents.storage.sqlite import quick_check
+    import sqlite3
+
+    db = str(tmp_path / "ok.db")
+    _make_db(db)
+    conn = sqlite3.connect(db)
+    try:
+        assert quick_check(conn) is True
+    finally:
+        conn.close()
+
+
+def test_quick_check_false_on_malformed_db(tmp_path):
+    from praisonaiagents.storage.sqlite import quick_check
+    import sqlite3
+
+    db = str(tmp_path / "bad.db")
+    _make_db(db)
+    _corrupt_file(db)
+    conn = sqlite3.connect(db)
+    try:
+        assert quick_check(conn) is False
+    finally:
+        conn.close()
+
+
+def test_guard_noop_for_healthy_db(tmp_path):
+    """A healthy database is not backed up or altered when guarded."""
+    db = str(tmp_path / "healthy.db")
+    _make_db(db, rows=3)
+    conn = connect(db, guard=True)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 3
+    finally:
+        conn.close()
+    # No forensic copy created for a healthy file.
+    assert not any(p.name.startswith("healthy.db.corrupt-") for p in tmp_path.iterdir())
+
+
+def test_guard_backs_up_malformed_db(tmp_path):
+    """A malformed file is forensically backed up before repair."""
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    conn = connect(db, guard=True, repair=False)
+    conn.close()
+    backups = [p for p in tmp_path.iterdir() if p.name.startswith("state.db.corrupt-")]
+    assert backups, "expected a forensic backup of the malformed file"
+
+
+def test_guard_never_raises_on_malformed_open(tmp_path):
+    """A malformed file must not surface an uncaught DatabaseError on open.
+
+    This is the core of Issue #5387: today a malformed file crashes the durable
+    path. With the guard, ``connect`` returns a usable connection object (the
+    malformed original is backed up first), never propagating the error.
+    """
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    conn = connect(db, guard=True)  # must not raise
+    try:
+        assert conn is not None
+    finally:
+        conn.close()
+    backups = [p for p in tmp_path.iterdir() if p.name.startswith("state.db.corrupt-")]
+    assert backups, "malformed file should have been forensically backed up"
+
+
+def test_repair_promotes_only_verified_snapshot(tmp_path):
+    """A repair that cannot rebuild an intact file never touches the original.
+
+    An unreadable ("file is not a database") original cannot be recovered by the
+    online-backup API, so the canonical file must be left exactly as-is (only the
+    forensic copy is added) rather than replaced by a half-written snapshot.
+    """
+    from praisonaiagents.storage.sqlite import _repair_via_online_backup
+
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    with open(db, "rb") as fh:
+        before = fh.read()
+    assert _repair_via_online_backup(db) is False
+    with open(db, "rb") as fh:
+        after = fh.read()
+    assert before == after  # canonical bytes untouched by a failed repair
+    assert not os.path.exists(db + ".repair-tmp")  # snapshot cleaned up
+
+
+def test_repair_budget_is_bounded(tmp_path):
+    """A permanently-bad file exhausts its repair budget and stops retrying."""
+    from praisonaiagents.storage.sqlite import (
+        _repair_budget_ok,
+        _record_repair_attempt,
+        _MAX_REPAIR_ATTEMPTS,
+    )
+
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    assert _repair_budget_ok(db) is True
+    for _ in range(_MAX_REPAIR_ATTEMPTS):
+        _record_repair_attempt(db)
+    assert _repair_budget_ok(db) is False
+
+
+def test_forensic_backup_retention_capped(tmp_path):
+    from praisonaiagents.storage.sqlite import _forensic_backup, _MAX_FORENSIC_BACKUPS
+    import os
+    import time
+
+    db = str(tmp_path / "state.db")
+    for _ in range(_MAX_FORENSIC_BACKUPS + 3):
+        _make_db(db)
+        _corrupt_file(db)
+        assert _forensic_backup(db) is not None
+        os.remove(db)  # start clean for the next iteration's fresh DB
+        time.sleep(0.002)
+    copies = [
+        p
+        for p in tmp_path.iterdir()
+        if p.name.startswith("state.db.corrupt-")
+        and not (p.name.endswith("-wal") or p.name.endswith("-shm"))
+    ]
+    assert len(copies) <= _MAX_FORENSIC_BACKUPS
+
+
+def test_guard_off_by_default_leaves_malformed_untouched(tmp_path):
+    """Without guard, connect() does not back up or repair (unchanged behaviour)."""
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    conn = connect(db)  # guard defaults to False
+    conn.close()
+    assert not any(p.name.startswith("state.db.corrupt-") for p in tmp_path.iterdir())
