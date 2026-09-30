@@ -627,6 +627,10 @@ def gateway_status(
                     output.print_info(
                         f"DLQ ({name}): praisonai bot dlq list --path {dlq_path}"
                     )
+                output.print_info(
+                    "Outbox: praisonai gateway outbox list "
+                    "[--status failed] [--target <chan>]"
+                )
             if probe and config and os.path.exists(config):
                 import asyncio
 
@@ -1864,6 +1868,154 @@ diagnostics_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(diagnostics_app, name="diagnostics")
+
+
+# ── Outbound queue operator surface (parity with `praisonai bot dlq`) ──
+outbox_app = typer.Typer(
+    help="Inspect / retry / purge the durable outbound delivery queue.",
+    no_args_is_help=True,
+)
+app.add_typer(outbox_app, name="outbox")
+
+
+def _resolve_outbox_path(path: Optional[str]) -> str:
+    """Resolve the durable outbox sqlite path.
+
+    Precedence: explicit ``--path`` → ``PRAISONAI_OUTBOX_PATH`` env →
+    the canonical gateway outbox (``~/.praisonai/state/gateway_outbox.sqlite``)
+    that ``GatewayServer.scheduled_outbox`` writes.
+    """
+    import os
+
+    if path:
+        return os.path.expanduser(path)
+    return os.path.expanduser(
+        os.environ.get(
+            "PRAISONAI_OUTBOX_PATH",
+            "~/.praisonai/state/gateway_outbox.sqlite",
+        )
+    )
+
+
+@outbox_app.command("list")
+def outbox_list(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p", help="Path to outbox sqlite file."
+    ),
+    status: Optional[str] = typer.Option(
+        None, "--status", "-s",
+        help="Filter by status (pending/failed/permanent_failure/recovered/sent).",
+    ),
+    target: Optional[str] = typer.Option(
+        None, "--target", "-t", help="Filter by exact target (e.g. telegram:12345)."
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max entries to show."),
+):
+    """List outbound entries (newest first) with target/status/attempts/error."""
+    import time
+
+    from praisonai_bot.bots import OutboundQueue
+
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
+    entries = outbox.list(status=status, target=target, limit=limit)
+    if not entries:
+        typer.echo(f"Outbox empty (path={outbox.path})")
+        raise typer.Exit(0)
+
+    typer.echo(
+        f"Outbox {outbox.path} — {outbox.size()} entries "
+        f"(showing {len(entries)}):"
+    )
+    # Print the FULL tracking key: operators copy it verbatim into `outbox
+    # retry`/`outbox purge`, so truncating it (with an ellipsis over the id)
+    # would make listed entries unactionable. Metadata follows on the next line.
+    now = time.time()
+    for e in entries:
+        key = f"{e.target}:{e.idempotency_key}:{e.id}"
+        err = (e.error or "")[:80]
+        age = f"{int(now - e.ts)}s"
+        typer.echo(f"  key={key}")
+        typer.echo(
+            f"      target={e.target} status={e.status} "
+            f"attempts={e.attempts} age={age}"
+            + (f" error={err}" if err else "")
+        )
+
+
+@outbox_app.command("stats")
+def outbox_stats(
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+):
+    """Show a per-status breakdown of the outbound queue."""
+    from praisonai_bot.bots import OutboundQueue
+
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
+    counts = outbox.stats()
+    if not counts:
+        typer.echo(f"Outbox empty (path={outbox.path})")
+        raise typer.Exit(0)
+
+    typer.echo(f"Outbox {outbox.path}:")
+    for status in sorted(counts):
+        typer.echo(f"  {status:<18} {counts[status]}")
+
+
+@outbox_app.command("retry")
+def outbox_retry(
+    key: str = typer.Argument(..., help="Entry key (target:idempotency:id)."),
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+):
+    """Requeue a specific entry for the next drain (e.g. after channel recovery)."""
+    import asyncio
+
+    from praisonai_bot.bots import OutboundQueue
+
+    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+    ok = asyncio.run(outbox.retry(key))
+    if ok:
+        typer.echo("requeued 1 entry")
+    else:
+        typer.echo("no matching entry to requeue (unknown key or already sent)")
+        raise typer.Exit(1)
+
+
+@outbox_app.command("purge")
+def outbox_purge(
+    key: Optional[str] = typer.Argument(
+        None, help="Entry key to delete. Omit with --all to clear everything."
+    ),
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+    all_entries: bool = typer.Option(
+        False, "--all", help="Delete ALL entries instead of a single key."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+):
+    """Delete a single outbound entry by key, or all entries with --all."""
+    from praisonai_bot.bots import OutboundQueue
+
+    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+
+    if all_entries:
+        n = outbox.size()
+        if n == 0:
+            typer.echo("Outbox already empty.")
+            raise typer.Exit(0)
+        if not yes and not typer.confirm(
+            f"Delete all {n} entries from {outbox.path}?"
+        ):
+            raise typer.Exit(0)
+        typer.echo(f"purged {outbox.purge()} entries")
+        return
+
+    if not key:
+        typer.echo("Provide an entry key or pass --all to clear the outbox.")
+        raise typer.Exit(1)
+
+    if outbox.purge_entry(key):
+        typer.echo("purged 1 entry")
+    else:
+        typer.echo("no matching entry to purge (unknown key)")
+        raise typer.Exit(1)
 
 
 @diagnostics_app.command("export")
