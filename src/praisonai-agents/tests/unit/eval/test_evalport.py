@@ -72,10 +72,12 @@ class TestSuiteConversion:
         assert case["id"] == "refund_policy"
         assert case["input"] == "What's your refund policy?"
         assert case["expected_output"] == "30 days, unused, receipt required"
-        assert case["graders"] == ["answer_correct"]
+        # Every case references the verdict grader (so the verdict result always
+        # has a matching reference) plus its own criteria.
+        assert case["graders"] == [VERDICT_GRADER_ID, "answer_correct"]
         assert case["metadata"]["tier"] == "gold"
         assert case["timeout_ms"] == 15000
-        assert "timeout_seconds" not in case["metadata"]
+        assert "praisonai" not in case["metadata"]
 
     def test_from_evalport_shape(self):
         suite = to_evalport(self._pkg())
@@ -117,9 +119,28 @@ class TestSuiteConversion:
         pkg = EvalPackage(name="p", cases=[EvalCase(name="c", input="x")])
         case = to_evalport(pkg)["test_cases"][0]
         assert "expected_output" not in case
-        # EvalPort requires >= 1 grader per test case: fall back to the verdict grader.
+        # EvalPort requires >= 1 grader per test case: a case without criteria
+        # still references the verdict grader.
         assert case["graders"] == [VERDICT_GRADER_ID]
         assert from_evalport(to_evalport(pkg)).cases[0].criteria == []
+
+    def test_empty_package_exports_valid_empty_suite(self):
+        """A valid package with no cases exports a spec-shaped empty suite."""
+        suite = to_evalport(EvalPackage(name="empty"))
+        assert suite["id"] == "empty"
+        assert suite["test_cases"] == []
+        assert _structural_suite_errors(suite) == []
+        assert from_evalport(suite).cases == []
+
+    def test_nonpositive_timeout_round_trips(self):
+        """A zero/negative timeout is not spec-representable but must round-trip."""
+        pkg = EvalPackage(
+            name="p", cases=[EvalCase(name="c", input="x", timeout_seconds=0.0)]
+        )
+        case = to_evalport(pkg)["test_cases"][0]
+        assert "timeout_ms" not in case  # spec requires timeout_ms >= 1
+        assert case["metadata"]["praisonai"]["timeout_seconds"] == 0.0
+        assert from_evalport(to_evalport(pkg)).cases[0].timeout_seconds == 0.0
 
     def test_metadata_timeout_key_does_not_corrupt_native_timeout(self):
         """A user ``metadata['timeout_seconds']`` must not clobber the native one."""
@@ -248,12 +269,15 @@ class TestResultSetConversion:
         passed, failed = rs["results"]
         assert passed["test_case_id"] == "refund_policy"
         assert passed["passed"] is True
+        # The verdict grader result comes first, followed by a per-criterion
+        # grader result that matches the criterion grader referenced in the Suite.
         assert passed["grader_results"] == [
-            {"grader_id": VERDICT_GRADER_ID, "type": "custom", "score": 0.95, "passed": True}
+            {"grader_id": VERDICT_GRADER_ID, "type": "custom", "score": 0.95, "passed": True},
+            {"grader_id": "answer_correct", "type": "custom", "score": 0.95, "passed": True},
         ]
         assert passed["duration_ms"] == 120
         assert passed["actual_output"] == "30 days."
-        assert passed["metadata"]["praisonai"]["criteria_scores"] == {"answer_correct": 0.95}
+        assert "metadata" not in passed  # criteria are graders now, not metadata
         assert "error" not in passed
 
         assert failed["test_case_id"] == "shipping"
@@ -291,7 +315,7 @@ def _structural_suite_errors(suite):
     grader_ids = [g["id"] for g in suite.get("graders", [])]
     if len(grader_ids) != len(set(grader_ids)):
         errs.append("duplicate grader id")
-    if not suite.get("test_cases"):
+    if "test_cases" not in suite:  # spec allows an empty list, but the key is required
         errs.append("test_cases")
     for tc in suite.get("test_cases", []):
         if not tc.get("id") or not tc.get("input") or not tc.get("graders"):
@@ -341,6 +365,24 @@ class TestEvalPortSpecConformance:
         assert _structural_result_set_errors(rs) == []
         json.dumps(suite)
         json.dumps(rs)
+
+    def test_criterion_grader_results_reference_suite_graders(self):
+        """Per-criterion grader results must match graders declared in the Suite.
+
+        The Suite's ``answer_correct`` grader is now surfaced as a grader_result
+        in the ResultSet, so EvalPort consumers can diff that criterion across
+        tools instead of only seeing the verdict grader.
+        """
+        suite = to_evalport(TestSuiteConversion()._pkg())
+        rs = report_to_evalport(TestResultSetConversion()._report())
+        suite_grader_ids = {g["id"] for g in suite["graders"]}
+        emitted = {
+            g["grader_id"]
+            for r in rs["results"]
+            for g in r["grader_results"]
+        }
+        assert "answer_correct" in emitted
+        assert emitted <= suite_grader_ids
 
     def test_valid_with_evalport_sdk(self):
         validate = pytest.importorskip("openeval.validate")
