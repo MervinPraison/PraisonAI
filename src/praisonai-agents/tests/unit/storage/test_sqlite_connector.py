@@ -330,3 +330,98 @@ def test_guard_off_by_default_leaves_malformed_untouched(tmp_path):
     conn = connect(db)  # guard defaults to False
     conn.close()
     assert not any(p.name.startswith("state.db.corrupt-") for p in tmp_path.iterdir())
+
+
+def test_guard_quarantines_unrepairable_so_store_can_boot(tmp_path):
+    """An unrepairable malformed file is cleared so a fresh DB opens usable.
+
+    This is the durable-path fix for Issue #5387: after the guard runs, the
+    connection must be usable for schema creation (``CREATE TABLE``) instead of
+    raising ``file is not a database`` on first query. The malformed bytes are
+    preserved in a forensic copy.
+    """
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    conn = connect(db, guard=True)
+    try:
+        # A fresh, empty database must be usable — this raised before the fix.
+        conn.execute("CREATE TABLE s (session_id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO s VALUES ('a')")
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM s").fetchone()[0] == 1
+    finally:
+        conn.close()
+    backups = [p for p in tmp_path.iterdir() if p.name.startswith("state.db.corrupt-")]
+    assert backups, "malformed bytes must be preserved before quarantine"
+
+
+def test_guard_leaves_locked_healthy_db_untouched(tmp_path, monkeypatch):
+    """A transient lock on a healthy DB is not mistaken for corruption."""
+    from praisonaiagents.storage import sqlite as sqlite_mod
+
+    db = str(tmp_path / "state.db")
+    _make_db(db, rows=4)
+
+    import sqlite3
+
+    real_connect = sqlite3.connect
+
+    class _LockingConn:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, *a, **k):
+            if isinstance(sql, str) and "quick_check" in sql:
+                raise sqlite3.OperationalError("database is locked")
+            return self._conn.execute(sql, *a, **k)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    def _locking_connect(target, *args, **kwargs):
+        conn = real_connect(target, *args, **kwargs)
+        if str(target) == db:
+            return _LockingConn(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", _locking_connect)
+    # Guard must NOT back up or quarantine a merely-locked healthy file.
+    sqlite_mod._guard_integrity(db, repair=True, backup=True)
+    monkeypatch.undo()
+
+    assert not any(p.name.startswith("state.db.corrupt-") for p in tmp_path.iterdir())
+    # The original healthy data is intact.
+    conn = connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 4
+    finally:
+        conn.close()
+
+
+def test_guard_skips_repair_when_backup_fails(tmp_path, monkeypatch):
+    """If the forensic backup cannot be taken, repair must not run.
+
+    Repair's atomic promotion would otherwise destroy the only copy of the
+    malformed bytes, so a failed backup must leave the canonical file untouched.
+    """
+    from praisonaiagents.storage import sqlite as sqlite_mod
+
+    db = str(tmp_path / "state.db")
+    _make_db(db)
+    _corrupt_file(db)
+    with open(db, "rb") as fh:
+        before = fh.read()
+
+    monkeypatch.setattr(sqlite_mod, "_forensic_backup", lambda path: None)
+    repaired = {"called": False}
+    monkeypatch.setattr(
+        sqlite_mod,
+        "_repair_via_online_backup",
+        lambda path: repaired.__setitem__("called", True) or True,
+    )
+    sqlite_mod._guard_integrity(db, repair=True, backup=True)
+
+    assert repaired["called"] is False, "repair must not run when backup failed"
+    with open(db, "rb") as fh:
+        assert fh.read() == before  # canonical malformed bytes preserved
