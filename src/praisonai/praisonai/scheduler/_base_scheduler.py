@@ -553,6 +553,14 @@ class _BaseAgentScheduler:
             (datetime.now() - self._start_time).total_seconds()
             if self._start_time else 0
         )
+        # Snapshot the delivery counters under the lock so the pair
+        # (delivered_deliveries, undelivered_deliveries) is internally
+        # consistent — the exact invariant the lock exists to preserve. The
+        # write side already holds this lock; reading them unlocked could
+        # observe a torn (delivered_new, undelivered_old) pair.
+        with self._delivery_lock:
+            delivered = getattr(self, "_delivered_count", 0)
+            undelivered = getattr(self, "_undelivered_count", 0)
         return {
             "is_running": self.is_running,
             "total_executions": execs,
@@ -572,9 +580,24 @@ class _BaseAgentScheduler:
             # can be a successful *execution* yet an undelivered *result*. Both
             # use explicit counters (not success-minus-undelivered inference) so
             # NOT_CONFIGURED / SUPPRESSED runs never over-report a delivery.
-            "delivered_deliveries": getattr(self, "_delivered_count", 0),
-            "undelivered_deliveries": getattr(self, "_undelivered_count", 0),
+            "delivered_deliveries": delivered,
+            "undelivered_deliveries": undelivered,
         }
+
+    def get_stats_sync(self) -> Dict[str, Any]:
+        """Best-effort synchronous stats snapshot, shared by both schedulers.
+
+        Routes through :meth:`_build_stats` so the sync and async surfaces
+        return the same dict shape (including ``runtime_seconds`` and
+        ``cost_per_execution``) and the delivery counters are read under the
+        delivery lock.
+        """
+        return self._build_stats(
+            execs=self._execution_count,
+            success=self._success_count,
+            failed=self._failure_count,
+            total_cost=self._total_cost,
+        )
 
     def _update_state_if_daemon(self) -> None:
         """Update ~/.praisonai/schedulers/*.json for the current PID, if present.

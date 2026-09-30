@@ -383,28 +383,9 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             execs=execs, success=success, failed=failed, total_cost=total_cost
         )
     
-    def get_stats_sync(self) -> Dict[str, Any]:
-        """
-        Synchronous alias for get_stats() for clarity.
-        
-        Returns:
-            Dictionary with execution stats (best-effort)
-        """
-        # Always do best-effort synchronous read for simplicity
-        return {
-            "is_running": self.is_running,
-            "total_executions": self._execution_count,
-            "successful_executions": self._success_count,
-            "failed_executions": self._failure_count,
-            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
-            "total_cost_usd": round(self._total_cost, 4),
-            "remaining_budget": round(self.max_cost - self._total_cost, 4) if self.max_cost is not None else None,
-            # Explicit delivery-outcome counters (Issue #4454): never inferred
-            # from success minus undelivered, so NOT_CONFIGURED / SUPPRESSED
-            # runs never over-report a delivery.
-            "delivered_deliveries": getattr(self, "_delivered_count", 0),
-            "undelivered_deliveries": getattr(self, "_undelivered_count", 0),
-        }
+    # get_stats_sync is inherited from _BaseAgentScheduler so the sync and async
+    # surfaces return the same dict shape (incl. runtime_seconds /
+    # cost_per_execution) and read the delivery counters under the delivery lock.
     
     async def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
         """Internal method to run scheduled agent executions.
