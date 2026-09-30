@@ -3248,16 +3248,20 @@ Your Goal: {self.goal}"""
             tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
         )
 
-    def _apply_hook_prompt_updates(self, hook_results, prompt, attachments):
+    def _apply_hook_prompt_updates(self, hook_results, prompt, llm_prompt, attachments):
         """Apply BEFORE_AGENT hook prompt modifications, returning (prompt, llm_prompt).
 
         Shared by the sync/async chat paths; contains no await so the async
         method keeps its own `await self._hook_runner.execute(...)` dispatch.
+
+        ``llm_prompt`` is only rebuilt when a hook actually changes the prompt.
+        This preserves any prepared ``llm_prompt`` (e.g. an appended response
+        template) for no-op hooks and avoids reprocessing attachments twice.
         """
         for res in hook_results:
             if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
                 prompt = res.output.modified_input["prompt"]
-        llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+                llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         return prompt, llm_prompt
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -3308,7 +3312,7 @@ Your Goal: {self.goal}"""
                 return None
 
             # Update prompt if modified by hooks
-            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, attachments)
+            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, llm_prompt, attachments)
 
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
@@ -4065,7 +4069,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return None
 
             # Update prompt if modified by hooks
-            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, attachments)
+            prompt, llm_prompt = self._apply_hook_prompt_updates(hook_results, prompt, llm_prompt, attachments)
         
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
