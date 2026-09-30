@@ -17,8 +17,12 @@ def _get_autogen_tools():
 
 
 def _praisonai_tools_available() -> bool:
-    """Read-only accessor — never mutate this from inside a function."""
-    return PRAISONAI_TOOLS_PACKAGE_AVAILABLE or _get_autogen_tools() is not None
+    """Read-only accessor — never mutate this from inside a function.
+
+    Delegates to the single source of truth (``is_available``) so it reflects
+    the *actual* optional package, not merely whether the probe module imported.
+    """
+    return is_available("praisonai_tools")
 
 
 # Backward-compat: keep the constant, computed lazily on attribute access.
