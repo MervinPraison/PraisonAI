@@ -773,7 +773,9 @@ jobs:
     env:
       # Bump deliberately: this is the version everything in this job was
       # verified against. Latest at time of writing is v0.33.3.
-      OLLAMA_VERSION: v0.33.2
+      # No leading "v": install.sh passes ?version=$OLLAMA_VERSION and ollama.com
+      # redirects to GitHub tag v$version (vv0.33.2 → 404 if set to v0.33.2).
+      OLLAMA_VERSION: "0.33.2"
       # 522 MB, capabilities: completion, tools, thinking.
       OLLAMA_TEST_MODEL: qwen3:0.6b
 
