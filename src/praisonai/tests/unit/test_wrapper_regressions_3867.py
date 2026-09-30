@@ -92,6 +92,66 @@ def test_sync_run_and_trace_hooks_complete_async_store_calls():
     assert values["span:span"]["status"] == "error"
 
 
+def test_export_session_dispatches_on_async_store():
+    """export_session must route through _call_store so an async conversation
+    store (mode="async") is awaited instead of leaking an un-awaited coroutine
+    (regression for the PR #5380 export_session dispatch fix)."""
+    db = _db_with_async_stores()
+
+    db.import_session(
+        {
+            "session_id": "s1",
+            "user_id": "u1",
+            "agent_id": "a1",
+            "name": "Session s1",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    )
+
+    exported = db.export_session("s1")
+    assert exported["session_id"] == "s1"
+    assert [m["content"] for m in exported["messages"]] == ["hello"]
+
+
+def test_export_session_missing_returns_empty_on_async_store():
+    db = _db_with_async_stores()
+    assert db.export_session("does-not-exist") == {}
+
+
+def test_aexport_and_aimport_session_roundtrip_on_async_store():
+    """The async twins aimport_session / aexport_session must round-trip a
+    session against an async conversation store."""
+    import asyncio
+
+    async def _run():
+        db = _db_with_async_stores()
+        db._ainit_stores = _noop_ainit(db)
+
+        sid = await db.aimport_session(
+            {
+                "session_id": "async-s",
+                "messages": [
+                    {"role": "user", "content": "ping"},
+                    {"role": "assistant", "content": "pong"},
+                ],
+            }
+        )
+        assert sid == "async-s"
+
+        exported = await db.aexport_session("async-s")
+        assert exported["session_id"] == "async-s"
+        assert [m["content"] for m in exported["messages"]] == ["ping", "pong"]
+
+    asyncio.run(_run())
+
+
+def _noop_ainit(db):
+    async def _ainit():
+        return None
+
+    return _ainit
+
+
 def test_profile_detailed_records_without_losing_return_value():
     from praisonai.profiler import Profiler, get_profiler, profile_detailed
 

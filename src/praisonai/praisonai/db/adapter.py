@@ -724,22 +724,9 @@ class PraisonAIDB:
             return runs[: max(limit, 0)]
         return runs
     
-    def export_session(
-        self,
-        session_id: str,
-    ) -> Dict[str, Any]:
-        """Export a session as a dictionary."""
-        self._init_stores()
-        
-        if not self._conversation_store:
-            return {}
-        
-        session = self._conversation_store.get_session(session_id)
-        if not session:
-            return {}
-        
-        messages = self._conversation_store.get_messages(session_id)
-        
+    @staticmethod
+    def _session_to_dict(session: Any, messages: Any) -> Dict[str, Any]:
+        """Serialise a conversation session + its messages to a plain dict."""
         return {
             "session_id": session.session_id,
             "user_id": session.user_id,
@@ -755,26 +742,16 @@ class PraisonAIDB:
                     "metadata": msg.metadata,
                     "created_at": msg.created_at
                 }
-                for msg in messages
+                for msg in (messages or [])
             ]
         }
-    
-    def import_session(
-        self,
-        data: Dict[str, Any],
-    ) -> str:
-        """Import a session from a dictionary."""
-        self._init_stores()
-        
-        if not self._conversation_store:
-            raise ValueError("No conversation store configured")
-        
+
+    def _build_import(self, data: Dict[str, Any]):
+        """Build the session + messages to import; returns (session_id, session, messages)."""
         from ..persistence.conversation.base import ConversationSession, ConversationMessage
         import uuid
-        
+
         session_id = data.get("session_id") or f"imported-{uuid.uuid4().hex[:8]}"
-        
-        # Create session
         session = ConversationSession(
             session_id=session_id,
             user_id=data.get("user_id", "default"),
@@ -782,16 +759,8 @@ class PraisonAIDB:
             name=data.get("name", f"Imported Session {session_id}"),
             metadata=data.get("metadata", {})
         )
-        self._call_store(
-            self._conversation_store,
-            "create_session",
-            "async_create_session",
-            session,
-        )
-        
-        # Import messages with new IDs to avoid conflicts
-        for msg_data in data.get("messages", []):
-            msg = ConversationMessage(
+        messages = [
+            ConversationMessage(
                 id=f"msg-{uuid.uuid4().hex[:12]}",  # Always generate new ID
                 session_id=session_id,
                 role=msg_data.get("role", "user"),
@@ -799,14 +768,83 @@ class PraisonAIDB:
                 metadata=msg_data.get("metadata", {}),
                 created_at=msg_data.get("created_at", time.time())
             )
-            self._call_store(
-                self._conversation_store,
-                "add_message",
-                "async_add_message",
-                session_id,
-                msg,
-            )
-        
+            for msg_data in data.get("messages", [])
+        ]
+        return session_id, session, messages
+
+    def export_session(
+        self,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        """Export a session as a dictionary.
+
+        Routes through :meth:`_call_store` so it works on async conversation
+        stores (``mode="async"``) from a sync caller instead of leaking
+        un-awaited coroutines.
+        """
+        self._init_stores()
+        store = self._conversation_store
+        if not store:
+            return {}
+
+        session = self._call_store(store, "get_session", "async_get_session", session_id)
+        if not session:
+            return {}
+
+        messages = self._call_store(store, "get_messages", "async_get_messages", session_id)
+        return self._session_to_dict(session, messages)
+
+    async def aexport_session(
+        self,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        """Async: export a session as a dictionary."""
+        await self._ainit_stores()
+        store = self._conversation_store
+        if not store:
+            return {}
+
+        session = await self._dispatch_async(
+            store, "get_session", "async_get_session", session_id
+        )
+        if not session:
+            return {}
+
+        messages = await self._dispatch_async(
+            store, "get_messages", "async_get_messages", session_id
+        )
+        return self._session_to_dict(session, messages)
+
+    def import_session(
+        self,
+        data: Dict[str, Any],
+    ) -> str:
+        """Import a session from a dictionary."""
+        self._init_stores()
+        store = self._conversation_store
+        if not store:
+            raise ValueError("No conversation store configured")
+
+        session_id, session, messages = self._build_import(data)
+        self._call_store(store, "create_session", "async_create_session", session)
+        for msg in messages:
+            self._call_store(store, "add_message", "async_add_message", session_id, msg)
+        return session_id
+
+    async def aimport_session(
+        self,
+        data: Dict[str, Any],
+    ) -> str:
+        """Async: import a session from a dictionary."""
+        await self._ainit_stores()
+        store = self._conversation_store
+        if not store:
+            raise ValueError("No conversation store configured")
+
+        session_id, session, messages = self._build_import(data)
+        await self._dispatch_async(store, "create_session", "async_create_session", session)
+        for msg in messages:
+            await self._dispatch_async(store, "add_message", "async_add_message", session_id, msg)
         return session_id
     
     # --- Tracing/Observability ---

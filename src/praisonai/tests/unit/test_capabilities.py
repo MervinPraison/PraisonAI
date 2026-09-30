@@ -4,7 +4,12 @@ Unit tests for PraisonAI Capabilities Module.
 Tests the LiteLLM endpoint parity capabilities.
 """
 
+import sys
+import types
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock
+
+import pytest
 
 
 class TestAudioCapabilities:
@@ -737,3 +742,132 @@ class TestEmbeddingAliases:
             assert callable(embedding)
             # The deprecation warning should be raised when the function is called
             # We'll check that the function has the warning in its implementation
+
+
+def _guardrail_response(payload):
+    """Build a minimal litellm-completion-shaped response object."""
+    message = SimpleNamespace(content=payload)
+    choice = SimpleNamespace(message=message)
+    return SimpleNamespace(choices=[choice])
+
+
+class TestGuardrailFailClosed:
+    """Regression tests for the fail-closed guardrail behaviour (PR #5380)."""
+
+    def test_parse_valid_pass(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = _guardrail_response('{"passed": true, "violations": []}')
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is True
+
+    def test_parse_valid_fail(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = _guardrail_response('{"passed": false, "violations": ["pii"]}')
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is False
+        assert result.violations == ["pii"]
+
+    def test_missing_passed_key_fails_closed(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = _guardrail_response('{"violations": []}')
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is False
+
+    def test_non_bool_passed_fails_closed(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = _guardrail_response('{"passed": "yes"}')
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is False
+
+    def test_empty_response_fails_closed(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = SimpleNamespace(choices=[])
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is False
+
+    def test_non_dict_payload_fails_closed(self):
+        from praisonai.capabilities.guardrails import _parse_guardrail_response
+
+        resp = _guardrail_response('["passed"]')
+        result = _parse_guardrail_response(resp, "content", "g", "block", None)
+        assert result.passed is False
+
+    def test_handler_block_allow_raise(self):
+        from praisonai.capabilities.guardrails import _handle_guardrail_error
+
+        exc = ValueError("boom")
+        blocked = _handle_guardrail_error(exc, "c", "g", "block", None)
+        assert blocked.passed is False
+        allowed = _handle_guardrail_error(exc, "c", "g", "allow", None)
+        assert allowed.passed is True
+        with pytest.raises(ValueError):
+            _handle_guardrail_error(exc, "c", "g", "raise", None)
+
+    def _with_stub_litellm(self, completion=None, acompletion=None):
+        stub = types.ModuleType("litellm")
+        if completion is not None:
+            stub.completion = completion
+        if acompletion is not None:
+            stub.acompletion = acompletion
+        return patch.dict(sys.modules, {"litellm": stub})
+
+    def test_apply_guardrail_blocks_on_completion_error(self):
+        from praisonai.capabilities.guardrails import apply_guardrail
+
+        def _boom(*a, **k):
+            raise RuntimeError("rate limit")
+
+        with self._with_stub_litellm(completion=_boom):
+            result = apply_guardrail("content")
+        assert result.passed is False
+        assert result.violations[0]["reason"] == "guardrail_unavailable"
+
+    def test_apply_guardrail_allow_passes_on_error(self):
+        from praisonai.capabilities.guardrails import apply_guardrail
+
+        def _boom(*a, **k):
+            raise RuntimeError("timeout")
+
+        with self._with_stub_litellm(completion=_boom):
+            result = apply_guardrail("content", on_error="allow")
+        assert result.passed is True
+
+    def test_apply_guardrail_raise_reraises(self):
+        from praisonai.capabilities.guardrails import apply_guardrail
+
+        def _boom(*a, **k):
+            raise RuntimeError("surface me")
+
+        with self._with_stub_litellm(completion=_boom):
+            with pytest.raises(RuntimeError):
+                apply_guardrail("content", on_error="raise")
+
+    def test_apply_guardrail_invalid_json_fails_closed(self):
+        from praisonai.capabilities.guardrails import apply_guardrail
+
+        def _bad_json(*a, **k):
+            return _guardrail_response("this is not json")
+
+        with self._with_stub_litellm(completion=_bad_json):
+            result = apply_guardrail("content")
+        assert result.passed is False
+
+    def test_aapply_guardrail_blocks_on_error(self):
+        import asyncio
+
+        from praisonai.capabilities.guardrails import aapply_guardrail
+
+        async def _boom(*a, **k):
+            raise RuntimeError("async rate limit")
+
+        async def _run():
+            with self._with_stub_litellm(acompletion=_boom):
+                return await aapply_guardrail("content")
+
+        result = asyncio.run(_run())
+        assert result.passed is False
