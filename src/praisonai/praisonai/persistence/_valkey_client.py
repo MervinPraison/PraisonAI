@@ -25,6 +25,8 @@ _MISSING_MSG = (
 )
 
 _CLIENT_NAME = "praisonai_persistence_client"
+# CLIENT SETINFO LIB-NAME tag: the server sees GlidePySync(praisonai).
+_CLIENT_INFO_TAG = "praisonai"
 
 
 def create_valkey_client(
@@ -43,5 +45,6 @@ def create_valkey_client(
         credentials=creds,
         database_id=db,
         client_name=_CLIENT_NAME,
+        client_info_tag=_CLIENT_INFO_TAG,
     )
     return GlideClientSync.create(config)
