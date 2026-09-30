@@ -588,12 +588,19 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
     return 0
 
 
-def extract_retry_after(error: Exception) -> Optional[float]:
+def extract_retry_after(
+    error: Exception, cap_seconds: float = 300.0,
+) -> Optional[float]:
     """Extract Retry-After header value from rate limit errors.
-    
+
     Args:
         error: Exception potentially containing Retry-After info
-        
+        cap_seconds: Upper bound applied to the parsed value. Defaults to 300s
+            (5 minutes) for in-tick backoff callers. A scheduler *hold* passes a
+            larger cap so a job can be parked past a long provider reset window
+            (e.g. an hourly quota) instead of re-firing every tick — capping at
+            5 minutes there would defeat the park.
+
     Returns:
         Delay in seconds if found, None otherwise
     """
@@ -608,14 +615,14 @@ def extract_retry_after(error: Exception) -> Optional[float]:
             retry_after = None
         if retry_after is not None:
             try:
-                return min(float(retry_after), 300.0)  # Cap at 5 minutes
+                return min(float(retry_after), cap_seconds)
             except (ValueError, TypeError):
                 pass  # Not a plain number (could be an HTTP-date); fall through
 
     # 2. Some SDKs expose a numeric ``retry_after`` attribute directly.
     retry_after_attr = getattr(error, "retry_after", None)
     if isinstance(retry_after_attr, (int, float)):
-        return min(float(retry_after_attr), 300.0)
+        return min(float(retry_after_attr), cap_seconds)
 
     error_str = str(error)
     
@@ -632,7 +639,7 @@ def extract_retry_after(error: Exception) -> Optional[float]:
         if match:
             try:
                 delay = float(match.group(1))
-                return min(delay, 300.0)  # Cap at 5 minutes
+                return min(delay, cap_seconds)
             except (ValueError, IndexError):
                 continue
     

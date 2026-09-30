@@ -76,6 +76,58 @@ def next_fire_time(
     return croniter(cron_expr, base_datetime).get_next(datetime).timestamp()
 
 
+# Upper bound on a single quota hold (24h) so a bogus/huge provider Retry-After
+# cannot park a recurring job indefinitely.
+_MAX_HOLD_SECONDS = 86_400.0
+
+
+def quota_hold_from_failure(
+    error: Any,
+    now: float,
+    slack_seconds: float = 60.0,
+) -> float | None:
+    """Return an epoch to park a job past a provider's rate-limit window.
+
+    Pure decision helper for the "provider-quota-aware hold": given a run's
+    failure it decides whether the job should stop re-firing until the
+    provider's own reset window elapses. Returns ``now + Retry-After + slack``
+    when the failure is a rate-limit / quota signal carrying a usable reset
+    hint, else ``None`` (no hold — a non-quota failure keeps today's behaviour).
+
+    Reuses the core error classifier so a 429/quota error is recognised by
+    exception type, HTTP status code, or message, and the reset window is read
+    from the provider's ``Retry-After`` header / ``retry_after`` attribute /
+    message text — no new parsing surface. The small ``slack_seconds`` avoids
+    re-firing the instant the window reopens (clock skew / provider rounding).
+
+    Args:
+        error: The failure — an ``Exception`` (preferred, so the classifier can
+            read the response headers) or an error string.
+        now: Epoch the failure was observed at.
+        slack_seconds: Extra seconds added past the provider's reset window.
+
+    Returns:
+        The epoch before which the job should be parked, or ``None`` when the
+        failure is not a quota signal or carries no usable reset window.
+    """
+    from praisonaiagents.llm.error_classifier import (
+        ErrorCategory,
+        classify_error,
+        extract_retry_after,
+    )
+
+    exc = error if isinstance(error, Exception) else Exception(str(error or ""))
+    if classify_error(exc) != ErrorCategory.RATE_LIMIT:
+        return None
+    # Honour the provider's full reset window (unlike in-tick backoff, which caps
+    # at 5 minutes) so a long quota window parks the job instead of re-firing —
+    # but bound it to 24h so a bogus/huge value can't park a job indefinitely.
+    retry_after = extract_retry_after(exc, cap_seconds=_MAX_HOLD_SECONDS)
+    if not retry_after or retry_after <= 0:
+        return None
+    return now + float(retry_after) + max(float(slack_seconds), 0.0)
+
+
 def is_due(
     job: Any,
     now: float,
@@ -101,6 +153,17 @@ def is_due(
     run_count = getattr(job, "run_count", 0)
     if max_runs is not None and run_count >= max_runs:
         return False
+    # Provider-quota hold short-circuits before the kind check: while a job is
+    # parked past a provider's known-closed window (a 429/quota ``Retry-After``
+    # captured on a prior failure) it is not due, so it stops re-firing and
+    # re-failing every tick against a benched provider. Any intervening fires
+    # coalesce — the job becomes due again at the first legal instant once the
+    # hold elapses. The executor clears ``hold_until`` on the first run that
+    # reaches the model (proof the window reopened).
+    hold_until = getattr(job, "hold_until", None)
+    if hold_until is not None and now < hold_until:
+        return False
+
     until = getattr(job, "until", None)
     if until is not None:
         try:
