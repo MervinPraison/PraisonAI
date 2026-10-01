@@ -280,15 +280,22 @@ class SqliteMemoryAdapter:
         Leaves the shared adapter and other threads' connections intact so the
         adapter can be reused; the calling thread lazily reopens its own
         connections on next access.
+
+        A connection is only removed from the registry and cleared from
+        thread-local storage after it closes successfully. If ``close()`` raises,
+        the connection stays tracked so a later ``close_connections()`` /
+        ``close_thread_connections()`` can retry it, and the failure is logged
+        rather than silently swallowed.
         """
         for attr in ("stm_conn", "ltm_conn"):
             conn = getattr(self._local, attr, None)
-            if conn is not None:
-                try:
-                    with self._connection_lock:
-                        self._all_connections.discard(conn)
-                    conn.close()
-                except Exception:
-                    pass
-                finally:
-                    setattr(self._local, attr, None)
+            if conn is None:
+                continue
+            try:
+                conn.close()
+            except Exception as e:
+                logger.warning(f"Failed to close {attr}; keeping it tracked for retry: {e}")
+                continue
+            with self._connection_lock:
+                self._all_connections.discard(conn)
+            setattr(self._local, attr, None)

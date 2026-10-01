@@ -101,3 +101,64 @@ def test_adapter_thread_close_is_idempotent(store):
     store.memory_adapter.close_thread_connections()
     store.store_short_term("shared record")
     assert "shared record" in _texts(store.search_short_term("shared record"))
+
+
+def test_adapter_thread_close_closes_open_connection(store):
+    """Opening a connection then closing it directly must close the live conn
+    and drop it from the shared registry (not just the no-op path)."""
+    adapter = store.memory_adapter
+    adapter.store_short_term("shared record")
+    adapter.store_long_term("shared long record")
+
+    stm = adapter._local.stm_conn
+    ltm = adapter._local.ltm_conn
+    assert stm in adapter._all_connections
+    assert ltm in adapter._all_connections
+
+    adapter.close_thread_connections()
+
+    # Thread-local refs cleared and registry no longer tracks the closed conns.
+    assert getattr(adapter._local, "stm_conn", None) is None
+    assert getattr(adapter._local, "ltm_conn", None) is None
+    assert stm not in adapter._all_connections
+    assert ltm not in adapter._all_connections
+
+    # The physical connections are closed (operations raise ProgrammingError).
+    with pytest.raises(Exception):
+        stm.execute("SELECT 1")
+    with pytest.raises(Exception):
+        ltm.execute("SELECT 1")
+
+    # Adapter remains usable via lazy reopen.
+    assert "shared record" in _texts(adapter.search_short_term("shared record"))
+
+
+def test_adapter_thread_close_keeps_connection_tracked_on_failure(store):
+    """If a connection fails to close, it stays tracked for a later retry and
+    the thread-local ref is preserved (the open-conn failure path)."""
+    adapter = store.memory_adapter
+    adapter.store_short_term("shared record")
+    real = adapter._local.stm_conn
+
+    class _FlakyConn:
+        def __init__(self, inner):
+            self._inner = inner
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("boom")
+
+    flaky = _FlakyConn(real)
+    # Swap the tracked real conn for a flaky wrapper in both registry and tls.
+    with adapter._connection_lock:
+        adapter._all_connections.discard(real)
+        adapter._all_connections.add(flaky)
+    adapter._local.stm_conn = flaky
+
+    adapter.close_thread_connections()
+
+    assert flaky.close_calls == 1
+    # Failed close: connection stays tracked and the ref is NOT cleared.
+    assert flaky in adapter._all_connections
+    assert adapter._local.stm_conn is flaky
