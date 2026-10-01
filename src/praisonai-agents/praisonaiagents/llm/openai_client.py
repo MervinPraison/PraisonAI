@@ -914,6 +914,14 @@ class OpenAIClient:
         so that all downstream code (tool loop, display, callbacks)
         works without modification.
         """
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status == "failed":
+            from .llm import LLMResponseError
+            error = response.get("error") if isinstance(response, dict) else getattr(response, "error", None)
+            code = error.get("code") if isinstance(error, dict) else getattr(error, "code", None)
+            message = error.get("message") if isinstance(error, dict) else getattr(error, "message", None)
+            label = f"Responses API failed ({code})" if code else "Responses API failed"
+            raise LLMResponseError(f"{label}: {message or 'Provider returned a failed response.'}")
         response_text = ""
         tool_calls_list: List[ToolCall] = []
 
@@ -1667,6 +1675,7 @@ class OpenAIClient:
         """
         # ── Responses API path (non-streaming only) ────────────────────
         if not stream and self._use_responses_api(model):
+            raw = None
             try:
                 resp_params = self._build_responses_input(
                     messages, model, temperature, tools,
@@ -1677,6 +1686,9 @@ class OpenAIClient:
             except (FileNotFoundError, ValueError):
                 raise
             except Exception as e:
+                status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                if status == "failed":
+                    raise
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
 
@@ -1731,6 +1743,7 @@ class OpenAIClient:
         """
         # ── Responses API path (non-streaming only) ────────────────────
         if not stream and self._use_responses_api(model):
+            raw = None
             try:
                 resp_params = self._build_responses_input(
                     messages, model, temperature, tools,
@@ -1741,6 +1754,9 @@ class OpenAIClient:
             except (FileNotFoundError, ValueError):
                 raise
             except Exception as e:
+                status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                if status == "failed":
+                    raise
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
 
