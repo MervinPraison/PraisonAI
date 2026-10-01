@@ -195,6 +195,8 @@ class BaseStore(ABC):
     
     def search(self, query: str, limit: int = 10) -> List[LearnEntry]:
         """Simple text search (can be overridden for semantic search)."""
+        # Retrieval persists usage telemetry, so refresh before selecting entries.
+        self._load()
         query_lower = query.lower()
         results = [
             entry for entry in self._entries.values()
@@ -206,6 +208,7 @@ class BaseStore(ABC):
     
     def list_all(self, limit: int = 100) -> List[LearnEntry]:
         """List all entries."""
+        self._load()
         entries = list(self._entries.values())
         entries.sort(key=lambda x: x.updated_at, reverse=True)
         entries = entries[:limit]
@@ -214,6 +217,7 @@ class BaseStore(ABC):
     
     def update(self, entry_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[LearnEntry]:
         """Update an existing entry."""
+        self._load()
         if entry_id not in self._entries:
             return None
         entry = self._entries[entry_id]
@@ -227,6 +231,7 @@ class BaseStore(ABC):
     
     def delete(self, entry_id: str) -> bool:
         """Delete an entry."""
+        self._load()
         if entry_id in self._entries:
             del self._entries[entry_id]
             self._save()
