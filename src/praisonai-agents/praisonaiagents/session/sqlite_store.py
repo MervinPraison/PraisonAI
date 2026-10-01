@@ -440,12 +440,6 @@ class SqliteSessionStore(DefaultSessionStore):
                 logger.debug("Post-add index refresh failed for %s: %s", session_id, exc)
         return ok
 
-    def clear_session(self, session_id: str) -> bool:
-        ok = super().clear_session(session_id)
-        if ok:
-            self._deindex_session(session_id)
-        return ok
-
     def delete_session(self, session_id: str) -> bool:
         ok = super().delete_session(session_id)
         if ok:
