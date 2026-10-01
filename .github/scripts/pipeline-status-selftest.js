@@ -73,4 +73,33 @@ assert(
   )
 );
 
+assert(
+  'external example only path',
+  mg.isExternalExampleOnlyChange([{ filename: 'examples/tools/external/arxiv/tool.py' }])
+);
+assert(
+  'mixed paths not external-example only',
+  !mg.isExternalExampleOnlyChange([
+    { filename: 'examples/tools/external/foo.py' },
+    { filename: 'src/praisonai-agents/foo.py' },
+  ])
+);
+
+assert(
+  'upstream head repo',
+  ps.isUpstreamHeadRepo(
+    { head: { repo: { full_name: 'MervinPraison/PraisonAI' } } },
+    'MervinPraison',
+    'PraisonAI'
+  )
+);
+assert(
+  'fork head repo still synced (not upstream)',
+  !ps.isUpstreamHeadRepo(
+    { head: { repo: { full_name: 'ai-mrscraper/PraisonAI' } } },
+    'MervinPraison',
+    'PraisonAI'
+  )
+);
+
 process.exit(failed ? 1 : 0);

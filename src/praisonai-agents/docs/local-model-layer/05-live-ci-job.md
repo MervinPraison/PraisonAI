@@ -183,7 +183,9 @@ banner. Key fragments:
     timeout-minutes: 15
     env:
       # Bump deliberately; the cache key and what we test both follow this.
-      OLLAMA_VERSION: v0.33.2
+      # No leading "v": install.sh passes ?version=$OLLAMA_VERSION and ollama.com
+      # redirects to GitHub tag v$version (vv0.33.2 → 404 if set to v0.33.2).
+      OLLAMA_VERSION: "0.33.2"
       OLLAMA_TEST_MODEL: qwen3:0.6b
     steps:
     - uses: actions/checkout@v4
@@ -204,9 +206,12 @@ banner. Key fragments:
       shell: bash
       run: |
         set -euo pipefail
-        curl -fsSL -o /tmp/ollama.tgz \
-          "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tgz"
-        sudo tar -C /usr -xzf /tmp/ollama.tgz
+        # The official installer, VERSION-PINNED via OLLAMA_VERSION (which it
+        # honours). Since v0.33 the linux bundle ships as a .tar.zst with GPU
+        # runtimes bundled in, so a direct release-asset download is not a
+        # workable alternative; the installer handles the zst/tgz split.
+        sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+        curl -fsSL https://ollama.com/install.sh | sh
         ollama --version
     - name: Start Ollama and pull model
       shell: bash

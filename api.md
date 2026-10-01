@@ -776,7 +776,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">wait_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">where_does_it_run</a>() -> str</code>
 * <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval</a>(request: ApprovalRequest) -> ApprovalDecision</code>
-* <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval_sync</a>(request: ApprovalRequest) -> ApprovalDecision</code>
+* <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval_sync</a>(request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision</code>
 * <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">completed</a>(output: Optional[str] = None) -> 'RunOutcome'</code>
 * <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">from_exception</a>(exc: BaseException, output: Optional[str] = None) -> 'RunOutcome'</code>
 * <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">succeeded</a>() -> bool</code>
@@ -1018,7 +1018,8 @@ export { // Bot types
   FailoverManager, // Enums
   SandboxStatus, // Gateway types
   type GatewayConfig, // Other types
-  type ProviderStatus, AutonomyLevel, GatewayEventType, RagRetrievalPolicy } from "./gateway";
+  type ProviderStatus, // Session-projection reducer (Issue #5324)
+  SessionProjection, AutonomyLevel, GatewayEventType, RagRetrievalPolicy } from "./gateway";
 export { LLMGuardrail, createLLMGuardrail } from "./guardrails/llm-guardrail";
 export { DisplayTypes, HooksManager, WorkflowHooksExecutor, clearAllCallbacks, clearApprovalCallback, createHooksManager, createLoggingOperationHooks, createLoggingWorkflowHooks, createTimingWorkflowHooks, createValidationOperationHooks, createWorkflowHooks, executeCallback, executeSyncCallback, getRegisteredDisplayTypes, hasApprovalCallback, registerApprovalCallback, registerDisplayCallback, requestApproval, unregisterDisplayCallback } from "./hooks";
 export { // Computer Use

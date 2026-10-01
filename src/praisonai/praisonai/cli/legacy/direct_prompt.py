@@ -871,9 +871,9 @@ def handle_direct_prompt(self, prompt):
                     if direct:
                         # Pass-through proxy (original behavior, preserved as escape hatch)
                         ext_console.print(f"[bold cyan]🔌 Using external agent (direct): {external_agent_name}[/bold cyan]")
-                        import asyncio
+                        from praisonai._async_bridge import run_cli_coro
                         try:
-                            result = asyncio.run(integration.execute(prompt))
+                            result = run_cli_coro(integration.execute(prompt))
                             ext_console.print(f"\n[bold green]Result from {external_agent_name}:[/bold green]")
                             ext_console.print(result)
                             return ""

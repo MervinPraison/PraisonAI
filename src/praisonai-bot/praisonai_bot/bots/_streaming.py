@@ -34,6 +34,77 @@ _REASONING_OPEN_RE = re.compile(
 )
 
 
+def redact_outbound_text(text: str, adapter: Any = None) -> str:
+    """Scrub registered secrets + credential-shaped tokens from streamed text.
+
+    The progressive draft/edit path does not pass through the adapters'
+    ``fire_message_sending`` seam (only the final content does), so an
+    intermediate edit could otherwise flash a secret to the user before the
+    final scrub. Applying the same core primitive here closes that window.
+
+    When an ``adapter`` is supplied, the same controls as the mixin seam apply:
+    an injected ``_outbound_redactor`` (e.g. one that also enforces a PII
+    policy) takes precedence and ``_redact_secrets_outbound = False`` opts out,
+    so one consistent redaction policy governs every outbound seam (Issue #5055).
+    Best-effort — a scrubber error leaves the text unchanged.
+    """
+    if not text:
+        return text
+    if adapter is not None and not getattr(adapter, "_redact_secrets_outbound", True):
+        return text
+    redactor = getattr(adapter, "_outbound_redactor", None) if adapter is not None else None
+    try:
+        if redactor is not None:
+            masked = redactor.redact(text)
+            # Only honour a well-behaved injected redactor (returns a str);
+            # anything else falls back to the core primitive so a stray/mock
+            # attribute cannot yield a coroutine or drop the scrub.
+            if isinstance(masked, str):
+                return masked
+        from praisonaiagents.secrets import redact_outbound
+
+        return redact_outbound(text)
+    except Exception:  # pragma: no cover — never block a stream on a scrubber bug
+        return text
+
+
+# Privacy-safe activity surface: stable mapping from tool-name substrings to a
+# coarse activity *category*. Categories key the operator-configured phrase
+# catalogue so a curated line ("Searching the web…") can be shown during an
+# output-silent tool run WITHOUT ever interpolating tool args, command strings,
+# URLs, file paths or model reasoning. Matching is substring-based on the
+# lowercased tool name only; unknown tools fall back to the ``default`` phrase.
+_ACTIVITY_CATEGORY_HINTS: tuple = (
+    ("web", ("web", "browser", "fetch", "url", "http", "crawl", "scrape")),
+    ("search", ("search", "google", "duckduckgo", "tavily", "serper", "wiki")),
+    ("shell", ("shell", "bash", "command", "terminal", "exec", "subprocess")),
+    ("code", ("code", "python", "interpreter", "repl", "compile", "script")),
+    ("file", ("file", "read", "write", "open", "save", "load", "csv", "pdf", "doc")),
+    ("mcp", ("mcp",)),
+)
+
+# Neutral line used when a curated catalogue is enabled but has no phrase for the
+# current category and no ``default``. Guarantees opting in can never fall back to
+# surfacing the raw tool name.
+_SAFE_ACTIVITY_FALLBACK = "Working on it…"
+
+
+def resolve_activity_category(tool_name: Optional[str]) -> str:
+    """Map a tool name to a stable activity *category* for the phrase catalogue.
+
+    Uses substring hints on the lowercased tool name only — never the tool's
+    arguments — so the resulting category (and the phrase it selects) can never
+    leak sensitive input. Returns ``"default"`` when nothing matches.
+    """
+    if not tool_name:
+        return "default"
+    lowered = str(tool_name).lower()
+    for category, hints in _ACTIVITY_CATEGORY_HINTS:
+        if any(hint in lowered for hint in hints):
+            return category
+    return "default"
+
+
 def strip_reasoning_tags(text: str) -> str:
     """Remove ``<think>``/``<reasoning>`` spans from streamed content.
 
@@ -82,6 +153,12 @@ class StreamingConfig:
     flood_backoff_factor: float = 2.0         # Multiply interval on each flood/429
     max_interval: float = 30.0                # Cap for the adaptively-widened interval
     strip_reasoning_tags: bool = True         # Strip <think>/<reasoning> from output
+    # Opt-in privacy-safe activity surface (PROGRESS mode). When set, a curated
+    # phrase keyed by tool *category* (see ``resolve_activity_category``) is
+    # shown during an output-silent tool run instead of the raw tool name.
+    # Empty/None => today's behaviour (renders "Running <tool>..."). Phrases are
+    # the ONLY text surfaced; tool args/commands/URLs are never interpolated.
+    activity_phrases: Optional[Dict[str, str]] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "StreamingConfig":
@@ -92,6 +169,20 @@ class StreamingConfig:
         except ValueError:
             logger.warning("Invalid streaming mode '%s', using 'off'", mode_str)
             mode = StreamingMode.OFF
+        
+        # Accept the curated phrase catalogue either inline as ``activity_phrases``
+        # or under an ``activity_status`` block ({enabled, phrases}) matching the
+        # documented bot-config shape. ``enabled: false`` disables the surface.
+        activity_phrases: Optional[Dict[str, str]] = None
+        raw_phrases = data.get("activity_phrases")
+        activity_block = data.get("activity_status")
+        if isinstance(activity_block, dict):
+            if activity_block.get("enabled", True):
+                raw_phrases = activity_block.get("phrases", raw_phrases)
+            else:
+                raw_phrases = None
+        if isinstance(raw_phrases, dict) and raw_phrases:
+            activity_phrases = {str(k): str(v) for k, v in raw_phrases.items()}
         
         return cls(
             mode=mode,
@@ -106,6 +197,7 @@ class StreamingConfig:
             flood_backoff_factor=data.get("flood_backoff_factor", 2.0),
             max_interval=data.get("max_interval", 30.0),
             strip_reasoning_tags=data.get("strip_reasoning_tags", True),
+            activity_phrases=activity_phrases,
         )
 
 
@@ -378,6 +470,26 @@ class DraftStreamer:
         # Schedule new update task
         self._update_task = asyncio.create_task(_delayed_update())
     
+    def _activity_line(self, tool_name: str) -> str:
+        """Render the progress line for a running tool.
+
+        When a curated ``activity_phrases`` catalogue is configured, the line is
+        drawn EXCLUSIVELY from that catalogue keyed by the tool's activity
+        *category* (falling back to the ``default`` phrase). The raw tool name is
+        never surfaced in that mode, closing the privacy footgun where tool
+        identity/args could leak to chat. With no catalogue configured, behaviour
+        is unchanged ("Running <tool>...").
+        """
+        phrases = self._config.activity_phrases
+        if phrases:
+            category = resolve_activity_category(tool_name)
+            phrase = phrases.get(category) or phrases.get("default")
+            # Opting in must NEVER silently restore the raw tool name: when a
+            # partial catalogue lacks both the matched category and a ``default``
+            # phrase, fall back to a safe generic line rather than the tool name.
+            return f"{self._config.progress_prefix}{phrase or _SAFE_ACTIVITY_FALLBACK}"
+        return f"{self._config.progress_prefix}Running {tool_name}..."
+
     def _render_content(self) -> Optional[str]:
         """Render the buffer for the current mode, applying reasoning stripping."""
         buffer = self._content_buffer
@@ -388,7 +500,11 @@ class DraftStreamer:
         if self._config.mode == StreamingMode.DRAFT:
             content = buffer or self._config.placeholder_text
         elif self._config.mode == StreamingMode.PROGRESS:
-            if self._feed_style and self._progress_lines:
+            # When a curated catalogue is opted in, the raw feed (which folds tool
+            # names/summaries/output into its lines) must not be rendered — that
+            # would bypass the privacy-safe surface. Fall through to the curated
+            # single-line ``_activity_line`` instead so only phrases are shown.
+            if self._feed_style and self._progress_lines and not self._config.activity_phrases:
                 from praisonaiagents.streaming.progress import render_progress
 
                 content = render_progress(
@@ -399,13 +515,19 @@ class DraftStreamer:
                 if not content:
                     content = self._config.placeholder_text
             elif self._current_tool:
-                content = f"{self._config.progress_prefix}Running {self._current_tool}..."
+                content = self._activity_line(self._current_tool)
             elif buffer:
                 content = buffer
             else:
                 content = self._config.placeholder_text
         else:
             return None  # Should not happen
+        
+        # Scrub secrets/credential-shaped tokens from the streamed draft before
+        # it is edited into the live message (Issue #5055). Runs before the text
+        # limit so a mask cannot be split across the truncation boundary. Passes
+        # the adapter so an injected redactor / opt-out governs this seam too.
+        content = redact_outbound_text(content, self._adapter)
         
         # Apply text limit if configured
         if self._text_limit > 0 and len(content) > self._text_limit:
@@ -495,6 +617,13 @@ class DraftStreamer:
         # Strip reasoning tags from the final answer too
         if final_content and self._config.strip_reasoning_tags:
             final_content = strip_reasoning_tags(final_content)
+        
+        # Scrub secrets before the final edit/send (Issue #5055). Idempotent, so
+        # a caller that already redacted via ``fire_message_sending`` is
+        # unaffected, while a caller that finalises directly (e.g. UnifiedDelivery)
+        # still gets the safe-by-default guarantee. The adapter carries any
+        # injected redactor / opt-out so one policy governs every outbound seam.
+        final_content = redact_outbound_text(final_content, self._adapter)
         
         if self._rate_limiter:
             await self._rate_limiter.acquire(self._channel_id)

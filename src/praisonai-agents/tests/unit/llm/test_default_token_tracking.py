@@ -289,6 +289,52 @@ def test_openai_client_clears_stale_metrics_when_usage_absent(monkeypatch):
     assert client.last_token_metrics is None
 
 
+def test_scoped_summary_keeps_idless_openai_usage(monkeypatch):
+    """Greptile P1: id-less (OpenAI-client) usage must survive id-based scoping.
+
+    When a team's agents carry stable ids, the scoped summary prefers the
+    collision-free ``by_agent_id`` breakdown. The native OpenAI client records
+    ``agent`` with no ``agent_id`` (keyed by name), so a naive id-only filter
+    dropped that bucket — reporting interactions/per-model rows but zero agent
+    totals and zero total tokens. The scoped summary must retain it.
+    """
+    from praisonaiagents import Agent
+    from praisonaiagents.agents.agents import PraisonAIAgents
+    from praisonaiagents.telemetry.token_collector import TokenMetrics
+
+    collector = get_token_collector()
+    collector.reset()
+
+    agent = Agent(name="Researcher", instructions="test", llm="gpt-4o-mini")
+    scope_id = getattr(agent, "_approval_scope_id", None)
+    assert scope_id, "agent must expose a stable _approval_scope_id"
+
+    team = PraisonAIAgents(agents=[agent])
+
+    # Id-bearing usage (normal LLM path threads current_agent_id).
+    collector.track_tokens(
+        model="gpt-4o-mini",
+        agent="Researcher",
+        metrics=TokenMetrics(input_tokens=10, output_tokens=2),
+        metadata={"provider": "openai"},
+        agent_id=scope_id,
+    )
+    # Id-less usage from the native OpenAI client path (agent_id=None).
+    collector.track_tokens(
+        model="gpt-4o-mini",
+        agent="Researcher",
+        metrics=TokenMetrics(input_tokens=11, output_tokens=3),
+        metadata={"provider": "openai"},
+    )
+
+    summary = team.get_token_usage_summary()
+    assert summary["total_tokens"] == 26
+    assert summary["total_metrics"]["input_tokens"] == 21
+    assert summary["total_metrics"]["output_tokens"] == 5
+    assert "Researcher" in summary["by_agent"]
+    assert summary["by_agent"]["Researcher"]["input_tokens"] == 21
+
+
 async def test_concurrent_agents_sharing_one_llm_do_not_misattribute_tokens(monkeypatch):
     """current_agent_name lives on the shared LLM instance, so a second agent's
     set_current_agent() can overwrite it while the first agent is still

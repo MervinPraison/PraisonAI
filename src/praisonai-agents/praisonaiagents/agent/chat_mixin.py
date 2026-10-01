@@ -3606,41 +3606,48 @@ Your Goal: {self.goal}"""
             )
             
 
+            # Track messages THIS turn appends so a failure rolls back only our
+            # own messages, never a concurrent turn's (see memory_mixin). The
+            # default (OpenAI) path used to skip this, so its positional rollback
+            # ``del chat_history[n:]`` erased a concurrent turn's interleaved
+            # messages and corrupted the shared transcript.
+            _turn_token = self._begin_turn_tracking()
+
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
-            
-            # Normalize original_prompt for consistent chat history storage
-            normalized_content = original_prompt
-            if isinstance(original_prompt, list):
-                # Extract text from multimodal prompts
-                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
-            
-            # Add user message to chat history BEFORE LLM call so handoffs can
-            # access it. Use atomic check-then-act to prevent TOCTOU races: an
-            # unatomic read of chat_history[-1] followed by a separate append
-            # lets a concurrent turn's user message be mistaken for this turn's
-            # own duplicate, silently dropping this user turn from the record.
-            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
-                # Persist user message to DB (OpenAI path)
-                self._persist_message("user", normalized_content)
 
-            reflection_count = 0
-            start_time = time.time()
-            
-            # Apply context management before LLM call (auto-compaction)
-            # Zero overhead when context=False
-            system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
-            processed_messages, context_result = self._apply_context_management(
-                messages=messages,
-                system_prompt=system_prompt_content,
-                tools=tools,
-            )
-            # Use processed messages for the LLM call
-            messages = processed_messages
-            
-            
-            # Wrap entire while loop in try-except for rollback on any failure
+            # Wrap entire turn in try/finally so per-turn tracking is always
+            # ended (the finally reads the ownership list during rollback).
             try:
+                # Normalize original_prompt for consistent chat history storage
+                normalized_content = original_prompt
+                if isinstance(original_prompt, list):
+                    # Extract text from multimodal prompts
+                    normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
+
+                # Add user message to chat history BEFORE LLM call so handoffs can
+                # access it. Use atomic check-then-act to prevent TOCTOU races: an
+                # unatomic read of chat_history[-1] followed by a separate append
+                # lets a concurrent turn's user message be mistaken for this turn's
+                # own duplicate, silently dropping this user turn from the record.
+                if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
+                    # Persist user message to DB (OpenAI path)
+                    self._persist_message("user", normalized_content)
+
+                reflection_count = 0
+                start_time = time.time()
+
+                # Apply context management before LLM call (auto-compaction)
+                # Zero overhead when context=False
+                system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
+                processed_messages, context_result = self._apply_context_management(
+                    messages=messages,
+                    system_prompt=system_prompt_content,
+                    tools=tools,
+                )
+                # Use processed messages for the LLM call
+                messages = processed_messages
+
                 while True:
                     try:
                         if self.verbose:
@@ -3858,6 +3865,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Rollback chat history
                 self._rollback_chat_history_to(chat_history_length)
                 return None
+            finally:
+                # End per-turn tracking after any rollback has run (rollback
+                # reads the ownership list, so this must come last).
+                self._end_turn_tracking(_turn_token)
 
     def clean_json_output(self, output: str) -> str:
         """Clean JSON output while preserving the legacy agent method."""
@@ -4250,6 +4261,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if durable_context is not None:
                 messages = await durable_context.arestore_messages(messages)
             
+            # Track messages THIS turn appends so a failure rolls back only our
+            # own messages, never a concurrent turn's (see memory_mixin). The
+            # default (OpenAI) path used to skip this, so its positional rollback
+            # ``del chat_history[n:]`` erased a concurrent turn's interleaved
+            # messages. Each achat() turn runs in its own task/context and
+            # _clear_turn_tracking() ran at the top of this turn, so this list is
+            # cleaned up when the next turn on this task starts.
+            self._begin_turn_tracking()
+
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
             
@@ -4726,6 +4746,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
             return None
+        finally:
+            # Unregister this turn's ownership list from the process-wide
+            # live-turn registry once the turn finishes (success or failure).
+            # The sync path does this in _end_turn_tracking's finally; the async
+            # path previously relied only on the *next* turn's
+            # _clear_turn_tracking(), so a terminal achat/arun/astart left its
+            # completed ownership globally registered and a later ephemeral()
+            # cleanup treated its committed messages as still live. Rollback in
+            # the except blocks above already read ownership before this runs.
+            self._clear_turn_tracking()
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
@@ -5698,6 +5728,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         return llm_summarize_async
 
+    def _resolve_compaction_max_tokens(self, execution_cfg):
+        """
+        Resolve the compaction trigger budget.
+
+        An explicit ``ExecutionConfig.max_context_tokens`` always wins. When it
+        is unset, size the trigger to the active model's context window (reusing
+        the model-aware ``budgeter`` the in-loop path already uses) instead of a
+        flat default, so large-context models are not compacted prematurely.
+        Falls back to a static default only for the offline / unknown-model case.
+        """
+        _explicit = getattr(execution_cfg, 'max_context_tokens', None)
+        if _explicit:
+            return _explicit
+        try:
+            from ..context.budgeter import get_model_limit, get_output_reserve
+            model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+            limit = get_model_limit(model_name)
+            reserve = get_output_reserve(model_name)
+            return max(1, int(limit * 0.8) - reserve)
+        except Exception:
+            return 8000
+
     def _apply_context_compaction(self, messages, hook_event_class):
         """
         Apply context compaction to messages if enabled (sync version).
@@ -5717,7 +5769,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from ..compaction import ContextCompactor
             from ..compaction.strategy import CompactionStrategy
             
-            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg)
             _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
             
             # Create LLM summarization function if strategy is LLM_SUMMARIZE
@@ -5749,17 +5801,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Perform compaction
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                import asyncio
-                try:
-                    # Run async compaction in event loop
-                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
-                except RuntimeError:
-                    # If already in async context, fall back to sync (naive) compaction
-                    logging.warning(
-                        f"[compaction] {self.name}: LLM_SUMMARIZE fell back to naive summarization "
-                        f"(asyncio.run not available in sync context)"
-                    )
-                    compacted_msgs, _cr = _compactor.compact(messages)
+                # Drive the async summariser through the shared bridge so it runs
+                # correctly whether or not a loop is already running (FastAPI /
+                # Jupyter / a bot handler). The previous code caught bare
+                # RuntimeError from ``asyncio.run`` ("event loop already
+                # running") and silently downgraded LLM summarisation to naive
+                # truncation whenever a loop was live; the bridge removes that
+                # spurious fallback so the real summariser always runs. Provider
+                # errors inside the summariser remain best-effort (see
+                # ``_llm_summarize_async``, which falls back to a naive summary on
+                # failure) — compaction never hard-fails the turn.
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                compacted_msgs, _cr = run_coroutine_from_any_context(
+                    _compactor.compact_async(messages)
+                )
             else:
                 compacted_msgs, _cr = _compactor.compact(messages)
             
@@ -5804,7 +5859,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from ..compaction import ContextCompactor
             from ..compaction.strategy import CompactionStrategy
             
-            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg)
             _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
             
             # Create LLM summarization function if strategy is LLM_SUMMARIZE

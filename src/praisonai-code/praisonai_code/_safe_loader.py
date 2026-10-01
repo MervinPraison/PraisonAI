@@ -9,6 +9,7 @@ import importlib.util
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from types import ModuleType
 
@@ -70,19 +71,35 @@ def load_user_module(
             logger.warning("Refusing to exec %s: outside working directory.", path)
             return None
 
-    spec = importlib.util.spec_from_file_location(name, str(path))
+    # Namespace the sys.modules entry per-load so two concurrent user-tool
+    # loads on the same process (e.g. multi-tenant ``praisonai serve``) cannot
+    # clobber one another through a shared, fixed module name — and a failed
+    # exec can only pop *its own* entry, never another live tenant's module.
+    # ``name`` is retained only as a readable hint in the qualified key; every
+    # reachable caller binds the returned module object rather than reading
+    # ``sys.modules[name]``.
+    qualified = f"praisonai_userload::{name}::{path}::{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(qualified, str(path))
     if spec is None or spec.loader is None:
         return None
-    
+
     module = importlib.util.module_from_spec(spec)
     # Register before exec so decorators/dataclasses that consult
     # sys.modules[__name__] during module execution resolve correctly.
-    sys.modules[name] = module
+    sys.modules[qualified] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise
+    finally:
+        # Whether exec succeeds or raises, drop the registration once execution
+        # is done: it is only needed *during* module execution (so decorators/
+        # dataclasses that consult ``sys.modules[__name__]`` resolve). Every
+        # reachable caller binds the returned module object and none read
+        # ``sys.modules[qualified]`` afterwards, so popping here keeps a
+        # long-lived, multi-tenant ``praisonai serve`` process from
+        # accumulating one dead module (and its globals) per reload — while a
+        # failed exec still removes only *its own* entry, never another
+        # tenant's live module. The returned object stays fully live.
+        sys.modules.pop(qualified, None)
     return module
 
 
@@ -118,15 +135,22 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
             f"Refusing to exec {path}: outside working directory."
         ) from None
 
-    spec = importlib.util.spec_from_file_location(name, str(path))
+    # Per-load-unique sys.modules key: see load_user_module for the rationale
+    # (multi-tenant / concurrent-load isolation; failed exec pops only its own
+    # entry). Callers bind the returned module rather than sys.modules[name].
+    qualified = f"praisonai_userload::{name}::{path}::{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(qualified, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not create spec for {path}")
-    
+
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[qualified] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise
+    finally:
+        # See load_user_module: pop after execution completes (success or
+        # failure) so long-lived processes don't accumulate dead modules and a
+        # failed exec only removes its own entry. Callers bind the returned
+        # object, never sys.modules[qualified].
+        sys.modules.pop(qualified, None)
     return module

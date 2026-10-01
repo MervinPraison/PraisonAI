@@ -37,7 +37,16 @@ const LABEL_SPECS = [
   { name: 'pipeline/blocked:cooldown', color: 'fef2c0', description: 'Blocked: post-push or @claude cooldown' },
   { name: 'pipeline/blocked:stale-final', color: 'f9d0c4', description: 'Blocked: FINAL stale after new commits' },
   { name: 'pipeline/blocked:no-final', color: 'ededed', description: 'Blocked: no FINAL @claude trigger yet' },
+  {
+    name: 'pipeline/external-example',
+    color: 'bfd4f2',
+    description: 'Diff only under examples/tools/external/ — not merge-ready without maintainer-accept-example',
+  },
 ];
+
+// PRs with pipeline/external-example cannot reach pipeline/merge-ready unless
+// maintainers add maintainer-accept-example (enforced in merge-gate evaluatePipelineQuiescent,
+// same fail-closed pattern as fork PRs).
 
 function deriveStage(comments, evalResult) {
   if (evalResult.ready) return 'pipeline/merge-ready';
@@ -63,7 +72,8 @@ function reasonToBlockerLabel(reason) {
     r.includes('without test') ||
     r.includes('files changed') ||
     r.includes('possible secret') ||
-    r.includes('agent.py')
+    r.includes('agent.py') ||
+    r.includes('external example only')
   ) return 'pipeline/blocked:manual-review';
   if (r.includes('recent @claude') || r.includes('post-push buffer')) return 'pipeline/blocked:cooldown';
   if (r.includes('stale final')) return 'pipeline/blocked:stale-final';
@@ -133,11 +143,16 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
     github, owner, repo, prNumber, core
   );
   const { stage, blockers, all } = computePipelineLabels(ctx.comments, evalResult);
+  const pullFiles = await mergeGate.listPullFiles(github, owner, repo, prNumber);
+  const auxiliary = mergeGate.isExternalExampleOnlyChange(pullFiles)
+    ? [mergeGate.EXTERNAL_EXAMPLE_LABEL]
+    : [];
+  const labelSet = [...all, ...auxiliary];
 
   const current = ctx.labels.filter((l) => l.startsWith(PIPELINE_PREFIX));
-  const desired = new Set(all);
+  const desired = new Set(labelSet);
   const toRemove = current.filter((l) => !desired.has(l) && l !== 'pipeline/merged');
-  const toAdd = all.filter((l) => !current.includes(l));
+  const toAdd = labelSet.filter((l) => !current.includes(l));
 
   for (const name of toRemove) {
     try {
@@ -199,6 +214,11 @@ async function dispatchMergeGateForOldestReady(github, owner, repo, readyCandida
   return 0;
 }
 
+function isUpstreamHeadRepo(pr, owner, repo) {
+  const headFull = pr.head?.repo?.full_name;
+  return !headFull || headFull === `${owner}/${repo}`;
+}
+
 async function syncOpenPullRequests(github, owner, repo, options, core) {
   const { maxPrs = 20, dispatchMergeGate = true } = options || {};
   await ensurePipelineLabels(github, owner, repo, core);
@@ -223,9 +243,8 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
   for (const pr of prs) {
     if (synced >= maxPrs) break;
     if (pr.draft) continue;
-    if (pr.head?.repo?.full_name && pr.head.repo.full_name !== `${owner}/${repo}`) continue;
     const result = await syncPipelineLabels(github, owner, repo, pr.number, core);
-    if (result.ready) {
+    if (result.ready && isUpstreamHeadRepo(pr, owner, repo)) {
       readyCandidates.push({
         prNumber: pr.number,
         createdAt: result.createdAt || new Date(pr.created_at).getTime(),
@@ -248,6 +267,7 @@ module.exports = {
   STAGE_LABELS,
   BLOCKER_LABELS,
   ALL_PIPELINE_LABELS,
+  isUpstreamHeadRepo,
   deriveStage,
   deriveBlockerLabels,
   computePipelineLabels,

@@ -49,6 +49,7 @@ __all__ = [
     "create_deny_tools_policy",
     "create_allow_tools_policy",
     "create_read_only_policy",
+    "create_network_policy",
 ]
 
 
@@ -64,6 +65,7 @@ _LAZY_IMPORTS = {
     "create_deny_tools_policy": (f"{__name__}.engine", "create_deny_tools_policy"),
     "create_allow_tools_policy": (f"{__name__}.engine", "create_allow_tools_policy"),
     "create_read_only_policy": (f"{__name__}.engine", "create_read_only_policy"),
+    "create_network_policy": (f"{__name__}.engine", "create_network_policy"),
 }
 
 __getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)

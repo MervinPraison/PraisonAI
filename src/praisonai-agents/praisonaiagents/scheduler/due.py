@@ -76,6 +76,158 @@ def next_fire_time(
     return croniter(cron_expr, base_datetime).get_next(datetime).timestamp()
 
 
+def scheduled_instant(
+    job: Any,
+    now: float,
+    default_timezone: str | None = None,
+) -> float | None:
+    """Return the epoch of the occurrence this due job is firing *for*.
+
+    When a recurring job becomes due at ``now`` it is firing for a specific
+    scheduled slot that may lie in the past (the process was down when the
+    slot arrived). This returns that slot's canonical instant so a misfire
+    policy can decide whether recovery is still within an acceptable grace
+    window. ``None`` is returned when there is no meaningful past slot (a
+    never-run interval job, or a kind/expression that cannot be evaluated).
+
+    - ``every``: the *first* slot that came due after ``last_run_at``
+      (``last_run_at + every_seconds``). Its age measures how long the job has
+      been overdue — the meaningful lateness for a coalesced recovery.
+    - ``cron``: the last cron fire at or before ``now`` (the slot being
+      recovered for a daily/weekly schedule).
+    - ``at``: the target instant itself.
+    """
+    sched = job.schedule
+    if sched.kind == "every":
+        if sched.every_seconds is None or job.last_run_at is None:
+            return None
+        if now - job.last_run_at < sched.every_seconds:
+            return None
+        return job.last_run_at + sched.every_seconds
+    if sched.kind == "at":
+        if sched.at is None:
+            return None
+        try:
+            return localize_wall_clock(
+                datetime.fromisoformat(sched.at),
+                sched.tz or default_timezone,
+            ).timestamp()
+        except (ValueError, TypeError):
+            return None
+    if sched.kind == "cron":
+        if sched.cron_expr is None:
+            return None
+        try:
+            from croniter import croniter  # type: ignore[import-untyped]
+        except ImportError:
+            return None
+        try:
+            base_datetime = datetime.fromtimestamp(
+                now, resolve_schedule_timezone(sched.tz or default_timezone)
+            )
+            return croniter(sched.cron_expr, base_datetime).get_prev(datetime).timestamp()
+        except (ValueError, KeyError, TypeError):
+            return None
+    return None
+
+
+def is_misfire(
+    job: Any,
+    now: float,
+    default_timezone: str | None = None,
+) -> bool:
+    """Whether a *due* job's occurrence should be suppressed as a misfire.
+
+    Shared by every atomic-claim store so the misfire decision is defined once.
+    Returns ``True`` when the occurrence the job is firing for is older than
+    ``misfire_grace_seconds`` — a stale run whose slot passed while the process
+    was down. Such an occurrence is recorded as ``missed`` (observable) instead
+    of firing a late, no-longer-useful run. An occurrence still within the
+    grace window (or a first run) coalesces into a single normal fire on
+    recovery, the pre-existing behaviour.
+
+    With no grace set this is always ``False`` — existing jobs keep firing
+    exactly as before. A first run (``last_run_at is None``) is never a misfire
+    for any kind: there is no missed *recurrence* to suppress, only the initial
+    fire, which must always run (matching ``is_due``'s never-run branches).
+    """
+    grace = getattr(job, "misfire_grace_seconds", None)
+    if grace is None:
+        return False
+    # A first run is the initial fire, not a recovered recurrence — always let
+    # it run. ``every`` already encodes this (``scheduled_instant`` returns
+    # ``None`` with no ``last_run_at``); make it explicit for ``cron``/``at``
+    # too so a never-run job past a stale slot is not marked missed unfired.
+    if getattr(job, "last_run_at", None) is None:
+        return False
+    # Tolerate a mis-typed grace (e.g. a hand-edited quoted YAML value that
+    # slipped past coercion): a bad policy value must never raise and abort the
+    # whole claim pass — treat it as "no misfire" so other due jobs still fire.
+    try:
+        grace_val = float(grace)
+    except (TypeError, ValueError):
+        return False
+    instant = scheduled_instant(job, now, default_timezone)
+    if instant is None:
+        return False
+    age = now - instant
+    if age <= 0:
+        return False
+    return age > grace_val
+
+
+# Upper bound on a single quota hold (24h) so a bogus/huge provider Retry-After
+# cannot park a recurring job indefinitely.
+_MAX_HOLD_SECONDS = 86_400.0
+
+
+def quota_hold_from_failure(
+    error: Any,
+    now: float,
+    slack_seconds: float = 60.0,
+) -> float | None:
+    """Return an epoch to park a job past a provider's rate-limit window.
+
+    Pure decision helper for the "provider-quota-aware hold": given a run's
+    failure it decides whether the job should stop re-firing until the
+    provider's own reset window elapses. Returns ``now + Retry-After + slack``
+    when the failure is a rate-limit / quota signal carrying a usable reset
+    hint, else ``None`` (no hold — a non-quota failure keeps today's behaviour).
+
+    Reuses the core error classifier so a 429/quota error is recognised by
+    exception type, HTTP status code, or message, and the reset window is read
+    from the provider's ``Retry-After`` header / ``retry_after`` attribute /
+    message text — no new parsing surface. The small ``slack_seconds`` avoids
+    re-firing the instant the window reopens (clock skew / provider rounding).
+
+    Args:
+        error: The failure — an ``Exception`` (preferred, so the classifier can
+            read the response headers) or an error string.
+        now: Epoch the failure was observed at.
+        slack_seconds: Extra seconds added past the provider's reset window.
+
+    Returns:
+        The epoch before which the job should be parked, or ``None`` when the
+        failure is not a quota signal or carries no usable reset window.
+    """
+    from praisonaiagents.llm.error_classifier import (
+        ErrorCategory,
+        classify_error,
+        extract_retry_after,
+    )
+
+    exc = error if isinstance(error, Exception) else Exception(str(error or ""))
+    if classify_error(exc) != ErrorCategory.RATE_LIMIT:
+        return None
+    # Honour the provider's full reset window (unlike in-tick backoff, which caps
+    # at 5 minutes) so a long quota window parks the job instead of re-firing —
+    # but bound it to 24h so a bogus/huge value can't park a job indefinitely.
+    retry_after = extract_retry_after(exc, cap_seconds=_MAX_HOLD_SECONDS)
+    if not retry_after or retry_after <= 0:
+        return None
+    return now + float(retry_after) + max(float(slack_seconds), 0.0)
+
+
 def is_due(
     job: Any,
     now: float,
@@ -101,6 +253,17 @@ def is_due(
     run_count = getattr(job, "run_count", 0)
     if max_runs is not None and run_count >= max_runs:
         return False
+    # Provider-quota hold short-circuits before the kind check: while a job is
+    # parked past a provider's known-closed window (a 429/quota ``Retry-After``
+    # captured on a prior failure) it is not due, so it stops re-firing and
+    # re-failing every tick against a benched provider. Any intervening fires
+    # coalesce — the job becomes due again at the first legal instant once the
+    # hold elapses. The executor clears ``hold_until`` on the first run that
+    # reaches the model (proof the window reopened).
+    hold_until = getattr(job, "hold_until", None)
+    if hold_until is not None and now < hold_until:
+        return False
+
     until = getattr(job, "until", None)
     if until is not None:
         try:

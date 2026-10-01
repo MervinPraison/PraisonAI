@@ -32,6 +32,7 @@ from praisonai._async_bridge import (
     async_scoped_bridge,
     current_bridge,
     dispatch_maybe_awaitable,
+    run_cli_coro,
     run_sync,
 )
 
@@ -40,6 +41,50 @@ async def _coro(value: int) -> int:
     """Helper coroutine used by the tests below."""
     await asyncio.sleep(0)  # yield to the loop at least once
     return value * 2
+
+
+class TestRunCliCoro(unittest.TestCase):
+    """``run_cli_coro`` is the CLI-leaf replacement for ``asyncio.run``."""
+
+    def test_runs_on_shared_bridge_from_sync_context(self):
+        # No fresh event loop is spawned; result comes back off the bridge.
+        self.assertEqual(run_cli_coro(_coro(21)), 42)
+
+    def test_reuses_shared_loop_across_calls(self):
+        self.assertEqual(run_cli_coro(_coro(1)), 2)
+        self.assertEqual(run_cli_coro(_coro(2)), 4)
+
+    def test_raises_from_inside_running_loop(self):
+        async def outer() -> str:
+            try:
+                run_cli_coro(_coro(1))
+                return "no-raise"
+            except RuntimeError:
+                return "raised"
+
+        self.assertEqual(run_sync(outer()), "raised")
+
+    def test_defaults_to_unbounded_timeout(self):
+        # CLI leaves replaced bare asyncio.run(...) (no whole-command deadline);
+        # a long-running interactive shell / standardise / background job must
+        # not be aborted by run_sync's 300s default. Assert the omitted timeout
+        # forwards None (unbounded), not the default.
+        import praisonai._async_bridge as bridge
+
+        captured = {}
+
+        def _fake_run_sync(coro, *, timeout):
+            captured["timeout"] = timeout
+            coro.close()
+            return "ok"
+
+        original = bridge.run_sync
+        bridge.run_sync = _fake_run_sync
+        try:
+            self.assertEqual(run_cli_coro(_coro(1)), "ok")
+        finally:
+            bridge.run_sync = original
+        self.assertIsNone(captured["timeout"])
 
 
 class TestRunSync(unittest.TestCase):

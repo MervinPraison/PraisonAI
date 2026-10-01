@@ -61,6 +61,35 @@ class TestSqliteTranscriptStore:
         history = s2.get_chat_history("s1")
         assert history == [{"role": "user", "content": "persist me"}]
 
+    def test_boots_on_malformed_db(self, tmp_dir):
+        """A malformed transcript DB recovers instead of taking the store down.
+
+        Before Issue #5387's guard, opening a corrupt ``sessions.db`` raised an
+        uncaught ``sqlite3.DatabaseError`` on the first ``CREATE TABLE``. The
+        guard forensically backs up the bad bytes and lets a fresh, usable store
+        open so durable session handling keeps working.
+        """
+        db = os.path.join(tmp_dir, "sessions.db")
+        s1 = SqliteTranscriptStore(session_dir=tmp_dir, db_path=db)
+        s1.add_message("s1", "user", "before corruption")
+        s1._conn.close()  # release the file/WAL before corrupting on disk
+
+        # Corrupt the on-disk database so quick_check fails and it is unreadable.
+        for sidecar in (db + "-wal", db + "-shm"):
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+        with open(db, "r+b") as fh:
+            fh.write(b"not a sqlite database" + b"\x00" * 300)
+
+        # A new store must open without raising and be usable.
+        s2 = SqliteTranscriptStore(session_dir=tmp_dir, db_path=db)
+        assert s2.add_message("s2", "user", "after recovery")
+        assert s2.get_chat_history("s2") == [
+            {"role": "user", "content": "after recovery"}
+        ]
+        # The malformed bytes were preserved for forensics.
+        assert any(f.startswith("sessions.db.corrupt-") for f in os.listdir(tmp_dir))
+
     def test_session_exists_and_delete(self, tmp_dir):
         store = SqliteTranscriptStore(session_dir=tmp_dir)
         assert not store.session_exists("s1")

@@ -207,9 +207,10 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
         if isinstance(response_json, list):
             tool_calls: List[Dict[str, Any]] = []
             for idx, tool_json in enumerate(response_json):
-                if isinstance(tool_json, dict) and tool_json.get("name") in allowed:
+                name = tool_json.get("name") if isinstance(tool_json, dict) else None
+                if name:
                     tool_calls.append(_make_tool_call(
-                        tool_json["name"], tool_json.get("arguments", {}), response_text, idx))
+                        name, tool_json.get("arguments", {}), response_text, idx))
             if tool_calls:
                 return tool_calls
     except (json.JSONDecodeError, TypeError, KeyError):

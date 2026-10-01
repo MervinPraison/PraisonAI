@@ -14,7 +14,7 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due
+from .due import is_due as _is_due, is_misfire as _is_misfire
 from .hook_emit import emit_schedule_add, emit_schedule_remove
 
 logger = get_logger(__name__)
@@ -187,6 +187,10 @@ class FileScheduleStore:
         # a later ``remove(job.id)`` by the runner is then a no-op, so a spent
         # one-shot yields exactly one SCHEDULE_REMOVE.
         auto_removed: List[ScheduleJob] = []
+        # (job_id, job_name) for occurrences suppressed by the misfire policy.
+        # Logged as ``missed`` history after the lock so a dropped occurrence is
+        # observable instead of vanishing silently.
+        missed: List[tuple] = []
         with self._lock, self._file_lock():
             # Re-read from disk so we observe cross-process claims/leases.
             self._reload_locked()
@@ -207,6 +211,18 @@ class FileScheduleStore:
                     if job.should_retire(now):
                         auto_removed.append(self._jobs.pop(job.id))
                         changed = True
+                    continue
+                # Misfire policy: the job is due, but the occurrence it is
+                # firing for may have landed while the process was down. Decide
+                # whether to run it now or record it as ``missed`` (observable)
+                # rather than firing a stale run or dropping it silently.
+                if _is_misfire(job, now):
+                    # Advance the schedule past the missed slot (so the next
+                    # poll does not see it as due again) and record the miss,
+                    # without claiming or firing.
+                    job.last_run_at = now
+                    missed.append((job.id, job.name))
+                    changed = True
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
@@ -237,6 +253,15 @@ class FileScheduleStore:
                     return []
         for job in auto_removed:
             emit_schedule_remove(job)
+        # Record suppressed occurrences so a missed run is visible in history
+        # rather than silently dropped. Logged outside the file lock (log_run
+        # takes only the thread lock) to keep the critical section short.
+        for job_id, job_name in missed:
+            self.log_run(
+                job_id=job_id,
+                status="missed",
+                job_name=job_name,
+            )
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:

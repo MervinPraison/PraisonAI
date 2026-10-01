@@ -94,6 +94,17 @@ class RunPolicy:
             delivery outcome.  ``None`` disables the durable output audit.
         scanner: Optional callable ``(prompt: str) -> PromptScanResult`` that
             overrides the built-in heuristic scan (e.g. a guardrail plugin).
+        hold_on_rate_limit: When ``True`` (default) a run that fails with a
+            provider rate-limit / quota signal parks the job past the provider's
+            own reset window (its ``Retry-After`` / usage-reset plus
+            ``hold_slack_seconds``) instead of re-firing and re-failing every
+            tick against a benched provider.  Intervening fires coalesce; the
+            executor emits one "held until N" notice via the incident path and
+            clears the hold on the first run that reaches the model.  Set
+            ``False`` to keep the prior fire-every-tick behaviour.
+        hold_slack_seconds: Extra seconds added past the provider's reset window
+            when parking (default 60) so the job does not re-fire the instant
+            the window reopens (clock skew / provider rounding).
     """
 
     allowed_toolsets: Optional[Set[str]] = None
@@ -107,6 +118,8 @@ class RunPolicy:
     # Appended last to keep the pre-existing positional constructor order of
     # ``audit_dir``/``scanner`` stable for callers that pass them positionally.
     alert_after_failures: int = 1
+    hold_on_rate_limit: bool = True
+    hold_slack_seconds: float = 60.0
 
     # ── toolset scoping ──────────────────────────────────────────────
 

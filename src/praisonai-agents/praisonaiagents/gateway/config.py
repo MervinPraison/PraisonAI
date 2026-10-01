@@ -753,10 +753,17 @@ class ApiConfig:
             backed by the gateway's live agents and sessions.
         mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing the gateway's
             registered agents as callable tools.
+        stream: Emit true token-level deltas on the OpenAI-compatible
+            ``/v1/chat/completions`` SSE surface (``stream:true``) by wiring the
+            agent's existing ``stream_emitter`` through the gateway hot path.
+            Off by default: streaming responses stay byte-for-byte the buffered
+            single-chunk path, so enabling it never regresses non-streaming
+            latency or correctness.
     """
 
     openai: bool = False
     mcp: bool = False
+    stream: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -765,7 +772,7 @@ class ApiConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        return {"openai": self.openai, "mcp": self.mcp}
+        return {"openai": self.openai, "mcp": self.mcp, "stream": self.stream}
 
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> "ApiConfig":
@@ -775,6 +782,7 @@ class ApiConfig:
         return cls(
             openai=bool(data.get("openai", False)),
             mcp=bool(data.get("mcp", False)),
+            stream=bool(data.get("stream", False)),
         )
 
 
@@ -933,6 +941,73 @@ class AttachmentConfig:
         )
 
 
+def _parse_drain_timeout(value: Any) -> Optional[float]:
+    """Coerce a ``gateway.drain_timeout`` YAML value to a float (or None).
+
+    Tolerant of env-substituted strings (e.g. ``"20"``); an unparseable /
+    negative value falls back to None (no drain) rather than raising, matching
+    the wrapper's fail-open handling of a malformed drain window (#5362).
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _parse_watchdog_enabled(value: Any) -> bool:
+    """Whether a ``gateway.watchdog`` YAML value enables the loop watchdog.
+
+    Accepts both a bare truthy scalar and the documented block form
+    (``watchdog: { enabled: true, ... }``), mirroring the wrapper's watchdog
+    wiring so the public config reflects the same on/off decision (#5362).
+    """
+    if isinstance(value, dict):
+        flag = value.get("enabled", False)
+    else:
+        flag = value
+    if isinstance(flag, str):
+        return flag.strip().lower() in ("1", "true", "yes", "on")
+    return bool(flag)
+
+
+def _parse_watchdog_timeout(value: Any) -> Optional[float]:
+    """Derive the loop-stall budget (seconds) from a ``gateway.watchdog`` block.
+
+    Reads ``liveness_interval * liveness_strikes`` from the block form when
+    present so the public config exposes the effective wedge budget the CLI
+    ``--watchdog-timeout`` flag sets; returns None when unset/unparseable.
+    """
+    if not isinstance(value, dict):
+        return None
+    try:
+        interval = float(value.get("liveness_interval", 5.0))
+        strikes = int(value.get("liveness_strikes", 3)) or 3
+    except (TypeError, ValueError):
+        return None
+    budget = interval * strikes
+    return budget if budget > 0 else None
+
+
+def _parse_watchdog_timeout_scalar(value: Any) -> Optional[float]:
+    """Coerce an explicit ``gateway.watchdog_timeout`` scalar to a float.
+
+    Mirrors the ``watchdog_timeout > 0`` invariant (see ``GatewayConfig``):
+    tolerant of env-substituted strings (e.g. ``"15"``); an unparseable or
+    non-positive value falls back to None so a malformed timeout disables the
+    budget rather than raising (#5362).
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 @dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
@@ -965,6 +1040,13 @@ class GatewayConfig:
     host: str = "127.0.0.1"
     port: int = 8765
     bind_host: Optional[str] = None
+    # Issue #5312: CIDRs/IPs of upstream proxies/tunnels the operator declares
+    # trusted. Empty (default) means the gateway is directly exposed: forwarded
+    # headers are never believed and per-IP policy keys on the socket peer.
+    # When set, the real client IP is resolved by walking the forwarded chain
+    # across trusted hops (see ``resolve_ingress_attribution``); anything
+    # proxy-shaped but unattributable fails closed to the socket peer.
+    trusted_proxies: List[str] = field(default_factory=list)
     cors_origins: List[str] = field(default_factory=lambda: [])
     allowed_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
@@ -988,6 +1070,14 @@ class GatewayConfig:
     max_concurrent_runs: int = 0  # Aggregate concurrency ceiling (0 = unlimited)
     queue_depth: int = 0  # Bounded wait queue when at the ceiling
     overflow_policy: str = "reject"  # reject | queue | shed_oldest
+    # Issue #5362: complete the back-pressure/lifecycle posture on the public
+    # config so a Python embedder / gateway.yaml can pin it declaratively —
+    # parity with the CLI ``--drain-timeout`` / ``--watchdog`` /
+    # ``--watchdog-timeout`` flags. ``None``/False keep today's behaviour
+    # (no drain, watchdog off); a CLI flag still overrides these at start.
+    drain_timeout: Optional[float] = None  # graceful-drain window on shutdown (s)
+    watchdog: bool = False  # event-loop liveness watchdog (opt-in)
+    watchdog_timeout: Optional[float] = None  # loop-stall budget before restart (s)
     # Issue #5168: per-tenant/per-scope concurrency sub-limit within the global
     # ceiling so one tenant cannot occupy every run slot. 0 disables the
     # sub-limit (today's global-only behaviour).
@@ -1067,6 +1157,14 @@ class GatewayConfig:
             raise ValueError(
                 "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
             )
+        if self.drain_timeout is not None and self.drain_timeout < 0:
+            raise ValueError(
+                "drain_timeout must be >= 0 (use 0/None to disable the drain window)"
+            )
+        if self.watchdog_timeout is not None and self.watchdog_timeout <= 0:
+            raise ValueError(
+                "watchdog_timeout must be > 0 (leave unset to use the default budget)"
+            )
         if self.max_concurrent_runs_per_scope < 0:
             raise ValueError(
                 "max_concurrent_runs_per_scope must be >= 0 "
@@ -1139,6 +1237,7 @@ class GatewayConfig:
         return {
             "host": self.host,
             "port": self.port,
+            "trusted_proxies": list(self.trusted_proxies),
             "cors_origins": self.cors_origins,
             "allowed_origins": self.allowed_origins,
             "auth_token": "***" if self.auth_token else None,
@@ -1154,6 +1253,9 @@ class GatewayConfig:
             "max_concurrent_runs": self.max_concurrent_runs,
             "queue_depth": self.queue_depth,
             "overflow_policy": self.overflow_policy,
+            "drain_timeout": self.drain_timeout,
+            "watchdog": self.watchdog,
+            "watchdog_timeout": self.watchdog_timeout,
             "max_concurrent_runs_per_scope": self.max_concurrent_runs_per_scope,
             "preauth_max_connections_per_ip": self.preauth_max_connections_per_ip,
             "max_unauthorized_frames": self.max_unauthorized_frames,
@@ -1333,9 +1435,17 @@ class MultiChannelGatewayConfig:
                 for tok, scopes in gw_data["auth_scopes"].items()
             }
 
+        raw_trusted = gw_data.get("trusted_proxies", [])
+        trusted_proxies = (
+            [str(p).strip() for p in raw_trusted if str(p).strip()]
+            if isinstance(raw_trusted, (list, tuple))
+            else []
+        )
+
         gateway_config = GatewayConfig(
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
+            trusted_proxies=trusted_proxies,
             cors_origins=gw_data.get("cors_origins", []),
             allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),
@@ -1352,6 +1462,17 @@ class MultiChannelGatewayConfig:
             max_concurrent_runs=int(gw_data.get("max_concurrent_runs", 0) or 0),
             queue_depth=int(gw_data.get("queue_depth", 0) or 0),
             overflow_policy=str(gw_data.get("overflow_policy", "reject") or "reject"),
+            drain_timeout=_parse_drain_timeout(gw_data.get("drain_timeout")),
+            watchdog=_parse_watchdog_enabled(gw_data.get("watchdog")),
+            # Prefer an explicit ``gateway.watchdog_timeout`` scalar (as emitted
+            # by ``to_dict`` and settable directly, matching the CLI
+            # ``--watchdog-timeout`` flag); otherwise derive the budget from the
+            # ``watchdog`` block so both round-trip and block forms work (#5362).
+            watchdog_timeout=(
+                _parse_watchdog_timeout_scalar(gw_data.get("watchdog_timeout"))
+                if gw_data.get("watchdog_timeout") is not None
+                else _parse_watchdog_timeout(gw_data.get("watchdog"))
+            ),
             max_concurrent_runs_per_scope=int(
                 gw_data.get("max_concurrent_runs_per_scope", 0) or 0
             ),

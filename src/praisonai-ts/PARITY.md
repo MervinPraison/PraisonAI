@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.7.6 | **Last Updated:** 2026-09-17
+> **Version:** 1.7.6 | **Last Updated:** 2026-09-29
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 421 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2082 |
+| TypeScript Features | 2087 |
 | **Gap Count** | **4** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -907,7 +907,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
-<summary><strong>other</strong> (510 exports)</summary>
+<summary><strong>other</strong> (515 exports)</summary>
 
 ```typescript
 import { A2UI, A2UIAdapter, A2UINotInstalledError, A2UISystemPromptOptions, A2UIToolResultProtocol, A2UI_MIME_TYPE, AGENT_ERROR_KINDS, ARITY, AUTONOMY_PRESETS, ActionRecord... } from 'praisonai';

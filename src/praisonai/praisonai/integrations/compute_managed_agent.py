@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import shlex
+import sys
 import uuid
 import weakref
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,18 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 _MARKER = "__PRAISON_RESULT__"
+
+# Bounded wait for the cloud teardown when ``_release`` runs at interpreter
+# exit. Long enough for a normal provider ``shutdown`` round-trip, short enough
+# that a hung provider cannot stall process exit indefinitely. Overridable via
+# ``PRAISONAI_COMPUTE_RELEASE_EXIT_TIMEOUT`` (read at import; teardown timing is
+# not a hot path).
+try:
+    _RELEASE_EXIT_TIMEOUT = float(
+        os.environ.get("PRAISONAI_COMPUTE_RELEASE_EXIT_TIMEOUT", "10")
+    )
+except ValueError:
+    _RELEASE_EXIT_TIMEOUT = 10.0
 
 _KEY_VARS = (
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
@@ -257,29 +270,58 @@ def _release(provider, instance_id: str, place: str) -> None:
 
     Collection can happen on a thread that already drives an event loop (GC
     inside async workflow code), where a bare ``asyncio.run`` raises before the
-    shutdown ever runs and the instance leaks. Bridge through the same
-    loop-safe helper ``SharedCompute`` uses so teardown survives either case.
-    """
-    import asyncio
+    shutdown ever runs and the instance leaks. Route through the module's shared
+    ``AsyncBridge`` — one long-lived background loop, never a fresh loop per
+    teardown.
 
+    Exit-safety: ``weakref.finalize`` fires at interpreter shutdown too, where
+    fire-and-forget is unsafe — the bridge's own ``atexit`` teardown can cancel
+    the in-flight shutdown, or its daemon loop thread can be killed, before the
+    cloud round-trip lands, leaking a provisioned instance. So when
+    ``sys.is_finalizing()`` we *block* on the future for a bounded window so the
+    instance is actually reclaimed before the process dies. During normal GC on a
+    live process we stay fire-and-forget so the caller's loop is never pinned for
+    the cloud round-trip.
+    """
     async def _shutdown():
         await provider.shutdown(instance_id)
 
     try:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_shutdown())
-        else:
-            import concurrent.futures
+        from praisonai._async_bridge import current_bridge
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(asyncio.run, _shutdown()).result()
-        logger.debug("[compute_managed] released %s on %s", instance_id, place)
-    except Exception as exc:  # pragma: no cover - teardown stays quiet
+        fut = current_bridge().submit(_shutdown())
+    except Exception as exc:  # pragma: no cover - bridge poisoned / interpreter exit
         logger.warning(
-            "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
+            "[compute_managed] leaked %s on %s (bridge unavailable: %s)",
+            instance_id, place, exc,
         )
+        return
+
+    def _log_result(f):
+        try:
+            f.result()
+            logger.debug("[compute_managed] released %s on %s", instance_id, place)
+        except Exception as exc:  # pragma: no cover - teardown stays quiet
+            logger.warning(
+                "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
+            )
+
+    # At interpreter exit, block (bounded) so the instance is reclaimed before
+    # the process — and the bridge's daemon loop thread — go away.
+    # ``sys.is_finalizing()`` is only true during shutdown, so live GC (the
+    # running-loop case this routing exists for) never takes the blocking path.
+    if sys.is_finalizing():
+        try:
+            fut.result(timeout=_RELEASE_EXIT_TIMEOUT)
+            logger.debug("[compute_managed] released %s on %s", instance_id, place)
+        except Exception as exc:  # pragma: no cover - best-effort at exit
+            logger.warning(
+                "[compute_managed] could not release %s on %s at exit: %s",
+                instance_id, place, exc,
+            )
+        return
+
+    fut.add_done_callback(_log_result)
 
 
 def _as_dict(config: Any) -> Dict[str, Any]:

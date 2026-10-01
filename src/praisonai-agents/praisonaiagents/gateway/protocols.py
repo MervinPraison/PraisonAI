@@ -2556,6 +2556,225 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
 
 
 # ---------------------------------------------------------------------------
+# Ingress attribution / trusted-proxy real-client-IP resolution (Issue #5312)
+# ---------------------------------------------------------------------------
+#
+# The gateway keys rate-limiting, the pre-auth connection budget, and the
+# operator identity on the *raw socket peer*. Behind a reverse proxy or tunnel
+# (nginx, Caddy, Traefik, a cloud LB, Cloudflare, Tailscale Serve/Funnel) that
+# peer is the *proxy* for every request, so every per-IP bucket collapses to
+# one and the operator id becomes identical for all callers. Trusting
+# ``X-Forwarded-For`` unconditionally is worse — a directly-reachable gateway
+# would accept a spoofed client IP any attacker can set.
+#
+# This pure, import-free contract resolves the real client address *only* by
+# walking the forwarded chain across hops the operator has explicitly declared
+# trusted, and **fails closed** for anything proxy-shaped but unattributable
+# (rate-limited as one bucket keyed on the socket peer; never trusts a header).
+# It lives in core so every seam consults one unit-testable decision, exactly
+# like the sibling ``resolve_route`` / ``evaluate_pressure`` contracts.
+
+IngressTrust = Literal[
+    "direct-local",
+    "direct-remote",
+    "trusted-proxy",
+    "tunnel",
+    "unattributable-proxy",
+]
+"""Classification of where an inbound request actually came from.
+
+- ``direct-local``: loopback peer, no proxy headers (local CLI / same host).
+- ``direct-remote``: a remote peer talking to us directly, no proxy headers.
+- ``trusted-proxy``: arrived via one or more hops all in ``trusted_proxies``;
+  the real client IP was resolved from the forwarded chain.
+- ``tunnel``: a trusted loopback/private tunnel hop (e.g. Tailscale/Cloudflare
+  sidecar on loopback) presented a forwarded client — resolved like a trusted
+  proxy.
+- ``unattributable-proxy``: proxy-shaped (forwarded headers present) but the
+  immediate hop is not declared trusted — fails closed, header not trusted.
+"""
+
+
+@dataclass(frozen=True)
+class IngressAttribution:
+    """Resolved answer to "who/where is this request from", consulted before
+    any per-IP policy.
+
+    Attributes:
+        trust: The :data:`IngressTrust` classification.
+        client_ip: The subject to key per-IP policy on. The *real* client only
+            when it was resolved across trusted hops; otherwise the raw socket
+            peer (never a spoofable header value).
+        via_proxy: Whether forwarded headers were present at all.
+        fail_closed: True when the request was proxy-shaped but unattributable —
+            the caller must rate-limit it as a single bucket keyed on the socket
+            peer and must never trust a client IP from a header.
+    """
+
+    trust: IngressTrust
+    client_ip: str
+    via_proxy: bool
+    fail_closed: bool
+
+
+def parse_forwarded_for(header: Optional[str]) -> "List[str]":
+    """Parse an ``X-Forwarded-For`` header into an ordered list of hops.
+
+    The chain is left→right, client-first: ``client, proxy1, proxy2``. Empty
+    tokens and surrounding whitespace are dropped; ``None``/empty yields an
+    empty list. Pure string handling — no name resolution, no validation of
+    whether each token is a real IP (that is the caller's trust decision).
+    """
+    if not header:
+        return []
+    return [tok.strip() for tok in header.split(",") if tok.strip()]
+
+
+def _is_valid_ip(host: Optional[str]) -> bool:
+    """Return whether ``host`` parses as a literal IPv4/IPv6 address.
+
+    Forwarded-header tokens are attacker-influenced strings; a value such as
+    ``unknown`` or an arbitrary label must never become a per-IP policy subject
+    (it would group unrelated callers or split one caller across buckets). The
+    caller uses this to fail closed to the socket peer for a non-IP hop.
+    """
+    if not host:
+        return False
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(str(host).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _is_trusted_hop(host: str, trusted_proxies: "Sequence[str]") -> bool:
+    """Return whether ``host`` is a member of the declared trusted set.
+
+    A trusted entry may be a bare IP or a CIDR (``10.0.0.0/8``). Loopback is
+    *not* implicitly trusted here — the caller decides how to treat a loopback
+    tunnel — so this stays a pure membership test.
+    """
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    for entry in trusted_proxies:
+        entry = str(entry).strip()
+        if not entry:
+            continue
+        try:
+            if "/" in entry:
+                if ip in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def resolve_ingress_attribution(
+    *,
+    peer_ip: str,
+    forwarded_for: "Sequence[str]" = (),
+    real_ip: Optional[str] = None,
+    trusted_proxies: "Sequence[str]" = (),
+) -> IngressAttribution:
+    """Resolve the real client attribution for an inbound request.
+
+    Pure and side-effect-free so it is unit-testable in isolation and every
+    seam (rate limiters, connection budget, operator id) consults the same
+    decision.
+
+    Args:
+        peer_ip: Raw socket peer (``request.client.host``).
+        forwarded_for: Parsed ``X-Forwarded-For`` chain, left→right
+            (client-first). See :func:`parse_forwarded_for`.
+        real_ip: Optional ``X-Real-IP`` value (used only when there is no
+            forwarded chain and the immediate hop is trusted).
+        trusted_proxies: CIDRs/IPs the operator declares trusted.
+
+    Returns:
+        An :class:`IngressAttribution`. The real client IP is resolved *only*
+        across hops in ``trusted_proxies``; anything proxy-shaped but
+        unattributable fails closed to the socket peer.
+
+    Resolution rules:
+        * No proxy headers → ``direct-local`` (loopback peer) or
+          ``direct-remote``; ``client_ip`` is the peer, never fail-closed.
+        * Proxy headers present but the socket peer is not a trusted hop →
+          ``unattributable-proxy``, ``fail_closed=True``, ``client_ip`` = peer
+          (a spoofable header is never trusted on a directly-reachable
+          gateway).
+        * Socket peer is a trusted hop → walk the forwarded chain right→left,
+          peeling trusted hops, and stop at the first untrusted address: that
+          address is the real client. If the chain is empty, fall back to
+          ``real_ip`` then the peer. The resolved client must be a literal IP —
+          a malformed/non-IP hop fails closed to the peer. A loopback trusted
+          hop is classified ``tunnel``; otherwise ``trusted-proxy``.
+    """
+    has_headers = bool(forwarded_for) or bool(real_ip)
+
+    # No forwarded headers at all — attribute straight to the socket peer.
+    if not has_headers:
+        trust: IngressTrust = "direct-local" if is_loopback(peer_ip) else "direct-remote"
+        return IngressAttribution(
+            trust=trust,
+            client_ip=peer_ip,
+            via_proxy=False,
+            fail_closed=False,
+        )
+
+    # Proxy-shaped. The immediate hop (socket peer) must itself be trusted for
+    # any header to be believed; otherwise fail closed to the socket peer.
+    if not _is_trusted_hop(peer_ip, trusted_proxies):
+        return IngressAttribution(
+            trust="unattributable-proxy",
+            client_ip=peer_ip,
+            via_proxy=True,
+            fail_closed=True,
+        )
+
+    # Trusted immediate hop. Walk the forwarded chain right→left, peeling hops
+    # that are themselves trusted; the first untrusted address is the real
+    # client. Stop as soon as we hit it so a client-supplied spoofed prefix
+    # cannot be peeled past.
+    client_ip = None
+    for hop in reversed(list(forwarded_for)):
+        if _is_trusted_hop(hop, trusted_proxies):
+            continue
+        client_ip = hop
+        break
+    if client_ip is None:
+        # Entire chain was trusted (or empty). Prefer X-Real-IP, then peer.
+        client_ip = (real_ip.strip() if real_ip else None) or peer_ip
+
+    # The resolved client must be a literal IP before it keys per-IP policy. A
+    # malformed hop (e.g. ``unknown`` or an arbitrary label injected upstream)
+    # would otherwise group unrelated callers or split one caller across
+    # buckets — fail closed to the socket peer instead (Greptile P2).
+    if not _is_valid_ip(client_ip):
+        return IngressAttribution(
+            trust="unattributable-proxy",
+            client_ip=peer_ip,
+            via_proxy=True,
+            fail_closed=True,
+        )
+
+    trust = "tunnel" if is_loopback(peer_ip) else "trusted-proxy"
+    return IngressAttribution(
+        trust=trust,
+        client_ip=client_ip,
+        via_proxy=True,
+        fail_closed=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Weak / placeholder secret guard (Issue #3259)
 # ---------------------------------------------------------------------------
 
@@ -3074,6 +3293,57 @@ ReactionStatus = Literal["ok", "unsupported", "failed", "no_route"]
 """
 
 
+MessageActionStatus = Literal["ok", "unsupported", "failed", "no_route"]
+"""Closed set of outcomes for a message-mutation verb (``edit`` / ``delete``).
+
+Mirrors :data:`ReactionStatus` so every agent-callable message action returns
+the same typed shape:
+
+* ``ok`` — the message was edited/deleted.
+* ``unsupported`` — the channel has no matching capability
+  (``supports_edit`` / ``supports_delete``).
+* ``failed`` — the transport rejected the action (e.g. no such message, or the
+  message is not editable/deletable by this bot).
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class MessageActionResult:
+    """Outcome of an agent-initiated message mutation (Issue #5054).
+
+    Shared typed result for the ``edit`` and ``delete`` verbs of the unified
+    message-action surface. Every call resolves to exactly one
+    :data:`MessageActionStatus`, so a channel that cannot edit/delete returns a
+    typed ``unsupported`` outcome instead of raising — identical to how
+    :class:`ReactionResult` and :class:`ThreadResult` degrade.
+
+    Attributes:
+        status: The outcome (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
+        target: The resolved target the action was routed to.
+        detail: Optional model-readable explanation.
+    """
+
+    status: MessageActionStatus
+    target: str = ""
+    detail: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        """Whether the action succeeded (``status == "ok"``)."""
+        return self.status == "ok"
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["target"] = self.target
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
 @dataclass
 class ReactionResult:
     """Outcome of an agent-initiated message reaction (Issue #3917).
@@ -3259,6 +3529,51 @@ class OutboundMessengerProtocol(Protocol):
         """
         ...
 
+    async def edit(
+        self,
+        target: str,
+        message_id: str,
+        text: str,
+    ) -> "MessageActionResult":
+        """Edit a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent update its own live status message in place rather than
+        posting a follow-up — e.g. editing "Working…" to "Done ✅". Gated on the
+        channel's ``PlatformCapabilities.supports_edit``; a channel that cannot
+        edit returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to edit.
+            text: The new message text.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
+        """
+        ...
+
+    async def delete(
+        self,
+        target: str,
+        message_id: str,
+    ) -> "MessageActionResult":
+        """Delete/unsend a prior message this agent/session sent (Issue #5054).
+
+        Lets an agent retract a message it should not have sent. Gated on the
+        channel's ``PlatformCapabilities.supports_delete``; a channel that
+        cannot delete returns a typed ``unsupported`` outcome instead of raising.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            message_id: The id of the message to delete.
+
+        Returns:
+            A :class:`MessageActionResult` describing the outcome.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Agent-callable cross-conversation request/reply (Issue #3689)
@@ -3362,6 +3677,122 @@ class ConversationRequestProtocol(Protocol):
         Returns:
             A :class:`ConversationReply` describing the outcome.
         """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Server→client interactive request/reply over the gateway transport
+# (Issue #5351)
+#
+# A blocked HITL turn (approval / choice / free-text input) needs to reach a
+# generic gateway client — a web dashboard, TUI, or custom app — and correlate
+# the client's answer back into the waiting turn. Structured elicitation today
+# only renders through per-channel button backends; a client on the gateway
+# WebSocket cannot see or answer one, and an in-flight prompt is lost when the
+# client drops (the ``since`` cursor replays *past events*, not *still-open
+# requests*).
+#
+# Core owns only the *shape*: the typed request (:class:`GatewayServerRequest`),
+# the correlated reply (:class:`GatewayServerReply`), and the protocol seam
+# (:class:`GatewayRequestChannelProtocol`) — including the ``open_requests``
+# contract that the resume path honours so a reconnecting client is re-sent
+# every still-open (and *only* still-open) request for its sessions. The socket
+# delivery, correlation, and durable open-request set are bound by the running
+# gateway (praisonai-bot) exactly as the outbound messenger is — no heavy
+# import lives in core.
+# ---------------------------------------------------------------------------
+
+GatewayRequestKind = Literal["approval", "choice", "input"]
+"""Closed set of server→client interactive request kinds.
+
+* ``approval`` — allow/deny; the reply ``value`` is ``"allow"`` or ``"deny"``.
+* ``choice`` — select one of ``options``; the reply ``value`` is the option.
+* ``input`` — free text; the reply ``value`` is the entered text.
+"""
+
+
+@dataclass
+class GatewayServerRequest:
+    """A typed server→client interactive request (Issue #5351).
+
+    Delivered to a connected gateway client as a ``server_request`` frame while
+    a turn is blocked awaiting a human answer, and re-issued verbatim on resume
+    for as long as it stays open.
+
+    Attributes:
+        request_id: Correlation id echoed back in the :class:`GatewayServerReply`.
+        kind: One of :data:`GatewayRequestKind`.
+        prompt: Human-readable prompt to render.
+        options: Selectable options, populated only for ``kind == "choice"``.
+        session_id: Session the request belongs to (used for resume replay).
+    """
+
+    request_id: str
+    kind: GatewayRequestKind
+    prompt: str
+    options: Optional[List[str]] = None
+    session_id: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the ``server_request`` frame."""
+        data: Dict[str, Any] = {
+            "request_id": self.request_id,
+            "kind": self.kind,
+            "prompt": self.prompt,
+        }
+        if self.options is not None:
+            data["options"] = list(self.options)
+        if self.session_id:
+            data["session_id"] = self.session_id
+        return data
+
+
+@dataclass
+class GatewayServerReply:
+    """A client's correlated answer to a :class:`GatewayServerRequest`.
+
+    Attributes:
+        request_id: The id of the request being answered.
+        value: ``"allow"``/``"deny"`` for approval, the chosen option for
+            choice, or the entered text for input.
+    """
+
+    request_id: str
+    value: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {"request_id": self.request_id, "value": self.value}
+
+
+@runtime_checkable
+class GatewayRequestChannelProtocol(Protocol):
+    """Protocol for server→client interactive request/reply over the transport.
+
+    A concrete implementation is bound by the running gateway (in praisonai-bot)
+    and registered into the per-turn context so a blocked HITL turn can deliver
+    an :class:`GatewayServerRequest` to the connected client and await the
+    correlated :class:`GatewayServerReply`. ``open_requests`` returns the
+    still-open requests for a session so the gateway's resume path can re-issue
+    them alongside the event replay — a dropped connection never wedges a turn.
+    """
+
+    async def request(
+        self,
+        req: "GatewayServerRequest",
+        *,
+        timeout_s: float = 120.0,
+    ) -> Optional["GatewayServerReply"]:
+        """Deliver ``req`` to the session's client and await its reply.
+
+        Returns the correlated :class:`GatewayServerReply`, or ``None`` when no
+        reply arrives within ``timeout_s`` (the request is then cleared from the
+        open set so it is not replayed on a later reconnect).
+        """
+        ...
+
+    def open_requests(self, session_id: str) -> List["GatewayServerRequest"]:
+        """Return the still-open (unanswered) requests for ``session_id``."""
         ...
 
 
@@ -7364,8 +7795,16 @@ def _register_core_gateway_methods() -> None:
         # the same action, so both names carry the WRITE scope in lockstep.
         "abort": OperatorScope.WRITE,
         "message_abort": OperatorScope.WRITE,
+        # Issue #5351: answering a server→client interactive request (approval /
+        # choice / input) on behalf of the blocked turn mutates it, so it needs
+        # the same WRITE scope as sending a message.
+        "server_reply": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
+        # Resolve a friendly reference (short id / slug / label / ``main``
+        # sentinel, optionally agent-scoped) to a concrete session id (Issue
+        # #5383). Read-only lookup: it reveals no more than session.status.
+        "session.resolve": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,
         "pairing.approve": OperatorScope.PAIRING,
         "pairing.revoke": OperatorScope.PAIRING,
