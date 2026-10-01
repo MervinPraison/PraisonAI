@@ -13,6 +13,7 @@ import uuid
 import json
 import time
 import logging
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -564,6 +565,7 @@ class Session:
                         {
                             "role": msg.get("role", "user"),
                             "content": msg.get("content", ""),
+                            **deepcopy(msg),
                         }
                         for msg in chat_history
                         if isinstance(msg, dict)
