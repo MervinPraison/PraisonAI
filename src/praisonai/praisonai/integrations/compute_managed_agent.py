@@ -229,13 +229,22 @@ class ComputeManagedAgent:
         # timer, which docker and flyio do not have.
         instance_id, place = self._instance, self._place
         pending_release = []
+        from threading import Lock
+        release_lock = Lock()
+        claimed = False
 
         def reclaim():
-            future = _release(provider, instance_id, place)
+            nonlocal claimed
+            with release_lock:
+                if claimed:
+                    return
+                claimed = True
+                future = _release(provider, instance_id, place)
+                if future is not None:
+                    pending_release.append(future)
             if future is None:
                 atexit.unregister(reclaim_at_exit)
             else:
-                pending_release.append(future)
                 future.add_done_callback(lambda done: atexit.unregister(reclaim_at_exit))
 
         finalizer = weakref.finalize(self, reclaim)
@@ -244,12 +253,22 @@ class ComputeManagedAgent:
         finalizer.atexit = False
 
         def reclaim_at_exit():
-            if finalizer.detach() is not None:
-                _release(provider, instance_id, place, at_exit=True)
-            elif pending_release:
-                # GC may have submitted teardown just before process exit.
-                # Keep its exit hook until completion so that work is drained too.
-                _wait_for_release_at_exit(pending_release[0], instance_id, place)
+            nonlocal claimed
+            with release_lock:
+                if not claimed:
+                    claimed = True
+                    finalizer.detach()
+                    future = _release(provider, instance_id, place)
+                    if future is not None:
+                        pending_release.append(future)
+                else:
+                    future = pending_release[0] if pending_release else None
+            # The claim and future publication are atomic; even a finalizer
+            # that has fired but not entered reclaim cannot leave a handoff gap.
+            # Wait outside the lock so it never guards a provider round trip.
+            if future is not None:
+                _wait_for_release_at_exit(future, instance_id, place)
+            atexit.unregister(reclaim_at_exit)
 
         self._finalizer = finalizer
         self._exit_reclaimer = reclaim_at_exit
@@ -293,7 +312,7 @@ class ComputeManagedAgent:
 
 
 
-def _release(provider, instance_id: str, place: str, *, at_exit: bool = False):
+def _release(provider, instance_id: str, place: str):
     """Reclaim an instance whose backend is gone.
 
     Registered with weakref.finalize, so it runs when the backend is collected
@@ -306,14 +325,9 @@ def _release(provider, instance_id: str, place: str, *, at_exit: bool = False):
     ``AsyncBridge`` — one long-lived background loop, never a fresh loop per
     teardown.
 
-    Exit-safety: the explicitly registered atexit callback passes ``at_exit``, where
-    fire-and-forget is unsafe — the bridge's own ``atexit`` teardown can cancel
-    the in-flight shutdown, or its daemon loop thread can be killed, before the
-    cloud round-trip lands, leaking a provisioned instance. So when
-    ``at_exit`` is true we *block* on the future for a bounded window so the
-    instance is actually reclaimed before the process dies. During normal GC on a
-    live process we stay fire-and-forget so the caller's loop is never pinned for
-    the cloud round-trip.
+    Return the future so the explicit atexit callback can wait for it before
+    the bridge shuts down. During normal GC this submission stays asynchronous
+    so the caller's loop is never pinned for the cloud round trip.
     """
     async def _shutdown():
         await provider.shutdown(instance_id)
@@ -339,14 +353,6 @@ def _release(provider, instance_id: str, place: str, *, at_exit: bool = False):
             logger.warning(
                 "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
             )
-
-    # At interpreter exit, block (bounded) so the instance is reclaimed before
-    # the process — and the bridge's daemon loop thread — go away.
-    # Live GC never takes this blocking path; only our explicit atexit callback
-    # passes the flag, before the bridge's own teardown callback executes.
-    if at_exit:
-        _wait_for_release_at_exit(fut, instance_id, place)
-        return fut
 
     fut.add_done_callback(_log_result)
     return fut

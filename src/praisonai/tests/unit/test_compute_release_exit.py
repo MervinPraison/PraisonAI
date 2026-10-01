@@ -41,6 +41,36 @@ elif mode == "gc":
     import gc
     del backend
     gc.collect()
+elif mode == "race":
+    import threading
+    from praisonai.integrations import compute_managed_agent as module
+
+    entered = threading.Event()
+    allow_submission = threading.Event()
+    original_release = module._release
+
+    def delayed_release(*args, **kwargs):
+        entered.set()
+        assert allow_submission.wait(5)
+        return original_release(*args, **kwargs)
+
+    module._release = delayed_release
+    exit_callback = backend._exit_reclaimer
+    holder = [backend]
+    del backend
+    worker = threading.Thread(target=lambda: holder.pop())
+    worker.start()
+    assert entered.wait(5)
+    timer = threading.Timer(0.1, allow_submission.set)
+    timer.start()
+    try:
+        # GC is inside _release but has not published its future yet.
+        exit_callback()
+        assert marker.exists(), "exit missed the in-progress GC handoff"
+    finally:
+        allow_submission.set()
+        worker.join(5)
+        timer.join(5)
 '''
 
 
@@ -61,7 +91,7 @@ def _child(tmp_path, mode):
     return marker, result
 
 
-@pytest.mark.parametrize("mode", ["warm", "cold", "explicit", "gc"])
+@pytest.mark.parametrize("mode", ["warm", "cold", "explicit", "gc", "race"])
 def test_exit_reclaims_instance_once(tmp_path, mode):
     marker, result = _child(tmp_path, mode)
     assert marker.exists(), result.stderr
