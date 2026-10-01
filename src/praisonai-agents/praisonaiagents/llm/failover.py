@@ -530,18 +530,37 @@ class FailoverManager:
         benches. Without clearing the coordinator, a subsequent
         ``get_next_profile()`` would re-apply the old cooldown via
         ``_sync_bench_from_coordinator()`` and silently undo the reset.
-        Fail-open: a coordinator hiccup must never wedge the local reset.
+
+        ``reset_all()`` is a deliberate, operator-initiated override that
+        forces every credential back to AVAILABLE, so the coordinator bench is
+        cleared unconditionally — unlike ``mark_success()``, which only
+        recovers from a specific known cooldown and must not clobber a newer
+        concurrent bench. On a shared coordinator this therefore also clears
+        benches other replicas may have recorded; that is intended for an
+        explicit reset.
+
+        Fail-open with best-effort durability: a coordinator hiccup must never
+        wedge the local reset, but a single transient ``clear()`` failure must
+        not silently undo the reset either (the stale bench would be re-imported
+        on the next ``get_next_profile()``). We therefore verify the clear and
+        retry once before giving up and warning.
         """
         with self._lock:
             for profile in self._profiles:
                 profile.reset()
-                try:
-                    self._coordinator.clear(profile.credential_id)
-                except Exception as e:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Quota coordinator clear failed for '{profile.name}': {e}; "
-                        f"local reset applied"
-                    )
+                cred_id = profile.credential_id
+                for attempt in range(2):
+                    try:
+                        self._coordinator.clear(cred_id)
+                        if self._coordinator.benched_until(cred_id) is None:
+                            break
+                    except Exception as e:  # pragma: no cover - defensive
+                        if attempt == 0:
+                            continue
+                        logger.warning(
+                            f"Quota coordinator clear failed for '{profile.name}': {e}; "
+                            f"local reset applied but shared bench may persist"
+                        )
 
 
 @runtime_checkable
