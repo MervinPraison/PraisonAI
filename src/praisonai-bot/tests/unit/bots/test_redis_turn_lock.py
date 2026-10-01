@@ -198,6 +198,41 @@ async def test_redis_turn_lock_reclaims_expired_lease():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('ttl,poll_interval', [(0.03, 0.05), (0.03, 0.5), (0.3, 0.05)])
+async def test_renewal_keeps_owner_when_acquisition_poll_is_slow(monkeypatch, ttl, poll_interval):
+    """Waiting replicas' polling cadence must not make the holder renew too late."""
+    import sys
+    from types import SimpleNamespace
+    from praisonai_bot.bots import _redis_turn_lock
+
+    now = [0.0]
+    # Only this fake Redis uses virtual time; the event-loop clock is unchanged.
+    monkeypatch.setattr(sys.modules[__name__], 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    redis = FakeRedis()
+
+    async def advance_clock(delay):
+        now[0] += delay
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(_redis_turn_lock, 'asyncio', SimpleNamespace(
+        sleep=advance_clock, ensure_future=asyncio.ensure_future,
+        CancelledError=asyncio.CancelledError,
+    ))
+    lock = RedisTurnLock(redis, ttl=ttl, poll_interval=poll_interval)
+    async with lock.get('session'):
+        (key,) = list(redis.store)
+        owner = redis.store[key]
+
+        async def wait_for_renewals():
+            while len(redis.eval_calls) < 12:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_renewals(), timeout=5)
+        assert now[0] > 3 * ttl
+        assert await redis.get(key) == owner
+
+
+@pytest.mark.asyncio
 async def test_redis_turn_lock_fails_open_and_serialises_on_outage():
     """A Redis outage must not wedge a turn and must still serialise in-process."""
     marks = []

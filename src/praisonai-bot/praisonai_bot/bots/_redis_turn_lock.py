@@ -92,7 +92,9 @@ class _RedisLease:
 
     async def _renew_loop(self) -> None:
         """Extend our lease at ~ttl/3 so a long turn keeps the session (owner-checked)."""
-        interval = max(self._lock._poll_interval, self._lock._ttl / 3.0)
+        # Acquisition polling controls waiters, not the owner's lease deadline.
+        # A poll interval longer than the TTL must not delay renewal past expiry.
+        interval = self._lock._ttl / 3.0
         ttl_ms = max(1, int(self._lock._ttl * 1000))
         try:
             while True:
