@@ -34,3 +34,15 @@ def test_explicit_connect_failure_keeps_type_precedence():
     assert is_replay_unsafe(ConnectTimeout("TLS connection timed out")) is False
     assert is_replay_unsafe(ssl.SSLError("TLS handshake failure")) is False
     assert is_replay_unsafe(ssl.SSLCertVerificationError("certificate verify failed")) is False
+
+
+@pytest.mark.parametrize("error_type", [Exception, ssl.SSLError])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "TLS handshake failed: connection reset by peer",
+        "SSL handshake read timed out",
+    ],
+)
+def test_handshake_scoped_failure_stays_pre_dispatch(error_type, message):
+    assert is_replay_unsafe(error_type(message)) is False

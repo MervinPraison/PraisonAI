@@ -506,7 +506,6 @@ _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"name.?resolution",
     r"failed.?to.?resolve",
     r"getaddrinfo",
-    r"handshake",
 )
 
 
@@ -531,10 +530,17 @@ def is_replay_unsafe(error: Exception) -> bool:
         if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
             return True
 
-    # 2. Explicit read/reset signals win over transport labels or a message
+    # 2. A failure the message explicitly places during the TLS handshake is
+    # pre-dispatch — the request bytes were never sent, so a reset/timeout at
+    # that point is safe to replay even though the text also mentions "reset"
+    # or "timeout". This check wins over the generic read/reset signals below.
+    error_text = f"{type(error).__name__} {error}".lower()
+    if re.search(r"handshake", error_text):
+        return False
+
+    # 3. Explicit read/reset signals win over transport labels or a message
     # mentioning an earlier connection attempt. SSLError itself is not proof
     # of a handshake failure: it can also be raised by an established stream.
-    error_text = f"{type(error).__name__} {error}".lower()
     for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
         if re.search(pattern, error_text):
             return True
