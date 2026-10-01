@@ -9,6 +9,7 @@ Provides both legacy API (classify_error) and new structured classification
 """
 
 import re
+import math
 import random
 from dataclasses import dataclass
 from enum import Enum
@@ -644,7 +645,9 @@ def extract_retry_after(
             retry_after = None
         if retry_after is not None:
             try:
-                return min(float(retry_after), cap_seconds)
+                delay = float(retry_after)
+                if math.isfinite(delay) and delay >= 0:
+                    return min(delay, cap_seconds)
             except (ValueError, TypeError):
                 # Not a plain delta-seconds value — RFC 7231 also permits an
                 # HTTP-date. Parse it so a provider that sends an absolute reset
@@ -658,7 +661,12 @@ def extract_retry_after(
     # 2. Some SDKs expose a numeric ``retry_after`` attribute directly.
     retry_after_attr = getattr(error, "retry_after", None)
     if isinstance(retry_after_attr, (int, float)):
-        return min(float(retry_after_attr), cap_seconds)
+        try:
+            delay = float(retry_after_attr)
+        except OverflowError:
+            delay = float("inf")
+        if math.isfinite(delay) and delay >= 0:
+            return min(delay, cap_seconds)
 
     error_str = str(error)
     
@@ -675,7 +683,8 @@ def extract_retry_after(
         if match:
             try:
                 delay = float(match.group(1))
-                return min(delay, cap_seconds)
+                if math.isfinite(delay) and delay >= 0:
+                    return min(delay, cap_seconds)
             except (ValueError, IndexError):
                 continue
     
