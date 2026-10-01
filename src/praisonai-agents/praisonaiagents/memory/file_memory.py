@@ -1061,6 +1061,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             for i, item in enumerate(self._short_term):
                 if item.id == memory_id:
                     del self._short_term[i]
@@ -1080,6 +1084,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._long_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.long_term_file, [])
+            ]
             for i, item in enumerate(self._long_term):
                 if item.id == memory_id:
                     del self._long_term[i]
@@ -1099,6 +1107,10 @@ class FileMemory:
             True if entity was found and deleted, False otherwise
         """
         with self._lock:
+            self._entities = {
+                key: EntityItem.from_dict(value)
+                for key, value in self._read_json(self.entities_file, {}).items()
+            }
             # Find entity by name using existing helper
             entity = self._find_entity_by_name(name)
             if entity:
