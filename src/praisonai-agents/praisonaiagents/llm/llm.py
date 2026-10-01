@@ -5154,11 +5154,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.error(f"Error in get_response_stream: {e}")
             raise
 
-    def _is_gemini_model(self) -> bool:
+    def _is_gemini_model(self, model: Optional[str] = None) -> bool:
         """Check if the model is a Gemini model."""
-        if not self.model:
+        model = self.model if model is None else model
+        if not model:
             return False
-        return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+        return any(prefix in model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
     
     def _is_anthropic_model(self) -> bool:
         """Check if the model is an Anthropic Claude model."""
@@ -6792,11 +6793,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             schema_model = output_json or output_pydantic
             
             # Check if model supports structured outputs
-            if supports_structured_outputs(self.model):
+            if supports_structured_outputs(params['model']):
                 # Check if this is a Gemini model (uses different params)
-                if self._is_gemini_model():
-                    if schema_model and hasattr(schema_model, 'model_json_schema'):
-                        schema = schema_model.model_json_schema()
+                if self._is_gemini_model(params['model']):
+                    schema = schema_model.model_json_schema() if hasattr(schema_model, 'model_json_schema') else schema_model
+                    if isinstance(schema, dict):
                         # Gemini uses response_mime_type and response_schema
                         params['response_mime_type'] = 'application/json'
                         params['response_schema'] = schema
