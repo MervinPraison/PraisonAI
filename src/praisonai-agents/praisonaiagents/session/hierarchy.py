@@ -286,8 +286,6 @@ class HierarchicalSessionStore(DefaultSessionStore):
 
         def _apply(session: SessionData) -> None:
             session.messages.append(message)
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages :]
 
         return self._modify_session_locked(
             session_id, _apply, error_label="add message to session"
@@ -314,9 +312,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
+        # Match the inherited retention policy, including non-destructive
+        # compaction and tool-exchange-aware truncation.
+        self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
             try:
