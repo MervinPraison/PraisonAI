@@ -138,12 +138,17 @@ class MediaSupervisor:
             raise RuntimeError(detail or str(exc)) from exc
 
         if is_minimax:
-            status = payload.get("base_resp") or {}
-            if status.get("status_code") != 0:
-                raise RuntimeError(status.get("status_msg") or "MiniMax image generation failed")
-            data = payload.get("data") or {}
-            url = (data.get("image_urls") or [None])[0]
-            b64 = (data.get("image_base64") or [None])[0]
+            status = payload.get("base_resp") if isinstance(payload, dict) else None
+            if not isinstance(status, dict) or status.get("status_code") != 0:
+                msg = status.get("status_msg") if isinstance(status, dict) else None
+                raise RuntimeError(msg or "MiniMax image generation failed")
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise RuntimeError("MiniMax image generation returned no images")
+            urls = data.get("image_urls")
+            b64s = data.get("image_base64")
+            url = urls[0] if isinstance(urls, list) and urls else None
+            b64 = b64s[0] if isinstance(b64s, list) and b64s else None
             if not url and not b64:
                 raise RuntimeError("MiniMax image generation returned no images")
         else:
@@ -162,6 +167,9 @@ class MediaSupervisor:
             raise RuntimeError("image API returned no url or b64_json")
 
         raw = local_path.read_bytes()
+        if not raw:
+            local_path.unlink(missing_ok=True)
+            raise RuntimeError("image download was empty")
         data_url = "data:image/png;base64," + base64.b64encode(raw).decode()
 
         return {
@@ -181,6 +189,18 @@ class MediaSupervisor:
         if model != MINIMAX_IMAGE_MODEL:
             raise ValueError(f"Unknown MiniMax image model: {model!r}")
         api_key = str(os.environ.get("MINIMAX_API_KEY") or "").strip()
+        if not api_key:
+            # The desktop engine does not load ~/.praisonai/.env at startup, so a
+            # key placed there (per INSTALL.md) is invisible to a fresh Images
+            # request. Reuse the bots loader (MINIMAX_API_KEY is a credential key
+            # it force-loads) before failing, matching the gateway/bot path.
+            try:
+                import bots
+
+                bots.load_dotenv_file(pathlib.Path.home() / ".praisonai" / ".env")
+                api_key = str(os.environ.get("MINIMAX_API_KEY") or "").strip()
+            except Exception:  # noqa: BLE001 - key stays empty, handled below
+                pass
         if not api_key:
             raise ValueError("MiniMax API key required (MINIMAX_API_KEY)")
         region = str(os.environ.get("MINIMAX_IMAGE_REGION") or "global_en").strip()

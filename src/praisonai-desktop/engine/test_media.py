@@ -205,6 +205,56 @@ class MiniMaxImageTests(unittest.TestCase):
                 request.assert_called_once()
         self.assertEqual(list((self.sup.out / "images").iterdir()), [])
 
+    def test_malformed_payload_shapes_fail_without_saving(self):
+        for payload in ["error", [1, 2, 3], {"base_resp": "error"}, {"base_resp": [1]},
+                        {"base_resp": {"status_code": 0}, "data": [1]}]:
+            with self.subTest(payload=payload), patch(
+                "media.urllib.request.urlopen",
+                return_value=io.BytesIO(json.dumps(payload).encode()),
+            ):
+                with self.assertRaises(RuntimeError):
+                    self.sup.generate_image(
+                        "a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL
+                    )
+        self.assertEqual(list((self.sup.out / "images").iterdir()), [])
+
+    def test_empty_download_fails_without_saving(self):
+        payload = {
+            "base_resp": {"status_code": 0},
+            "data": {"image_urls": ["https://example.com/generated.png"]},
+        }
+        with patch("media.urllib.request.urlopen", side_effect=[
+            io.BytesIO(json.dumps(payload).encode()), io.BytesIO(b""),
+        ]):
+            with self.assertRaisesRegex(RuntimeError, "empty"):
+                self.sup.generate_image(
+                    "a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL
+                )
+        self.assertEqual(list((self.sup.out / "images").iterdir()), [])
+
+    def test_key_loaded_from_praison_env_when_absent(self):
+        import pathlib
+
+        home = pathlib.Path(self.tmp.name)
+        env_dir = home / ".praisonai"
+        env_dir.mkdir(parents=True, exist_ok=True)
+        (env_dir / ".env").write_text("MINIMAX_API_KEY=from-dotenv\n", encoding="utf-8")
+        image = b"generated-image"
+        payload = {
+            "base_resp": {"status_code": 0},
+            "data": {"image_base64": [base64.b64encode(image).decode()]},
+        }
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("pathlib.Path.home", return_value=home), \
+                patch("media.urllib.request.urlopen",
+                      return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+            result = self.sup.generate_image(
+                "a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL
+            )
+        req = request.call_args_list[0].args[0]
+        self.assertEqual(req.get_header("Authorization"), "Bearer from-dotenv")
+        self.assertEqual(pathlib.Path(result["path"]).read_bytes(), image)
+
     def test_requires_dedicated_key(self):
         with patch.dict(os.environ, {}, clear=True), patch("media.urllib.request.urlopen") as request:
             with self.assertRaisesRegex(ValueError, "MINIMAX_API_KEY"):
