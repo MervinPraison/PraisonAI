@@ -1428,9 +1428,11 @@ class DefaultSessionStore:
         Returns:
             True if the store was updated successfully.
         """
-        # Short-circuit: finalizing with no text and no prior partial is a
-        # no-op, so avoid a needless read-modify-write.
-        if finalize and not content and not self._has_trailing_partial(session_id):
+        # Short-circuit: finalizing with no text and a *confirmed* absent
+        # partial is a no-op, so avoid a needless read-modify-write. An
+        # ambiguous read failure (None) falls through to the locked RMW, which
+        # re-reads under the lock rather than guessing (Issue #5407).
+        if finalize and not content and self._has_trailing_partial(session_id) is False:
             return True
 
         # Capture the finalized message so it can be mirrored after the write
@@ -1487,12 +1489,17 @@ class DefaultSessionStore:
             self._mirror_append(session_id, [finalized_holder["message"]])
         return True
 
-    def _has_trailing_partial(self, session_id: str) -> bool:
-        """Return True if the session's last turn is an in-progress partial."""
+    def _has_trailing_partial(self, session_id: str) -> Optional[bool]:
+        """Return the trailing-partial state, or ``None`` if it can't be read.
+
+        ``True``/``False`` report a successful check; ``None`` signals the read
+        itself failed, so callers must not treat an ambiguous failure as a
+        confirmed absence (which would silently skip a needed discard).
+        """
         try:
             session = self._read_session_fresh(session_id)
         except Exception:
-            return False
+            return None
         trailing = session.messages[-1] if session.messages else None
         return (
             trailing is not None
@@ -1507,8 +1514,11 @@ class DefaultSessionStore:
         path (e.g. a tool-call turn) so a stale partial record does not linger.
         No-op when the trailing message is not a partial.
         """
-        # Nothing to discard: skip the read-modify-write entirely.
-        if not self._has_trailing_partial(session_id):
+        # Only skip the read-modify-write when we can *confirm* there is no
+        # trailing partial. An ambiguous read failure (None) must fall through
+        # to the locked RMW — which re-reads under the lock — so a stale partial
+        # is never left behind on a transient read error (Issue #5407).
+        if self._has_trailing_partial(session_id) is False:
             return True
 
         def _apply(session: SessionData) -> None:

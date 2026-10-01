@@ -88,6 +88,32 @@ class TestPartialAssistantPersistence:
             session = store.get_session("s")
             assert [m.content for m in session.messages] == ["q", "done"]
 
+    def test_discard_read_failure_falls_through_to_locked_rmw(self, monkeypatch):
+        """An ambiguous precheck read failure must not short-circuit the
+        discard as success — it must fall through to the locked RMW so a stale
+        partial is still removed (Issue #5407)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("s", "q")
+            store.upsert_partial_assistant_message("s", "stale")
+
+            calls = {"n": 0}
+            real_read = store._read_session_fresh
+
+            def flaky_read(session_id):
+                # Fail only the first (precheck) read; the locked RMW re-reads.
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("transient read failure")
+                return real_read(session_id)
+
+            monkeypatch.setattr(store, "_read_session_fresh", flaky_read)
+
+            assert store.discard_partial_assistant_message("s") is True
+            monkeypatch.undo()
+            session = store.get_session("s")
+            assert [m.role for m in session.messages] == ["user"]
+
 
 class TestMemoryMixinSeam:
     """The agent-side helpers degrade gracefully and route to the store."""
