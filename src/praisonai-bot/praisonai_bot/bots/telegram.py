@@ -64,7 +64,13 @@ from ._album import (
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
-from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
+from ._streaming import (
+    StreamingConfig,
+    StreamingMode,
+    DraftStreamer,
+    build_footer_line,
+    append_footer,
+)
 from ._rate_limit import RateLimiter
 from ._resilience import deliver_with_retry, BackoffPolicy, TELEGRAM_BACKOFF
 from ._dlq import OutboundDLQ
@@ -251,6 +257,35 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         """
         self._streaming_config = config
         logger.debug("TelegramBot: streaming configured, mode=%s", config.mode)
+
+    def _maybe_append_footer(
+        self, content: str, turn_started_at: Optional[float]
+    ) -> str:
+        """Append the opt-in runtime footer to a final reply.
+
+        No-op (returns ``content`` unchanged) unless ``config.footer`` is enabled.
+        Privacy-safe: surfaces only the configured model name and turn latency,
+        omitting any field that is unavailable. Best-effort — a build error never
+        blocks the reply.
+        """
+        if not getattr(self.config, "footer", False):
+            return content
+        if not isinstance(content, str) or not content:
+            return content
+        try:
+            model = None
+            agent = self._agent
+            if agent is not None:
+                llm = getattr(agent, "llm", None)
+                model = llm if isinstance(llm, str) else None
+            latency = None
+            if turn_started_at is not None:
+                latency = max(0.0, time.monotonic() - turn_started_at)
+            line = build_footer_line(model=model, latency_s=latency)
+            return append_footer(content, line)
+        except Exception as e:  # pragma: no cover — never block a reply on footer
+            logger.debug("footer build skipped: %s", e)
+            return content
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -705,6 +740,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         message.content = merged.caption
 
                 try:
+                    # Mark the turn start so the opt-in runtime footer can report
+                    # latency ("inbound received -> reply delivered"). Cheap and
+                    # unused unless config.footer is enabled.
+                    turn_started_at = time.monotonic()
                     message_text = await self._debouncer.debounce(user_id, message.content)
 
                     # Render any resolved reply/quote context (Issue #5223) as a
@@ -774,8 +813,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             text_content = parsed["text"]
                             media_urls = parsed.get("media_urls", [])
                             
-                            # Finalize with text content (after hook processing and media extraction)
-                            await streamer.finalize(text_content if text_content else send_result["content"])
+                            # Finalize with text content (after hook processing and media extraction).
+                            # Append the opt-in runtime footer to the FINAL reply only
+                            # (never to interim streamed frames).
+                            final_text = text_content if text_content else send_result["content"]
+                            final_text = self._maybe_append_footer(final_text, turn_started_at)
+                            await streamer.finalize(final_text)
 
                             # Issue #3623: the streamed reply is delivered as text
                             # by the streamer, so the outbound voice-reply policy
@@ -879,9 +922,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         )
                         if send_result["cancel"]:
                             return
+                        # Append the opt-in runtime footer to the final reply.
+                        final_content = self._maybe_append_footer(
+                            send_result["content"], turn_started_at
+                        )
                         await self._send_response_with_media(
                             update.message.chat_id,
-                            send_result["content"],
+                            final_content,
                             reply_to=update.message.message_id,
                             inbound_was_voice=bool(
                                 update.message.voice or update.message.audio
