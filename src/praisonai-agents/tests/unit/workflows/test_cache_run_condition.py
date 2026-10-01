@@ -35,6 +35,10 @@ def test_cached_step_rechecks_gate_without_rerunning_handler():
     assert checks == [True, True, False, True]
     assert calls == ["run"]
     assert resumed["output"] == "done"
+    # The reopened gate serves a cached result: the step's status must reflect
+    # that terminal success, not the "skipped" state left by the closed-gate run.
+    assert flow.step_statuses["conditional"] == "completed"
+    assert step.status == "completed"
 
 
 def test_skipped_step_is_not_cached_when_gate_later_opens():

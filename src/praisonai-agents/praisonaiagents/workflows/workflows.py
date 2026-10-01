@@ -1640,6 +1640,14 @@ class AgentFlow:
                     if verbose:
                         print(f"↩︎  cache hit: {step.name}")
                     previous_output = _cached.get("output")
+                    # A cache hit is a successful (re)use of the step's result,
+                    # so record it as completed. Without this, a step that was
+                    # skipped on an earlier run keeps its stale "skipped" status
+                    # even though the gate reopened and a cached result was
+                    # served. Execution callbacks stay disabled: nothing ran.
+                    if hasattr(step, 'status'):
+                        step.status = "completed"
+                    self.step_statuses[step.name] = "completed"
                     results.append({"step": step.name, "output": previous_output})
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
