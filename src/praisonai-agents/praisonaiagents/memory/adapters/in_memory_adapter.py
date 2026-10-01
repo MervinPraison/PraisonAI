@@ -6,6 +6,7 @@ No dependencies required - stores data as plain Python lists.
 """
 
 import threading
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 
@@ -15,6 +16,8 @@ class InMemoryAdapter:
 
     Stores short-term and long-term memories as plain Python lists.
     Data is not persisted across process restarts.
+    Metadata must support deepcopy; writes and reads own independent copies so
+    caller edits cannot change stored records outside the adapter's lock.
 
     Usage:
         adapter = InMemoryAdapter()
@@ -48,7 +51,7 @@ class InMemoryAdapter:
                 "id": str(self._next_id),
                 "text": text,
                 "type": "short",
-                "metadata": metadata,
+                "metadata": deepcopy(metadata),
             }
             self._next_id += 1
             self._data.append(entry)
@@ -64,7 +67,7 @@ class InMemoryAdapter:
                 for e in self._data
                 if e["type"] == "short" and query.lower() in e["text"].lower()
             ]
-            return results[:limit]
+            return deepcopy(results[:limit])
 
     def store_long_term(
         self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs
@@ -74,7 +77,7 @@ class InMemoryAdapter:
                 "id": str(self._next_id),
                 "text": text,
                 "type": "long",
-                "metadata": metadata,
+                "metadata": deepcopy(metadata),
             }
             self._next_id += 1
             self._data.append(entry)
@@ -90,7 +93,7 @@ class InMemoryAdapter:
                 for e in self._data
                 if e["type"] == "long" and query.lower() in e["text"].lower()
             ]
-            return results[:limit]
+            return deepcopy(results[:limit])
 
     def delete_memory(self, memory_id: str, tier: Optional[str] = None, **kwargs) -> bool:
         """Delete a memory by ID. Returns True if an entry was removed.
@@ -124,4 +127,4 @@ class InMemoryAdapter:
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         with self._lock:
             # Return defensive copy to prevent external mutation of internal state
-            return [dict(entry) for entry in self._data]
+            return deepcopy(self._data)
