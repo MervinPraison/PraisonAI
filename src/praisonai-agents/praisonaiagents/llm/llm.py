@@ -7231,7 +7231,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Match Chat Completions after merging overrides: reasoning models
         # must not regain unsupported sampling parameters through either path.
         from .model_capabilities import is_reasoning_model
-        if is_reasoning_model(self.model):
+        if is_reasoning_model(params["model"]):
             for param in ('temperature', 'top_p', 'presence_penalty',
                           'frequency_penalty', 'logit_bias'):
                 params.pop(param, None)
