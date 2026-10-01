@@ -156,7 +156,7 @@ class RulesManager:
     MAX_RULE_CHARS = 12000
     
     # Import pattern for @path/to/file syntax
-    IMPORT_PATTERN = re.compile(r'(?<!`)@([\w./-]+)(?!`)')
+    IMPORT_PATTERN = re.compile(r'(?<!`)@((?:~/)?[\w./-]+)(?!`)')
     
     def __init__(
         self,
