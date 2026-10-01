@@ -1596,7 +1596,8 @@ Summary:"""
         checkpoints_path = self.user_path / "checkpoints"
         checkpoints_path.mkdir(parents=True, exist_ok=True)
         
-        checkpoint_id = name or f"checkpoint_{int(time.time())}"
+        from uuid import uuid4
+        checkpoint_id = name or f"checkpoint_{int(time.time())}_{uuid4().hex}"
         checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
         
         checkpoint_data = {
