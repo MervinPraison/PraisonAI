@@ -86,9 +86,11 @@ class TestCompactionMaxTokensResolution:
         agent = self._make_agent("gpt-4o")  # 128k window
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
-        # ~30k tokens of conversation should fit comfortably in a 128k model.
-        msgs = [{"role": "user", "content": "A" * 4 * 30000}]
+        # A short conversation should fit under both accurate and heuristic
+        # token counting; assert the fixture's budget premise explicitly.
+        msgs = [{"role": "user", "content": "message " * 30000}]
         compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.count_total_tokens(msgs) < resolved
         assert compactor.needs_compaction(msgs) is False
 
     def test_unset_triggers_when_budget_approached(self):
@@ -98,8 +100,11 @@ class TestCompactionMaxTokensResolution:
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
         # Well beyond the working budget must trigger compaction.
-        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
+        # Repeated A characters compress under BPE: char/4 does not establish
+        # that an accurate tokeniser sees an over-budget conversation.
+        msgs = [{"role": "user", "content": "message " * (resolved + 50000)}]
         compactor = ContextCompactor(max_tokens=resolved)
+        assert compactor.count_total_tokens(msgs) > resolved
         assert compactor.needs_compaction(msgs) is True
 
 
