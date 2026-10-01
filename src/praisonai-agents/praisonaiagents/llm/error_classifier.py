@@ -505,6 +505,20 @@ _REPLAY_UNSAFE_MESSAGE_PATTERNS = (
     r"server.?disconnected",
 )
 
+# Phase-specific pre-dispatch signals. The TLS handshake and certificate
+# verification both complete *before* any request byte is written, so a failure
+# naming either phase is pre-dispatch even when it also mentions a reset or
+# disconnect (e.g. "connection reset by peer during TLS handshake"). These win
+# over the generic post-dispatch patterns below, which otherwise match the bare
+# "reset"/"disconnect" token. Kept deliberately narrow — only phases that are
+# provably pre-request — so a true mid-response reset stays replay-unsafe.
+_REPLAY_SAFE_PHASE_PATTERNS = (
+    r"handshake",
+    r"certificate.?verif",
+    r"certificate.?verify.?failed",
+    r"cert.?verif",
+)
+
 # Explicit pre-dispatch signals. These establish that the request never reached
 # the provider (connect never completed, TLS handshake/certificate failed) and
 # therefore win even over a generic transport label. A bare "tls"/"ssl" token is
@@ -517,11 +531,7 @@ _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"name.?resolution",
     r"failed.?to.?resolve",
     r"getaddrinfo",
-    r"handshake",
-    r"certificate.?verif",
-    r"certificate.?verify.?failed",
-    r"cert.?verif",
-)
+) + _REPLAY_SAFE_PHASE_PATTERNS
 
 
 def is_replay_unsafe(error: Exception) -> bool:
@@ -541,20 +551,34 @@ def is_replay_unsafe(error: Exception) -> bool:
     while explicit connect-timeout, TLS handshake and certificate-verification
     signals remain safe.
 
+    A *phase-specific* pre-dispatch signal (TLS handshake, certificate
+    verification) is the one exception that wins over a post-dispatch token: both
+    phases complete before any request byte is written, so a reset or disconnect
+    *during the handshake* (e.g. "connection reset by peer during TLS handshake")
+    is pre-dispatch and safe to replay, not a mid-response failure.
+
     Defaults to ``False`` (safe/retryable) for ambiguous transient errors so
     existing auto-retry behaviour is preserved unless a post-dispatch signal is
     present. Callers should only block the retry when the turn is side-effecting.
     """
     error_text = f"{type(error).__name__} {error}".lower()
 
-    # 1. An explicit post-dispatch signal in the message always wins — even when
+    # 1. A phase-specific pre-dispatch signal (TLS handshake / certificate
+    #    verification) wins first: these phases finish before any request byte is
+    #    sent, so a reset/disconnect naming the handshake is pre-dispatch and
+    #    safe to replay — it must not be masked by the post-dispatch patterns.
+    for pattern in _REPLAY_SAFE_PHASE_PATTERNS:
+        if re.search(pattern, error_text):
+            return False
+
+    # 2. An explicit post-dispatch signal in the message wins next — even when
     #    the error is an SSLError or carries a generic TLS/SSL label. A read
     #    timeout or connection reset means bytes were already on the wire.
     for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
         if re.search(pattern, error_text):
             return True
 
-    # 2. Exception type (walk the MRO to catch provider subclasses) — stable, and
+    # 3. Exception type (walk the MRO to catch provider subclasses) — stable, and
     #    checked only after ruling out a post-dispatch message signal above so a
     #    mid-response SSLError is not misclassified as a pre-dispatch handshake.
     for cls in type(error).__mro__:
@@ -564,7 +588,7 @@ def is_replay_unsafe(error: Exception) -> bool:
         if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
             return True
 
-    # 3. Explicit pre-dispatch message signals (connect timeout, handshake,
+    # 4. Explicit pre-dispatch message signals (connect timeout, handshake,
     #    certificate verification) establish the request never reached the
     #    provider — safe to replay.
     for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:

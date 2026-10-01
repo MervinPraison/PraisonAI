@@ -597,6 +597,54 @@ class TestReplaySafetyTlsLabels:
 
         assert is_replay_unsafe(Exception("TLS connect timed out")) is False
 
+    def test_handshake_reset_is_pre_dispatch_safe(self):
+        """A reset *during the TLS handshake* is pre-dispatch, not mid-response.
+
+        The handshake completes before any request byte is written, so an error
+        that mentions both ``reset``/``disconnect`` and ``handshake`` must be
+        treated as pre-dispatch (safe to replay) — the handshake phase signal
+        wins over the generic post-dispatch reset token. Regression for the
+        Greptile finding on #5441.
+        """
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(
+            ssl.SSLError("connection reset by peer during TLS handshake")
+        ) is False
+        assert is_replay_unsafe(
+            Exception("server disconnected during TLS handshake")
+        ) is False
+
+    def test_cert_verification_with_reset_text_remains_safe(self):
+        """Certificate verification failures stay safe even if 'reset' appears."""
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(
+            ssl.SSLError("certificate verify failed; connection reset")
+        ) is False
+
+    def test_mid_response_reset_without_handshake_remains_unsafe(self):
+        """A reset with no handshake/cert phase signal is still post-dispatch."""
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(ssl.SSLError("SSL connection reset by peer")) is True
+
+    def test_side_effecting_turn_retries_handshake_reset(self):
+        """A handshake-phase reset is safe to replay even on a tool turn."""
+        import ssl
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="fake")
+        decision = llm.resolve_failover_decision(
+            ssl.SSLError("connection reset by peer during TLS handshake"),
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"
+
     def test_side_effecting_turn_blocks_tls_labelled_read_timeout(self):
         """A tool turn must surface a TLS-labelled read timeout, not replay it."""
         from praisonaiagents.llm.llm import LLM
