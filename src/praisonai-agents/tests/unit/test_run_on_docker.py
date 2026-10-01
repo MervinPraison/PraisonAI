@@ -347,8 +347,8 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     # weakening that guarantee.
     import time
 
-    deadline = time.time() + 5.0
-    while not released and time.time() < deadline:
+    deadline = time.monotonic() + 5.0
+    while not released and time.monotonic() < deadline:
         time.sleep(0.01)
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
