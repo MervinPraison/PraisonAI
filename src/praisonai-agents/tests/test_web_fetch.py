@@ -175,6 +175,126 @@ class TestLLMBuildCompletionParamsWebFetch:
                     assert tool.get('type') != 'web_fetch_20250910'
 
 
+class TestBuildParamsDoesNotMutateCaller:
+    """Regression tests for issue #5450.
+
+    Provider tool injection (web_fetch / Claude memory) must not mutate the
+    caller's tools list or extra_headers dict that are passed via
+    override_params. Reusing the same list across builds previously
+    accumulated duplicate provider definitions.
+    """
+
+    def _memory_llm(self):
+        """Build an LLM with a stubbed Claude memory tool.
+
+        Avoids depending on live memory-tool availability by patching the
+        two helper methods used by _build_completion_params.
+        """
+        from praisonaiagents.llm.llm import LLM
+
+        class _StubMemoryTool:
+            def get_tool_definition(self):
+                return {"type": "memory_20250818", "name": "memory"}
+
+            def get_beta_header(self):
+                return "context-management-2025-06-27"
+
+        llm = LLM(model="anthropic/claude-sonnet-4-5")
+        llm._supports_claude_memory = lambda: True
+        llm._get_claude_memory_tool = lambda: _StubMemoryTool()
+        return llm
+
+    def test_web_fetch_does_not_mutate_caller_tools(self):
+        """web_fetch injection leaves the caller's tools list unchanged."""
+        from praisonaiagents.llm.llm import LLM
+        llm = LLM(model="anthropic/claude-sonnet-4-5", web_fetch=True)
+
+        local_tool = {"type": "function", "function": {"name": "local_fn"}}
+        caller_tools = [local_tool]
+
+        params = llm._build_completion_params(tools=caller_tools)
+
+        assert len(caller_tools) == 1
+        assert caller_tools == [local_tool]
+        assert len(params['tools']) == 2
+
+    def test_web_fetch_repeated_builds_do_not_accumulate(self):
+        """Reusing the same list across builds must not accumulate tools."""
+        from praisonaiagents.llm.llm import LLM
+        llm = LLM(model="anthropic/claude-sonnet-4-5", web_fetch=True)
+
+        caller_tools = [{"type": "function", "function": {"name": "local_fn"}}]
+
+        first = llm._build_completion_params(tools=caller_tools)
+        second = llm._build_completion_params(tools=caller_tools)
+
+        assert len(caller_tools) == 1
+        assert len(first['tools']) == 2
+        assert len(second['tools']) == 2
+
+    def test_web_fetch_earlier_request_stable(self):
+        """A later build must not change an earlier request's tools list."""
+        from praisonaiagents.llm.llm import LLM
+        llm = LLM(model="anthropic/claude-sonnet-4-5", web_fetch=True)
+
+        caller_tools = [{"type": "function", "function": {"name": "local_fn"}}]
+
+        first = llm._build_completion_params(tools=caller_tools)
+        first_tools_snapshot = list(first['tools'])
+        llm._build_completion_params(tools=caller_tools)
+
+        assert first['tools'] == first_tools_snapshot
+
+    def test_memory_does_not_mutate_caller_tools(self):
+        """Memory tool injection leaves the caller's tools list unchanged."""
+        llm = self._memory_llm()
+        caller_tools = [{"type": "function", "function": {"name": "local_fn"}}]
+
+        params = llm._build_completion_params(tools=caller_tools)
+
+        assert len(caller_tools) == 1
+        assert len(params['tools']) == 2
+
+    def test_memory_does_not_mutate_caller_headers(self):
+        """Memory beta header must not mutate the caller's extra_headers."""
+        llm = self._memory_llm()
+        caller_headers = {"x-existing": "value"}
+
+        params = llm._build_completion_params(extra_headers=caller_headers)
+
+        assert caller_headers == {"x-existing": "value"}
+        assert params['extra_headers']['anthropic-beta']
+        assert params['extra_headers']['x-existing'] == "value"
+
+    def test_web_fetch_and_memory_combined_no_mutation(self):
+        """web_fetch + memory together still keep caller inputs unchanged."""
+        llm = self._memory_llm()
+        llm.web_fetch = True
+
+        caller_tools = [{"type": "function", "function": {"name": "local_fn"}}]
+        caller_headers = {"x-existing": "value"}
+
+        params = llm._build_completion_params(
+            tools=caller_tools,
+            extra_headers=caller_headers,
+        )
+
+        assert len(caller_tools) == 1
+        assert caller_headers == {"x-existing": "value"}
+        assert len(params['tools']) == 3
+
+    def test_no_provider_addition_leaves_tools_identical(self):
+        """Control: without provider features the caller tools pass through."""
+        from praisonaiagents.llm.llm import LLM
+        llm = LLM(model="gpt-4o-mini")
+
+        caller_tools = [{"type": "function", "function": {"name": "local_fn"}}]
+        params = llm._build_completion_params(tools=caller_tools)
+
+        assert len(caller_tools) == 1
+        assert len(params['tools']) == 1
+
+
 class TestAgentWebFetchParameter:
     """Test the web_fetch parameter in Agent class."""
     
