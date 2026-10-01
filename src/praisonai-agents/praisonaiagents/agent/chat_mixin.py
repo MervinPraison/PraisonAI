@@ -5653,6 +5653,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import inspect
 
+        # Replay-safety gate (#3860): reissuing chat() after a streaming failure
+        # is still a provider replay. When the turn exposes tools and the
+        # streaming failure is replay-unsafe (a post-dispatch read timeout /
+        # connection reset, possibly wrapped by the LLM path as the cause of a
+        # generic error), a tool call may already have run server-side, so the
+        # turn must not be re-issued. Surface the original failure instead. A
+        # tool-less turn (or a pre-dispatch failure) keeps falling back.
+        request_tools = kwargs.get('tools')
+        instance_tools = getattr(self, 'tools', None)
+        side_effecting = bool(request_tools) or bool(instance_tools)
+        if side_effecting:
+            try:
+                from praisonaiagents.llm.error_classifier import is_replay_unsafe_chain
+            except Exception:  # noqa: BLE001 - never let classification break fallback
+                is_replay_unsafe_chain = None
+            if is_replay_unsafe_chain is not None and is_replay_unsafe_chain(streaming_error):
+                logging.warning(
+                    "Not falling back to non-streaming chat() on a tool turn: the "
+                    "streaming failure is replay-unsafe (post-dispatch); surfacing "
+                    "the original error to avoid re-executing the turn."
+                )
+                raise streaming_error
+
         try:
             parameters = inspect.signature(self.chat).parameters
         except (TypeError, ValueError):

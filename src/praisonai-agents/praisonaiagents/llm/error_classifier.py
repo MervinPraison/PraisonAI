@@ -21,6 +21,7 @@ __all__ = [
     "classify_llm_error",
     "should_retry", 
     "is_replay_unsafe",
+    "is_replay_unsafe_chain",
     "get_retry_delay",
     "extract_retry_after",
     "get_error_context",
@@ -543,6 +544,27 @@ def is_replay_unsafe(error: Exception) -> bool:
         if re.search(pattern, error_text):
             return True
 
+    return False
+
+
+def is_replay_unsafe_chain(error: BaseException) -> bool:
+    """Like :func:`is_replay_unsafe` but also inspects the exception cause chain.
+
+    A streaming attempt often re-raises a post-dispatch failure wrapped in a
+    generic exception (``raise Exception(...) from read_timeout``), so the
+    replay-unsafe signal lives on ``__cause__``/``__context__`` rather than the
+    outermost exception. Returning ``True`` when *any* link in the chain is
+    replay-unsafe keeps a wrapped read timeout from being silently replayed by a
+    higher-level fallback. A pre-dispatch (replay-safe) link does not override an
+    unsafe one found elsewhere in the chain; the chain is unsafe if any link is.
+    """
+    seen: set = set()
+    current: Optional[BaseException] = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if is_replay_unsafe(current):
+            return True
+        current = current.__cause__ or current.__context__
     return False
 
 
