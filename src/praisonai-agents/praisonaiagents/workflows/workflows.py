@@ -1712,6 +1712,11 @@ class AgentFlow:
                             output = result.output
                             stop = result.stop_workflow
                             if result.variables:
+                                # Accumulate across retries so the cached
+                                # snapshot matches the cold run: a rejected
+                                # attempt that wrote {a, b} followed by an
+                                # accepted attempt that wrote {a} leaves both
+                                # keys in the live run, so both must be cached.
                                 all_variables.update(result.variables)
                                 if cached_variable_updates is not None:
                                     cached_variable_updates.update(result.variables)
