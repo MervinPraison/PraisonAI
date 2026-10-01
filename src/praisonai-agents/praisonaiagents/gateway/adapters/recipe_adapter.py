@@ -67,18 +67,38 @@ class RecipeBotAdapter:
 
             return render_failure_reply(e).text
 
-    async def astart(self, message: str, stream: bool = False, **kwargs) -> str:
+    async def astart(
+        self,
+        message: str,
+        stream: bool = False,
+        cancel_token: Any = None,
+        **kwargs,
+    ) -> str:
         """Async surface used by the gateway/bot streaming hot path.
 
         Forwards the recipe's incremental events into ``self.stream_emitter`` so the
         bot DraftStreamer / OpenAI-compatible SSE surface receive progressive output,
         then returns the final text. Degrades safely to a single final send when the
         recipe runtime cannot produce incremental output.
-        """
-        return await self.achat(message)
 
-    async def achat(self, message: str) -> str:
-        """Stream recipe execution into ``self.stream_emitter`` and return final text."""
+        ``cancel_token`` is accepted explicitly (rather than being swallowed by
+        ``**kwargs``) so a cancelled/timed-out turn stops the recipe worker
+        cooperatively instead of leaving it running and emitting after the turn
+        ended.
+        """
+        return await self.achat(message, cancel_token=cancel_token)
+
+    async def achat(self, message: str, cancel_token: Any = None) -> str:
+        """Stream recipe execution into ``self.stream_emitter`` and return final text.
+
+        Events are produced by the recipe runtime on a worker thread
+        (``run_in_executor``), but are marshalled back onto this event loop via
+        ``call_soon_threadsafe`` before hitting ``stream_emitter``. That keeps the
+        emission on the loop thread — matching the Python ``Agent`` streaming
+        contract — so bot draft callbacks that schedule coroutines with
+        ``asyncio.get_running_loop()`` and SSE callbacks that read turn-local
+        context both observe recipe events exactly as they do for Agent runs.
+        """
         from praisonaiagents.streaming import StreamEvent, StreamEventType
 
         try:
@@ -93,21 +113,57 @@ class RecipeBotAdapter:
         has_listeners = self.stream_emitter.has_callbacks
 
         def _emit(event: StreamEvent) -> None:
+            # Marshal onto the loop thread so callbacks run in the same context
+            # the Agent path uses (get_running_loop()/turn-local SSE context).
+            def _deliver() -> None:
+                try:
+                    self.stream_emitter.emit(event)
+                except Exception as emit_exc:  # never break the run on an emit failure
+                    logger.debug("Recipe stream emit failed: %s", emit_exc)
+
             try:
-                self.stream_emitter.emit(event)
-            except Exception as emit_exc:  # never break the run on an emit failure
-                logger.debug("Recipe stream emit failed: %s", emit_exc)
+                loop.call_soon_threadsafe(_deliver)
+            except RuntimeError:  # loop closed/stopping — emit inline as a fallback
+                _deliver()
+
+        def _cancelled() -> bool:
+            if cancel_token is None:
+                return False
+            for attr in ("is_cancelled", "cancelled"):
+                flag = getattr(cancel_token, attr, None)
+                try:
+                    if (flag() if callable(flag) else flag):
+                        return True
+                except Exception:  # pragma: no cover - defensive token probe
+                    continue
+            return False
 
         def _run_blocking() -> str:
             final_text = ""
             emitted_first = False
+            # Forward the cancel token to the recipe runtime when it accepts one,
+            # so cancellation can stop work inside the recipe too — not only our
+            # iteration. Fall back to the unsupported signature otherwise.
+            stream_kwargs = {
+                "input": {"user_input": message},
+                "config": self.config or None,
+            }
+            if cancel_token is not None:
+                try:
+                    import inspect
+
+                    params = inspect.signature(recipe.run_stream).parameters
+                    if "cancel_token" in params or any(
+                        p.kind == p.VAR_KEYWORD for p in params.values()
+                    ):
+                        stream_kwargs["cancel_token"] = cancel_token
+                except (ValueError, TypeError):  # pragma: no cover - builtin/CFunction
+                    pass
             try:
-                stream = recipe.run_stream(
-                    self.recipe_name,
-                    input={"user_input": message},
-                    config=self.config or None,
-                )
+                stream = recipe.run_stream(self.recipe_name, **stream_kwargs)
                 for rec_event in stream:
+                    if _cancelled():
+                        break
                     etype = getattr(rec_event, "event_type", "")
                     data = getattr(rec_event, "data", {}) or {}
                     if etype == "progress" and has_listeners:
