@@ -5717,6 +5717,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import inspect
 
+        # A non-streaming fallback reissues the turn too. Respect tool overrides
+        # (including an explicit empty list) and the underlying error chain.
+        from ..llm.error_classifier import _is_replay_unsafe_chain
+
+        tools = kwargs.get('tools')
+        if tools is None:
+            tools = getattr(self, 'tools', None)
+        if tools and _is_replay_unsafe_chain(streaming_error):
+            raise streaming_error
+
         try:
             parameters = inspect.signature(self.chat).parameters
         except (TypeError, ValueError):

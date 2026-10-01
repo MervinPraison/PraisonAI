@@ -546,6 +546,19 @@ def is_replay_unsafe(error: Exception) -> bool:
     return False
 
 
+def _is_replay_unsafe_chain(error: BaseException) -> bool:
+    """Keep post-dispatch evidence when streaming adapters wrap an exception."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if is_replay_unsafe(error):
+            return True
+        error = error.__cause__ or (
+            error.__context__ if not error.__suppress_context__ else None
+        )
+    return False
+
+
 def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float = 1.0) -> float:
     """Get the appropriate delay before retrying based on error category.
     

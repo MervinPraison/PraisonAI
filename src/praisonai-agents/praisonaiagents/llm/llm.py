@@ -1015,8 +1015,8 @@ Respond with ONLY a valid JSON tool call in this format:
         provider and is always safe to replay.
         """
         try:
-            from .error_classifier import is_replay_unsafe
-            return is_replay_unsafe(error)
+            from .error_classifier import _is_replay_unsafe_chain
+            return _is_replay_unsafe_chain(error)
         except Exception:  # noqa: BLE001 - classification must never break retry
             return False
 
@@ -4955,6 +4955,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             
                 except Exception as e:
+                    # Switching response mode still replays the provider call.
+                    # Do not undo the retry gate, including iterator failures
+                    # wrapped by the streaming error handler above.
+                    if formatted_tools and self._is_post_dispatch_failure(e):
+                        raise
                     error_msg = str(e).lower()
                     
                     # Provide more specific error messages based on the error type
