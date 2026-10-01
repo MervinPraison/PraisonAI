@@ -6,6 +6,7 @@ forking, and revert capabilities.
 """
 
 import copy
+import hashlib
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -15,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .store import SessionData, SessionMessage, DefaultSessionStore, FileLock
 
@@ -149,7 +150,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._extended_cache: Dict[str, ExtendedSessionData] = {}
-        self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
+        self._cache_fingerprints: Dict[str, Tuple[ExtendedSessionData, bytes]] = {}
 
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
@@ -171,9 +172,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
         if not os.path.exists(filepath):
             return ExtendedSessionData(session_id=session_id)
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return ExtendedSessionData.from_dict(data)
+            with open(filepath, "rb") as f:
+                raw = f.read()
+            data = json.loads(raw.decode("utf-8"))
+            session = ExtendedSessionData.from_dict(data)
+            # Bind the fingerprint to this parsed object and these exact bytes.
+            # A later writer must not certify an older payload via its stats.
+            with self._lock:
+                self._cache_fingerprints[session_id] = (session, hashlib.sha256(raw).digest())
+            return session
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Invalid UTF-8 (``UnicodeDecodeError``) is handled alongside
             # malformed JSON so a corrupt binary file is quarantined here too
@@ -214,18 +221,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
         return result
 
     def _is_cache_valid(self, session_id: str) -> bool:
-        """Check if cached session is still valid based on file mtime."""
-        if session_id not in self._extended_cache:
-            return False
-        
+        """Validate the parsed cache against current bytes under the file lock."""
+        with self._lock:
+            if session_id not in self._extended_cache:
+                return False
         filepath = self._get_session_path(session_id)
-        if not os.path.exists(filepath):
-            return False
-        
         try:
-            current_mtime = os.path.getmtime(filepath)
-            cached_mtime = self._cache_mtimes.get(session_id, 0)
-            return current_mtime <= cached_mtime
+            with FileLock(filepath, self.lock_timeout):
+                with open(filepath, "rb") as f:
+                    fingerprint = hashlib.sha256(f.read()).digest()
+                with self._lock:
+                    cached = self._cache_fingerprints.get(session_id)
+                    return (
+                        cached is not None
+                        and cached[0] is self._extended_cache.get(session_id)
+                        and cached[1] == fingerprint
+                    )
         except (OSError, IOError):
             return False
     
@@ -237,16 +248,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             with self._lock:
                 self._cache[session_id] = session
         
-        # Update cache with fresh file mtime
-        filepath = self._get_session_path(session_id)
-        try:
-            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else time.time()
-        except (OSError, IOError):
-            mtime = time.time()
-        
         with self._lock:
             self._extended_cache[session_id] = session
-            self._cache_mtimes[session_id] = mtime
         
         return session
     
@@ -287,14 +290,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
         )
     
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
-        """Load extended session with smart caching based on file modification time."""
+        """Reuse parsed extended data only when its source bytes are unchanged."""
         # Force reload bypasses cache validation
         if force_reload or not self._is_cache_valid(session_id):
             return self._read_session_fresh(session_id)
         
-        # Cache is valid, return cached version
+        # Invalidation may have raced with the content check.
         with self._lock:
-            return self._extended_cache[session_id]
+            cached = self._extended_cache.get(session_id)
+        if cached is not None:
+            return cached
+        return self._read_session_fresh(session_id)
     
     def _save_extended_session(self, session: ExtendedSessionData) -> bool:
         """Save extended session to disk."""
@@ -322,15 +328,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 
                 os.replace(temp_path, filepath)
                 
-                # Update cache with current file mtime after successful write
-                try:
-                    mtime = os.path.getmtime(filepath)
-                except (OSError, IOError):
-                    mtime = time.time()
-                
                 with self._lock:
                     self._extended_cache[session.session_id] = session
-                    self._cache_mtimes[session.session_id] = mtime
+                    self._cache_fingerprints.pop(session.session_id, None)
                 
                 return True
             except (IOError, OSError) as e:
@@ -673,12 +673,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def get_extended_session(self, session_id: str,
                              force_reload: bool = False) -> ExtendedSessionData:
-        """Get extended session data, using the mtime cache when it is valid.
+        """Get extended data, reusing parsed data when the JSON bytes match.
 
-        This called _read_session_fresh unconditionally, so every read went to
-        disk and re-parsed the file: _is_cache_valid, _cache_mtimes and
-        _load_extended_session were all built and never reached from the public
-        API. Pass force_reload=True to re-read regardless.
+        Pass force_reload=True to reload regardless of content validation.
         """
         return self._load_extended_session(session_id, force_reload=force_reload)
 
@@ -688,9 +685,11 @@ class HierarchicalSessionStore(DefaultSessionStore):
             if session_id:
                 self._cache.pop(session_id, None)
                 self._extended_cache.pop(session_id, None)
+                self._cache_fingerprints.pop(session_id, None)
             else:
                 self._cache.clear()
                 self._extended_cache.clear()
+                self._cache_fingerprints.clear()
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """
