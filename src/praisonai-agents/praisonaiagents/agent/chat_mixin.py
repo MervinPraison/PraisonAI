@@ -5256,6 +5256,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Build messages using the helper method
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'),
+                                                               tools=tool_param,
                                                                memory_prefetch_context=memory_prefetch_context)
                 
                 # Apply context management so the streaming path compacts long

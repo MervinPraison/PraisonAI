@@ -69,3 +69,36 @@ def test_stream_request_tools_match_fallback_policy(custom, override, fails, str
         assert len(fallback) == int(fails)
     assert len(sent) == 1
     assert bool(sent[0]) is (override != 'empty')
+
+
+@pytest.mark.parametrize('override', ['absent', 'none', 'empty'])
+def test_native_stream_prompt_matches_effective_tools(override, stream_agent):
+    agent = stream_agent
+    agent._using_custom_llm = False
+    sent = []
+
+    def build_messages(prompt, system_prompt=None, chat_history=None, **kwargs):
+        return [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': prompt},
+        ], prompt
+
+    def create(**kwargs):
+        sent.append(kwargs)
+        delta = SimpleNamespace(content='ok', tool_calls=None)
+        return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
+
+    agent._Agent__openai_client = SimpleNamespace(
+        build_messages=build_messages,
+        sync_client=SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create),
+        )),
+    )
+    kwargs = {} if override == 'absent' else {'tools': None if override == 'none' else []}
+    assert ''.join(agent._start_stream_impl('question', **kwargs)) == 'ok'
+    assert len(sent) == 1
+    system_prompt = sent[0]['messages'][0]['content']
+    enabled = override != 'empty'
+    assert ('configured_tool' in system_prompt) is enabled
+    assert ('You have access to the following tools:' in system_prompt) is enabled
+    assert bool(sent[0].get('tools')) is enabled
