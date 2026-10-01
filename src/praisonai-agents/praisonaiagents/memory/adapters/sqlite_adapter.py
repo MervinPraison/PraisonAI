@@ -12,6 +12,8 @@ import sqlite3
 import json
 from praisonaiagents._logging import get_logger
 import threading
+from contextlib import nullcontext
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -64,12 +66,22 @@ class SqliteMemoryAdapter:
         self.short_db = short_db
         self.long_db = long_db
         self.verbose = verbose
+        # Each adapter/tier owns one named in-memory database. Plain :memory:
+        # would create a different database for every thread-local connection.
+        self._short_target = (
+            f"file:praisonai-short-{uuid4().hex}?mode=memory&cache=shared"
+            if short_db == ":memory:" else short_db
+        )
+        self._long_target = (
+            f"file:praisonai-long-{uuid4().hex}?mode=memory&cache=shared"
+            if long_db == ":memory:" else long_db
+        )
         
         # Thread-local storage for SQLite connections (thread-safe)
         self._local = threading.local()
         
         # Write lock for serializing database modifications (thread-safe)
-        self._write_lock = threading.Lock()
+        self._write_lock = threading.RLock()
         
         # Connection registry for cleanup across threads
         self._all_connections = set()
@@ -83,53 +95,57 @@ class SqliteMemoryAdapter:
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
-        if getattr(self._local, 'stm_conn', None) is None:
-            self._local.stm_conn = sqlite3.connect(
-                self.short_db,
-                check_same_thread=False,
-                timeout=10.0
-            )
-            self._local.stm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
-            self._local.stm_conn.execute("""
-                CREATE TABLE IF NOT EXISTS short_term_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        with self._write_lock:
+            if getattr(self._local, 'stm_conn', None) is None:
+                self._local.stm_conn = sqlite3.connect(
+                    self._short_target,
+                    uri=self.short_db == ":memory:",
+                    check_same_thread=False,
+                    timeout=10.0
                 )
-            """)
-            self._local.stm_conn.commit()
+                self._local.stm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
+                self._local.stm_conn.execute("""
+                    CREATE TABLE IF NOT EXISTS short_term_memory (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        content TEXT NOT NULL,
+                        metadata TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._local.stm_conn.commit()
             
-            # Register connection for cleanup
-            with self._connection_lock:
-                self._all_connections.add(self._local.stm_conn)
+                # Register connection for cleanup
+                with self._connection_lock:
+                    self._all_connections.add(self._local.stm_conn)
         
-        return self._local.stm_conn
+            return self._local.stm_conn
     
     def _get_ltm_conn(self):
         """Get thread-local long-term memory connection."""
-        if getattr(self._local, 'ltm_conn', None) is None:
-            self._local.ltm_conn = sqlite3.connect(
-                self.long_db,
-                check_same_thread=False,
-                timeout=10.0
-            )
-            self._local.ltm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
-            self._local.ltm_conn.execute("""
-                CREATE TABLE IF NOT EXISTS long_term_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        with self._write_lock:
+            if getattr(self._local, 'ltm_conn', None) is None:
+                self._local.ltm_conn = sqlite3.connect(
+                    self._long_target,
+                    uri=self.long_db == ":memory:",
+                    check_same_thread=False,
+                    timeout=10.0
                 )
-            """)
-            self._local.ltm_conn.commit()
+                self._local.ltm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
+                self._local.ltm_conn.execute("""
+                    CREATE TABLE IF NOT EXISTS long_term_memory (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        content TEXT NOT NULL,
+                        metadata TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._local.ltm_conn.commit()
             
-            # Register connection for cleanup
-            with self._connection_lock:
-                self._all_connections.add(self._local.ltm_conn)
+                # Register connection for cleanup
+                with self._connection_lock:
+                    self._all_connections.add(self._local.ltm_conn)
         
-        return self._local.ltm_conn
+            return self._local.ltm_conn
     
     def store_short_term(
         self, 
@@ -154,26 +170,27 @@ class SqliteMemoryAdapter:
         **kwargs
     ) -> List[Dict[str, Any]]:
         """Search short-term memory."""
-        conn = self._get_stm_conn()
-        user_id = kwargs.get("user_id")
-        user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
-        params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
-        cursor = conn.execute(
-            "SELECT id, content, metadata, timestamp FROM short_term_memory "
-            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
-            params
-        )
+        with self._write_lock if self.short_db == ":memory:" else nullcontext():
+            conn = self._get_stm_conn()
+            user_id = kwargs.get("user_id")
+            user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
+            params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
+            cursor = conn.execute(
+                "SELECT id, content, metadata, timestamp FROM short_term_memory "
+                "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+                params
+            )
         
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "id": str(row[0]),
-                "text": row[1],
-                "metadata": json.loads(row[2]) if row[2] else {},
-                "timestamp": row[3]
-            })
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "id": str(row[0]),
+                    "text": row[1],
+                    "metadata": json.loads(row[2]) if row[2] else {},
+                    "timestamp": row[3]
+                })
         
-        return results
+            return results
     
     def store_long_term(
         self, 
@@ -198,26 +215,27 @@ class SqliteMemoryAdapter:
         **kwargs
     ) -> List[Dict[str, Any]]:
         """Search long-term memory."""
-        conn = self._get_ltm_conn()
-        user_id = kwargs.get("user_id")
-        user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
-        params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
-        cursor = conn.execute(
-            "SELECT id, content, metadata, timestamp FROM long_term_memory "
-            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
-            params
-        )
+        with self._write_lock if self.long_db == ":memory:" else nullcontext():
+            conn = self._get_ltm_conn()
+            user_id = kwargs.get("user_id")
+            user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
+            params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
+            cursor = conn.execute(
+                "SELECT id, content, metadata, timestamp FROM long_term_memory "
+                "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+                params
+            )
         
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "id": str(row[0]),
-                "text": row[1],
-                "metadata": json.loads(row[2]) if row[2] else {},
-                "timestamp": row[3]
-            })
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "id": str(row[0]),
+                    "text": row[1],
+                    "metadata": json.loads(row[2]) if row[2] else {},
+                    "timestamp": row[3]
+                })
         
-        return results
+            return results
     
     def delete_memory(self, memory_id: str, tier: Optional[str] = None, **kwargs) -> bool:
         """Delete a memory by ID.
