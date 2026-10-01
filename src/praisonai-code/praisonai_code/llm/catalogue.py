@@ -285,6 +285,46 @@ def env_vars_for_provider(provider: str) -> tuple:
     return row[0] if row else ()
 
 
+def _default_cache_dir() -> Path:
+    """Return the canonical cache directory for the model catalogue.
+
+    Routes through the wrapper's path helpers so the catalogue cache lives under
+    the canonical ``~/.praisonai/cache`` home (honouring ``PRAISONAI_HOME`` /
+    ``XDG``) rather than the historical ``~/.praison/cache``. Falls back to the
+    canonical literal if the helper is unavailable (standalone install).
+    """
+    try:
+        from praisonai_code.cli.configuration.paths import get_cache_dir
+
+        return get_cache_dir()
+    except Exception:
+        return Path.home() / ".praisonai" / "cache"
+
+
+# Substrings that mark a clearly weaker / cheaper representative we should
+# de-prioritise when choosing a capable zero-config default. Matched on the
+# bare model id so e.g. ``gpt-4o-mini`` ranks below ``gpt-4o``.
+_WEAK_MODEL_MARKERS = ("mini", "nano", "small", "lite", "haiku", "flash", "3.5-turbo")
+
+
+def _rank_score(model: "ModelInfo") -> tuple:
+    """Capability score for ranking (higher sorts first).
+
+    Prefers tool-use (essential for agentic/coding work) and a large context
+    window, and de-prioritises clearly weaker ``-mini``/nano-class ids so the
+    out-of-the-box default is *capable* rather than the cheapest representative.
+    """
+    mid = (model.id or "").lower()
+    is_weak = any(marker in mid for marker in _WEAK_MODEL_MARKERS)
+    return (
+        1 if model.supports_tools else 0,
+        0 if is_weak else 1,
+        model.max_context or 0,
+        1 if model.supports_reasoning else 0,
+        1 if model.supports_vision else 0,
+    )
+
+
 class ModelCatalogue:
     """
     Model catalogue with litellm integration and caching.
@@ -298,7 +338,7 @@ class ModelCatalogue:
             cache_dir: Directory for caching model data
             cache_ttl: Cache TTL in seconds (default: 1 hour)
         """
-        self.cache_dir = cache_dir or Path.home() / ".praison" / "cache"
+        self.cache_dir = cache_dir or _default_cache_dir()
         self.cache_file = self.cache_dir / "models.json"
         self.cache_ttl = cache_ttl
         self._models: Optional[List[ModelInfo]] = None
@@ -476,7 +516,47 @@ class ModelCatalogue:
             models = [m for m in models if search_lower in m.id.lower()]
         
         return [m.to_dict() for m in models]
-    
+
+    def rank_models(self, provider: Optional[str] = None) -> List[ModelInfo]:
+        """Return catalogued models ordered best-first for an agentic default.
+
+        Ranking is capability-weighted (tool-use, context size, reasoning,
+        vision) with weaker ``-mini``/nano-class ids de-prioritised. When
+        ``provider`` is given, only that provider's models are considered.
+        """
+        models = self._get_models()
+        if provider:
+            provider_lower = provider.lower()
+            models = [m for m in models if (m.provider or "").lower() == provider_lower]
+        return sorted(models, key=_rank_score, reverse=True)
+
+    def best_available(self, provider: str) -> Optional[str]:
+        """Return the best-ranked model id for ``provider``, or ``None``.
+
+        Used to replace a fixed, often-weak per-provider representative with the
+        most *capable* model reachable from the present credential, using the
+        capability metadata the catalogue already loads.
+        """
+        ranked = self.rank_models(provider=provider)
+        return ranked[0].id if ranked else None
+
+    def refresh(self) -> List[Dict[str, Any]]:
+        """Rebuild the capability catalogue cache from litellm on demand.
+
+        Bypasses the TTL so a newly released flagship model is recognised
+        without waiting an hour or bumping the installed litellm version. Returns
+        the refreshed model list. Falls back to the static table when litellm is
+        unavailable.
+        """
+        self._models = None
+        models = self._load_from_litellm()
+        if models:
+            self._save_to_cache(models)
+        else:
+            models = list(FALLBACK_MODELS)
+        self._models = models
+        return [m.to_dict() for m in models]
+
     def list_providers(self) -> List[str]:
         """
         List distinct provider ids known to the catalogue, sorted.
