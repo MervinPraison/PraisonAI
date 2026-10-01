@@ -7161,6 +7161,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
+    def _raise_responses_failure(self, error) -> None:
+        """Surface a failed Responses request without accepting partial output."""
+        code = error.get("code") if isinstance(error, dict) else getattr(error, "code", None)
+        message = error.get("message") if isinstance(error, dict) else getattr(error, "message", None)
+        if self._last_stop_reason == "completed":
+            self._last_stop_reason = "error"
+        label = f"Responses API failed ({code})" if code else "Responses API failed"
+        raise LLMResponseError(f"{label}: {message or 'Provider returned a failed response.'}")
+
     def _extract_from_responses_output(self, response) -> tuple:
         """
         Parse a ``ResponsesAPIResponse`` into the same (text, tool_calls,
@@ -7172,6 +7181,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Unlike Chat Completions, text and tool calls are *always* separate
         items, so ``content`` is never null when text is present.
         """
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status == "failed":
+            error = response.get("error") if isinstance(response, dict) else getattr(response, "error", None)
+            self._raise_responses_failure(error)
         self._record_finish_reason(response)
         response_text = ""
         tool_calls: List[Dict[str, Any]] = []
@@ -7272,6 +7285,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 evt_type = event.get("type", "")
             else:
                 evt_type = getattr(event, "type", "")
+
+            if evt_type == "response.failed":
+                failed_response = event.get("response") if isinstance(event, dict) else getattr(event, "response", None)
+                error = failed_response.get("error") if isinstance(failed_response, dict) else getattr(failed_response, "error", None)
+                self._raise_responses_failure(error)
+            if evt_type == "error":
+                self._raise_responses_failure(event)
 
             # ── Completed — capture the final response for usage accounting ──
             if evt_type in ("response.completed", "response.incomplete"):
@@ -7403,6 +7423,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 evt_type = event.get("type", "")
             else:
                 evt_type = getattr(event, "type", "")
+
+            if evt_type == "response.failed":
+                failed_response = event.get("response") if isinstance(event, dict) else getattr(event, "response", None)
+                error = failed_response.get("error") if isinstance(failed_response, dict) else getattr(failed_response, "error", None)
+                self._raise_responses_failure(error)
+            if evt_type == "error":
+                self._raise_responses_failure(event)
 
             if evt_type in ("response.completed", "response.incomplete"):
                 _final_response = (event.get("response") if isinstance(event, dict)
