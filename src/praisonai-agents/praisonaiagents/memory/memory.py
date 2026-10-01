@@ -2532,8 +2532,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # Other active threads should manage their own connections
         # Only clear full registry in __del__ or explicit shutdown
         
-        # Close memory adapter if it exists (protocol-driven path)
-        if hasattr(self, 'memory_adapter') and self.memory_adapter:
+        # SQLite cleanup is thread-scoped. Keep the shared adapter available to
+        # other threads and allow this thread to reopen its closed connections.
+        # Other providers retain their existing adapter shutdown behavior.
+        if (getattr(self, 'memory_adapter', None)
+                and not isinstance(self.memory_adapter, SqliteMemoryAdapter)):
             try:
                 if hasattr(self.memory_adapter, 'close') and callable(self.memory_adapter.close):
                     self.memory_adapter.close()

@@ -73,7 +73,7 @@ class SqliteMemoryAdapter:
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
-        if not hasattr(self._local, 'stm_conn'):
+        if getattr(self._local, 'stm_conn', None) is None:
             self._local.stm_conn = sqlite3.connect(
                 self.short_db,
                 check_same_thread=False,
@@ -97,7 +97,7 @@ class SqliteMemoryAdapter:
     
     def _get_ltm_conn(self):
         """Get thread-local long-term memory connection."""
-        if not hasattr(self._local, 'ltm_conn'):
+        if getattr(self._local, 'ltm_conn', None) is None:
             self._local.ltm_conn = sqlite3.connect(
                 self.long_db,
                 check_same_thread=False,
