@@ -370,6 +370,13 @@ class SqliteSessionStore(DefaultSessionStore):
             self._index_session(session)
         return ok
 
+    def _save_imported_session(self, session: SessionData) -> bool:
+        """Refresh recall and routing after a verbatim portable restore."""
+        ok = super()._save_imported_session(session)
+        if ok:
+            self._index_session(session)
+        return ok
+
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
         """Refresh the index after any locked read-modify-write.
 
