@@ -241,7 +241,13 @@ class SqliteSessionStore(DefaultSessionStore):
         gateway_session_id = getattr(session, "gateway_session_id", None)
         agent_id = getattr(session, "agent_id", None)
         try:
-            with self._db_lock:
+            # Keep lock ordering consistent with backfill: database, then file.
+            # A refresh may carry a snapshot read before a concurrent deletion.
+            filepath = self._get_session_path(sid)
+            with self._db_lock, FileLock(filepath, self.lock_timeout):
+                if not os.path.exists(filepath):
+                    self._deindex_session(sid)
+                    return True
                 # A separate WAL reader must see the old or new index record,
                 # never the autocommitted gap between DELETE and INSERT.
                 conn.execute("SAVEPOINT praisonai_index_refresh")
@@ -256,6 +262,8 @@ class SqliteSessionStore(DefaultSessionStore):
                         "VALUES (?, ?)",
                         (sid, session.updated_at),
                     )
+                    # Keep the gateway/agent routing index in sync so inbound
+                    # routing is an indexed lookup, not a full-directory scan.
                     if gateway_session_id or agent_id:
                         conn.execute(
                             "INSERT OR REPLACE INTO session_route "
@@ -441,10 +449,16 @@ class SqliteSessionStore(DefaultSessionStore):
         return ok
 
     def delete_session(self, session_id: str) -> bool:
-        ok = super().delete_session(session_id)
-        if ok:
-            self._deindex_session(session_id)
-        return ok
+        try:
+            filepath = self._get_session_path(session_id)
+            with self._db_lock, FileLock(filepath, self.lock_timeout):
+                ok = super().delete_session(session_id)
+                if ok:
+                    self._deindex_session(session_id)
+                return ok
+        except OSError as exc:
+            logger.error("Failed to lock session deletion for %s: %s", session_id, exc)
+            return False
 
     # ── read path: bounded index lookup + anchored hits ───────────────
 
