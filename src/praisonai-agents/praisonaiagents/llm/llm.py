@@ -7105,13 +7105,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         schema_model = output_json or output_pydantic
         if schema_model:
             from .model_capabilities import supports_structured_outputs
-            if supports_structured_outputs(self.model):
-                if hasattr(schema_model, 'model_json_schema'):
-                    schema = schema_model.model_json_schema()
+            request_model = kwargs.get('model') if kwargs.get('model') is not None else params['model']
+            if supports_structured_outputs(request_model):
+                schema = schema_model.model_json_schema() if hasattr(schema_model, 'model_json_schema') else schema_model
+                if isinstance(schema, dict):
                     params['text'] = {
                         "format": {
                             "type": "json_schema",
-                            "name": getattr(schema_model, '__name__', 'response'),
+                            "name": getattr(schema_model, '__name__', 'structured_output' if isinstance(schema_model, dict) else 'response'),
                             "schema": schema,
                             "strict": True,
                         }
