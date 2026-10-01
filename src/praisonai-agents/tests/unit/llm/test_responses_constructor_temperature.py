@@ -44,3 +44,31 @@ async def test_public_responses_temperature_configuration(mode, model, configure
         assert 'temperature' not in requests[0]
     else:
         assert requests[0]['temperature'] == expected
+
+
+def test_build_responses_params_drops_reasoning_sampling(monkeypatch):
+    """_build_responses_params must strip sampling params for reasoning models."""
+    from praisonaiagents.llm import model_capabilities
+
+    monkeypatch.setattr(model_capabilities, 'is_reasoning_model', lambda model: True)
+    llm = LLM(model='o1-mini', temperature=0.7, top_p=0.9)
+    params = llm._build_responses_params(
+        messages=[{'role': 'user', 'content': 'hi'}],
+        temperature=0.5,
+        top_p=0.8,
+    )
+    for param in ('temperature', 'top_p', 'presence_penalty',
+                  'frequency_penalty', 'logit_bias'):
+        assert param not in params
+
+
+def test_build_responses_params_keeps_sampling_for_standard_model(monkeypatch):
+    """Non-reasoning models keep the resolved constructor temperature."""
+    from praisonaiagents.llm import model_capabilities
+
+    monkeypatch.setattr(model_capabilities, 'is_reasoning_model', lambda model: False)
+    llm = LLM(model='gpt-4o-mini', temperature=0.3)
+    params = llm._build_responses_params(
+        messages=[{'role': 'user', 'content': 'hi'}],
+    )
+    assert params['temperature'] == 0.3
