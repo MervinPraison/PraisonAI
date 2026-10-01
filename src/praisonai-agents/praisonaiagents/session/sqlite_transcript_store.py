@@ -463,7 +463,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             ).fetchall()
         return [r[0] for r in rows]
 
-    # ── search: indexed candidate lookup + inherited scoring ──────────
+    # ── search: bounded candidate lookup + inherited scoring ──────────
 
     def search(
         self,
@@ -472,9 +472,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         limit: int = 5,
         window: int = 5,
     ) -> List[Any]:
-        """Full-text search over transcripts using an indexed candidate lookup.
+        """Full-text search over transcripts using a bounded candidate lookup.
 
-        Candidate sessions are found with a bounded ``LIKE`` query against the
+        Candidate sessions are found with a bounded term query against the
         stored JSON payload (not an ``os.listdir`` scan); the parent store's
         per-session scoring, bookends, automated-demotion and lineage-dedup are
         then reused verbatim so results are identical in shape. Scanning spans
@@ -491,14 +491,29 @@ class SqliteTranscriptStore(DefaultSessionStore):
         terms = [t for t in needle.split() if t]
 
         conn = self._connect()
-        like = "%" + query.replace("%", "").replace("_", "") + "%"
+        encoded_terms = tuple(json.dumps(term, ensure_ascii=False)[1:-1] for term in terms)
+
+        def matches_terms(payload):
+            # Match any scoring term, preserving JSON escapes, literal %/_
+            # and Python's Unicode lowercasing instead of SQLite's ASCII lower.
+            if not isinstance(payload, str):
+                return False
+            lowered = payload.lower()
+            return any(term in lowered for term in encoded_terms)
+
         fetch = max(limit * 5, limit)
         with self._db_lock:
-            rows = conn.execute(
-                "SELECT data FROM sessions WHERE lower(data) LIKE lower(?) "
-                "ORDER BY updated_at DESC LIMIT ?",
-                (like, fetch),
-            ).fetchall()
+            # The connection-local callback and query share the lock so searches
+            # with different terms cannot replace one another's callback.
+            conn.create_function("praison_transcript_terms", 1, matches_terms)
+            try:
+                rows = conn.execute(
+                    "SELECT data FROM sessions WHERE praison_transcript_terms(data) "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (fetch,),
+                ).fetchall()
+            finally:
+                conn.create_function("praison_transcript_terms", 1, None)
 
         hits: List[tuple] = []
         for row in rows:
