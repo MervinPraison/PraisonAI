@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import shlex
+import threading
 import uuid
 import weakref
 from typing import Any, Dict, List, Optional
@@ -229,8 +230,7 @@ class ComputeManagedAgent:
         # timer, which docker and flyio do not have.
         instance_id, place = self._instance, self._place
         pending_release = []
-        from threading import Lock
-        release_lock = Lock()
+        release_lock = threading.Lock()
         claimed = False
 
         def reclaim():
