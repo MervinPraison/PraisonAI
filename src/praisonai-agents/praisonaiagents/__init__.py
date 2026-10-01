@@ -227,6 +227,20 @@ _LAZY_IMPORTS = {
     'aembed': ('praisonaiagents.embedding.embed', 'aembed'),
     'EmbeddingResult': ('praisonaiagents.embedding.result', 'EmbeddingResult'),
     'get_dimensions': ('praisonaiagents.embedding.dimensions', 'get_dimensions'),
+
+    # System One / Jev decision models (Ollama /v1/systemone)
+    'system_one': ('praisonaiagents.decisions', 'system_one'),
+    'asystem_one': ('praisonaiagents.decisions', 'asystem_one'),
+    'SystemOneResult': ('praisonaiagents.decisions', 'SystemOneResult'),
+    'choice_question': ('praisonaiagents.decisions', 'choice_question'),
+    'noul_question': ('praisonaiagents.decisions', 'noul_question'),
+    'score_question': ('praisonaiagents.decisions', 'score_question'),
+    'is_decision_model': ('praisonaiagents.decisions', 'is_decision_model'),
+    'DecisionRoutePlan': ('praisonaiagents.decisions', 'DecisionRoutePlan'),
+    'DecisionTriageRouter': ('praisonaiagents.decisions', 'DecisionTriageRouter'),
+    'triaged_start': ('praisonaiagents.decisions', 'triaged_start'),
+    'triage_decision': ('praisonaiagents.decisions', 'triage_decision'),
+    'default_ticket_triage_questions': ('praisonaiagents.decisions', 'default_ticket_triage_questions'),
     
     # Guardrails
     'GuardrailResult': ('praisonaiagents.guardrails', 'GuardrailResult'),

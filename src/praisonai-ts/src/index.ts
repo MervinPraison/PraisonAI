@@ -952,6 +952,21 @@ export {
   cosineSimilarity, euclideanDistance, normalizeEmbedding,
 } from './embeddings';
 
+// System One / Jev decision models (Ollama /v1/systemone, TypeSafe)
+export {
+  KNOWN_DECISION_MODELS,
+  choiceQuestion,
+  getChoice,
+  getNoul,
+  getScore,
+  isDecisionModel,
+  noulQuestion,
+  resolveSystemOneBaseUrl,
+  scoreQuestion,
+  systemOne,
+} from './decisions';
+export type { QuestionSpec, SystemOneAnswer, SystemOneOptions, SystemOneResult } from './decisions';
+
 // Export Trace Module (Python parity with praisonaiagents/trace)
 export {
   // Enums

@@ -68,6 +68,13 @@ __all__ = [
     'aembed',
     'embedding',  # Alias for embed
     'aembedding',  # Alias for aembed
+    # System One / Jev decisions (Ollama /v1/systemone)
+    'system_one',
+    'asystem_one',
+    'choice_question',
+    'noul_question',
+    'score_question',
+    'is_decision_model',
     # Rerank
     'rerank',
     'arerank',
@@ -155,6 +162,7 @@ __all__ = [
     'BatchResult',
     'VectorStoreResult',
     'EmbeddingResult',
+    'SystemOneResult',
     'RerankResult',
     'ModerationResult',
     'OCRResult',
@@ -197,6 +205,10 @@ _ATTR_TO_MODULE = {
     # Embeddings
     'embed': 'embeddings', 'aembed': 'embeddings', 'EmbeddingResult': 'embeddings',
     'embedding': 'embeddings', 'aembedding': 'embeddings',  # Aliases
+    # System One decisions
+    'system_one': 'decisions', 'asystem_one': 'decisions',
+    'choice_question': 'decisions', 'noul_question': 'decisions', 'score_question': 'decisions',
+    'is_decision_model': 'decisions', 'SystemOneResult': 'decisions',
     # Rerank
     'rerank': 'rerank_module', 'arerank': 'rerank_module', 'RerankResult': 'rerank_module',
     # Moderations
