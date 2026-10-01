@@ -1,6 +1,7 @@
 """Hierarchy creation reports failed durable writes instead of returning IDs."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -86,3 +87,14 @@ def test_successful_operation_returns_persisted_id(store, operation):
         assert identifier in [snapshot.id for snapshot in store.get_snapshots("parent")]
     else:
         assert store.session_exists(identifier)
+
+
+@pytest.mark.parametrize("session_id", ["new", "parent"])
+def test_self_parent_is_rejected_before_any_session_write(store, session_id):
+    parent_path = Path(store.session_dir) / "parent.json"
+    before = parent_path.read_bytes()
+    with pytest.raises(ValueError, match="parent"):
+        store.create_session(session_id, parent_id=session_id)
+    assert parent_path.read_bytes() == before
+    assert not store.session_exists("new")
+    assert store.get_session_tree("parent")["children"] == []

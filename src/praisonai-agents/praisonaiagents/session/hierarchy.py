@@ -369,10 +369,13 @@ class HierarchicalSessionStore(DefaultSessionStore):
             The session ID
 
         Raises:
+            ValueError: The session would be its own parent.
             OSError: Saving the session or registering its parent failed.
                 A saved child is retained if parent registration fails.
         """
         sid = session_id or str(uuid.uuid4())
+        if parent_id == sid:
+            raise ValueError(f"Session {sid} cannot be its own parent")
         
         session = ExtendedSessionData(
             session_id=sid,
