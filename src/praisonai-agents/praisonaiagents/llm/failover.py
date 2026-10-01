@@ -524,11 +524,28 @@ class FailoverManager:
             }
     
     def reset_all(self) -> None:
-        """Reset all profiles and clear their coordinated cooldowns."""
+        """Reset all profiles and clear their coordinated cooldowns.
+
+        Clears the shared bench so a credential benched by this manager becomes
+        selectable again fleet-wide. To stay correct under a shared coordinator,
+        this mirrors ``mark_success``: it does NOT clobber a bench that is
+        *newer* than the local cooldown being reset (one a sibling manager /
+        replica published via an independent, still-active failure). Clearing
+        that would resume a credential others know is still rate-limited.
+        Fail-open: a coordinator error still resets every local profile.
+        """
         with self._lock:
             for profile in self._profiles:
+                recovered_from = profile.cooldown_until
+                cred_id = profile.credential_id
                 try:
-                    self._coordinator.clear(profile.credential_id)
+                    shared_until = self._coordinator.benched_until(cred_id)
+                    if (
+                        shared_until is None
+                        or recovered_from is None
+                        or shared_until <= recovered_from
+                    ):
+                        self._coordinator.clear(cred_id)
                 except Exception as e:
                     logger.warning(
                         f"Quota coordinator clear failed for '{profile.name}': {e}; "

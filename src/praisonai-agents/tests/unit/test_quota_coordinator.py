@@ -207,6 +207,30 @@ class TestFailoverCoordinatorWiring:
         assert not coord.is_benched(primary_a.credential_id)
         assert mgr_b.get_next_profile() is primary_b
 
+    def test_reset_all_preserves_newer_shared_bench(self):
+        # A sibling manager (same shared coordinator) publishes a NEWER bench via
+        # an independent, still-active failure while this manager resets. reset_all
+        # must not clobber that newer bench — mirrors the mark_success guard.
+        coord = LocalQuotaCoordinator()
+        mgr_a = FailoverManager(coordinator=coord)
+        primary_a = AuthProfile(name="primary-a", provider="openai", api_key="k")
+        mgr_a.add_profile(primary_a)
+
+        # mgr_a benches its credential with a short cooldown.
+        primary_a.mark_rate_limited(1.0)
+        coord.bench(primary_a.credential_id, until=primary_a.cooldown_until)
+
+        # A concurrent/other-replica failure benches the SAME credential longer.
+        newer = time.time() + 300
+        coord.bench(primary_a.credential_id, until=newer)
+
+        mgr_a.reset_all()
+
+        # Local profile still resets, but the newer shared bench survives.
+        assert primary_a.status == ProviderStatus.AVAILABLE
+        assert primary_a.cooldown_until is None
+        assert coord.is_benched(primary_a.credential_id) is True
+
     def test_reset_all_clear_failure_does_not_stop_local_resets(self):
         class BrokenClearCoordinator(LocalQuotaCoordinator):
             def clear(self, cred_id):
