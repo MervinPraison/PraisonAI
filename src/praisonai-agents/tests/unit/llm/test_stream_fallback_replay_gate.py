@@ -90,16 +90,13 @@ def test_host_preserves_toolless_or_predispatch_fallback(error):
     assert host.calls == 1
 
 
-def test_host_empty_override_falls_back_to_instance_tools():
-    # The native streaming path resolves an explicit empty ``tools=[]`` override
-    # back to ``self.tools`` and sends them, so a post-dispatch ReadTimeout is
-    # replay-unsafe and must surface rather than reissue the tool turn.
+def test_host_empty_override_disables_instance_tools():
+    # Both streaming branches now send no tools for an explicit empty override,
+    # matching normal completion formatting, so pure-text fallback remains safe.
     host = FallbackHost(['tool'])
     original = ReadTimeout('read timeout after request')
-    with pytest.raises(ReadTimeout) as exc_info:
-        host._stream_fallback_chat('question', {'tools': []}, original)
-    assert exc_info.value is original
-    assert host.calls == 0
+    assert host._stream_fallback_chat('question', {'tools': []}, original) == 'fallback answer'
+    assert host.calls == 1
 
 
 def test_host_keeps_wrapped_provider_failure():

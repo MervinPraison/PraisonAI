@@ -5717,15 +5717,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import inspect
 
-        # A non-streaming fallback reissues the turn too. Mirror the native
-        # streaming path's tool resolution so the gate agrees with the tools
-        # actually sent: a None *or* empty-list override falls back to
-        # ``self.tools`` (see the ``kwargs.get('tools', self.tools)`` /
-        # empty-list handling above). Only then consult the error chain.
+        # A non-streaming fallback reissues the turn too. Match both streaming
+        # branches: None inherits self.tools; an explicit empty list disables
+        # tools. Only then consult the underlying error chain.
         from ..llm.error_classifier import _is_replay_unsafe_chain
 
         tools = kwargs.get('tools')
-        if tools is None or (isinstance(tools, list) and len(tools) == 0):
+        if tools is None:
             tools = getattr(self, 'tools', None)
         if tools and _is_replay_unsafe_chain(streaming_error):
             raise streaming_error
