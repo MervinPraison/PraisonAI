@@ -428,31 +428,69 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
 
         @functools.wraps(fn)
         def _sync_wrapped(*args, **kwargs):
-            executor = executor_factory()
-            future = executor.submit(fn, *args, **kwargs)
-            try:
-                return future.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                # Best-effort cancel; only effective if the future has not started.
-                # A started sync call cannot be interrupted, so warn operators that
-                # the worker may keep running (and its side effects may still occur).
-                cancelled = future.cancel()
-                if not cancelled and on_leaked is not None:
-                    # The worker is stuck and OS-owned; let the generator recycle
-                    # the pool so new submissions are not permanently queued behind
-                    # leaked threads.
-                    on_leaked()
-                logger.warning(
-                    "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
-                    "executing in the background.",
-                    getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds, cancelled,
-                )
-                raise ToolTimeoutError(
-                    tool_name=getattr(fn, "__name__", repr(fn)),
-                    timeout_seconds=timeout_seconds,
-                    background_work_may_continue=not cancelled,
-                )
+            tool_name = getattr(fn, "__name__", repr(fn))
+            # A concurrent recycle (or close()) can shut the captured pool down
+            # between capture and submit. Retry once against a freshly-minted
+            # pool; a second failure is genuinely fatal. Surfacing the failure
+            # as ToolTimeoutError keeps the module contract (see the docstring
+            # above) intact instead of leaking RuntimeError/CancelledError.
+            for attempt in (0, 1):
+                try:
+                    executor = executor_factory()
+                    future = executor.submit(fn, *args, **kwargs)
+                except RuntimeError:
+                    # Either "cannot schedule new futures after shutdown" (the
+                    # captured pool was recycled between capture and submit) or
+                    # the generator was closed and refuses to mint a new pool
+                    # (executor_factory() raises). Both are recoverable on the
+                    # first attempt via a fresh pool; a second failure is fatal.
+                    # Keep the factory call inside this try so a close() landing
+                    # between the two attempts still surfaces as ToolTimeoutError
+                    # rather than leaking RuntimeError to the caller.
+                    if attempt == 0:
+                        continue
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
+                try:
+                    return future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    # Best-effort cancel; only effective if the future has not started.
+                    # A started sync call cannot be interrupted, so warn operators that
+                    # the worker may keep running (and its side effects may still occur).
+                    cancelled = future.cancel()
+                    if not cancelled and on_leaked is not None:
+                        # The worker is stuck and OS-owned; let the generator recycle
+                        # the pool so new submissions are not permanently queued behind
+                        # leaked threads.
+                        on_leaked()
+                    logger.warning(
+                        "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
+                        "executing in the background.",
+                        tool_name,
+                        timeout_seconds, cancelled,
+                    )
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=not cancelled,
+                    )
+                except concurrent.futures.CancelledError:
+                    # A concurrent pool recycle (shutdown(cancel_futures=True))
+                    # cancelled our still-queued future before it ran. The tool
+                    # never executed, so retry once against a freshly-minted pool
+                    # rather than losing a required result. If the retry is also
+                    # cancelled, surface as a timeout so the tool's declared
+                    # return-type contract is not silently downgraded.
+                    if attempt == 0:
+                        continue
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
         return _sync_wrapped
 
     # Framework tool object (CrewAI/LangChain BaseTool, praisonai @tool). These
@@ -561,6 +599,15 @@ class AgentsGenerator:
             task_callback (callable, optional): A callback function to be executed after each tool run.
             tools (dict): A dictionary containing the tools to be used for the agents.
         """
+        # Wire the built-in readers/retrievers/rerankers into the core-SDK
+        # registries so YAML `retriever:` / `reader:` / `reranker:` declarations
+        # resolve identically on every launch path (CLI, serve, eval, Python).
+        # Single-sourced here so surfaces that construct AgentsGenerator directly
+        # (praisonai <file.yaml>, serve, eval) get the same wiring as run()/arun().
+        # Idempotent + thread-safe + register-only-if-absent; safe to call again.
+        from .adapters import register_default_adapters
+        register_default_adapters()
+
         self.agent_file = agent_file
         self.framework = framework
         self.config_list = config_list
@@ -625,6 +672,8 @@ class AgentsGenerator:
         self._tool_timeout_executor = tool_timeout_executor
         self._owns_tool_timeout_executor = tool_timeout_executor is None
         self._tool_timeout_executor_lock = threading.Lock()
+        # Set by close() to permanently refuse resurrecting an owned pool.
+        self._closed = False
         # Track workers permanently held by stuck sync tools. Once half the pool
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
@@ -683,6 +732,20 @@ class AgentsGenerator:
         import concurrent.futures
 
         with self._tool_timeout_executor_lock:
+            # Refuse to resurrect the pool after close(). Without this a tool
+            # object still reachable past the `with ... as gen:` block (via a
+            # framework lifecycle hook, shared registry, or retained callback)
+            # would find _tool_timeout_executor is None, build a fresh unowned
+            # pool, and leak its daemon threads per request in a long-lived
+            # server worker. Mirrors AsyncBridge._closed (_async_bridge.py:118).
+            if getattr(self, "_closed", False):
+                raise RuntimeError(
+                    "AgentsGenerator is closed; refusing to construct a new "
+                    "tool-timeout executor. This tool was invoked after "
+                    "close(); hold a live generator (e.g. keep the "
+                    "`with ... as gen:` block open) for the lifetime of any "
+                    "tool it wraps."
+                )
             recycle = (
                 self._owns_tool_timeout_executor
                 and self._tool_timeout_executor is not None
@@ -727,7 +790,14 @@ class AgentsGenerator:
         with self._tool_timeout_executor_lock:
             if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
                 self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
-                self._tool_timeout_executor = None
+            self._tool_timeout_executor = None
+            # Poison ownership and mark closed so a tool invoked after close()
+            # cannot silently resurrect an unowned pool (see
+            # _get_tool_timeout_executor). The `with ... as gen:` block that
+            # would have called close() has already exited, so nothing would
+            # ever tear a resurrected pool down.
+            self._owns_tool_timeout_executor = False
+            self._closed = True
 
     def __enter__(self):
         return self
@@ -903,9 +973,23 @@ class AgentsGenerator:
         # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
         # Treat an empty ``roles: {}`` the same as a missing one so populated
         # ``agents:`` is still promoted instead of running with zero agents.
-        if 'agents' in config and not config.get('roles'):
-            config['roles'] = {}
+        #
+        # Promotion is *authoritative*: the shorthand ``agents:`` bucket is
+        # removed after merging into ``roles:`` so downstream validators and the
+        # executor read a single source of truth. Leaving ``agents:`` in place
+        # let validators see a merged ``{**roles, **agents}`` view the executor
+        # (which reads only ``roles:``) never runs — causing double-fired
+        # warnings, false-positive validation rejections, and silently dropped
+        # ``tool_timeout``/handoff knobs for agents that never became roles.
+        if 'agents' in config and isinstance(config['agents'], dict):
+            config.setdefault('roles', {})
+            if not isinstance(config['roles'], dict):
+                config['roles'] = {}
             for agent_name, agent_config in config['agents'].items():
+                # An entry already present under ``roles:`` is canonical and
+                # wins; only agents-only entries are promoted.
+                if agent_name in config['roles']:
+                    continue
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
                 if 'instructions' in role_config and 'backstory' not in role_config:
@@ -918,6 +1002,8 @@ class AgentsGenerator:
                 if 'backstory' not in role_config:
                     role_config['backstory'] = f'You are a {role_config["role"]}'
                 config['roles'][agent_name] = role_config
+            # Drop the shorthand bucket so validators and the executor agree.
+            del config['agents']
 
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))
@@ -1010,14 +1096,34 @@ class AgentsGenerator:
         # Expose the per-run wrap so adapters that inject *more* tools after this
         # point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the same
         # timeout guard instead of silently bypassing it; expose the per-agent
-        # resolver for heterogeneous budgets. Both keys are written every time so
-        # the inactive path is cleared rather than left holding a prior closure.
-        self.cli_config = {
-            **(self.cli_config or {}),
+        # resolver for heterogeneous budgets. These are private per-run closures
+        # (bound to this generator's timeout executor), NOT user configuration —
+        # keep them off the user-facing ``self.cli_config`` dict so a caller who
+        # passed a shared cli_config template never gets it back stamped with
+        # instance-bound lambdas (cross-run / cross-tenant leak). They are merged
+        # into the cli_config kwarg only at dispatch (see _dispatch_cli_config)
+        # so adapters still read them via the same keys. Both are written every
+        # time so the inactive path is cleared rather than left holding a prior
+        # closure.
+        self._run_ctx = {
             "_tool_timeout_wrap": wrap,
             "_agent_tool_wrap_resolver": resolver,
         }
         return tools_dict
+
+    def _dispatch_cli_config(self):
+        """Merge the private per-run context onto the user cli_config for adapters.
+
+        Adapters read ``_tool_timeout_wrap`` / ``_agent_tool_wrap_resolver`` off
+        their ``cli_config`` kwarg. Build a fresh merged dict at dispatch so the
+        closures reach the adapter without persisting onto the caller-owned
+        ``self.cli_config`` (which stays "user overrides only").
+        """
+        base = self.cli_config or {}
+        run_ctx = getattr(self, "_run_ctx", None)
+        if not run_ctx:
+            return base
+        return {**base, **run_ctx}
 
     def _resolve_effective_tool_timeout(self, config):
         """Resolve the effective per-tool timeout in seconds.
@@ -1506,7 +1612,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
     async def _aload_config(self):
@@ -1575,7 +1681,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=getattr(self, 'cli_config', None),
+                    cli_config=self._dispatch_cli_config(),
                 )
 
 
@@ -1760,7 +1866,14 @@ class AgentsGenerator:
         workflow, input_data = self._build_yaml_workflow(config)
 
         self.logger.debug(f"Running workflow: {workflow.name}")
-        result = workflow.start(input_data)
+        # Isolate this sync run's sync→async work onto its own loop+thread,
+        # mirroring generate_crew_and_kickoff. workflow.start(...) drives async
+        # internals through run_sync on the process-wide shared bridge; without
+        # scoped_bridge() a stuck workflow-tool coroutine would park the shared
+        # default loop for every other tenant's run_sync submission.
+        from ._async_bridge import scoped_bridge
+        with scoped_bridge():
+            result = workflow.start(input_data)
 
         return self._finalise_workflow_result(result)
 

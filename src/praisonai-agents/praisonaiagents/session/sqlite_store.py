@@ -102,7 +102,10 @@ class SqliteSessionStore(DefaultSessionStore):
                 # DELETE fallback on NFS/SMB/FUSE/virtiofs (Issue #5264).
                 from ..storage.sqlite import connect as _sqlite_connect
 
-                conn = _sqlite_connect(self.db_path, isolation_level=None)
+                # guard=True: quick_check on open + forensic backup + bounded
+                # least-destructive repair so a malformed index file recovers
+                # instead of taking the durable path down (Issue #5387).
+                conn = _sqlite_connect(self.db_path, isolation_level=None, guard=True)
                 self._fts_available = self._init_schema(conn)
                 self._conn = conn
             except Exception as exc:

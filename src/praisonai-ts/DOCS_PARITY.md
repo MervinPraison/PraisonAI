@@ -78,7 +78,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Sandbox | 8 | 2 | 226 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
-| ✅ Sessions | 19 | 2 | 437 |
+| ✅ Sessions | 22 | 2 | 437 |
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 8 | 1 | 320 |

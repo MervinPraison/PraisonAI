@@ -170,6 +170,74 @@ class TestCreateLazyGetattr:
         assert 'test_module' in str(exc_info.value)
 
 
+class TestLazyGetattrWithFallbackImportErrors:
+    """ImportError classification in create_lazy_getattr_with_fallback (P1 #3)."""
+
+    def _make_getattr(self, module_path, exc):
+        import sys
+        import types
+        from praisonaiagents._lazy import create_lazy_getattr_with_fallback
+
+        # Install a stub target module whose attribute access raises the given
+        # ImportError, simulating a target that imports a broken/missing dep.
+        stub = types.ModuleType(module_path)
+
+        def _raise(_name):
+            raise exc
+
+        stub.__getattr__ = _raise  # type: ignore[attr-defined]
+        sys.modules[module_path] = stub
+        self._installed = module_path
+
+        mapping = {"Target": (module_path, "Target")}
+        return create_lazy_getattr_with_fallback(mapping, module_name="test_mod")
+
+    def teardown_method(self):
+        import sys
+        installed = getattr(self, "_installed", None)
+        if installed:
+            sys.modules.pop(installed, None)
+
+    def test_broken_core_dependency_is_surfaced(self):
+        """A missing/broken *core* dependency (e.g. pydantic) must raise, not None."""
+        err = ImportError("No module named 'pydantic'")
+        err.name = "pydantic"
+        getattr_fn = self._make_getattr("praisonaiagents._fake_target_core", err)
+
+        with pytest.raises(ImportError) as exc_info:
+            getattr_fn("Target")
+        assert "pydantic" in str(exc_info.value)
+
+    def test_broken_pyyaml_is_surfaced(self):
+        """PyYAML is a declared *core* dependency (import root ``yaml``); a
+        broken/missing install must raise rather than mask as None (Greptile P1).
+        """
+        err = ImportError("No module named 'yaml'")
+        err.name = "yaml"
+        getattr_fn = self._make_getattr("praisonaiagents._fake_target_yaml", err)
+
+        with pytest.raises(ImportError) as exc_info:
+            getattr_fn("Target")
+        assert "yaml" in str(exc_info.value)
+
+    def test_missing_optional_integration_sdk_stays_none(self):
+        """An optional integration whose own optional SDK is absent keeps the
+        graceful None fallback (must NOT raise)."""
+        err = ImportError("No module named 'some_optional_ui_sdk'")
+        err.name = "some_optional_ui_sdk"
+        getattr_fn = self._make_getattr("praisonaiagents._fake_target_optional", err)
+
+        assert getattr_fn("Target") is None
+
+    def test_absent_target_module_itself_stays_none(self):
+        """When the target module itself is absent, keep the None fallback."""
+        err = ImportError("No module named 'praisonaiagents._fake_absent'")
+        err.name = "praisonaiagents._fake_absent"
+        getattr_fn = self._make_getattr("praisonaiagents._fake_absent", err)
+
+        assert getattr_fn("Target") is None
+
+
 class TestLazyImportPerformance:
     """Test that lazy loading has minimal performance impact."""
     

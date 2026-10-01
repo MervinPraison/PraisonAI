@@ -31,6 +31,18 @@ _LAZY_IMPORTS = {
     "SessionVisibility": ("praisonaiagents.gateway.protocols", "SessionVisibility"),
     "SessionSharingRole": ("praisonaiagents.gateway.protocols", "SessionSharingRole"),
     "SessionObserverProtocol": ("praisonaiagents.gateway.protocols", "SessionObserverProtocol"),
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection": ("praisonaiagents.gateway.session_projection", "SessionProjection"),
+    "SessionProjectionState": ("praisonaiagents.gateway.session_projection", "SessionProjectionState"),
+    "RunView": ("praisonaiagents.gateway.session_projection", "RunView"),
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef": ("praisonaiagents.gateway.addressing", "SessionRef"),
+    "build_session_path": ("praisonaiagents.gateway.addressing", "build_session_path"),
+    "parse_session_path": ("praisonaiagents.gateway.addressing", "parse_session_path"),
+    "derive_short_id": ("praisonaiagents.gateway.addressing", "derive_short_id"),
+    "slugify": ("praisonaiagents.gateway.addressing", "slugify"),
+    "RESERVED_NAMES": ("praisonaiagents.gateway.addressing", "RESERVED_NAMES"),
+    "SHORT_ID_LEN": ("praisonaiagents.gateway.addressing", "SHORT_ID_LEN"),
     "GatewayCloseCode": ("praisonaiagents.gateway.protocols", "GatewayCloseCode"),
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor": ("praisonaiagents.gateway.protocols", "GatewayMethodDescriptor"),
@@ -45,6 +57,11 @@ _LAZY_IMPORTS = {
     # Saturation / back-pressure observability (Issue #4265)
     "HealthPressure": ("praisonaiagents.gateway.protocols", "HealthPressure"),
     "evaluate_pressure": ("praisonaiagents.gateway.protocols", "evaluate_pressure"),
+    # Trusted-proxy ingress attribution (Issue #5312)
+    "IngressTrust": ("praisonaiagents.gateway.protocols", "IngressTrust"),
+    "IngressAttribution": ("praisonaiagents.gateway.protocols", "IngressAttribution"),
+    "resolve_ingress_attribution": ("praisonaiagents.gateway.protocols", "resolve_ingress_attribution"),
+    "parse_forwarded_for": ("praisonaiagents.gateway.protocols", "parse_forwarded_for"),
     # Push protocols and dataclasses
     "PushChannelProtocol": ("praisonaiagents.gateway.protocols", "PushChannelProtocol"),
     "PresenceProtocol": ("praisonaiagents.gateway.protocols", "PresenceProtocol"),
@@ -235,6 +252,8 @@ _LAZY_IMPORTS = {
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy": ("praisonaiagents.gateway.liveness", "LoopWatchdogPolicy"),
     "LoopWatchdog": ("praisonaiagents.gateway.liveness", "LoopWatchdog"),
+    # liveness.py — Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog": ("praisonaiagents.gateway.liveness", "StartupWatchdog"),
     # degraded_state.py — Unified degraded-capability registry (Issue #3518)
     "DegradedOwner": ("praisonaiagents.gateway.degraded_state", "DegradedOwner"),
     "DegradedCapabilityProtocol": ("praisonaiagents.gateway.degraded_state", "DegradedCapabilityProtocol"),
@@ -377,6 +396,18 @@ __all__ = [
     "SessionVisibility",
     "SessionSharingRole",
     "SessionObserverProtocol",
+    # Session-projection reducer (Issue #5324)
+    "SessionProjection",
+    "SessionProjectionState",
+    "RunView",
+    # Canonical session-address grammar (Issue #5383)
+    "SessionRef",
+    "build_session_path",
+    "parse_session_path",
+    "derive_short_id",
+    "slugify",
+    "RESERVED_NAMES",
+    "SHORT_ID_LEN",
     "GatewayCloseCode",
     # Declarative method -> required-scope registry (Issue #3206)
     "GatewayMethodDescriptor",
@@ -390,6 +421,11 @@ __all__ = [
     "compute_config_revision",
     "HealthPressure",
     "evaluate_pressure",
+    # Trusted-proxy ingress attribution (Issue #5312)
+    "IngressTrust",
+    "IngressAttribution",
+    "resolve_ingress_attribution",
+    "parse_forwarded_for",
     # Push protocols (always available)
     "PushChannelProtocol",
     "PresenceProtocol",
@@ -572,6 +608,8 @@ __all__ = [
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    # Startup-phase watchdog (Issue #5265)
+    "StartupWatchdog",
     # Unified degraded-capability registry (Issue #3518)
     "DegradedOwner",
     "DegradedCapabilityProtocol",

@@ -85,6 +85,29 @@ class TestResultSubstitutionIsNarrowed:
         assert llm._param_accepts_string("lookup", "mixed", tools) is True
 
 
+class TestSubstitutionPathHonoursSchema:
+    """Exercise the resolver, not just the helper: a declared string argument
+    whose literal happens to match a prior tool name must survive, while a
+    result-reference for a non-string parameter is still substituted."""
+
+    def test_string_arg_matching_a_tool_name_is_preserved(self, llm):
+        mapping = {"get_weather": 42}
+        args = {"city": "get_weather", "count": "get_weather"}
+        resolved = llm._resolve_ollama_chained_args(
+            args, mapping, function_name="lookup", tools=TOOLS
+        )
+        # `city` is declared string -> keep the literal the model sent.
+        assert resolved["city"] == "get_weather"
+        # `count` is numeric -> the reference is resolved to the prior result.
+        assert resolved["count"] == 42
+
+    def test_without_schema_the_legacy_behaviour_is_unchanged(self, llm):
+        mapping = {"get_weather": 42}
+        args = {"city": "get_weather"}
+        resolved = llm._resolve_ollama_chained_args(args, mapping)
+        assert resolved["city"] == 42
+
+
 class TestStreamManagesContext:
     def test_the_stream_loop_calls_context_management(self):
         """Sync and async both do; the stream loop grew messages unbounded."""

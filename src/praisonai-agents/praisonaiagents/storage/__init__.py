@@ -31,6 +31,8 @@ __all__ = [
     "get_backend",
     # Hardened stdlib SQLite connection factory (WAL-with-safe-fallback)
     "sqlite_connect",
+    # Structural integrity probe for durable SQLite stores (Issue #5387)
+    "sqlite_quick_check",
 ]
 
 _LAZY_IMPORTS = {
@@ -49,6 +51,7 @@ _LAZY_IMPORTS = {
     "SQLiteBackend": ("backends", "SQLiteBackend"),
     "get_backend": ("backends", "get_backend"),
     "sqlite_connect": ("sqlite", "connect"),
+    "sqlite_quick_check": ("sqlite", "quick_check"),
 }
 
 

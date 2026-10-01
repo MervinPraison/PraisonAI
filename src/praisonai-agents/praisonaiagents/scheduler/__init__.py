@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .store import FileScheduleStore
     from .config_store import ConfigYamlScheduleStore
     from .parser import parse_schedule
+    from .due import quota_hold_from_failure
     from .runner import ScheduleRunner
     from .loop import ScheduleLoop, InProcessScheduleProvider
     from .protocols import (
@@ -106,6 +107,11 @@ def __getattr__(name: str):
         _module_cache[name] = parse_schedule
         return parse_schedule
 
+    if name == "quota_hold_from_failure":
+        from .due import quota_hold_from_failure
+        _module_cache[name] = quota_hold_from_failure
+        return quota_hold_from_failure
+
     if name == "ScheduleRunner":
         from .runner import ScheduleRunner
         _module_cache[name] = ScheduleRunner
@@ -176,6 +182,7 @@ __all__ = [
     "FileScheduleStore",
     "ConfigYamlScheduleStore",
     "parse_schedule",
+    "quota_hold_from_failure",
     "ScheduleRunner",
     "ScheduleLoop",
     "InProcessScheduleProvider",

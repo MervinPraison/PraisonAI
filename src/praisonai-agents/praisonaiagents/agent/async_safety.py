@@ -27,27 +27,21 @@ def run_async_in_sync_context(coro):
     tool loop, otherwise a bare un-awaited coroutine would be handed to the
     model as the tool result and the tool body would never run (silent data
     loss).
+
+    Delegates to the single canonical bridge
+    (:func:`utils.async_bridge.run_coroutine_from_any_context`) so all sync→async
+    call sites share one implementation: the caller's ``contextvars`` (trace /
+    session / approval context) are carried into the coroutine, and the running
+    loop is handled on a dedicated worker thread rather than raising.
+
+    ``timeout=None`` is passed deliberately: this helper backs the sync
+    tool-calling path, where a tool's own timeout policy (or lack of one) already
+    governs how long a tool may run. Imposing the bridge's default 5-minute
+    deadline here would silently cancel long-running tools that previously had no
+    limit — a backward-incompatible regression — so the bridge adds none.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No event loop - safe to use asyncio.run()
-        return asyncio.run(coro)
-
-    # Event loop exists - avoid deadlock by running in dedicated thread
-    import concurrent.futures
-
-    def run_in_thread():
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        future = executor.submit(run_in_thread)
-        return future.result(timeout=300)  # 5 minute timeout
+    from ..utils.async_bridge import run_coroutine_from_any_context
+    return run_coroutine_from_any_context(coro, timeout=None)
 
 
 class DualLock:
@@ -306,13 +300,13 @@ class AsyncSafeState:
             
     def __enter__(self):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        self._lock._thread_lock.acquire()
+        self._sync_guard = self._lock.sync()
+        self._sync_guard.__enter__()
         return self.value
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        self._lock._thread_lock.release()
-        return None
+        return self._sync_guard.__exit__(exc_type, exc_val, exc_tb)
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""

@@ -12,14 +12,14 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.7.8",
-    "praisonai-code>=0.1.7",
-    "praisonai-bot>=0.1.7",
-    "praisonai-train>=0.1.7",
-    "praisonai-browser>=0.1.7",
-    "praisonai-mcp>=0.1.9",
-    "praisonai-sandbox>=0.1.7",
-    "praisonai-deploy>=0.1.7",
+    "praisonaiagents>=1.7.9",
+    "praisonai-code>=0.1.8",
+    "praisonai-bot>=0.1.8",
+    "praisonai-train>=0.1.8",
+    "praisonai-browser>=0.1.8",
+    "praisonai-mcp>=0.1.10",
+    "praisonai-sandbox>=0.1.8",
+    "praisonai-deploy>=0.1.8",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -265,7 +265,7 @@ dynamodb = [
     "boto3>=1.35.0",
 ]
 valkey = [
-    "valkey-glide-sync>=2.3.1",
+    "valkey-glide-sync>=2.5.2",
 ]
 # Cloud-native serverless databases
 neon = [

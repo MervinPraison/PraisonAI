@@ -67,11 +67,14 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         # in tests), and protocol validation runs once per adapter class rather
         # than on every create()/run()/arun(). Both are guarded by a lock so
         # multi-tenant/threaded callers don't race.
-        # Maps name -> (available, expires_at). Positive probes are cached for
-        # the whole process (expires_at == inf); transient failures get a short
-        # TTL so one flaky probe doesn't pin a framework to "unavailable".
-        self._avail_cache: dict[str, tuple[bool, float]] = {}
+        # Value is (available, transient_ts): transient_ts is None for positive
+        # results and structural failures (cached for the process lifetime) and
+        # a monotonic timestamp for transient (ImportError) negatives, which
+        # expire after _avail_retry_cooldown so a mid-life `pip install` of an
+        # optional framework dep is picked up without a restart.
+        self._avail_cache: dict[str, tuple[bool, Optional[float]]] = {}
         self._avail_lock = threading.Lock()
+        self._avail_retry_cooldown: float = 30.0
         self._validated_classes: set[type] = set()
         # Capability probes (SUPPORTS_WORKFLOW / SUPPORTS_RUNTIME_FEATURES / ...)
         # are memoised PER REGISTRY, not process-globally: two registries can
@@ -258,24 +261,51 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         now = time.monotonic()
         with self._avail_lock:
             cached = self._avail_cache.get(key)
-        if cached is not None:
-            ok, expires_at = cached
-            # Positives (and structural "not installed" negatives) are cached
-            # for the process; only transient negatives expire and reprobe.
-            if ok or now < expires_at:
-                return ok
+            if cached is not None:
+                ok, ts = cached
+                # A cached negative caused by a *transient* failure (a missing
+                # optional dep the operator may `pip install` mid-life) expires
+                # after a cool-down so long-lived hosts (`praisonai serve`)
+                # recover without a restart. Positive results and structural
+                # negatives are memoised for the process lifetime.
+                if ok or ts is None or (now - ts) < self._avail_retry_cooldown:
+                    return ok
+
+        # About to (re-)probe a transient negative. Built-in adapters delegate to
+        # the process-global ``_framework_availability`` memo, which caches a
+        # missing dep's ``False`` permanently — so without dropping it here the
+        # re-probe would keep reading the stale ``False`` and a mid-life
+        # ``pip install`` would never be observed. Best-effort: never let a
+        # missing/renamed helper break availability checking.
+        try:
+            from .._framework_availability import invalidate as _invalidate_availability
+            _invalidate_availability(key)
+        except Exception:  # noqa: BLE001 -- availability recovery must not crash the probe
+            pass
 
         try:
             adapter = self.create(name)
-            # ImportError covers ModuleNotFoundError raised when an adapter's
-            # constructor touches a missing optional dependency; treat the
-            # framework as simply unavailable rather than leaking a raw import
-            # error to callers (CLI validation, doctor checks, pick_default).
             ok = bool(adapter.is_available())
-            expires_at = float("inf")  # positive: cache for the process
-        except (ValueError, TypeError, ImportError):
-            # Structural "not installed" — durable; cache for the process.
-            ok, expires_at = False, float("inf")
+            # A NEGATIVE result is transient by default. Built-in optional
+            # adapters (crewai/autogen/…) report absence by returning ``False``
+            # from ``is_available()`` (a ``find_spec`` probe) rather than raising
+            # ``ImportError``, so if only ``ImportError`` were treated as
+            # transient the mid-life ``pip install`` recovery would never fire
+            # for the very frameworks it targets. Any negative therefore expires
+            # after the cool-down; only a POSITIVE result is memoised for the
+            # process lifetime (an installed framework does not vanish).
+            transient = not ok
+        except (ValueError, TypeError):
+            # Structural failure (bad name / bad adapter shape): permanent —
+            # re-probing cannot change a mis-registered adapter.
+            ok = False
+            transient = False
+        except ImportError:
+            # A missing optional dependency is transient: the operator can
+            # install it after boot, so this negative expires after the
+            # cool-down instead of being memoised permanently.
+            ok = False
+            transient = True
         except Exception:
             # Transient — the probe raised on something that isn't a durable
             # "unavailable" signal (a racing entry-point scan, a network probe
@@ -283,15 +313,16 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             # briefly so the next call reprobes instead of pinning it forever.
             logger.warning(
                 "is_available() raised for adapter %r; will retry after %.0fs",
-                name, _NEG_CACHE_TTL, exc_info=True,
+                name, self._avail_retry_cooldown, exc_info=True,
             )
-            # Anchor the cooldown to *now* (post-probe), not the pre-probe
-            # timestamp: a probe that itself blocks for >= _NEG_CACHE_TTL would
-            # otherwise write an already-expired deadline and defeat the cooldown.
-            ok, expires_at = False, time.monotonic() + _NEG_CACHE_TTL
+            ok = False
+            transient = True
 
         with self._avail_lock:
-            self._avail_cache[key] = (ok, expires_at)
+            # Anchor the cooldown to *now* (post-probe), not the pre-probe
+            # timestamp: a probe that itself blocks for >= the cooldown would
+            # otherwise write an already-expired timestamp and defeat it.
+            self._avail_cache[key] = (ok, time.monotonic() if transient else None)
         return ok
 
     def invalidate_availability(self, name: Optional[str] = None) -> None:
