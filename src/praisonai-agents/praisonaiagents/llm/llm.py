@@ -7114,10 +7114,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     content = msg.get("content")
                     if content and (not isinstance(content, str) or content.strip()):
                         from .openai_client import OpenAIClient
-                        input_items.append({
+                        item = {
                             "role": "assistant",
                             "content": OpenAIClient._build_responses_content(content),
-                        })
+                        }
+                        if "phase" in msg:
+                            item["phase"] = msg["phase"]
+                        input_items.append(item)
                     for tc in msg["tool_calls"]:
                         fn = tc.get("function", tc) if isinstance(tc, dict) else tc
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
