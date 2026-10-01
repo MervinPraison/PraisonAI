@@ -2,7 +2,6 @@
 
 import asyncio
 
-import httpx
 import pytest
 
 from praisonaiagents.llm.llm import LLM, LLMResponseError
@@ -13,6 +12,7 @@ from praisonaiagents.llm.llm import LLM, LLMResponseError
 @pytest.mark.parametrize('shape', ['direct', 'litellm'])
 @pytest.mark.parametrize('exit_kind', ['completed', 'failed', 'callback', 'cancelled'])
 async def test_responses_stream_releases_transport(mode, shape, exit_kind, monkeypatch):
+    import httpx
     import litellm
     if mode == 'sync' and exit_kind == 'cancelled':
         pytest.skip('Task cancellation is an asynchronous exit')
