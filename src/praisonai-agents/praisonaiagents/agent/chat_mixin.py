@@ -5101,7 +5101,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                if tools is None:
                     tool_param = self.tools
                 else:
                     tool_param = tools
@@ -5248,7 +5248,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                if tools is None:
                     tool_param = self.tools
                 else:
                     tool_param = tools
