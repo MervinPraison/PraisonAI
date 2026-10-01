@@ -4397,7 +4397,8 @@ CONCISE SUMMARY:"""
             if parent_cache is not None:
                 from .step_cache import _ScopedStepCache
                 included_workflow._step_cache = _ScopedStepCache(
-                    parent_cache, str(recipe_yaml.resolve())
+                    parent_cache,
+                    f"{recipe_yaml.resolve()}:{recipe_yaml.read_text(encoding='utf-8')}"
                 )
             
             # Merge parent variables into included workflow

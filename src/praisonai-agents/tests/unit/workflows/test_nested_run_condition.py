@@ -135,6 +135,31 @@ def test_cache_hit_resets_skipped_status_to_completed():
     assert flow.step_statuses["leaf"] == "completed"
 
 
+def test_included_recipe_definition_change_invalidates_cached_leaves(tmp_path, monkeypatch):
+    from pathlib import Path
+    from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+    recipe = tmp_path / "recipe"
+    recipe.mkdir()
+    definition = recipe / "workflow.yaml"
+    definition.write_text("old action", encoding="utf-8")
+    calls = []
+
+    def parse_file(parser, path):
+        action = Path(path).read_text(encoding="utf-8")
+        return AgentFlow(steps=[Task(name="leaf", handler=lambda ctx:
+                                    calls.append(action) or action)])
+
+    monkeypatch.setattr(YAMLWorkflowParser, "parse_file", parse_file)
+    monkeypatch.setitem(__import__("sys").modules, "agent_recipes", None)
+    flow = AgentFlow(steps=[Parallel(steps=[Include(recipe=str(recipe))])], cache=True)
+    assert flow.run("same", verbose=False)["output"] == "old action"
+    definition.write_text("new action", encoding="utf-8")
+    assert flow.run("same", verbose=False)["output"] == "new action"
+    assert flow.run("same", verbose=False)["output"] == "new action"
+    assert calls == ["old action", "new action"]
+
+
 @pytest.mark.skipif(
     os.getenv("RUN_REAL_KEY_TESTS") != "1" or not os.getenv("OPENAI_API_KEY"),
     reason="requires an explicitly enabled real test provider",
