@@ -1701,8 +1701,18 @@ class ToolExecutionMixin:
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
-                            # Add artifact reference to dict result if available
-                            if artifact_ref:
+                            # Per-field truncation only shortens individual fields
+                            # that each exceed the field limit; a dict of many
+                            # medium-sized fields (e.g. 50 search snippets each
+                            # just under the limit) stays unbounded and can still
+                            # overflow the context. Enforce a total-size budget:
+                            # if the serialised dict is still over the limit, fall
+                            # back to the already-computed head/tail string (which
+                            # carries the artifact reference for full retrieval).
+                            if len(str(result)) > limit:
+                                result = truncated
+                            elif artifact_ref:
+                                # Add artifact reference to dict result if available
                                 result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated

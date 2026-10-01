@@ -34,6 +34,50 @@ from typing import List, Optional
 # Operators that separate simple-commands within a compound command.
 _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
 
+# POSIX wrapper executables that run *another* command passed as their trailing
+# arguments (``sudo rm -rf x`` really runs ``rm``). A deny on ``rm`` must still
+# fire through these, so the wrapper is stripped and the inner command re-parsed
+# as the effective operation. Matched on the basename, so ``/usr/bin/sudo``
+# works too. ``timeout``/``nice`` take a leading non-command operand (a duration
+# / niceness value) which is skipped by ``_skip_wrapper_operands``.
+_POSIX_PREFIX_WRAPPERS = frozenset(
+    {
+        "sudo",
+        "env",
+        "command",
+        "nohup",
+        "nice",
+        "ionice",
+        "stdbuf",
+        "setsid",
+        "time",
+        "timeout",
+        "exec",
+        "busybox",
+        "xargs",
+        "doas",
+    }
+)
+
+# POSIX shells whose ``-c <script>`` argument is an inner command string that
+# must be decomposed so a deny on the inner command still fires.
+_POSIX_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+
+# Short option flags that consume the *next* token as their value, per wrapper.
+# ``sudo -u root rm`` must skip ``root`` so the effective command resolves to
+# ``rm`` rather than mis-reading ``root`` as the executable (a fail-open that
+# would let the broad allow match). Only the value-taking flags that appear
+# before the command need listing; unknown flags fall back to being skipped
+# as valueless, which over-approximates safely (the next token is re-parsed as
+# a command and still checked against deny rules).
+_WRAPPER_VALUE_FLAGS = {
+    "sudo": frozenset({"-u", "-g", "-h", "-p", "-C", "-r", "-t", "-U", "-R", "-T"}),
+    "doas": frozenset({"-u", "-C"}),
+    "nice": frozenset({"-n"}),
+    "ionice": frozenset({"-c", "-n", "-p"}),
+    "env": frozenset({"-u", "-C", "-S"}),
+}
+
 # Shell *parameter* expansion that bash resolves at runtime, invisibly to the
 # static tokenizer. ``rm${IFS}-rf${IFS}/`` tokenizes as one opaque token here
 # but bash word-splits it into ``rm -rf /`` when executed, so a broad allow
@@ -63,6 +107,23 @@ def has_unresolvable_expansion(cmd: str) -> bool:
     if not cmd:
         return False
     return _UNSAFE_EXPANSION_RE.search(cmd) is not None
+
+def has_parse_error(cmd: str) -> bool:
+    """Return ``True`` if *cmd* cannot be safely tokenized by ``shlex``.
+
+    An unbalanced quote (``echo 'x; rm -rf x``) makes ``shlex.split`` raise,
+    after which the fallback splitter mis-tokenizes the command and a specific
+    deny rule can no longer be verified against the real sub-operations. The
+    caller escalates such commands to ``ASK`` rather than allowing them.
+    """
+    if not cmd or not cmd.strip():
+        return False
+    try:
+        shlex.split(cmd, comments=False, posix=True)
+        return False
+    except ValueError:
+        return True
+
 
 # Redirection operators that truncate/overwrite or append to a file.
 # These produce an additional ``write:<path>`` sub-target.
@@ -560,6 +621,107 @@ def _unwrap_shell_wrapper(segment: str) -> Optional[List[ShellOp]]:
     return parse_command(inner, dialect=dialect)
 
 
+def _basename(executable: str) -> str:
+    """Return the basename of *executable* (``/bin/rm`` -> ``rm``)."""
+    return executable.rsplit("/", 1)[-1]
+
+
+# Standard system binary directories. An absolute executable under one of these
+# is a normal PATH-resolvable command (``/usr/bin/rm``), so stripping the prefix
+# to match a command deny rule is safe. Executables elsewhere (``/tmp/tool``)
+# keep their path so the workspace-boundary gate still gates them.
+_STANDARD_BIN_DIRS = (
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+    "/usr/local/bin/",
+    "/usr/local/sbin/",
+    "/opt/homebrew/bin/",
+)
+
+
+def _is_standard_bin_path(executable: str) -> bool:
+    """Return ``True`` if *executable* is an absolute path under a system bindir."""
+    return executable.startswith(_STANDARD_BIN_DIRS)
+
+
+def _skip_wrapper_operands(name: str, rest: List[str]) -> List[str]:
+    """Drop a wrapper's own flags/operands, returning the inner argv.
+
+    ``rest`` is the argument list following the wrapper executable. Leading
+    ``VAR=val`` assignments (``env FOO=bar cmd``) and option flags are dropped.
+    ``timeout``/``nice``/``ionice`` take a leading non-flag operand (a duration
+    or priority value) before the real command, which is also skipped.
+    """
+    i = 0
+    n = len(rest)
+    # ``env``/``command`` leading ``VAR=val`` assignments precede the command.
+    while i < n and "=" in rest[i] and not rest[i].startswith("-") \
+            and rest[i].split("=", 1)[0].isidentifier():
+        i += 1
+    # Skip wrapper option flags (``sudo -u root``, ``env -i``). Flags that take
+    # a separate value token (``sudo -u <user>``) consume the following token so
+    # the real command is not mistaken for the value.
+    value_flags = _WRAPPER_VALUE_FLAGS.get(name, frozenset())
+    while i < n and rest[i].startswith("-"):
+        # ``--`` ends option parsing: everything after is the command.
+        if rest[i] == "--":
+            i += 1
+            break
+        flag = rest[i]
+        i += 1
+        # ``-u=root`` carries its value inline; ``-u root`` consumes the next
+        # token. Unknown flags are treated as valueless (safe over-approx).
+        if "=" not in flag and flag in value_flags and i < n:
+            i += 1
+    # ``timeout 5 cmd`` / ``nice -n 5 cmd``: skip a single bare numeric operand.
+    if name in ("timeout", "nice", "ionice") and i < n:
+        operand = rest[i]
+        if operand.replace(".", "", 1).isdigit():
+            i += 1
+    return rest[i:]
+
+
+def _normalize_posix_argv(tokens: List[str]) -> List[List[str]]:
+    """Resolve POSIX wrapper prefixes to the effective inner command(s).
+
+    ``sudo rm -rf x`` / ``/bin/rm -rf x`` / ``env FOO=1 rm x`` all reduce to an
+    ``rm`` operation so a ``rm`` deny still fires. ``bash -c '<script>'`` recurses
+    into the quoted script. Returns a list of argv lists (``bash -c`` can yield
+    several); an empty list means nothing could be resolved and the caller should
+    treat the original tokens as a single op.
+    """
+    argv = list(tokens)
+    guard = 0
+    while argv and guard < 32:
+        guard += 1
+        name = _basename(argv[0])
+        if name in _POSIX_SHELLS and "-c" in argv[1:]:
+            idx = argv.index("-c", 1)
+            if idx + 1 < len(argv):
+                inner_ops: List[List[str]] = []
+                for inner_op in parse_command(argv[idx + 1]):
+                    inner_ops.append([inner_op.executable, *inner_op.args])
+                return inner_ops
+            return [argv]
+        if name in _POSIX_PREFIX_WRAPPERS:
+            inner = _skip_wrapper_operands(name, argv[1:])
+            if not inner:
+                # Wrapper with no residual command (``sudo -v``): keep as-is.
+                return [argv]
+            argv = inner
+            continue
+        break
+    # Strip a *standard system* directory prefix so ``/bin/rm`` matches a ``rm``
+    # deny rule. Executables under arbitrary/external paths (``/tmp/tool``,
+    # ``../tool``) are left intact so the workspace-boundary gate still sees a
+    # path-shaped executable and requires approval.
+    if argv and argv[0] != _basename(argv[0]) and _is_standard_bin_path(argv[0]):
+        argv = [_basename(argv[0]), *argv[1:]]
+    return [argv] if argv else []
+
+
 def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
     """Parse a single simple-command segment into ShellOp(s).
 
@@ -661,6 +823,27 @@ def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
             args.append(tok)
 
     op.args = args
+
+    # POSIX wrapper/path normalization: ``sudo rm``/``/bin/rm``/``env FOO=1 rm``/
+    # ``bash -c '…'`` all reduce to the effective inner command(s) so a deny on
+    # the real executable fires instead of matching a broad allow on the wrapper.
+    if posix_mode and op.executable:
+        resolved = _normalize_posix_argv([op.executable, *op.args])
+        if resolved and resolved != [[op.executable, *op.args]]:
+            for i, inner_argv in enumerate(resolved):
+                if not inner_argv or not inner_argv[0]:
+                    continue
+                inner_op = ShellOp(
+                    executable=inner_argv[0],
+                    args=list(inner_argv[1:]),
+                    dialect=dialect,
+                )
+                # Keep the segment's redirect targets on the first resolved op.
+                if i == 0:
+                    inner_op.write_targets = op.write_targets
+                ops.append(inner_op)
+            if ops:
+                return ops
 
     if op.executable or op.write_targets:
         ops.append(op)
