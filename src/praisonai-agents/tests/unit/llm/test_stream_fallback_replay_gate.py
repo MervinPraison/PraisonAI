@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from praisonaiagents.agent.chat_mixin import ChatMixin
 from praisonaiagents.llm.llm import LLM
 
@@ -50,7 +49,10 @@ def test_llm_stream_fallback_keeps_replay_gate(stage, tool_turn, error_type):
     tools = [{'type': 'function'}] if tool_turn else []
     stream = llm.get_response_stream('question', tools=tools)
     if tool_turn and error_type is ReadTimeout:
-        with pytest.raises(Exception):
+        # The gate may surface the original timeout or a streaming-handler
+        # wrapper around it; the contract is that the turn is NOT replayed
+        # (only one streaming attempt, no non-streaming reissue).
+        with pytest.raises(Exception):  # noqa: B017 - wrapper type varies by path
             list(stream)
         assert calls == [True]
     else:
@@ -81,10 +83,23 @@ def test_host_fallback_does_not_replay_tool_turn(tool_source):
 
 @pytest.mark.parametrize('error', [ReadTimeout('read timeout'), ConnectTimeout('connect timeout')])
 def test_host_preserves_toolless_or_predispatch_fallback(error):
-    host = FallbackHost(['tool'])
-    kwargs = {'tools': []} if isinstance(error, ReadTimeout) else {}
-    assert host._stream_fallback_chat('question', kwargs, error) == 'fallback answer'
+    # Tool-less host (no instance tools): a post-dispatch ReadTimeout is safe to
+    # replay; a pre-dispatch ConnectTimeout is always safe.
+    host = FallbackHost([])
+    assert host._stream_fallback_chat('question', {}, error) == 'fallback answer'
     assert host.calls == 1
+
+
+def test_host_empty_override_falls_back_to_instance_tools():
+    # The native streaming path resolves an explicit empty ``tools=[]`` override
+    # back to ``self.tools`` and sends them, so a post-dispatch ReadTimeout is
+    # replay-unsafe and must surface rather than reissue the tool turn.
+    host = FallbackHost(['tool'])
+    original = ReadTimeout('read timeout after request')
+    with pytest.raises(ReadTimeout) as exc_info:
+        host._stream_fallback_chat('question', {'tools': []}, original)
+    assert exc_info.value is original
+    assert host.calls == 0
 
 
 def test_host_keeps_wrapped_provider_failure():
