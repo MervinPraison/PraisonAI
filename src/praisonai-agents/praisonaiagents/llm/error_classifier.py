@@ -485,7 +485,6 @@ _REPLAY_SAFE_EXCEPTION_NAMES = frozenset({
     "connecterror",             # httpx connect error (pre-dispatch)
     "newconnectionerror",       # urllib3: connection never established
     "gaierror",                 # DNS resolution failure
-    "sslerror",                 # TLS handshake failure (pre-dispatch)
     "sslcertverificationerror",
 })
 
@@ -507,9 +506,7 @@ _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"name.?resolution",
     r"failed.?to.?resolve",
     r"getaddrinfo",
-    r"ssl",
     r"handshake",
-    r"tls",
 )
 
 
@@ -517,7 +514,7 @@ def is_replay_unsafe(error: Exception) -> bool:
     """Return True if replaying the request could double-execute the turn.
 
     Distinguishes *pre-dispatch* failures (the request provably never reached
-    the provider — DNS/connect/TLS failures) which are safe to replay, from
+    the provider — DNS/connect/TLS handshake failures) which are safe to replay, from
     *post-dispatch* failures (read timeout, connection reset mid-response) where
     the provider may already have produced output and any side-effecting tool
     calls may already have run. Post-dispatch failures are replay-unsafe.
@@ -534,14 +531,16 @@ def is_replay_unsafe(error: Exception) -> bool:
         if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
             return True
 
-    # 2. Message text — pre-dispatch signals win over the generic "timeout".
+    # 2. Explicit read/reset signals win over transport labels or a message
+    # mentioning an earlier connection attempt. SSLError itself is not proof
+    # of a handshake failure: it can also be raised by an established stream.
     error_text = f"{type(error).__name__} {error}".lower()
-    for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
-        if re.search(pattern, error_text):
-            return False
     for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
         if re.search(pattern, error_text):
             return True
+    for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
+        if re.search(pattern, error_text):
+            return False
 
     return False
 
