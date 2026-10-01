@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 433 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2101 |
+| TypeScript Features | 2106 |
 | **Gap Count** | **7** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
@@ -919,7 +919,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
-<summary><strong>other</strong> (529 exports)</summary>
+<summary><strong>other</strong> (534 exports)</summary>
 
 ```typescript
 import { A2UI, A2UIAdapter, A2UINotInstalledError, A2UISystemPromptOptions, A2UIToolResultProtocol, A2UI_MIME_TYPE, AGENT_ERROR_KINDS, ARITY, AUTONOMY_PRESETS, ActionRecord... } from 'praisonai';
