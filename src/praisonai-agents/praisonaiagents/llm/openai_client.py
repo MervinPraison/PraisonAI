@@ -749,7 +749,7 @@ class OpenAIClient:
         for msg in messages:
             role = msg.get("role", "")
             if role in ("system", "developer"):
-                content = msg.get("content", "")
+                content = self._build_responses_instruction_text(msg.get("content", ""))
                 if instructions is None:
                     instructions = content
                 else:
@@ -841,6 +841,23 @@ class OpenAIClient:
             raise ValueError(f"Unsupported local image type: {image_path}")
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
+
+    @staticmethod
+    def _build_responses_instruction_text(content: Any) -> str:
+        """Convert instruction text parts without changing caller-owned content."""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = []
+            for part in content:
+                if (not isinstance(part, dict) or part.get('type') not in ('text', 'input_text')
+                        or not isinstance(part.get('text'), str)):
+                    raise ValueError("System/developer instructions must contain text parts")
+                texts.append(part['text'])
+            return "\n".join(texts)
+        raise ValueError("System/developer instructions must be text or a list of text parts")
 
     @classmethod
     def _build_responses_content(cls, content: Any) -> Any:

@@ -6993,7 +6993,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             role = msg.get("role", "")
             if role in ("system", "developer"):
                 # Accumulate system / developer messages as instructions
-                content = msg.get("content", "")
+                from .openai_client import OpenAIClient
+                content = OpenAIClient._build_responses_instruction_text(msg.get("content", ""))
                 if instructions is None:
                     instructions = content
                 else:
