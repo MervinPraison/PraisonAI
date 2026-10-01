@@ -192,27 +192,39 @@ class BaseStore(ABC):
     def get(self, entry_id: str) -> Optional[LearnEntry]:
         """Get entry by ID."""
         return self._entries.get(entry_id)
+
+    def _refresh_for_retrieval(self) -> bool:
+        """Refresh before telemetry writes; use cached entries on backend outage."""
+        try:
+            self._load()
+        except Exception:
+            import logging
+            logging.warning("Failed to refresh learning store; using read-only cached entries.")
+            return False
+        return True
     
     def search(self, query: str, limit: int = 10) -> List[LearnEntry]:
         """Simple text search (can be overridden for semantic search)."""
         # Retrieval persists usage telemetry, so refresh before selecting entries.
-        self._load()
+        refreshed = self._refresh_for_retrieval()
         query_lower = query.lower()
         results = [
             entry for entry in self._entries.values()
             if query_lower in entry.content.lower()
         ]
         results = results[:limit]
-        self._touch(results)
+        if refreshed:
+            self._touch(results)
         return results
     
     def list_all(self, limit: int = 100) -> List[LearnEntry]:
         """List all entries."""
-        self._load()
+        refreshed = self._refresh_for_retrieval()
         entries = list(self._entries.values())
         entries.sort(key=lambda x: x.updated_at, reverse=True)
         entries = entries[:limit]
-        self._touch(entries)
+        if refreshed:
+            self._touch(entries)
         return entries
     
     def update(self, entry_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[LearnEntry]:

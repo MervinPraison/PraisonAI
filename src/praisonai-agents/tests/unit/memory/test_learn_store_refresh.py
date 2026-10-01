@@ -61,3 +61,62 @@ def test_missing_target_control(tmp_path, operation):
         assert store.delete("missing") is False
     assert not store.was_updated
     assert InsightStore(store_path=path).get(target.id).content == "existing"
+
+
+class UnavailableBackend:
+    def __init__(self):
+        self.data = None
+        self.unavailable = False
+        self.saves = 0
+
+    def load(self, key):
+        if self.unavailable:
+            raise ConnectionError("backend unavailable")
+        return self.data
+
+    def save(self, key, data):
+        self.saves += 1
+        self.data = data
+
+
+def test_search_finds_peer_addition_when_cache_has_no_match(tmp_path):
+    path = str(tmp_path / "insights.json")
+    first = InsightStore(store_path=path)
+    first.add("unrelated")
+    peer = InsightStore(store_path=path)
+    target = peer.add("new matching record")
+    results = first.search("matching")
+    assert [entry.id for entry in results] == [target.id]
+    assert results[0].use_count == 1
+
+
+@pytest.mark.parametrize("operation", ["search", "list_all"])
+@pytest.mark.parametrize("has_match", [False, True])
+def test_backend_outage_reads_cache_without_writing(tmp_path, operation, has_match):
+    backend = UnavailableBackend()
+    store = InsightStore(store_path=str(tmp_path / "insights.json"), backend=backend)
+    target = store.add("cached target") if has_match else None
+    saves_before = backend.saves
+    store.reset_updated()
+    backend.unavailable = True
+    results = store.search("target") if operation == "search" else store.list_all()
+    assert [entry.id for entry in results] == ([target.id] if target else [])
+    assert all(entry.use_count == 0 and entry.last_used is None for entry in results)
+    assert backend.saves == saves_before
+    assert not store.was_updated
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_backend_outage_mutations_fail_without_writing(tmp_path, operation):
+    backend = UnavailableBackend()
+    store = InsightStore(store_path=str(tmp_path / "insights.json"), backend=backend)
+    target = store.add("cached target")
+    saves_before = backend.saves
+    backend.unavailable = True
+    with pytest.raises(ConnectionError):
+        if operation == "update":
+            store.update(target.id, "replacement")
+        else:
+            store.delete(target.id)
+    assert backend.saves == saves_before
+    assert store.get(target.id).content == "cached target"
