@@ -252,8 +252,10 @@ class SqliteMemoryAdapter:
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from both short-term and long-term."""
-        short_memories = self.search_short_term("", limit=1000)
-        long_memories = self.search_long_term("", limit=1000)
+        # SQLite's negative LIMIT means no upper bound. Enumeration must return
+        # every row; ordinary searches retain their default/explicit limits.
+        short_memories = self.search_short_term("", limit=-1)
+        long_memories = self.search_long_term("", limit=-1)
         
         # Mark memory types
         for memory in short_memories:
