@@ -7226,6 +7226,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if k not in _internal and v is not None:
                 params[k] = v
 
+        # Match Chat Completions after merging overrides: reasoning models
+        # must not regain unsupported sampling parameters through either path.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(self.model):
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
+
         return params
 
     def _call_responses_api(self, **params) -> Any:
