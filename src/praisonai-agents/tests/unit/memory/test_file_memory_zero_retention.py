@@ -61,3 +61,36 @@ def test_empty_zero_retention_does_not_call_summarizer(tmp_path):
 
     assert memory.compress(llm_func=unexpected_call, max_items=0) == ""
     assert memory.get_stats()["long_term_count"] == 0
+
+
+@pytest.mark.parametrize("keep", [0, 1])
+@pytest.mark.parametrize("peer_instance", [False, True])
+def test_records_added_during_summary_are_retained(tmp_path, keep, peer_instance):
+    memory = FileMemory(user_id="during-summary", base_path=tmp_path)
+    for i in range(4):
+        memory.add_short_term(f"original {i}")
+    writer = FileMemory(user_id="during-summary", base_path=tmp_path) if peer_instance else memory
+
+    def summarize(prompt):
+        writer.add_short_term("added during summary")
+        return prompt
+
+    summary = memory.compress(llm_func=summarize, max_items=keep)
+    reopened = FileMemory(user_id="during-summary", base_path=tmp_path)
+    retained = [item["content"] for item in reopened.export()["short_term"]]
+    expected = ["original 3", "added during summary"] if keep else ["added during summary"]
+    assert retained == expected
+    assert "added during summary" not in summary
+    assert reopened.export()["long_term"][0]["metadata"]["items_compressed"] == 4 - keep
+
+
+@pytest.mark.parametrize("keep", [0, 1])
+def test_builtin_summary_preserves_all_selected_records(tmp_path, keep):
+    memory = FileMemory(user_id="all-records", base_path=tmp_path)
+    for i in range(8):
+        memory.add_short_term(f"record {i}")
+    summary = memory.compress(max_items=keep)
+    for i in range(8 - keep):
+        assert f"record {i}" in summary
+    if keep:
+        assert memory.export()["short_term"][0]["content"] == "record 7"

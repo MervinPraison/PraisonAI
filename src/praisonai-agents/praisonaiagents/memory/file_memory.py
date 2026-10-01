@@ -1505,7 +1505,8 @@ class FileMemory:
         Args:
             llm_func: Optional LLM function for summarization.
                       Should accept (prompt: str) -> str
-            max_items: Max items to keep after compression
+            max_items: Max snapshot items to keep after compression. Records
+                       added while summarizing are also retained.
             
         Returns:
             The generated summary
@@ -1518,6 +1519,7 @@ class FileMemory:
             # Gather content to compress while holding lock
             items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
             content_list = [item.content for item in items_to_compress]
+            compressed_ids = {item.id for item in items_to_compress}
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
         if llm_func:
@@ -1532,7 +1534,7 @@ Summary:"""
             summary = llm_func(prompt)
         else:
             # Simple concatenation if no LLM
-            summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
+            summary = "Compressed context: " + " | ".join(content_list) + "..."
         
         # Add summary as a high-importance long-term memory (add_long_term has its own lock)
         self.add_long_term(
@@ -1541,9 +1543,13 @@ Summary:"""
             importance=0.9
         )
         
-        # Keep only recent items under lock
+        # Remove only the summarized snapshot, preserving intervening additions.
         with self._lock:
-            self._short_term = self._short_term[-max_items:] if max_items else []
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+                if item["id"] not in compressed_ids
+            ]
             self._save_short_term()
         
         self._log(f"Compressed {len(items_to_compress)} items into summary")
