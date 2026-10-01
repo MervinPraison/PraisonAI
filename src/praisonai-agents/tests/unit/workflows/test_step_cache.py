@@ -245,6 +245,71 @@ class TestCorrectnessOnAHit:
         flow.run("same", verbose=False)   # must retry, not serve cached failure
         assert attempts["n"] == 2
 
+    def test_a_cached_stop_still_stops_the_workflow(self):
+        """A handler that stopped the cold run must also stop the cached run.
+        Losing the stop flag on a hit ran downstream steps that the cold run
+        never reached."""
+        calls = []
+
+        def finish(ctx):
+            calls.append("finish")
+            return StepResult(output="done", stop_workflow=True)
+
+        finish.__name__ = "finish"
+
+        def downstream(ctx):
+            calls.append("downstream")
+            return "unexpected"
+
+        downstream.__name__ = "downstream"
+
+        flow = AgentFlow(steps=[finish, downstream], cache=True)
+        flow.run("same", verbose=False)
+        flow.run("same", verbose=False)
+        assert calls == ["finish"]
+
+    def test_a_cached_hit_preserves_handler_variables(self):
+        """A producer returning variables followed by a consumer reading them
+        must give the same output on the cached run as the cold one."""
+        def producer(ctx):
+            return StepResult(output="p", variables={"answer": 42})
+
+        producer.__name__ = "producer"
+
+        def consumer(ctx):
+            return f"answer={ctx.variables.get('answer')}"
+
+        consumer.__name__ = "consumer"
+
+        flow = AgentFlow(steps=[producer, consumer], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        assert first["output"] == "answer=42"
+        assert second["output"] == first["output"]
+
+    def test_a_cached_hit_preserves_completion_metadata(self):
+        """Step status and retries must survive a cache hit, not disappear from
+        the result records."""
+        flow = AgentFlow(steps=[_counting_step("s", [])], cache=True)
+        flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        record = second["steps"][0]
+        assert record["status"] == "completed"
+        assert record["retries"] == 0
+
+    def test_an_early_stop_hit_does_not_insert_the_output_variable(self):
+        """The cold path stops before writing `<step>_output`; a cached early
+        stop must not insert it either."""
+        def finish(ctx):
+            return StepResult(output="done", stop_workflow=True)
+
+        finish.__name__ = "finish"
+
+        flow = AgentFlow(steps=[finish], cache=True)
+        flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        assert "finish_output" not in second["variables"]
+
     def test_a_mutated_hit_does_not_corrupt_the_cache(self):
         """Values handed back on a hit are snapshots; mutating one must not
         change what the next hit returns."""

@@ -1633,6 +1633,14 @@ class AgentFlow:
                     if verbose:
                         print(f"↩︎  cache hit: {step.name}")
                     previous_output = _cached.get("output")
+                    # Replay the full step delta recorded on the cold run so a
+                    # hit is indistinguishable from re-executing: the step's
+                    # status/retries, any handler-supplied variables (and the
+                    # generated output variable, present only when the cold run
+                    # did not stop first), and -- crucially -- the stop signal.
+                    # A hit that only appended {step, output} and continued lost
+                    # the stop flag and the handler's variables, so a workflow
+                    # that stopped on the cold run ran on through the cached one.
                     cached_record = _cached.get("step_record") or {
                         "step": step.name, "output": previous_output,
                         "status": "completed", "retries": 0,
@@ -1644,6 +1652,8 @@ class AgentFlow:
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
                     if _cached.get("stop"):
+                        if verbose:
+                            print(f"🛑 Workflow stopped at: {step.name}")
                         break
                     i += 1
                     continue
