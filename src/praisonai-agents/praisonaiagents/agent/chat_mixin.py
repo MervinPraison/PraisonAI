@@ -392,11 +392,8 @@ class ChatMixin:
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
-                # Path-scoped glob rules are per-turn (they depend on the files
-                # touched so far) so they are appended after the cache, never
-                # baked into the cached base prompt.
-                return self._append_system_prompt_suffix(
-                    self._append_glob_rules_context(cached_prompt)
+                return self._append_system_prompt_turn_context(
+                    cached_prompt, tools=tools,
                 )
         else:
             cache_key = None  # Don't cache when memory is enabled
@@ -479,6 +476,11 @@ Your Goal: {self.goal}"""
         # Session context is per-turn and should not be cached
         if cache_key:
             self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+
+        return self._append_system_prompt_turn_context(system_prompt, tools=tools)
+
+    def _append_system_prompt_turn_context(self, system_prompt, tools=None):
+        """Append current-turn context to either a fresh or cached base prompt."""
         
         # Add session context (platform awareness) if available - AFTER caching
         try:
