@@ -30,7 +30,7 @@ Usage::
     store = SqliteTranscriptStore(db_path="~/.praisonai/sessions/sessions.db")
     agent = Agent(..., session_store=store)      # drop-in for DefaultSessionStore
     store.add_message("s1", "user", "hi")        # single-row transactional write
-    store.search("refund")                        # indexed candidate lookup
+    store.search("refund")                        # decoded transcript scoring
 """
 
 import json
@@ -463,7 +463,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             ).fetchall()
         return [r[0] for r in rows]
 
-    # ── search: bounded candidate lookup + inherited scoring ──────────
+    # ── search: transcript scan + inherited scoring ──────────
 
     def search(
         self,
@@ -472,15 +472,17 @@ class SqliteTranscriptStore(DefaultSessionStore):
         limit: int = 5,
         window: int = 5,
     ) -> List[Any]:
-        """Full-text search over transcripts using a bounded candidate lookup.
+        """Full-text search over decoded SQLite transcripts.
 
-        Candidate sessions are found with a bounded term query against the
-        stored JSON payload (not an ``os.listdir`` scan); the parent store's
+        Stored JSON rows are streamed without a pre-scoring candidate cap;
+        lowercasing is applied to decoded message content. The parent store's
         per-session scoring, bookends, automated-demotion and lineage-dedup are
         then reused verbatim so results are identical in shape. Scanning spans
         the shared archived-plus-active projection so compacted history stays
         recallable (Issue #5031).
         """
+        from contextlib import closing
+
         from .protocols import SessionHit
 
         query = (query or "").strip()
@@ -491,92 +493,82 @@ class SqliteTranscriptStore(DefaultSessionStore):
         terms = [t for t in needle.split() if t]
 
         conn = self._connect()
-        encoded_terms = tuple(json.dumps(term, ensure_ascii=False)[1:-1] for term in terms)
-
-        def matches_terms(payload):
-            # Match any scoring term, preserving JSON escapes, literal %/_
-            # and Python's Unicode lowercasing instead of SQLite's ASCII lower.
-            if not isinstance(payload, str):
-                return False
-            lowered = payload.lower()
-            return any(term in lowered for term in encoded_terms)
-
-        fetch = max(limit * 5, limit)
-        with self._db_lock:
-            # The connection-local callback and query share the lock so searches
-            # with different terms cannot replace one another's callback.
-            conn.create_function("praison_transcript_terms", 1, matches_terms)
-            try:
-                rows = conn.execute(
-                    "SELECT data FROM sessions WHERE praison_transcript_terms(data) "
-                    "ORDER BY updated_at DESC LIMIT ?",
-                    (fetch,),
-                ).fetchall()
-            finally:
-                conn.create_function("praison_transcript_terms", 1, None)
+        def records():
+            # Score decoded messages from every row: a recency-first cap can
+            # exclude stronger hits or fill up with one conversation lineage.
+            # Stream payloads rather than materializing all transcript JSON.
+            with self._db_lock:
+                cursor = conn.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
+                try:
+                    yield from cursor
+                finally:
+                    cursor.close()
 
         hits: List[tuple] = []
-        for row in rows:
-            try:
-                data = json.loads(row[0])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            messages = self._searchable_messages(data)
-            if not messages:
-                continue
-
-            best_index = -1
-            best_score = 0.0
-            total_score = 0.0
-            for idx, msg in enumerate(messages):
-                if not isinstance(msg, dict):
+        with closing(records()) as rows:
+            for row in rows:
+                try:
+                    data = json.loads(row[0])
+                except (json.JSONDecodeError, TypeError):
                     continue
-                content = str(msg.get("content", ""))
-                if not content:
+                if not isinstance(data, dict):
                     continue
-                lowered = content.lower()
-                score = 0.0
-                if needle in lowered:
-                    score += 2.0
-                score += sum(1.0 for term in terms if term in lowered)
-                total_score += score
-                if score > best_score:
-                    best_score = score
-                    best_index = idx
+                messages = self._searchable_messages(data)
+                if not messages:
+                    continue
 
-            if best_index < 0:
-                continue
+                best_index = -1
+                best_score = 0.0
+                total_score = 0.0
+                for idx, msg in enumerate(messages):
+                    if not isinstance(msg, dict):
+                        continue
+                    content = str(msg.get("content", ""))
+                    if not content:
+                        continue
+                    lowered = content.lower()
+                    score = 0.0
+                    if needle in lowered:
+                        score += 2.0
+                    score += sum(1.0 for term in terms if term in lowered)
+                    total_score += score
+                    if score > best_score:
+                        best_score = score
+                        best_index = idx
 
-            start = max(0, best_index - window)
-            end = min(len(messages), best_index + window + 1)
-            context = [
-                {
-                    "index": i,
-                    "role": messages[i].get("role", ""),
-                    "content": messages[i].get("content", ""),
-                    "timestamp": messages[i].get("timestamp"),
-                    "archived": bool(messages[i].get("archived")),
-                }
-                for i in range(start, end)
-                if isinstance(messages[i], dict)
-            ]
+                if best_index < 0:
+                    continue
 
-            if self._is_automated_session(data, messages):
-                total_score *= self.AUTOMATED_DEMOTION
+                start = max(0, best_index - window)
+                end = min(len(messages), best_index + window + 1)
+                context = [
+                    {
+                        "index": i,
+                        "role": messages[i].get("role", ""),
+                        "content": messages[i].get("content", ""),
+                        "timestamp": messages[i].get("timestamp"),
+                        "archived": bool(messages[i].get("archived")),
+                    }
+                    for i in range(start, end)
+                    if isinstance(messages[i], dict)
+                ]
 
-            hit = SessionHit(
-                session_id=data.get("session_id", ""),
-                title=self._session_title(data),
-                when=data.get("updated_at") or data.get("created_at"),
-                snippet=self._make_snippet(
-                    messages[best_index].get("content", ""), query
-                ),
-                score=total_score,
-                anchor_index=best_index,
-                messages=context,
-                bookends=self._bookends(messages, self.BOOKEND_SIZE),
-            )
-            hits.append((self._lineage_key(data), hit))
+                if self._is_automated_session(data, messages):
+                    total_score *= self.AUTOMATED_DEMOTION
+
+                hit = SessionHit(
+                    session_id=data.get("session_id", ""),
+                    title=self._session_title(data),
+                    when=data.get("updated_at") or data.get("created_at"),
+                    snippet=self._make_snippet(
+                        messages[best_index].get("content", ""), query
+                    ),
+                    score=total_score,
+                    anchor_index=best_index,
+                    messages=context,
+                    bookends=self._bookends(messages, self.BOOKEND_SIZE),
+                )
+                hits.append((self._lineage_key(data), hit))
 
         hits.sort(key=lambda item: (item[1].score, item[1].when or ""), reverse=True)
 
