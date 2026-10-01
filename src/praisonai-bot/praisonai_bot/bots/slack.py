@@ -206,6 +206,18 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._streaming_config = config
         logger.debug("SlackBot: streaming configured, mode=%s", config.mode)
 
+    def _reply_needs_thread(self, thread_id: str) -> bool:
+        """Whether a reply must be posted into a thread rather than the root.
+
+        The shared ``DraftStreamer`` posts/edits its placeholder at the channel
+        root (it only knows ``send_message(channel, text)``), so when a reply
+        belongs in a thread — the inbound message was itself in a thread, or
+        ``reply_in_thread`` is configured — streaming in place would strand the
+        answer in the main channel (Greptile #2 / #5417). In that case the
+        caller falls back to the existing threaded send path.
+        """
+        return bool(thread_id) or bool(getattr(self.config, "reply_in_thread", False))
+
     async def _maybe_stream_reply(
         self,
         channel_id: str,
@@ -218,14 +230,22 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         """Progressively stream a reply via DraftStreamer when configured.
 
         Returns the final (hook-processed) response text when the streaming
-        path handled delivery, or ``None`` when streaming is disabled so the
-        caller falls back to its normal single-message send (Issue #5415).
+        path handled delivery, or ``None`` when streaming is disabled — or when
+        the reply must be threaded (the channel-agnostic streamer can only post
+        at the channel root) — so the caller falls back to its normal
+        single-message, thread-aware, media-aware send (Issue #5415).
         """
         streaming_enabled = (
             self._streaming_config is not None
             and self._streaming_config.mode != StreamingMode.OFF
         )
         if not streaming_enabled:
+            return None
+
+        # Defer to the standard send path when the reply must land in a thread:
+        # the shared streamer posts/edits at the channel root and would
+        # otherwise strand a threaded answer in the main channel (Greptile #2).
+        if self._reply_needs_thread(thread_id):
             return None
 
         streamer = DraftStreamer(
@@ -251,7 +271,29 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 except Exception:
                     pass
                 return ""
-            await streamer.finalize(send_result["content"])
+
+            # Extract any MEDIA: directives before finalizing so an audio
+            # reply is uploaded via Slack's file path instead of being edited
+            # into the placeholder as literal "MEDIA:/path" text (Greptile #4).
+            parsed = split_media_from_output(send_result["content"])
+            text_content = parsed["text"]
+            media_urls = parsed.get("media_urls", [])
+
+            await streamer.finalize(text_content if text_content else send_result["content"])
+
+            for media_path in media_urls:
+                if not os.path.exists(media_path):
+                    logger.warning(f"Media file not found: {media_path}")
+                    continue
+                if is_audio_file(media_path) and self._client:
+                    try:
+                        await self._client.files_upload_v2(
+                            channel=channel_id,
+                            file=media_path,
+                            title=os.path.basename(media_path),
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to upload audio to Slack: {e}")
             return send_result["content"]
         except Exception:
             try:

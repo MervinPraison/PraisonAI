@@ -531,8 +531,29 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                                     except Exception:
                                         pass
                                     return
-                                await streamer.finalize(send_result["content"])
-                                self.fire_message_sent(channel_id, send_result["content"])
+                                final_content = send_result["content"]
+                                # A streamed answer longer than Discord's hard
+                                # cap cannot be delivered by editing the single
+                                # placeholder (both the edit and the send
+                                # fallback 400 on >2000 chars), which would drop
+                                # the whole reply. Fall back to the chunked
+                                # reply path so long answers are split and keep
+                                # the reply reference (Greptile #3 / #5).
+                                _cap = min(self.config.max_message_length, 2000)
+                                if len(final_content) > _cap:
+                                    try:
+                                        await self.delete_message(
+                                            channel_id, placeholder_message_id
+                                        )
+                                    except Exception:
+                                        pass
+                                    await self._send_long_message(
+                                        message.channel, final_content,
+                                        reference=message,
+                                    )
+                                else:
+                                    await streamer.finalize(final_content)
+                                self.fire_message_sent(channel_id, final_content)
                             except Exception:
                                 try:
                                     await self.delete_message(
