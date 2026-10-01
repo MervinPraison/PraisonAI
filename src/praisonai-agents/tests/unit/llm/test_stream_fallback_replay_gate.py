@@ -161,3 +161,82 @@ def test_llm_does_not_switch_modes_after_local_tool_dispatch(parallel):
     assert effects == ['counted_tool']
     assert requests == [True]
     assert error is original
+
+
+@pytest.mark.parametrize('stage', ['request', 'iterator', 'wrapped_iterator'])
+@pytest.mark.parametrize('web_fetch', [False, True])
+@pytest.mark.parametrize('error_type', [ReadTimeout, ConnectTimeout])
+def test_fallback_gate_uses_tools_added_by_real_request_builder(stage, web_fetch, error_type):
+    llm = LLM(model='anthropic/claude-sonnet-4-5', web_fetch=web_fetch)
+    llm._max_retries = 0
+    requests = []
+    original = error_type('transport timeout')
+
+    def failed_stream():
+        if stage == 'wrapped_iterator':
+            raise RuntimeError('decode failure') from original
+        raise original
+        yield
+
+    def completion(**kwargs):
+        requests.append(kwargs)
+        if kwargs['stream']:
+            if stage == 'request':
+                raise original
+            return failed_stream()
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content='fallback answer', tool_calls=None,
+        ))])
+
+    llm._completion_with_retry = lambda **kw: llm._call_with_retry(completion, **kw)
+    error = None
+    answer = None
+    try:
+        answer = list(llm.get_response_stream('question'))
+    except Exception as exc:
+        error = exc
+    assert bool(requests[0].get('tools')) is web_fetch
+    if web_fetch:
+        assert requests[0]['tools'][0]['type'] == 'web_fetch_20250910'
+    if web_fetch and error_type is ReadTimeout:
+        assert error is not None
+        assert len(requests) == 1
+    else:
+        assert error is None
+        assert answer == ['fallback answer']
+        assert [r['stream'] for r in requests] == [True, False]
+
+
+@pytest.mark.parametrize('override', ['absent', 'none', 'empty'])
+def test_agent_does_not_replay_provider_added_tools(override):
+    from praisonaiagents import Agent
+
+    agent = Agent(instructions='Answer briefly', tools=[], context=False)
+    llm = LLM(model='anthropic/claude-sonnet-4-5', web_fetch=True)
+    llm._max_retries = 0
+    requests = []
+    fallback = []
+    original = ReadTimeout('transport timeout')
+
+    def completion(**kwargs):
+        requests.append(kwargs)
+        if kwargs['stream']:
+            raise original
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content='unsafe fallback', tool_calls=None,
+        ))])
+
+    llm._completion_with_retry = lambda **kw: llm._call_with_retry(completion, **kw)
+    agent._using_custom_llm = True
+    agent.llm_instance = llm
+    agent.chat = lambda *args, **kwargs: fallback.append(args) or 'unsafe host fallback'
+    kwargs = {} if override == 'absent' else {'tools': None if override == 'none' else []}
+    try:
+        with pytest.raises(ReadTimeout) as exc_info:
+            list(agent._start_stream_impl('question', **kwargs))
+        assert exc_info.value is original
+        assert len(requests) == 1
+        assert requests[0]['tools'][0]['name'] == 'web_fetch'
+        assert fallback == []
+    finally:
+        agent.close()

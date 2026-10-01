@@ -4663,6 +4663,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
             if use_streaming:
                 # Real-time streaming approach with tool call support
+                stream_request_has_tools = bool(formatted_tools)
                 try:
                     tool_calls = []
                     response_text = ""
@@ -4670,17 +4671,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
                     
-                    stream_iterator = self._completion_with_retry(
-                        **self._build_completion_params(
-                            messages=messages,
-                            tools=formatted_tools,
-                            temperature=temperature,
-                            stream=True,
-                            output_json=output_json,
-                            output_pydantic=output_pydantic,
-                            **kwargs
-                        )
+                    stream_params = self._build_completion_params(
+                        messages=messages,
+                        tools=formatted_tools,
+                        temperature=temperature,
+                        stream=True,
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
+                        **kwargs
                     )
+                    # Provider tools can be added by the builder even when the
+                    # caller passed none. Gate replays on the dispatched request.
+                    stream_request_has_tools = bool(stream_params.get('tools'))
+                    stream_iterator = self._completion_with_retry(**stream_params)
                     
                     # Wrap the iteration with additional error handling for LiteLLM JSON parsing errors
                     try:
@@ -4972,7 +4975,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Switching response mode still replays the provider call.
                     # Do not undo the retry gate, including iterator failures
                     # wrapped by the streaming error handler above.
-                    if tool_execution_started or (formatted_tools and self._is_post_dispatch_failure(e)):
+                    if tool_execution_started or (stream_request_has_tools and self._is_post_dispatch_failure(e)):
+                        # An enclosing Agent must preserve this decision even
+                        # when its own tool list omits provider-added tools.
+                        e._praisonai_stream_replay_blocked = True
                         raise
                     error_msg = str(e).lower()
                     

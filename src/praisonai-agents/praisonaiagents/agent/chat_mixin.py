@@ -5739,6 +5739,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import inspect
 
+        if getattr(streaming_error, '_praisonai_stream_replay_blocked', False):
+            raise streaming_error
+
         # A non-streaming fallback reissues the turn too. Match both streaming
         # branches: None inherits self.tools; an explicit empty list disables
         # tools. Only then consult the underlying error chain.
