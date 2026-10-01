@@ -2005,13 +2005,18 @@ class AgentFlow:
                 if not stop:
                     _cached_var_name = step.output_variable or f"{step.name}_output"
                     cached_variable_updates[_cached_var_name] = output
-                _step_cache.set(
-                    _cache_key,
-                    {
-                        "output": output, "variables": cached_variable_updates,
-                        "stop": stop, "step_record": step_record,
-                    },
-                )
+                try:
+                    _step_cache.set(
+                        _cache_key,
+                        {
+                            "output": output, "variables": cached_variable_updates,
+                            "stop": stop, "step_record": step_record,
+                        },
+                    )
+                except Exception:
+                    # Custom caches may only accept serializable state. Keep
+                    # the successful workflow result when storage rejects it.
+                    logger.warning("Could not cache workflow step '%s'", step.name)
             
             if verbose:
                 print(f"✅ {step.name}: {str(output)}")

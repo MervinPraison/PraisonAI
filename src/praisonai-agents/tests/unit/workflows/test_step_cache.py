@@ -55,6 +55,60 @@ class TestCachingWorks:
 
 
 class TestCorrectnessOnAHit:
+    def test_uncopyable_handler_variables_are_not_cached_by_reference(self):
+        import threading
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(
+                output="ready", variables={"lock": threading.Lock(), "items": [1]}
+            )
+
+        flow = AgentFlow(steps=[produce], cache=True)
+        first = flow.run("same", verbose=False)
+        first["variables"]["items"].append(999)
+        second = flow.run("same", verbose=False)
+        assert second["variables"]["items"] == [1]
+        assert calls == ["produce", "produce"]
+
+    def test_custom_cache_rejecting_variables_does_not_abort_workflow(self):
+        import json
+        import threading
+
+        class JsonCache:
+            def get(self, key):
+                return None
+
+            def set(self, key, value):
+                json.dumps(value)
+
+        def produce(ctx):
+            return StepResult(output="ready", variables={"lock": threading.Lock()})
+
+        flow = AgentFlow(steps=[produce], cache=JsonCache())
+        result = flow.run("same", verbose=False)
+        assert result["output"] == "ready"
+        assert "lock" in result["variables"]
+        assert result["steps"][0]["status"] == "completed"
+
+    def test_legacy_cache_entry_restores_output_variable_and_status(self):
+        cache = InMemoryStepCache()
+        cache.set(make_step_key("upstream", None, "same", {"input": "same"}), {
+            "output": "cached", "variables": {"upstream_output": "cached"},
+        })
+        calls = []
+        flow = AgentFlow(steps=[_counting_step("upstream", calls)], cache=cache)
+        result = flow.run("same", verbose=False)
+        assert calls == []
+        assert result["output"] == "cached"
+        assert result["variables"]["upstream_output"] == "cached"
+        assert result["steps"] == [{
+            "step": "upstream", "output": "cached", "status": "completed", "retries": 0,
+        }]
+        assert flow.step_statuses["upstream"] == "completed"
+
     def test_a_cache_hit_preserves_early_stop(self):
         calls = []
 
@@ -173,6 +227,14 @@ class TestKeys:
 
 
 class TestTheCacheItself:
+    def test_uncopyable_replacement_removes_the_old_entry(self):
+        import threading
+
+        cache = InMemoryStepCache()
+        cache.set("k", {"output": "old"})
+        cache.set("k", {"output": "new", "lock": threading.Lock()})
+        assert cache.get("k") is None
+
     def test_it_is_bounded(self):
         """Unbounded would be a memory leak that only shows up in production."""
         cache = InMemoryStepCache(max_entries=2)
