@@ -238,6 +238,62 @@ class TestStructuredRetryAfter:
         # No numeric header, no message pattern -> None
         assert extract_retry_after(_ProviderError("please slow down")) is None
 
+    def test_nan_header_is_ignored(self):
+        """A ``nan`` Retry-After header must not poison the delay (issue #5424)."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "nan"}
+        # No usable header, no message pattern -> None (not NaN)
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_infinite_header_is_ignored(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "inf"}
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_negative_header_is_ignored(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "-5"}
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_zero_header_is_preserved(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "0"}
+        assert extract_retry_after(_ProviderError("rate limited")) == 0.0
+
+    def test_fractional_header_is_preserved(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "1.5"}
+        assert extract_retry_after(_ProviderError("rate limited")) == 1.5
+
+    def test_invalid_header_falls_through_to_message(self):
+        """An invalid high-priority header must not suppress a valid message delay."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "nan"}
+        assert extract_retry_after(_ProviderError("retry after 30 seconds")) == 30.0
+
+    def test_nan_attribute_is_ignored(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.nan
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_infinite_attribute_is_ignored(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.inf
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_negative_attribute_is_ignored(self):
+        class _ProviderError(Exception):
+            retry_after = -3.0
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_invalid_attribute_falls_through_to_message(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.nan
+        assert extract_retry_after(_ProviderError("retry after 12 seconds")) == 12.0
+
 
 class TestRetryLogic:
     

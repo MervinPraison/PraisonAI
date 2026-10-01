@@ -88,6 +88,21 @@ def test_slack_is_clamped_non_negative():
     assert quota_hold_from_failure(_RateLimited(100), now, slack_seconds=-5.0) == 100.0
 
 
+def test_nan_retry_after_does_not_produce_nan_hold():
+    # A 429 carrying a malformed ``nan`` Retry-After must not park the job with
+    # a NaN hold instant (issue #5424) — it carries no usable window → no park.
+    import math
+
+    hold = quota_hold_from_failure(_RateLimited("nan"), 1000.0, slack_seconds=60.0)
+    assert hold is None or math.isfinite(hold)
+    assert hold is None
+
+
+def test_negative_retry_after_does_not_hold():
+    # A negative Retry-After is not a usable future window → no park.
+    assert quota_hold_from_failure(_RateLimited(-30), 1000.0) is None
+
+
 # ── is_due hold guard ─────────────────────────────────────────────────
 
 
