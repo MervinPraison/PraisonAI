@@ -2202,6 +2202,9 @@ class AgentFlow:
                 step_result_internal = self._execute_single_step_internal(
                     step, previous_output, input, all_variables, model, verbose, i, stream
                 )
+                if step_result_internal.get("skipped"):
+                    results.append({"step": step_name, "output": None, "status": "skipped"})
+                    continue
                 output = step_result_internal.get("output", "")
                 stop = step_result_internal.get("stop", False)
                 step_vars = step_result_internal.get("variables", {})
@@ -2755,7 +2758,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 self.step_statuses[step.name] = "skipped"
                 return {
                     "step": step.name, "output": previous_output,
-                    "stop": False, "skipped": True, "variables": all_variables,
+                    "stop": False, "skipped": True, "variables": {},
                 }
         cache = getattr(self, "_step_cache", None)
         if cache is None:
@@ -3543,6 +3546,12 @@ CONCISE SUMMARY:"""
                         parallel_stopped = True
 
                 if branch_error is None:
+                    if step_result.get("skipped"):
+                        results.append({"step": step_result["step"], "output": None, "status": "skipped"})
+                        # Keep branch indexes stable without counting prior context
+                        # as output produced by a branch that never ran.
+                        outputs.append(None)
+                        continue
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
                     branch_deltas.append(
@@ -3601,7 +3610,7 @@ CONCISE SUMMARY:"""
         self._merge_branch_variables(all_variables, branch_deltas)
 
         # Combine outputs
-        combined_output = "\n---\n".join(str(o) for o in outputs)
+        combined_output = "\n---\n".join(str(o) for o in outputs if o is not None)
         all_variables["parallel_outputs"] = outputs
         
         if verbose:
@@ -4376,6 +4385,12 @@ CONCISE SUMMARY:"""
             from .yaml_parser import YAMLWorkflowParser
             parser = YAMLWorkflowParser(tool_registry=tool_registry)
             included_workflow = parser.parse_file(str(recipe_yaml))
+            parent_cache = getattr(self, "_step_cache", None)
+            if parent_cache is not None:
+                from .step_cache import _ScopedStepCache
+                included_workflow._step_cache = _ScopedStepCache(
+                    parent_cache, str(recipe_yaml.resolve())
+                )
             
             # Merge parent variables into included workflow
             included_workflow.variables.update(all_variables)
