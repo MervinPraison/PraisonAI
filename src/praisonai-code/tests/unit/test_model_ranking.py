@@ -85,13 +85,43 @@ def test_default_anthropic_keeps_prefix(monkeypatch):
 
 def test_refresh_rebuilds_and_returns_models(tmp_path):
     cat = ModelCatalogue(cache_dir=tmp_path)
-    models = cat.refresh()
+    result = cat.refresh()
+    assert isinstance(result, dict)
+    assert set(result) >= {"cached", "models"}
+    models = result["models"]
     assert isinstance(models, list)
     assert models
     assert all("id" in m for m in models)
 
 
-def test_cache_dir_is_canonical_home():
+def test_refresh_reports_cached_when_written(tmp_path):
+    # When litellm loads successfully the cache is written and ``cached`` is
+    # True; when it cannot load, the fallback table is returned and ``cached``
+    # is False and no cache file is written (no false "cached" report).
+    cat = ModelCatalogue(cache_dir=tmp_path)
+    result = cat.refresh()
+    cache_file = tmp_path / "models.json"
+    if result["cached"]:
+        assert cache_file.exists()
+    else:
+        assert not cache_file.exists()
+
+
+def test_refresh_fallback_not_cached(monkeypatch, tmp_path):
+    cat = ModelCatalogue(cache_dir=tmp_path)
+    monkeypatch.setattr(cat, "_load_from_litellm", lambda: None)
+    result = cat.refresh()
+    assert result["cached"] is False
+    assert result["models"]
+    assert not (tmp_path / "models.json").exists()
+
+
+def test_cache_dir_is_canonical_home(monkeypatch, tmp_path):
+    # Pin PRAISONAI_HOME so the assertion holds regardless of the host's
+    # home configuration (a machine with only a legacy ~/.praison would
+    # otherwise make the canonical-home check flaky).
+    home = tmp_path / ".praisonai"
+    monkeypatch.setenv("PRAISONAI_HOME", str(home))
     cat = ModelCatalogue()
     assert ".praison/cache" not in str(cat.cache_dir)
     assert ".praisonai" in str(cat.cache_dir)

@@ -177,13 +177,21 @@ def refresh_models(
     try:
         from praisonai_code.llm.catalogue import ModelCatalogue
         catalogue = ModelCatalogue()
-        models = catalogue.refresh()
+        result = catalogue.refresh()
+        models = result["models"]
 
         if json_output:
             output.print(json.dumps(models, indent=2))
             return
 
-        output.print_success(f"Refreshed catalogue: {len(models)} models cached")
+        if result["cached"]:
+            output.print_success(f"Refreshed catalogue: {len(models)} models cached")
+        else:
+            output.print_warning(
+                f"litellm unavailable — showing {len(models)} built-in models; "
+                "cache not updated. Install litellm to refresh: "
+                "pip install 'praisonai[litellm]'"
+            )
     except ImportError:
         output.print_warning("Model catalogue not available. Install litellm to refresh:")
         output.print("  pip install 'praisonai[litellm]'")
