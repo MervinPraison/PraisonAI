@@ -83,6 +83,20 @@ class StepCacheProtocol:
         raise NotImplementedError
 
 
+class _ScopedStepCache:
+    """Share a parent's storage while keeping included recipes' keys separate."""
+
+    def __init__(self, parent: Any, namespace: str):
+        self.parent = parent
+        self.namespace = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:32]
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        return self.parent.get(f"{self.namespace}:{key}")
+
+    def set(self, key: str, value: Dict[str, Any]) -> None:
+        self.parent.set(f"{self.namespace}:{key}", value)
+
+
 class InMemoryStepCache:
     """Bounded LRU cache, scoped to the process.
 
