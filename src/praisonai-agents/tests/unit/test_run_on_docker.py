@@ -308,10 +308,12 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     instance kept billing until the provider's own idle timer noticed, which
     docker and flyio do not have."""
     import gc
+    import threading
 
     from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 
     released = []
+    done = threading.Event()
 
     class Fake:
         provider_name = "fake"
@@ -327,6 +329,7 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
         async def shutdown(self, instance_id):
             released.append(instance_id)
+            done.set()
 
     import asyncio
 
@@ -338,6 +341,10 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
     del backend
     gc.collect()
+    # _release submits shutdown fire-and-forget to the shared background bridge
+    # loop, so the reclaim lands on another thread. Wait for it rather than
+    # asserting synchronously, which would race the loop.
+    assert done.wait(timeout=5), "the finalizer never ran the reclaim"
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
 
@@ -361,17 +368,24 @@ def test_release_reclaims_even_on_an_event_loop_thread():
     ever runs, silently leaking the instance -- so _release must bridge the loop
     the way SharedCompute does, not call asyncio.run() directly."""
     import asyncio
+    import threading
 
     from praisonai.integrations.compute_managed_agent import _release
 
     released = []
+    done = threading.Event()
 
     class Fake:
         async def shutdown(self, instance_id):
             released.append(instance_id)
+            done.set()
 
     async def collect_on_the_loop():
         _release(Fake(), "inst-loop", "docker")
 
     asyncio.run(collect_on_the_loop())
+    # _release bridges the reclaim onto the shared background loop rather than
+    # calling asyncio.run() on the live loop, so it completes on another thread.
+    # Wait for it instead of asserting synchronously, which would race the loop.
+    assert done.wait(timeout=5), "an instance leaked when GC ran on a live loop"
     assert released == ["inst-loop"], "an instance leaked when GC ran on a live loop"
