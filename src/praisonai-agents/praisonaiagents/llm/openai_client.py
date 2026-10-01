@@ -758,8 +758,11 @@ class OpenAIClient:
                 # Handle Chat Completions → Responses API format transforms
                 if role == "assistant" and msg.get("tool_calls"):
                     content = msg.get("content")
-                    if content and content.strip():
-                        input_items.append({"role": "assistant", "content": content})
+                    if content and (not isinstance(content, str) or content.strip()):
+                        input_items.append({
+                            "role": "assistant",
+                            "content": self._build_responses_content(content),
+                        })
                     for tc in msg["tool_calls"]:
                         fn = tc.get("function", tc) if isinstance(tc, dict) else tc
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")

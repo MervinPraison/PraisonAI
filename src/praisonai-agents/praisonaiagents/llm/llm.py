@@ -7112,8 +7112,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Assistant message with tool_calls → emit text (if any)
                     # then emit function_call items for each tool call
                     content = msg.get("content")
-                    if content and content.strip():
-                        input_items.append({"role": "assistant", "content": content})
+                    if content and (not isinstance(content, str) or content.strip()):
+                        from .openai_client import OpenAIClient
+                        input_items.append({
+                            "role": "assistant",
+                            "content": OpenAIClient._build_responses_content(content),
+                        })
                     for tc in msg["tool_calls"]:
                         fn = tc.get("function", tc) if isinstance(tc, dict) else tc
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")

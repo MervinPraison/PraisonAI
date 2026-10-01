@@ -1,0 +1,64 @@
+"""Assistant text parts and tool calls survive public Responses requests."""
+
+from copy import deepcopy
+from types import SimpleNamespace
+
+import pytest
+
+from praisonaiagents.llm.llm import LLM
+from praisonaiagents.llm.openai_client import OpenAIClient
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['llm_sync', 'llm_async', 'client_sync', 'client_async'])
+@pytest.mark.parametrize('content,expected', [
+    ('Checking', 'Checking'),
+    ('  ', None),
+    (None, None),
+    ([], None),
+    ([{'type': 'text', 'text': 'Checking'}], [{'type': 'input_text', 'text': 'Checking'}]),
+    ([{'type': 'text', 'text': 'First'}, {'type': 'text', 'text': ' second'}],
+     [{'type': 'input_text', 'text': 'First'}, {'type': 'input_text', 'text': ' second'}]),
+    ([{'type': 'input_text', 'text': 'Checking'}], [{'type': 'input_text', 'text': 'Checking'}]),
+])
+async def test_public_responses_preserves_assistant_parts_with_tool_calls(entry, content, expected):
+    history = [
+        {'role': 'assistant', 'content': content, 'tool_calls': [{
+            'id': 'call_1', 'type': 'function',
+            'function': {'name': 'lookup', 'arguments': '{"key":"value"}'},
+        }]},
+        {'role': 'tool', 'tool_call_id': 'call_1', 'content': 'found'},
+    ]
+    original = deepcopy(history)
+    requests = []
+
+    def respond(**kwargs):
+        requests.append(kwargs)
+        return SimpleNamespace(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}])
+
+    async def arespond(**kwargs):
+        return respond(**kwargs)
+
+    if entry.startswith('llm'):
+        llm = LLM(model='gpt-4o-mini')
+        llm._call_responses_api = respond
+        llm._call_responses_api_async = arespond
+        kwargs = dict(chat_history=history, stream=False, verbose=False)
+        answer = llm.get_response('continue', **kwargs) if entry == 'llm_sync' else await llm.get_response_async('continue', **kwargs)
+        assert answer == 'answer'
+    else:
+        client = OpenAIClient(api_key='sk-test-not-real')
+        client._sync_client = SimpleNamespace(responses=SimpleNamespace(create=respond))
+        client._async_client = SimpleNamespace(responses=SimpleNamespace(create=arespond))
+        messages = history + [{'role': 'user', 'content': 'continue'}]
+        answer = client.create_completion(messages) if entry == 'client_sync' else await client.acreate_completion(messages)
+        assert answer.choices[0].message.content == 'answer'
+    assert len(requests) == 1
+    expected_items = [] if expected is None else [{'role': 'assistant', 'content': expected}]
+    expected_items += [
+        {'type': 'function_call', 'call_id': 'call_1', 'name': 'lookup', 'arguments': '{"key":"value"}'},
+        {'type': 'function_call_output', 'call_id': 'call_1', 'output': 'found'},
+        {'role': 'user', 'content': 'continue'},
+    ]
+    assert requests[0]['input'] == expected_items
+    assert history == original
