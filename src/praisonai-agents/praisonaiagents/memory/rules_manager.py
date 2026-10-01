@@ -299,38 +299,23 @@ class RulesManager:
         frontmatter = {}
         body = content
         
-        # Check for YAML frontmatter (--- ... ---)
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                yaml_content = parts[1].strip()
-                body = parts[2].strip()
-                
-                # Simple YAML parsing (avoid dependency)
-                for line in yaml_content.split("\n"):
-                    line = line.strip()
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        key = key.strip()
-                        value = value.strip()
-                        
-                        # Handle lists
-                        if value.startswith("[") and value.endswith("]"):
-                            # Parse simple list: ["*.py", "*.pyx"]
-                            value = [v.strip().strip('"\'') for v in value[1:-1].split(",") if v.strip()]
-                        # Handle booleans
-                        elif value.lower() in ("true", "false"):
-                            value = value.lower() == "true"
-                        # Handle numbers
-                        elif value.isdigit():
-                            value = int(value)
-                        # Handle quoted strings
-                        elif value.startswith('"') and value.endswith('"'):
-                            value = value[1:-1]
-                        elif value.startswith("'") and value.endswith("'"):
-                            value = value[1:-1]
-                        
-                        frontmatter[key] = value
+        # Delimiters are complete lines, not substrings in metadata values.
+        lines = content.splitlines(keepends=True)
+        if lines and lines[0].rstrip("\r\n") == "---":
+            import yaml
+
+            for end in range(1, len(lines)):
+                if lines[end].rstrip("\r\n") != "---":
+                    continue
+                try:
+                    parsed = yaml.safe_load("".join(lines[1:end])) or {}
+                    if isinstance(parsed, dict):
+                        frontmatter = parsed
+                        body = "".join(lines[end + 1:]).strip()
+                except yaml.YAMLError:
+                    # Preserve the original instruction text when metadata is invalid.
+                    pass
+                break
         
         return frontmatter, body
     
@@ -747,20 +732,20 @@ class RulesManager:
         file_path = rules_dir / f"{name}.md"
         
         # Build frontmatter
-        frontmatter_lines = ["---"]
+        import yaml
+
+        metadata = {"activation": activation}
         if description:
-            frontmatter_lines.append(f'description: "{description}"')
+            metadata["description"] = description
         if globs:
-            globs_str = ", ".join(f'"{g}"' for g in globs)
-            frontmatter_lines.append(f"globs: [{globs_str}]")
-        frontmatter_lines.append(f"activation: {activation}")
+            metadata["globs"] = globs
         if priority != 0:
-            frontmatter_lines.append(f"priority: {priority}")
-        frontmatter_lines.append("---")
-        frontmatter_lines.append("")
+            metadata["priority"] = priority
         
         # Write file
-        full_content = "\n".join(frontmatter_lines) + content
+        full_content = "---\n" + yaml.safe_dump(
+            metadata, sort_keys=False, allow_unicode=False
+        ) + "---\n" + content
         file_path.write_text(full_content, encoding="utf-8")
         
         # Create and register rule
