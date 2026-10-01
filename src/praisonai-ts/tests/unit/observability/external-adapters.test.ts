@@ -235,6 +235,8 @@ describe('LangSmithObservabilityAdapter delivery (mock HTTP transport)', () => {
 
   it('is disabled with no API key and warns that flush delivered nothing (OBS-DEL-002)', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const savedSmith = process.env.LANGSMITH_API_KEY;
+    const savedChain = process.env.LANGCHAIN_API_KEY;
     try {
       const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
       delete process.env.LANGSMITH_API_KEY;
@@ -247,8 +249,84 @@ describe('LangSmithObservabilityAdapter delivery (mock HTTP transport)', () => {
       const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n');
       expect(messages.toLowerCase()).toContain('delivered nothing');
     } finally {
+      // Restore ambient credentials so later tests in this worker are unaffected.
+      if (savedSmith === undefined) delete process.env.LANGSMITH_API_KEY;
+      else process.env.LANGSMITH_API_KEY = savedSmith;
+      if (savedChain === undefined) delete process.env.LANGCHAIN_API_KEY;
+      else process.env.LANGCHAIN_API_KEY = savedChain;
       warnSpy.mockRestore();
     }
+  });
+
+  it('surfaces failed deliveries in flush() instead of resolving silently (OBS-DEL-004)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+      const adapter = new LangSmithObservabilityAdapter();
+      // A client whose POST rejects simulates a bad key / network / 4xx.
+      (adapter as any).client = {
+        async post() { throw new Error('401 unauthorized'); },
+        async patch() { return { status: 200 }; }
+      };
+      expect(adapter.isEnabled).toBe(true);
+      const trace = adapter.startTrace('agent-run', {});
+      adapter.endTrace(trace.traceId, 'completed');
+      await adapter.flush();
+      const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n').toLowerCase();
+      expect(messages).toContain('not delivered');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('exports span events into the run payload (OBS-DEL-005)', async () => {
+    const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+    const adapter = new LangSmithObservabilityAdapter();
+    const { client, patches } = makeMockClient();
+    (adapter as any).client = client;
+    const trace = adapter.startTrace('agent-run', {});
+    const span = adapter.startSpan(trace.traceId, 'search', 'tool');
+    span.addEvent('cache_hit', { key: 'q1' });
+    adapter.endSpan(span.spanId, 'completed');
+    adapter.endTrace(trace.traceId, 'completed');
+    await adapter.flush();
+    const eventPatch = patches.find(
+      (p: any) => p.body.extra && Array.isArray(p.body.extra.events)
+    );
+    expect(eventPatch).toBeDefined();
+    expect(eventPatch.body.extra.events[0].name).toBe('cache_hit');
+  });
+
+  it('refuses a plaintext http endpoint to a non-local host (SR-003)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+      const adapter = new LangSmithObservabilityAdapter({
+        name: 'langsmith',
+        apiKey: 'test-key',
+        baseUrl: 'http://traces.example.com'
+      });
+      await adapter.initialize();
+      expect(adapter.isEnabled).toBe(false);
+      const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n').toLowerCase();
+      expect(messages).toContain('plaintext http');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('evicts completed runs so memory stays bounded (OBS-DEL-006)', async () => {
+    const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+    const adapter = new LangSmithObservabilityAdapter();
+    const { client } = makeMockClient();
+    (adapter as any).client = client;
+    const trace = adapter.startTrace('agent-run', {});
+    const span = adapter.startSpan(trace.traceId, 'search', 'tool');
+    adapter.endSpan(span.spanId, 'completed');
+    adapter.endTrace(trace.traceId, 'completed');
+    await adapter.flush();
+    expect((adapter as any).runs.size).toBe(0);
+    expect((adapter as any).dottedBySpan.size).toBe(0);
   });
 
   it('posts a run for the agent root and child spans, and patches on end (OBS-DEL-001/003)', async () => {

@@ -72,6 +72,17 @@ function pad(n: number): string {
   return n.toString().padStart(3, '0');
 }
 
+/** True for http://localhost, 127.0.0.0/8 and ::1 — the only safe plaintext hosts. */
+function isLoopbackEndpoint(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return false;
+  }
+  return host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
 /**
  * LangSmith orders sibling runs by a "dotted_order" string built from the run
  * start time and id. We keep a monotonic sequence per trace so ordering is
@@ -107,6 +118,7 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
   private seqByTrace: Map<string, number> = new Map();
   private dottedBySpan: Map<string, string> = new Map();
   private queue: Promise<void> = Promise.resolve();
+  private deliveryErrors = 0;
 
   constructor(config?: ObservabilityToolConfig) {
     this.config = config || { name: 'langsmith' };
@@ -132,6 +144,18 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
       // SR-003: only http(s) schemes are accepted for self-hosted URLs.
       console.warn(
         `[OBSERVABILITY] Ignoring LangSmith endpoint "${rawEndpoint}": only http(s) URLs are supported. ` +
+          'Delivery is disabled; traces are recorded in memory only.'
+      );
+      this.client = null;
+      return;
+    }
+    // SR-003: the API key travels in an x-api-key header, so a plaintext http://
+    // endpoint would leak the credential to any on-path observer. Allow http
+    // only for loopback hosts (local self-hosted dev); require https otherwise.
+    if (/^http:\/\//i.test(rawEndpoint) && !isLoopbackEndpoint(rawEndpoint)) {
+      console.warn(
+        `[OBSERVABILITY] Refusing LangSmith endpoint "${rawEndpoint}": the API key must not be sent over ` +
+          'plaintext http to a non-local host. Use https (or an http://localhost endpoint). ' +
           'Delivery is disabled; traces are recorded in memory only.'
       );
       this.client = null;
@@ -173,7 +197,19 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
   }
 
   private enqueue(work: () => Promise<void>): void {
-    this.queue = this.queue.then(work).catch(() => {});
+    this.queue = this.queue.then(work).catch(() => {
+      // A rejected request must not break the chain (so later spans still try),
+      // but it must not vanish either: count it so flush() can report that not
+      // everything was delivered. The error is swallowed here only after being
+      // surfaced by the work function itself.
+      this.deliveryErrors++;
+    });
+  }
+
+  /** Drop a run's bookkeeping once it has ended so long processes stay bounded. */
+  private evict(runId: string): void {
+    this.runs.delete(runId);
+    this.dottedBySpan.delete(runId);
   }
 
   startTrace(
@@ -227,6 +263,8 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
       };
       if (status === 'failed') patch.error = 'trace failed';
       this.enqueue(() => this.patchRun(patch));
+      this.evict(traceId);
+      this.seqByTrace.delete(traceId);
     }
   }
 
@@ -309,11 +347,24 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
       if (attributes) patch.extra = { metadata: attributes };
       if (status === 'failed') patch.error = 'span failed';
       this.enqueue(() => this.patchRun(patch));
+      this.evict(spanId);
     }
   }
 
   addEvent(spanId: string, name: string, attributes?: Record<string, unknown>): void {
     this.memory.addEvent(spanId, name, attributes);
+    const run = this.runs.get(spanId);
+    if (this.client && run) {
+      // LangSmith has no first-class "event" on a run, so we accumulate events
+      // on the run payload and patch them into extra.events where they are
+      // visible alongside the span. Without this the registry's events:true
+      // claim would be dishonest.
+      const extra = (run.extra = run.extra || {});
+      const events = ((extra as any).events = ((extra as any).events as unknown[]) || []);
+      events.push({ name, time: new Date().toISOString(), attributes: attributes || {} });
+      const snapshot = events.slice();
+      this.enqueue(() => this.patchRun({ id: spanId, extra: { events: snapshot } }));
+    }
   }
 
   recordError(spanId: string, error: Error): void {
@@ -335,6 +386,18 @@ export class LangSmithObservabilityAdapter implements ObservabilityAdapter {
       return;
     }
     await this.queue;
+    if (this.deliveryErrors > 0) {
+      // Honest degradation: a configured, "enabled" client still may not have
+      // delivered everything (bad key, network, 4xx/5xx). Surface it rather than
+      // letting flush() imply a clean delivery.
+      const failed = this.deliveryErrors;
+      this.deliveryErrors = 0;
+      console.warn(
+        `[OBSERVABILITY] flush() on the "langsmith" adapter completed with ${failed} failed ` +
+          'run request(s): some traces were NOT delivered to LangSmith. Check the API key, endpoint ' +
+          'and network connectivity.'
+      );
+    }
   }
 
   private async postRun(run: LangSmithRun): Promise<void> {
