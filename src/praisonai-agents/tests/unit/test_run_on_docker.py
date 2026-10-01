@@ -338,6 +338,18 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
     del backend
     gc.collect()
+
+    # During live GC _release is fire-and-forget: it submits the shutdown to the
+    # shared background bridge loop and returns without blocking the collector
+    # (only interpreter-exit takes the blocking path). The reclaim therefore
+    # lands a beat later on another thread, so wait for it rather than racing the
+    # assertion -- we are still proving the finalizer fired and reclaimed, not
+    # weakening that guarantee.
+    import time
+
+    deadline = time.time() + 5.0
+    while not released and time.time() < deadline:
+        time.sleep(0.01)
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
 
