@@ -97,9 +97,20 @@ class TestCompactionMaxTokensResolution:
         agent = self._make_agent("gpt-4o")
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
-        # Well beyond the working budget must trigger compaction.
-        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
         compactor = ContextCompactor(max_tokens=resolved)
+        # Size the content against the compactor's OWN token estimator rather
+        # than assuming a flat chars/4 ratio. The accurate tokeniser (tiktoken)
+        # collapses a long run of identical characters far below chars/4, so a
+        # fixed "A" * 4 * N string under-counted and the budget was never
+        # crossed (Issue: flaky when tiktoken is available offline). Growing a
+        # varied, incompressible string until the estimate clears the budget
+        # keeps the intent — content beyond the budget must trigger — true for
+        # both the heuristic and the accurate tokeniser.
+        content = ""
+        chunk = "The quick brown fox jumps over the lazy dog 1234567890. "
+        while compactor.estimate_tokens(content) <= resolved:
+            content += chunk * 200
+        msgs = [{"role": "user", "content": content}]
         assert compactor.needs_compaction(msgs) is True
 
 

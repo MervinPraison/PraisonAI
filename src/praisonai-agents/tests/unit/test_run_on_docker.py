@@ -338,6 +338,14 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
     del backend
     gc.collect()
+    # ``_release`` reclaims fire-and-forget during live GC (it must not pin the
+    # caller's loop for the provider round-trip), so the shutdown coroutine runs
+    # on the shared async bridge's background loop. Poll briefly for it to land
+    # rather than asserting on the same tick, which raced the bridge thread.
+    import time
+    deadline = time.monotonic() + 5.0
+    while not released and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
 
