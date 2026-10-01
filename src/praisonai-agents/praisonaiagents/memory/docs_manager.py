@@ -355,8 +355,8 @@ class DocsManager:
         frontmatter_lines = ["---"]
         if description:
             frontmatter_lines.append(f'description: "{description}"')
-        if priority != 0:
-            frontmatter_lines.append(f"priority: {priority}")
+        # Persist explicit zero instead of reloading the workspace default (100).
+        frontmatter_lines.append(f"priority: {priority}")
         if tags:
             tags_str = ", ".join(f'"{t}"' for t in tags)
             frontmatter_lines.append(f"tags: [{tags_str}]")
@@ -372,7 +372,7 @@ class DocsManager:
             name=name,
             content=content,
             description=description,
-            priority=priority,
+            priority=priority - 1000 if scope == "global" else priority,
             tags=tags or [],
             file_path=str(file_path)
         )
