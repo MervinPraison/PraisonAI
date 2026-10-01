@@ -55,3 +55,26 @@ def test_valid_header_keeps_zero_fraction_and_cap(value):
     error = Exception("rate limited")
     error.headers = {"retry-after": value}
     assert extract_retry_after(error) == min(float(value), 300)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "rate limited; retry after -1 seconds",
+        "rate limited; retry-after: -3600 seconds",
+        "please wait -5 seconds",
+    ],
+)
+def test_negative_message_hint_is_ignored(message):
+    assert extract_retry_after(Exception(message)) is None
+
+
+def test_negative_message_hint_does_not_poison_scheduler_hold():
+    from praisonaiagents.scheduler.due import quota_hold_from_failure
+
+    error = Exception("rate limited; retry after -3600 seconds")
+    assert quota_hold_from_failure(error, now=1000) is None
+
+
+def test_valid_fractional_message_hint_is_preserved():
+    assert extract_retry_after(Exception("retry after 2.5 seconds")) == 2.5
