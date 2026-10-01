@@ -1613,12 +1613,23 @@ class AgentFlow:
                 variables=all_variables.copy()
             )
 
-            # Step-result cache (opt-in via cache=). This linear path invokes
-            # handlers INLINE rather than through _execute_single_step_internal,
-            # which the pattern paths use -- so both are wrapped. Caching only
-            # one would make the feature work or not depending on whether a step
-            # happened to sit inside a Parallel or an If, which is worse than
-            # not having it.
+            # Check should_run condition
+            if step.should_run:
+                try:
+                    if not step.should_run(context):
+                        if verbose:
+                            print(f"⏭️ Skipped: {step.name}")
+                        if hasattr(step, 'status'):
+                            step.status = "skipped"
+                        self.step_statuses[step.name] = "skipped"
+                        i += 1
+                        continue
+                except Exception as e:
+                    logger.error(f"should_run failed for {step.name}: {e}")
+
+            # Cache only the result, never the decision to run. A condition can
+            # observe external state that is absent from the cache key, so it
+            # must be evaluated even when identical inputs have a cached result.
             _step_cache = getattr(self, "_step_cache", None)
             _cache_key = None
             if _step_cache is not None:
@@ -1635,32 +1646,17 @@ class AgentFlow:
                     i += 1
                     continue
             
-            # Update step status
+            # Mark actual execution only after the condition and cache lookup.
             if hasattr(step, 'status'):
                 step.status = "running"
             self.step_statuses[step.name] = "running"
-            
-            # Call on_step_start callback
+
             if self.on_step_start:
                 try:
                     self.on_step_start(step.name, context)
                 except Exception as e:
                     logger.error(f"on_step_start callback failed: {e}")
-            
-            # Check should_run condition
-            if step.should_run:
-                try:
-                    if not step.should_run(context):
-                        if verbose:
-                            print(f"⏭️ Skipped: {step.name}")
-                        if hasattr(step, 'status'):
-                            step.status = "skipped"
-                        self.step_statuses[step.name] = "skipped"
-                        i += 1
-                        continue
-                except Exception as e:
-                    logger.error(f"should_run failed for {step.name}: {e}")
-            
+
             # Gap 3c: Check for cross-step handoff cycles
             self._check_handoff_cycle(step)
             
