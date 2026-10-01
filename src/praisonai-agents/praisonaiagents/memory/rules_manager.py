@@ -317,7 +317,8 @@ class RulesManager:
                             for key, value in node.value:
                                 # These schema fields preserve scalar spellings,
                                 # including leading zeroes and numeric filenames.
-                                if key.value == "priority" and isinstance(value, yaml.ScalarNode):
+                                if (key.value == "priority" and isinstance(value, yaml.ScalarNode)
+                                        and re.fullmatch(r"[+-]?[0-9]+", value.value)):
                                     value.tag = "tag:yaml.org,2002:str"
                                 elif key.value == "globs" and isinstance(value, yaml.SequenceNode):
                                     for item in value.value:
@@ -329,9 +330,10 @@ class RulesManager:
                     if isinstance(parsed, dict):
                         if "priority" in parsed:
                             priority = parsed["priority"]
-                            if not isinstance(priority, str) or not re.fullmatch(r"[+-]?[0-9]+", priority):
-                                raise ValueError("Rule priority must be a decimal integer")
-                            parsed["priority"] = int(priority, 10)
+                            if isinstance(priority, str) and re.fullmatch(r"[+-]?[0-9]+", priority):
+                                parsed["priority"] = int(priority, 10)
+                            elif type(priority) is not int:
+                                raise ValueError("Rule priority must be an integer")
                         if "globs" in parsed:
                             globs = parsed["globs"]
                             if not isinstance(globs, list) or not all(isinstance(item, str) for item in globs):

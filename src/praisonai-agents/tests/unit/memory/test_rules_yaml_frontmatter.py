@@ -112,6 +112,23 @@ def test_delimiter_accepts_trailing_whitespace(manager, opening, closing):
     assert manager.get_active_rules() == []
 
 
+@pytest.mark.parametrize("priority,expected", [("1_000", 1000), ("0x10", 16), ("0b10", 2), ("1:20", 80)])
+@pytest.mark.parametrize("scope", ["workspace", "global"])
+def test_yaml_integer_priority_preserves_all_metadata(manager, priority, expected, scope):
+    rules_dir = manager.global_rules_path if scope == "global" else manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text(
+        f'---\npriority: {priority}\ndescription: reference\nactivation: manual\n---\nBody', encoding="utf-8"
+    )
+    manager.reload()
+    rule = manager.get_rule_by_name("reference")
+    assert rule.priority == expected - (1000 if scope == "global" else 0)
+    assert rule.description == "reference"
+    assert rule.activation == "manual"
+    assert rule.content == "Body"
+    assert manager.get_active_rules() == []
+
+
 def test_empty_frontmatter_remains_valid(manager):
     rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
     rules_dir.mkdir(parents=True, exist_ok=True)
