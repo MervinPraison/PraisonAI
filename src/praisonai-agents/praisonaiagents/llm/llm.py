@@ -6784,21 +6784,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Set max_tokens here; for reasoning models this is normalized to
             # max_completion_tokens after per-call override_params are merged.
             params["max_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
-        if self.presence_penalty:
+        if self.presence_penalty is not None:
             params["presence_penalty"] = self.presence_penalty
-        if self.frequency_penalty:
+        if self.frequency_penalty is not None:
             params["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias:
             params["logit_bias"] = self.logit_bias
         if self.response_format:
             params["response_format"] = self.response_format
-        if self.seed:
+        if self.seed is not None:
             params["seed"] = self.seed
-        if self.logprobs:
+        if self.logprobs is not None:
             params["logprobs"] = self.logprobs
-        if self.top_logprobs:
+        if self.top_logprobs is not None:
             params["top_logprobs"] = self.top_logprobs
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
