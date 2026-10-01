@@ -458,19 +458,38 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Get the full session tree starting from a session.
         
         Returns a nested dictionary representing the tree structure.
+
+        Raises:
+            ValueError: Child references form a cycle on the current path.
         """
-        session = self._load_extended_session(session_id)
-        
-        tree = {
-            "session_id": session.session_id,
-            "title": session.title,
-            "message_count": len(session.messages),
-            "children": []
-        }
-        
-        for child_id in session.children_ids:
-            tree["children"].append(self.get_session_tree(child_id))
-        
+        def load_node(node_id):
+            session = self._load_extended_session(node_id)
+            node = {
+                "session_id": session.session_id,
+                "title": session.title,
+                "message_count": len(session.messages),
+                "children": [],
+            }
+            return node, iter(session.children_ids)
+
+        tree, children = load_node(session_id)
+        stack = [(session_id, tree, children)]
+        ancestors = {session_id}
+        while stack:
+            node_id, node, children = stack[-1]
+            try:
+                child_id = next(children)
+            except StopIteration:
+                stack.pop()
+                ancestors.remove(node_id)
+                continue
+            if child_id in ancestors:
+                raise ValueError(f"Cycle in session tree at {child_id}")
+            child, grandchildren = load_node(child_id)
+            node["children"].append(child)
+            ancestors.add(child_id)
+            stack.append((child_id, child, grandchildren))
+
         return tree
     
     def create_snapshot(
