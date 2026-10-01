@@ -478,6 +478,11 @@ _REPLAY_UNSAFE_EXCEPTION_NAMES = frozenset({
 
 # Signals that a transient failure happened BEFORE the request was dispatched,
 # so the provider provably did not process it — safe to replay automatically.
+# ``sslerror`` is deliberately NOT listed here: the stdlib ``ssl.SSLError`` is
+# also raised for mid-response failures (e.g. "SSL connection reset by peer"),
+# so a bare SSLError class is not proof of a pre-dispatch failure. It is treated
+# as safe only when the message carries an explicit pre-dispatch TLS signal
+# (handshake / certificate verification) and no post-dispatch signal — see below.
 _REPLAY_SAFE_EXCEPTION_NAMES = frozenset({
     "connecttimeout",           # TCP connect never completed
     "connecttimeouterror",      # urllib3 connect timeout
@@ -485,14 +490,14 @@ _REPLAY_SAFE_EXCEPTION_NAMES = frozenset({
     "connecterror",             # httpx connect error (pre-dispatch)
     "newconnectionerror",       # urllib3: connection never established
     "gaierror",                 # DNS resolution failure
-    "sslerror",                 # TLS handshake failure (pre-dispatch)
-    "sslcertverificationerror",
+    "sslcertverificationerror", # certificate verification fails before dispatch
 })
 
 _REPLAY_UNSAFE_MESSAGE_PATTERNS = (
     r"read.?timed?.?out",
     r"read.?timeout",
     r"connection.?reset",
+    r"reset.?by.?peer",
     r"peer.?closed",
     r"incomplete.?read",
     r"chunked",
@@ -500,6 +505,11 @@ _REPLAY_UNSAFE_MESSAGE_PATTERNS = (
     r"server.?disconnected",
 )
 
+# Explicit pre-dispatch signals. These establish that the request never reached
+# the provider (connect never completed, TLS handshake/certificate failed) and
+# therefore win even over a generic transport label. A bare "tls"/"ssl" token is
+# intentionally excluded: a transport label alone does not prove pre-dispatch
+# failure, and matching it would mask a post-dispatch read/reset signal.
 _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"connect.?timed?.?out",
     r"connection.?timed?.?out",
@@ -507,9 +517,10 @@ _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"name.?resolution",
     r"failed.?to.?resolve",
     r"getaddrinfo",
-    r"ssl",
     r"handshake",
-    r"tls",
+    r"certificate.?verif",
+    r"certificate.?verify.?failed",
+    r"cert.?verif",
 )
 
 
@@ -517,16 +528,35 @@ def is_replay_unsafe(error: Exception) -> bool:
     """Return True if replaying the request could double-execute the turn.
 
     Distinguishes *pre-dispatch* failures (the request provably never reached
-    the provider — DNS/connect/TLS failures) which are safe to replay, from
-    *post-dispatch* failures (read timeout, connection reset mid-response) where
-    the provider may already have produced output and any side-effecting tool
-    calls may already have run. Post-dispatch failures are replay-unsafe.
+    the provider — DNS/connect failures, TLS handshake and certificate
+    verification failures) which are safe to replay, from *post-dispatch*
+    failures (read timeout, connection reset mid-response) where the provider
+    may already have produced output and any side-effecting tool calls may
+    already have run. Post-dispatch failures are replay-unsafe.
+
+    A generic TLS/SSL transport label does NOT establish a pre-dispatch failure:
+    ``ssl.SSLError`` is raised both for handshake failures (pre-dispatch) and for
+    mid-response read/reset failures (post-dispatch). So an explicit post-dispatch
+    signal (read timeout, connection reset) always wins over the transport label,
+    while explicit connect-timeout, TLS handshake and certificate-verification
+    signals remain safe.
 
     Defaults to ``False`` (safe/retryable) for ambiguous transient errors so
     existing auto-retry behaviour is preserved unless a post-dispatch signal is
     present. Callers should only block the retry when the turn is side-effecting.
     """
-    # 1. Exception type (walk the MRO to catch provider subclasses) — most stable.
+    error_text = f"{type(error).__name__} {error}".lower()
+
+    # 1. An explicit post-dispatch signal in the message always wins — even when
+    #    the error is an SSLError or carries a generic TLS/SSL label. A read
+    #    timeout or connection reset means bytes were already on the wire.
+    for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
+        if re.search(pattern, error_text):
+            return True
+
+    # 2. Exception type (walk the MRO to catch provider subclasses) — stable, and
+    #    checked only after ruling out a post-dispatch message signal above so a
+    #    mid-response SSLError is not misclassified as a pre-dispatch handshake.
     for cls in type(error).__mro__:
         name = cls.__name__.lower()
         if name in _REPLAY_SAFE_EXCEPTION_NAMES:
@@ -534,14 +564,12 @@ def is_replay_unsafe(error: Exception) -> bool:
         if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
             return True
 
-    # 2. Message text — pre-dispatch signals win over the generic "timeout".
-    error_text = f"{type(error).__name__} {error}".lower()
+    # 3. Explicit pre-dispatch message signals (connect timeout, handshake,
+    #    certificate verification) establish the request never reached the
+    #    provider — safe to replay.
     for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
         if re.search(pattern, error_text):
             return False
-    for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
-        if re.search(pattern, error_text):
-            return True
 
     return False
 

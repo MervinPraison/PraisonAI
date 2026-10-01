@@ -552,3 +552,99 @@ class TestReplaySafety:
         )
         assert decision.is_retryable is True
         assert decision.action == "retry"
+
+
+class TestReplaySafetyTlsLabels:
+    """A TLS/SSL label must not mask a post-dispatch read/reset signal.
+
+    Regression for #5441: generic "tls"/"ssl" message matching and the stdlib
+    ``ssl.SSLError`` class were previously treated as proof of a pre-dispatch
+    failure, hiding a post-dispatch read timeout / connection reset.
+    """
+
+    def test_generic_tls_label_with_read_timeout_is_unsafe(self):
+        """A generic TLS label carrying a read-timeout signal is post-dispatch."""
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(Exception("TLS transport: read timeout")) is True
+
+    def test_sslerror_with_connection_reset_is_unsafe(self):
+        """ssl.SSLError raised mid-response (reset by peer) is post-dispatch."""
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(ssl.SSLError("SSL connection reset by peer")) is True
+
+    def test_sslerror_handshake_remains_safe(self):
+        """An explicit TLS handshake failure provably never reached dispatch."""
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(ssl.SSLError("TLS handshake failed")) is False
+
+    def test_certificate_verification_failure_remains_safe(self):
+        """Certificate verification fails before any request is dispatched."""
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(
+            ssl.SSLError("certificate verify failed: unable to get local issuer")
+        ) is False
+
+    def test_connect_timeout_label_remains_safe(self):
+        """An explicit connect timeout stays pre-dispatch/safe."""
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(Exception("TLS connect timed out")) is False
+
+    def test_side_effecting_turn_blocks_tls_labelled_read_timeout(self):
+        """A tool turn must surface a TLS-labelled read timeout, not replay it."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="fake")
+        decision = llm.resolve_failover_decision(
+            Exception("TLS transport: read timeout"),
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is False
+        assert decision.action == "surface_error"
+        assert decision.reason == "provider_outcome_unknown"
+
+    def test_side_effecting_turn_blocks_sslerror_connection_reset(self):
+        """A tool turn must surface an SSLError reset-by-peer, not replay it."""
+        import ssl
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="fake")
+        decision = llm.resolve_failover_decision(
+            ssl.SSLError("SSL connection reset by peer"),
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is False
+        assert decision.action == "surface_error"
+        assert decision.reason == "provider_outcome_unknown"
+
+    def test_tool_less_turn_still_retries_tls_labelled_read_timeout(self):
+        """A tool-less turn retains auto-retry for a TLS-labelled read timeout."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="fake")
+        decision = llm.resolve_failover_decision(
+            Exception("TLS transport: read timeout"),
+            {"attempt": 1, "max_retries": 3, "side_effecting": False},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"
+
+    def test_side_effecting_turn_retries_tls_handshake_failure(self):
+        """A pre-dispatch handshake failure is safe to replay even with tools."""
+        import ssl
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="fake")
+        decision = llm.resolve_failover_decision(
+            ssl.SSLError("TLS handshake failed"),
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"
