@@ -676,9 +676,15 @@ def extract_retry_after(
     #    silently read as a positive delay. Match a whole numeric token so
     #    leading-dot fractions, exponents and malformed suffixes cannot be
     #    mistaken for an unrelated positive integer.
-    number = r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?![\d.eE+-])"
+    # A period may terminate a sentence, but may not split an embedded token.
+    number = (
+        r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
+        r"(?![\deE+-]|\.(?!\s|$|[\"')\]}]))"
+    )
     patterns = [
-        r'"?retryDelay"?\s*:\s*"?' + number + r's\b',
+        # Quoted duration values must close immediately after the unit.
+        r'"?retryDelay"?\s*:\s*"' + number + r's"',
+        r'"?retryDelay"?\s*:\s*' + number + r's(?=$|[\s,;}\]])',
         r"try again in\s+" + number,
         r"retry.?after[:\s]+" + number,
         r"retry[:\s]+" + number,
