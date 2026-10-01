@@ -217,25 +217,46 @@
           "title": "Bot Loop Protection"
         },
         "allowlist": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Allowlist",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Allowlist"
         },
         "blocklist": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Blocklist",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Blocklist"
         },
         "allowed_users": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Allowed Users",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Allowed Users"
         },
         "unknown_user_policy": {
           "anyOf": [
@@ -256,6 +277,9 @@
             },
             {
               "type": "null"
+            },
+            {
+              "type": "integer"
             }
           ],
           "default": null,
@@ -1097,6 +1121,719 @@
       },
       "title": "TtsConfigSchema",
       "type": "object"
+    },
+    "HealthMonitorSchema": {
+      "additionalProperties": false,
+      "description": "Schema for the gateway channel health-monitor block (``gateway.health``).\n\nMirrors the knobs read by ``gateway/server.py`` (via\n``HealthMonitorConfig.from_dict``) so a misspelled threshold is caught at\nload time instead of silently falling back to the default.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "interval": {
+          "default": 300.0,
+          "exclusiveMinimum": 0,
+          "title": "Interval",
+          "type": "number"
+        },
+        "startup_grace": {
+          "default": 60.0,
+          "minimum": 0,
+          "title": "Startup Grace",
+          "type": "number"
+        },
+        "stale_after": {
+          "default": 120.0,
+          "exclusiveMinimum": 0,
+          "title": "Stale After",
+          "type": "number"
+        },
+        "stuck_after": {
+          "default": 900.0,
+          "exclusiveMinimum": 0,
+          "title": "Stuck After",
+          "type": "number"
+        },
+        "max_restarts_per_hour": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Max Restarts Per Hour",
+          "type": "integer"
+        },
+        "fleet_restarts_per_hour": {
+          "default": 40,
+          "minimum": 1,
+          "title": "Fleet Restarts Per Hour",
+          "type": "integer"
+        },
+        "failing_channel_fraction": {
+          "default": 0.5,
+          "exclusiveMinimum": 0,
+          "maximum": 1.0,
+          "title": "Failing Channel Fraction",
+          "type": "number"
+        },
+        "breaker_cooldown_s": {
+          "default": 120.0,
+          "minimum": 0,
+          "title": "Breaker Cooldown S",
+          "type": "number"
+        }
+      },
+      "title": "HealthMonitorSchema",
+      "type": "object"
+    },
+    "HookSchema": {
+      "additionalProperties": true,
+      "description": "Schema for a single inbound trigger hook (``hooks:`` entries, #2281).\n\nMirrors ``praisonaiagents.gateway.hooks.HookConfig``; ``extra=\"allow\"``\nkeeps free-form extras (folded into ``metadata`` by ``HookConfig.from_dict``)\nwhile still requiring a non-empty ``path`` and a valid ``action``.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent"
+        },
+        "action": {
+          "default": "agent",
+          "title": "Action",
+          "type": "string"
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth"
+        },
+        "session_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Key"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        },
+        "deliver_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deliver To"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "secret": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secret"
+        },
+        "signature_header": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature Header"
+        },
+        "signature_algo": {
+          "default": "sha256",
+          "title": "Signature Algo",
+          "type": "string"
+        },
+        "signature_prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature Prefix"
+        },
+        "events": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Events"
+        },
+        "event_header": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Header"
+        },
+        "deliver_only": {
+          "default": false,
+          "title": "Deliver Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "HookSchema",
+      "type": "object"
+    },
+    "GatewayServerSchema": {
+      "additionalProperties": false,
+      "description": "Typed schema for the ``gateway:`` server block (issue #3050).\n\nReplaces the previous opaque ``Dict[str, Any]`` so a misspelled or\nmistyped server knob (``drain_timout``, ``\"10s\"`` instead of ``10``) is\nrejected at load time with a friendly, field-named error instead of being\nsilently dropped and running with the default. Field names/types/ranges\nmirror core's ``praisonaiagents.gateway.config.GatewayConfig`` so there is\none definition of a gateway server setting.\n\n``extra=\"forbid\"`` surfaces unknown keys; ``hooks`` is validated as a\nnested list here too since the runtime accepts hooks nested under\n``gateway:``.",
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        },
+        "bind_host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bind Host"
+        },
+        "cors_origins": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cors Origins"
+        },
+        "allowed_origins": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Origins"
+        },
+        "auth_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Token"
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth"
+        },
+        "auth_scopes": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Scopes"
+        },
+        "max_connections": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Connections"
+        },
+        "max_sessions_per_agent": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Sessions Per Agent"
+        },
+        "session_config": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Config"
+        },
+        "heartbeat_interval": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heartbeat Interval"
+        },
+        "reconnect_timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reconnect Timeout"
+        },
+        "per_turn_timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Per Turn Timeout"
+        },
+        "ssl_cert": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ssl Cert"
+        },
+        "ssl_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ssl Key"
+        },
+        "max_buffered_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Buffered Bytes"
+        },
+        "max_queued_frames": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Queued Frames"
+        },
+        "max_concurrent_runs": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Concurrent Runs"
+        },
+        "queue_depth": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queue Depth"
+        },
+        "overflow_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overflow Policy"
+        },
+        "preauth_max_connections_per_ip": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preauth Max Connections Per Ip"
+        },
+        "max_unauthorized_frames": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Unauthorized Frames"
+        },
+        "drain_timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drain Timeout"
+        },
+        "reload_drain_timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reload Drain Timeout"
+        },
+        "reliability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reliability"
+        },
+        "durable_runs": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Durable Runs"
+        },
+        "notify_on_undelivered": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notify On Undelivered"
+        },
+        "undelivered_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Undelivered Template"
+        },
+        "api": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api"
+        },
+        "liveness": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Liveness"
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthMonitorSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "turn_lock": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turn Lock"
+        },
+        "control": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control"
+        },
+        "forensics": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forensics"
+        },
+        "hooks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HookSchema"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hooks"
+        }
+      },
+      "title": "GatewayServerSchema",
+      "type": "object"
     }
   },
   "description": "Schema for gateway.yaml / bot.yaml consumed by the PraisonAI gateway and single-bot runtime (gateway server, agents, channels, routing, schedules, hooks, streaming and delivery).",
@@ -1160,6 +1897,9 @@
         },
         {
           "type": "null"
+        },
+        {
+          "type": "integer"
         }
       ],
       "default": null,
@@ -1260,8 +2000,7 @@
     "gateway": {
       "anyOf": [
         {
-          "additionalProperties": true,
-          "type": "object"
+          "$ref": "#/$defs/GatewayServerSchema"
         },
         {
           "type": "null"
@@ -1273,11 +2012,10 @@
     "hooks": {
       "anyOf": [
         {
+          "type": "array",
           "items": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "type": "array"
+            "$ref": "#/$defs/HookSchema"
+          }
         },
         {
           "type": "null"
@@ -1285,8 +2023,14 @@
       ],
       "default": null,
       "title": "Hooks"
+    },
+    "config_version": {
+      "type": "integer",
+      "title": "Config Version",
+      "description": "Stamped by `praisonai gateway doctor --fix` / `start` to track config migrations. Managed automatically."
     }
   },
   "title": "PraisonAI Gateway / Bot Configuration",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
 }
