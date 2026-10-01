@@ -258,20 +258,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._streaming_config = config
         logger.debug("TelegramBot: streaming configured, mode=%s", config.mode)
 
-    def _maybe_append_footer(
-        self, content: str, turn_started_at: Optional[float]
-    ) -> str:
-        """Append the opt-in runtime footer to a final reply.
+    def _footer_line(self, turn_started_at: Optional[float]) -> str:
+        """Build the opt-in runtime footer line for a final reply.
 
-        No-op (returns ``content`` unchanged) unless ``config.footer`` is enabled.
-        Privacy-safe: surfaces only the configured model name and turn latency,
-        omitting any field that is unavailable. Best-effort — a build error never
-        blocks the reply.
+        Returns ``""`` (no footer) unless ``config.footer`` is enabled. The line
+        is privacy-safe: it surfaces only the configured model name and turn
+        latency, omitting any field that is unavailable. Best-effort — a build
+        error never blocks the reply.
+
+        The line is appended to the *text* of the final reply only (never to
+        interim streamed frames, and never to the text handed to voice/TTS or
+        media synthesis), so voice notes don't narrate the footer.
         """
         if not getattr(self.config, "footer", False):
-            return content
-        if not isinstance(content, str) or not content:
-            return content
+            return ""
         try:
             model = None
             agent = self._agent
@@ -281,11 +281,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             latency = None
             if turn_started_at is not None:
                 latency = max(0.0, time.monotonic() - turn_started_at)
-            line = build_footer_line(model=model, latency_s=latency)
-            return append_footer(content, line)
+            return build_footer_line(model=model, latency_s=latency)
         except Exception as e:  # pragma: no cover — never block a reply on footer
             logger.debug("footer build skipped: %s", e)
-            return content
+            return ""
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -815,9 +814,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             
                             # Finalize with text content (after hook processing and media extraction).
                             # Append the opt-in runtime footer to the FINAL reply only
-                            # (never to interim streamed frames).
+                            # (never to interim streamed frames, and never to the
+                            # voice-synthesis text below — matching the non-streaming path).
                             final_text = text_content if text_content else send_result["content"]
-                            final_text = self._maybe_append_footer(final_text, turn_started_at)
+                            final_text = append_footer(
+                                final_text, self._footer_line(turn_started_at)
+                            )
                             await streamer.finalize(final_text)
 
                             # Issue #3623: the streamed reply is delivered as text
@@ -922,17 +924,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         )
                         if send_result["cancel"]:
                             return
-                        # Append the opt-in runtime footer to the final reply.
-                        final_content = self._maybe_append_footer(
-                            send_result["content"], turn_started_at
-                        )
+                        # Opt-in runtime footer: appended to the final text reply
+                        # only (never to voice/TTS or media synthesis).
                         await self._send_response_with_media(
                             update.message.chat_id,
-                            final_content,
+                            send_result["content"],
                             reply_to=update.message.message_id,
                             inbound_was_voice=bool(
                                 update.message.voice or update.message.audio
                             ),
+                            footer_line=self._footer_line(turn_started_at),
                         )
                         # If the agent attached a portable presentation
                         # (buttons/menus), render it natively as an inline
@@ -1012,6 +1013,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         or ""
                     ) if update.message.from_user else ""
                     try:
+                        # Mark turn start so the opt-in footer can report latency,
+                        # matching the normal message path. Cheap, unused unless
+                        # config.footer is enabled.
+                        cmd_turn_started_at = time.monotonic()
                         response = await self._session.chat(
                             self._agent, user_id, prompt,
                             chat_id=str(update.message.chat_id) if update.message.chat_id else "",
@@ -1034,6 +1039,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             update.message.chat_id,
                             send_result["content"],
                             reply_to=update.message.message_id,
+                            footer_line=self._footer_line(cmd_turn_started_at),
                         )
                         try:
                             if presentation is not None:
@@ -1879,23 +1885,37 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         response: str,
         reply_to: Optional[int] = None,
         inbound_was_voice: bool = False,
+        footer_line: str = "",
     ) -> None:
-        """Send response, extracting and sending any MEDIA: files."""
+        """Send response, extracting and sending any MEDIA: files.
+
+        ``footer_line`` (opt-in, privacy-safe runtime footer) is appended to the
+        delivered *text* only — never to the text handed to voice/TTS synthesis —
+        so a voice note never narrates the model/latency footer and the
+        streaming and non-streaming paths behave identically.
+        """
         # Parse response for media
         parsed = split_media_from_output(response)
         text = parsed["text"]
         media_urls = parsed.get("media_urls", [])
         audio_as_voice = parsed.get("audio_as_voice", False)
         
-        # Send text first if present
+        # Send text first if present. The footer attaches to the final text
+        # reply only; the pre-footer ``text`` is what feeds voice synthesis.
         if text:
-            await self._send_long_message(chat_id, text, reply_to=reply_to)
+            await self._send_long_message(
+                chat_id, append_footer(text, footer_line), reply_to=reply_to
+            )
+        elif footer_line:
+            # Media-only reply: never emit a footer-only text bubble.
+            pass
 
         # Issue #3623: outbound voice reply. When the operator has enabled a
         # ``voice`` policy, synthesise the agent's plain text and deliver it as
         # a native Telegram voice note — the symmetric counterpart to inbound
         # STT. The agent authors plain text; voice is a transport concern here.
         # Skipped silently (text already sent) when disabled or synthesis fails.
+        # Footer is intentionally excluded from the synthesised text.
         await self._maybe_send_voice_reply(
             chat_id, text, inbound_was_voice=inbound_was_voice
         )
