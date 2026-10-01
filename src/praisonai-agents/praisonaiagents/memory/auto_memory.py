@@ -302,7 +302,6 @@ class AutoMemory:
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         if text_hash in self._processed_hashes:
             return []
-        self._processed_hashes.add(text_hash)
         
         # Quick filter
         if not self.extractor.should_remember(text):
@@ -313,6 +312,8 @@ class AutoMemory:
         
         if store and memories:
             self._store_memories(memories)
+            # Only a completed storage operation consumes deduplication.
+            self._processed_hashes.add(text_hash)
         
         return memories
     
