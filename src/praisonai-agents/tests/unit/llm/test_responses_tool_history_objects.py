@@ -6,6 +6,7 @@ import pytest
 from openai.types.chat import ChatCompletionMessageToolCall
 
 from praisonaiagents.llm.llm import LLM
+from praisonaiagents.llm.openai_client import OpenAIClient
 
 
 def tool_call(shape):
@@ -54,3 +55,35 @@ def test_public_response_preserves_sdk_tool_call_history():
     call = next(item for item in requests[0]['input'] if item.get('type') == 'function_call')
     assert call['name'] == 'lookup'
     assert call['arguments'] == '{"key":"value"}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['sync', 'async'])
+@pytest.mark.parametrize('shape', ['sdk', 'dict', 'mixed', 'flat'])
+async def test_public_client_preserves_tool_call_history(mode, shape):
+    client = OpenAIClient(api_key='sk-test-not-real')
+    requests = []
+
+    def response(**kwargs):
+        requests.append(kwargs)
+        return SimpleNamespace(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}])
+
+    async def aresponse(**kwargs):
+        return response(**kwargs)
+
+    client._sync_client = SimpleNamespace(responses=SimpleNamespace(create=response))
+    client._async_client = SimpleNamespace(responses=SimpleNamespace(create=aresponse))
+    messages = [
+        {'role': 'assistant', 'content': 'Checking', 'tool_calls': [tool_call(shape)]},
+        {'role': 'tool', 'tool_call_id': 'call_1', 'content': 'found'},
+        {'role': 'user', 'content': 'continue'},
+    ]
+    answer = client.create_completion(messages) if mode == 'sync' else await client.acreate_completion(messages)
+    assert answer.choices[0].message.content == 'answer'
+    assert len(requests) == 1
+    assert requests[0]['input'] == [
+        {'role': 'assistant', 'content': 'Checking'},
+        {'type': 'function_call', 'call_id': 'call_1', 'name': 'lookup', 'arguments': '{"key":"value"}'},
+        {'type': 'function_call_output', 'call_id': 'call_1', 'output': 'found'},
+        {'role': 'user', 'content': 'continue'},
+    ]
