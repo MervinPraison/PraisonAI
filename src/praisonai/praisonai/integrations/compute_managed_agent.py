@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import shlex
+import threading
 import uuid
 import weakref
 from typing import Any, Dict, List, Optional
@@ -229,14 +230,26 @@ class ComputeManagedAgent:
         # timer, which docker and flyio do not have.
         instance_id, place = self._instance, self._place
         pending_release = []
+        # Serialises the GC finalizer (``reclaim``, possibly on another thread)
+        # against the exit callback (``reclaim_at_exit`` on the main thread).
+        # Without it there is an unsynchronised window: ``reclaim`` submits the
+        # teardown future to the bridge *before* recording it in
+        # ``pending_release``, so a concurrent ``reclaim_at_exit`` could see the
+        # finalizer already fired yet find nothing to wait for, return early,
+        # and let the bridge's own atexit teardown cancel the in-flight
+        # shutdown — leaking the instance.
+        release_lock = threading.Lock()
 
         def reclaim():
-            future = _release(provider, instance_id, place)
-            if future is None:
-                atexit.unregister(reclaim_at_exit)
-            else:
-                pending_release.append(future)
-                future.add_done_callback(lambda done: atexit.unregister(reclaim_at_exit))
+            with release_lock:
+                future = _release(provider, instance_id, place)
+                if future is None:
+                    atexit.unregister(reclaim_at_exit)
+                else:
+                    pending_release.append(future)
+                    future.add_done_callback(
+                        lambda done: atexit.unregister(reclaim_at_exit)
+                    )
 
         finalizer = weakref.finalize(self, reclaim)
         # weakref's own exit hook cannot tell its callback that this is exit;
@@ -244,12 +257,20 @@ class ComputeManagedAgent:
         finalizer.atexit = False
 
         def reclaim_at_exit():
-            if finalizer.detach() is not None:
+            # Take the lock so a GC ``reclaim`` racing on another thread has
+            # either fully recorded its future in ``pending_release`` or not
+            # started — never the half-submitted state in between. Do the
+            # bounded blocking wait *outside* the lock so a slow teardown never
+            # pins the GC thread.
+            with release_lock:
+                detached = finalizer.detach() is not None
+                pending = pending_release[0] if pending_release else None
+            if detached:
                 _release(provider, instance_id, place, at_exit=True)
-            elif pending_release:
+            elif pending is not None:
                 # GC may have submitted teardown just before process exit.
                 # Keep its exit hook until completion so that work is drained too.
-                _wait_for_release_at_exit(pending_release[0], instance_id, place)
+                _wait_for_release_at_exit(pending, instance_id, place)
 
         self._finalizer = finalizer
         self._exit_reclaimer = reclaim_at_exit
