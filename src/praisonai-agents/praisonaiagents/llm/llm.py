@@ -6864,7 +6864,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         effort = override_params.get('reasoning_effort', self.reasoning_effort)
         if effort is not None:
             from ..thinking.effort import resolve_reasoning_params
-            reasoning_params = resolve_reasoning_params(effort, self.model)
+            reasoning_params = resolve_reasoning_params(effort, params['model'])
             # Don't clobber an explicit native param the caller already set.
             for key, value in reasoning_params.items():
                 params.setdefault(key, value)
@@ -6874,7 +6874,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Normalize here (after override_params merge) so per-call overrides
         # like max_tokens/temperature cannot reintroduce rejected params.
         from .model_capabilities import is_reasoning_model
-        if is_reasoning_model(self.model):
+        if is_reasoning_model(params['model']):
             # Map max_tokens -> max_completion_tokens unless the caller already
             # provided max_completion_tokens explicitly (which takes precedence).
             if 'max_tokens' in params:
