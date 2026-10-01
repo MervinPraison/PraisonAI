@@ -1225,6 +1225,7 @@ class DefaultSessionStore:
         mutator: Callable[[SessionData], None],
         *,
         error_label: str = "modify session",
+        apply_retention: bool = True,
     ) -> bool:
         """Apply mutator after reloading from disk under FileLock."""
         filepath = self._get_session_path(session_id)
@@ -1240,7 +1241,8 @@ class DefaultSessionStore:
             mutator(session)
             session.updated_at = datetime.now(timezone.utc).isoformat()
 
-            self._enforce_window(session)
+            if apply_retention:
+                self._enforce_window(session)
 
             if not self._atomic_write_json(filepath, session.to_dict()):
                 logger.error(f"Failed to {error_label} {session_id}")

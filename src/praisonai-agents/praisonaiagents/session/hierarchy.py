@@ -24,7 +24,11 @@ logger = get_logger(__name__)
 
 @dataclass
 class SessionSnapshot:
-    """A snapshot of session state at a point in time."""
+    """A transcript snapshot; old records may contain only a message index.
+
+    Captured transcripts add storage proportional to the snapshot history.
+    Legacy records cannot recover history already discarded before upgrading.
+    """
     
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str = ""
@@ -32,9 +36,11 @@ class SessionSnapshot:
     created_at: float = field(default_factory=time.time)
     label: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    transcript: Optional[Dict[str, Any]] = None
+    invalidated: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "id": self.id,
             "session_id": self.session_id,
             "message_index": self.message_index,
@@ -42,6 +48,11 @@ class SessionSnapshot:
             "label": self.label,
             "metadata": self.metadata,
         }
+        if self.transcript is not None:
+            data["transcript"] = copy.deepcopy(self.transcript)
+        if self.invalidated:
+            data["invalidated"] = True
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionSnapshot":
@@ -52,6 +63,8 @@ class SessionSnapshot:
             created_at=data.get("created_at", time.time()),
             label=data.get("label"),
             metadata=data.get("metadata", {}),
+            transcript=copy.deepcopy(data.get("transcript")),
+            invalidated=data.get("invalidated", False),
         )
 
 @dataclass
@@ -188,6 +201,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
         mutator,
         *,
         error_label: str = "modify session",
+        apply_retention: bool = True,
     ) -> bool:
         """Locked read-modify-write preserving extended session fields."""
         filepath = self._get_session_path(session_id)
@@ -197,14 +211,33 @@ class HierarchicalSessionStore(DefaultSessionStore):
             except OSError:
                 logger.error("Failed to %s %s: could not read existing session", error_label, session_id)
                 return False
+            before = session.messages[:]
             mutator(session)
+            self._invalidate_legacy_snapshots(session, before)
             session.updated_at = datetime.now(timezone.utc).isoformat()
-            self._enforce_window(session)
+            if apply_retention:
+                self._enforce_window(session)
             if not self._atomic_write_json(filepath, session.to_dict()):
                 logger.error("Failed to %s %s", error_label, session_id)
                 return False
             self._cache_written_session(session, filepath)
             return True
+
+    def _enforce_window(self, session: SessionData) -> None:
+        before = session.messages[:]
+        super()._enforce_window(session)
+        self._invalidate_legacy_snapshots(session, before)
+
+    @staticmethod
+    def _invalidate_legacy_snapshots(session: SessionData, before: List[SessionMessage]) -> None:
+        if isinstance(session, ExtendedSessionData):
+            for snapshot in session.snapshots:
+                index = snapshot.message_index
+                if snapshot.transcript is None and index >= 0 and (
+                    index >= len(session.messages)
+                    or before[:index + 1] != session.messages[:index + 1]
+                ):
+                    snapshot.invalidated = True
 
     def _cache_written_session(self, session: ExtendedSessionData, filepath: str) -> None:
         """Bind the written object to exact bytes while the caller holds FileLock."""
@@ -498,6 +531,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
     ) -> str:
         """
         Create a snapshot of the current session state.
+
+        Persist the active messages, archive and compaction checkpoint so
+        later retention cannot move the snapshot's restore point.
         
         Args:
             session_id: The session to snapshot
@@ -518,9 +554,21 @@ class HierarchicalSessionStore(DefaultSessionStore):
         )
 
         def _record_snapshot(session: SessionData) -> None:
-            snapshot.message_index = (
-                len(session.messages) - 1 if session.messages else -1
+            # The caller already holds the session write lock. Read the base
+            # transcript schema so existing durable checkpoint fields are not
+            # lost through the hierarchy's partial legacy field conversion.
+            captured = DefaultSessionStore._load_session_from_disk(
+                self, session_id, self._get_session_path(session_id)
             )
+            snapshot.message_index = (
+                len(captured.messages) - 1 if captured.messages else -1
+            )
+            snapshot.transcript = copy.deepcopy({
+                "messages": [message.to_dict() for message in captured.messages],
+                "archived_messages": [message.to_dict() for message in captured.archived_messages],
+                "last_compaction": captured.last_compaction.to_dict() if captured.last_compaction else None,
+            })
+            session.last_compaction = captured.last_compaction
             session.snapshots.append(snapshot)
 
         if not self._modify_session_locked(
@@ -544,7 +592,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
             snapshot_id: The snapshot to revert to
             
         Returns:
-            True if successful
+            True if successful; False for missing or invalidated legacy snapshots.
         """
         def _apply(session: SessionData) -> None:
             assert isinstance(session, ExtendedSessionData)
@@ -560,14 +608,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 logger.warning(f"Snapshot {snapshot_id} not found")
                 raise ValueError(f"Snapshot {snapshot_id} not found")
             
-            # Revert messages
-            if snapshot.message_index >= 0:
+            if snapshot.invalidated:
+                raise ValueError("Legacy snapshot position was invalidated by retention")
+            if snapshot.transcript is not None:
+                restored = SessionData.from_dict({"session_id": session_id, **snapshot.transcript})
+                session.messages = restored.messages
+                session.archived_messages = restored.archived_messages
+                session.last_compaction = restored.last_compaction
+            elif snapshot.message_index >= len(session.messages):
+                raise ValueError("Legacy snapshot position is outside the retained history")
+            elif snapshot.message_index >= 0:
                 session.messages = session.messages[:snapshot.message_index + 1]
             else:
                 session.messages = []
                 
         try:
-            return self._modify_session_locked(session_id, _apply, error_label="revert to snapshot")
+            return self._modify_session_locked(
+                session_id, _apply, error_label="revert to snapshot",
+                apply_retention=False,
+            )
         except ValueError:
             return False
     
