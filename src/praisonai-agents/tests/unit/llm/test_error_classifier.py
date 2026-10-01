@@ -309,6 +309,31 @@ class TestStructuredRetryAfter:
             headers = {"retry-after": "-5"}
         assert extract_retry_after(_ProviderError("retry after -3600 seconds")) is None
 
+    def test_loose_intervening_word_phrasing_is_not_misread(self):
+        """Phrasings with words between the number and "second" are intentionally
+        NOT honoured: a greedy match would otherwise read a status code (e.g. the
+        ``429`` in "429 Too Many Requests retry in 30 more seconds") as the delay
+        and park the job far past the real reset window. Such messages fall
+        through to None rather than producing a bogus positive delay."""
+        assert extract_retry_after(Exception("retry in 30 more seconds")) is None
+        assert (
+            extract_retry_after(
+                Exception("429 Too Many Requests retry in 30 more seconds")
+            )
+            is None
+        )
+
+    def test_fractional_message_second_delay_preserved(self):
+        """A fractional "N second" message delay is preserved, not truncated."""
+        assert extract_retry_after(Exception("cool down 2.5 seconds")) == 2.5
+
+    def test_later_valid_hint_not_shadowed_by_earlier_negative(self):
+        """An earlier echoed negative hint must not shadow a later valid one in
+        the same message (regression: re.search only saw the first match)."""
+        assert extract_retry_after(
+            Exception("retry after -5 seconds; retry after 30 seconds")
+        ) == 30.0
+
 
 class TestRetryLogic:
     
