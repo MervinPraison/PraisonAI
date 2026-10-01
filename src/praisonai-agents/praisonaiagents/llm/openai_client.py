@@ -896,6 +896,16 @@ class OpenAIClient:
                 responses_content.append(part)
         return responses_content
 
+    @staticmethod
+    def _responses_incomplete_finish_reason(response) -> Optional[str]:
+        """Map known incomplete reasons to existing Chat Completions outcomes."""
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status != "incomplete":
+            return None
+        details = response.get("incomplete_details") if isinstance(response, dict) else getattr(response, "incomplete_details", None)
+        reason = details.get("reason") if isinstance(details, dict) else getattr(details, "reason", None)
+        return {"max_output_tokens": "length", "content_filter": "content_filter"}.get(reason)
+
     def _responses_to_chat_completion(self, response) -> ChatCompletion:
         """
         Wrap a Responses API response into a ChatCompletion dataclass
@@ -955,7 +965,7 @@ class OpenAIClient:
             tool_calls=tool_calls_list if tool_calls_list else None,
         )
         choice = Choice(
-            finish_reason="tool_calls" if tool_calls_list else "stop",
+            finish_reason=self._responses_incomplete_finish_reason(response) or ("tool_calls" if tool_calls_list else "stop"),
             index=0,
             message=message,
         )

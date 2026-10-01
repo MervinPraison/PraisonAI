@@ -6565,6 +6565,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     finish_reason = getattr(choice, "finish_reason", None)
                     msg = getattr(choice, "message", None)
                     refusal = getattr(msg, "refusal", None) if msg is not None else None
+            if not choices:
+                from .openai_client import OpenAIClient
+                finish_reason = OpenAIClient._responses_incomplete_finish_reason(response)
             if finish_reason is None and not refusal:
                 return
             from ..agent.run_outcome import classify_finish_reason
@@ -7267,6 +7270,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Unlike Chat Completions, text and tool calls are *always* separate
         items, so ``content`` is never null when text is present.
         """
+        self._record_finish_reason(response)
         response_text = ""
         tool_calls: List[Dict[str, Any]] = []
         reasoning_content = None
@@ -7368,9 +7372,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 evt_type = getattr(event, "type", "")
 
             # ── Completed — capture the final response for usage accounting ──
-            if evt_type == "response.completed":
+            if evt_type in ("response.completed", "response.incomplete"):
                 _final_response = (event.get("response") if isinstance(event, dict)
                                    else getattr(event, "response", None))
+                self._record_finish_reason(_final_response)
 
             # ── Text delta ──────────────────────────────────────────
             if evt_type == "response.output_text.delta":
@@ -7497,9 +7502,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 evt_type = getattr(event, "type", "")
 
-            if evt_type == "response.completed":
+            if evt_type in ("response.completed", "response.incomplete"):
                 _final_response = (event.get("response") if isinstance(event, dict)
                                    else getattr(event, "response", None))
+                self._record_finish_reason(_final_response)
 
             if evt_type == "response.output_text.delta":
                 delta_text = (event.get("delta", "") if isinstance(event, dict)
