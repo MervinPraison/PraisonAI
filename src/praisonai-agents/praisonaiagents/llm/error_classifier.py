@@ -673,12 +673,15 @@ def extract_retry_after(
     # 3. Fall back to parsing common Retry-After patterns from the message.
     #    Capture the full signed token so a negative hint (e.g. "-3600 seconds")
     #    is rejected by the finite/non-negative check below instead of being
-    #    silently read as a positive delay. Allow fractional values too.
+    #    silently read as a positive delay. Match a whole numeric token so
+    #    leading-dot fractions, exponents and malformed suffixes cannot be
+    #    mistaken for an unrelated positive integer.
+    number = r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?![\d.eE+-])"
     patterns = [
-        r"retry.?after[:\s]+([+-]?\d+(?:\.\d+)?)",
-        r"retry[:\s]+([+-]?\d+(?:\.\d+)?)",
-        r"wait[:\s]+([+-]?\d+(?:\.\d+)?)",
-        r"([+-]?\d+(?:\.\d+)?)\s*second",
+        r"retry.?after[:\s]+" + number,
+        r"retry[:\s]+" + number,
+        r"wait[:\s]+" + number,
+        number + r"\s*second",
     ]
     
     for pattern in patterns:

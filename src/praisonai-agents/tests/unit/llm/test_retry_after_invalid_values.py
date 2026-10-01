@@ -78,3 +78,25 @@ def test_negative_message_hint_does_not_poison_scheduler_hold():
 
 def test_valid_fractional_message_hint_is_preserved():
     assert extract_retry_after(Exception("retry after 2.5 seconds")) == 2.5
+
+
+@pytest.mark.parametrize("token, expected", [
+    ("-.5", None), (".5", 0.5), ("+.5", 0.5),
+    ("-1e3", None), ("1e309", None), ("1e-1", 0.1),
+    ("1.2.3", None), ("+-.5", None), ("0", 0),
+])
+@pytest.mark.parametrize("prefix", ["wait ", "retry after ", "retry: ", ""])
+def test_message_numeric_token_is_not_partially_matched(token, expected, prefix):
+    assert extract_retry_after(Exception(f"rate limited; {prefix}{token} seconds")) == expected
+
+
+def test_negative_leading_dot_hint_does_not_create_scheduler_hold():
+    from praisonaiagents.scheduler.due import quota_hold_from_failure
+
+    error = Exception("rate limited; wait -.5 seconds")
+    error.headers = {"retry-after": "-.5"}
+    assert quota_hold_from_failure(error, now=1000) is None
+
+
+def test_message_delay_without_space_before_unit_is_preserved():
+    assert extract_retry_after(Exception("wait 5seconds")) == 5
