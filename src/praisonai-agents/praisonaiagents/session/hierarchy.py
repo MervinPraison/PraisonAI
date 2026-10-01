@@ -367,6 +367,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The session ID
+
+        Raises:
+            OSError: Saving the session or registering its parent failed.
+                A saved child is retained if parent registration fails.
         """
         sid = session_id or str(uuid.uuid4())
         
@@ -378,15 +382,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
-        # Update parent's children list without clobbering concurrent message writes
+        if not self._save_extended_session(session):
+            raise OSError(f"Failed to save session {sid}")
+
+        # Register only after the child exists on disk.
         if parent_id:
             def _apply(parent_session: SessionData) -> None:
                 assert isinstance(parent_session, ExtendedSessionData)
                 if sid not in parent_session.children_ids:
                     parent_session.children_ids.append(sid)
-            self._modify_session_locked(parent_id, _apply, error_label="update parent children")
+            if not self._modify_session_locked(parent_id, _apply, error_label="update parent children"):
+                raise OSError(f"Session {sid} was saved but registration with parent {parent_id} failed")
         
-        self._save_extended_session(session)
         return sid
     
     def fork_session(
@@ -405,6 +412,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The new forked session ID
+
+        Raises:
+            OSError: Saving the fork or registering it with the parent failed.
+                A saved fork is retained if parent registration fails.
         """
         # Force reload to get latest messages from disk
         parent = self._load_extended_session(session_id, force_reload=True)
@@ -431,15 +442,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
-        self._save_extended_session(forked)
+        if not self._save_extended_session(forked):
+            raise OSError(f"Failed to save forked session {new_id}")
 
         def _register_fork(parent: SessionData) -> None:
             if new_id not in parent.children_ids:
                 parent.children_ids.append(new_id)
 
-        self._modify_session_locked(
+        if not self._modify_session_locked(
             session_id, _register_fork, error_label="register forked session"
-        )
+        ):
+            raise OSError(f"Forked session {new_id} was saved but registration with parent {session_id} failed")
         
         return new_id
     
@@ -489,6 +502,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The snapshot ID
+
+        Raises:
+            OSError: The snapshot could not be persisted.
         """
         snapshot = SessionSnapshot(
             session_id=session_id,
@@ -503,9 +519,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
             )
             session.snapshots.append(snapshot)
 
-        self._modify_session_locked(
+        if not self._modify_session_locked(
             session_id, _record_snapshot, error_label="create snapshot"
-        )
+        ):
+            raise OSError(f"Failed to save snapshot {snapshot.id} for session {session_id}")
         
         return snapshot.id
     
@@ -720,6 +737,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The imported session ID
+
+        Raises:
+            OSError: The imported session could not be persisted.
         """
         session = ExtendedSessionData.from_dict(data)
         
@@ -733,7 +753,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.children_ids = []
         session.forked_from_message_id = None
         
-        self._save_extended_session(session)
+        if not self._save_extended_session(session):
+            raise OSError(f"Failed to save imported session {session.session_id}")
         return session.session_id
 
 # Global hierarchical store instance
