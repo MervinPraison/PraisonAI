@@ -7167,6 +7167,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["tool_choice"] = "auto"
 
         # ── Scalar params ───────────────────────────────────────────────
+        if temperature is None:
+            temperature = self.temperature
         if temperature is not None:
             params["temperature"] = temperature
         if self.max_tokens:
