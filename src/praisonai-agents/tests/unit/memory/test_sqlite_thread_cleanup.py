@@ -31,10 +31,19 @@ def test_worker_cleanup_preserves_other_thread_search(memory, tier, worker_has_c
     record_id = store('shared record')
     assert [record['id'] for record in search('shared record')] == [record_id]
 
+    conn_attr = 'stm_conn' if tier == 'short' else 'ltm_conn'
+
     with ThreadPoolExecutor(max_workers=1) as pool:
+        worker_conn = None
         if worker_has_connection:
             assert [record['id'] for record in pool.submit(search, 'shared record').result()] == [record_id]
+            worker_conn = pool.submit(lambda: getattr(memory._local, conn_attr)).result()
+            assert worker_conn is not None
         pool.submit(memory.close_connections).result()
+        if worker_has_connection:
+            assert pool.submit(lambda: getattr(memory._local, conn_attr, None)).result() is None
+            with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+                worker_conn.execute('SELECT 1')
         assert [record['id'] for record in search('shared record')] == [record_id]
 
 
