@@ -2725,6 +2725,38 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         depth: int = 0
     ) -> Dict[str, Any]:
         """Cache wrapper. The uncached body is _execute_single_step_uncached."""
+        # Patterns are control flow, not deterministic leaf results. Re-enter
+        # them on every run so their conditions and nested Task gates execute;
+        # their individual leaves can still reuse cached results.
+        if isinstance(step, (Loop, Parallel, Route, Repeat, Discussion, If, Include)):
+            return self._execute_single_step_uncached(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        if depth > MAX_NESTING_DEPTH:
+            raise ValueError(
+                f"Maximum nesting depth ({MAX_NESTING_DEPTH}) exceeded. "
+                "Simplify your workflow or reduce pattern nesting."
+            )
+        step = self._normalize_single_step(step, index)
+        if step.should_run:
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name, variables=all_variables.copy(),
+            )
+            try:
+                should_run = step.should_run(context)
+            except Exception as e:
+                logger.error(f"should_run failed for {step.name}: {e}")
+                should_run = True  # Preserve the linear executor's error policy.
+            if not should_run:
+                step.status = "skipped"
+                self.step_statuses[step.name] = "skipped"
+                return {
+                    "step": step.name, "output": previous_output,
+                    "stop": False, "skipped": True, "variables": all_variables,
+                }
         cache = getattr(self, "_step_cache", None)
         if cache is None:
             return self._execute_single_step_uncached(
