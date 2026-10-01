@@ -60,6 +60,10 @@ def test_escaped_description_survives_reload(manager, text):
     "---\ndescription: [\n---\nBody",
     "---\nunfinished",
     "---\n- item\n---\nBody",
+    "---\nfalse\n---\nBody",
+    "---\n0\n---\nBody",
+    "---\n[]\n---\nBody",
+    "---\ndescription: 2026-02-30\n---\nBody",
 ])
 def test_unusable_frontmatter_keeps_original_instruction_text(manager, source):
     rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
@@ -67,3 +71,64 @@ def test_unusable_frontmatter_keeps_original_instruction_text(manager, source):
     (rules_dir / "reference.md").write_text(source, encoding="utf-8")
     manager.reload()
     assert manager.get_rule_by_name("reference").content == source
+
+
+@pytest.mark.parametrize("priority", ["08", "010"])
+@pytest.mark.parametrize("scope", ["workspace", "global"])
+def test_handwritten_priority_uses_decimal_value(manager, priority, scope):
+    rules_dir = manager.global_rules_path if scope == "global" else manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text(f"---\npriority: {priority}\n---\nBody", encoding="utf-8")
+    manager.reload()
+    expected = int(priority, 10) - (1000 if scope == "global" else 0)
+    assert manager.get_rule_by_name("reference").priority == expected
+    assert manager.build_rules_context()
+
+
+@pytest.mark.parametrize("pattern", ["2024", "010"])
+def test_numeric_glob_remains_original_pattern_text(manager, pattern):
+    rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text(
+        f"---\nglobs: [{pattern}]\nactivation: glob\n---\nBody", encoding="utf-8"
+    )
+    manager.reload()
+    assert manager.get_rule_by_name("reference").globs == [pattern]
+    assert [item.name for item in manager.get_active_rules(file_path=pattern)] == ["reference"]
+
+
+@pytest.mark.parametrize("opening,closing", [("--- \t", "---"), ("---", "--- \t")])
+def test_delimiter_accepts_trailing_whitespace(manager, opening, closing):
+    rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text(
+        f'{opening}\ndescription: "before---after"\nactivation: manual\n{closing}\nBody', encoding="utf-8"
+    )
+    manager.reload()
+    rule = manager.get_rule_by_name("reference")
+    assert rule.content == "Body"
+    assert rule.description == "before---after"
+    assert rule.activation == "manual"
+    assert manager.get_active_rules() == []
+
+
+def test_empty_frontmatter_remains_valid(manager):
+    rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text("---\n---\nBody", encoding="utf-8")
+    manager.reload()
+    assert manager.get_rule_by_name("reference").content == "Body"
+
+
+def test_merged_yaml_metadata_retains_decimal_priority_and_pattern_spelling(manager):
+    rules_dir = manager.workspace_path / manager.RULES_DIR_NAME
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "reference.md").write_text(
+        "---\ndefaults: &defaults\n  priority: 010\n  globs: [010]\n  activation: glob\n"
+        "<<: *defaults\n---\nBody", encoding="utf-8"
+    )
+    manager.reload()
+    rule = manager.get_rule_by_name("reference")
+    assert rule.priority == 10
+    assert rule.globs == ["010"]
+    assert manager.get_active_rules(file_path="010") == [rule]

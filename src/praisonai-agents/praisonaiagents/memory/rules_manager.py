@@ -301,18 +301,45 @@ class RulesManager:
         
         # Delimiters are complete lines, not substrings in metadata values.
         lines = content.splitlines(keepends=True)
-        if lines and lines[0].rstrip("\r\n") == "---":
+        if lines and lines[0].rstrip("\r\n \t") == "---":
             import yaml
 
             for end in range(1, len(lines)):
-                if lines[end].rstrip("\r\n") != "---":
+                if lines[end].rstrip("\r\n \t") != "---":
                     continue
                 try:
-                    parsed = yaml.safe_load("".join(lines[1:end])) or {}
+                    yaml_content = "".join(lines[1:end])
+                    loader = yaml.SafeLoader(yaml_content)
+                    try:
+                        node = loader.get_single_node()
+                        if isinstance(node, yaml.MappingNode):
+                            loader.flatten_mapping(node)
+                            for key, value in node.value:
+                                # These schema fields preserve scalar spellings,
+                                # including leading zeroes and numeric filenames.
+                                if key.value == "priority" and isinstance(value, yaml.ScalarNode):
+                                    value.tag = "tag:yaml.org,2002:str"
+                                elif key.value == "globs" and isinstance(value, yaml.SequenceNode):
+                                    for item in value.value:
+                                        if isinstance(item, yaml.ScalarNode):
+                                            item.tag = "tag:yaml.org,2002:str"
+                        parsed = loader.construct_document(node) if node is not None else {}
+                    finally:
+                        loader.dispose()
                     if isinstance(parsed, dict):
+                        if "priority" in parsed:
+                            priority = parsed["priority"]
+                            if not isinstance(priority, str) or not re.fullmatch(r"[+-]?[0-9]+", priority):
+                                raise ValueError("Rule priority must be a decimal integer")
+                            parsed["priority"] = int(priority, 10)
+                        if "globs" in parsed:
+                            globs = parsed["globs"]
+                            if not isinstance(globs, list) or not all(isinstance(item, str) for item in globs):
+                                raise ValueError("Rule globs must be a list of scalar patterns")
+                            parsed["globs"] = globs
                         frontmatter = parsed
                         body = "".join(lines[end + 1:]).strip()
-                except yaml.YAMLError:
+                except (yaml.YAMLError, ValueError):
                     # Preserve the original instruction text when metadata is invalid.
                     pass
                 break
