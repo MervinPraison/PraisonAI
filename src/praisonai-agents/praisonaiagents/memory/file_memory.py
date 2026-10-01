@@ -1516,7 +1516,7 @@ class FileMemory:
                 return ""  # No compression needed
             
             # Gather content to compress while holding lock
-            items_to_compress = self._short_term[:-max_items]
+            items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
             content_list = [item.content for item in items_to_compress]
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
@@ -1543,7 +1543,7 @@ Summary:"""
         
         # Keep only recent items under lock
         with self._lock:
-            self._short_term = self._short_term[-max_items:]
+            self._short_term = self._short_term[-max_items:] if max_items else []
             self._save_short_term()
         
         self._log(f"Compressed {len(items_to_compress)} items into summary")
