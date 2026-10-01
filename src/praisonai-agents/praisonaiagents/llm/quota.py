@@ -53,6 +53,12 @@ class QuotaCoordinatorProtocol(Protocol):
         """Clear any bench for the credential (e.g. on recovery)."""
         ...
 
+    # Implementations may additionally expose
+    # clear_if_not_newer(cred_id, *, until) -> bool. This optional operation
+    # must atomically compare expiry and remove only a bench <= until.
+    # It is deliberately not a required protocol member: legacy coordinators
+    # still work, but reset_all retains their shared benches until TTL expiry.
+
 
 @dataclass
 class QuotaCoordinatorConfig:
@@ -118,6 +124,19 @@ class LocalQuotaCoordinator:
     def clear(self, cred_id: str) -> None:
         with self._lock:
             self._benches.pop(cred_id, None)
+
+    def clear_if_not_newer(self, cred_id: str, *, until: float) -> bool:
+        """Atomically remove only a bench within the caller's reset boundary.
+
+        Shared backends can implement the same optional operation using a
+        transactional comparison/removal. An independent later expiry survives.
+        """
+        with self._lock:
+            current = self._benches.get(cred_id)
+            if current is not None and current > until:
+                return False
+            self._benches.pop(cred_id, None)
+            return True
 
 
 def build_quota_coordinator(
