@@ -73,7 +73,7 @@ class SqliteMemoryAdapter:
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
-        if not hasattr(self._local, 'stm_conn'):
+        if getattr(self._local, 'stm_conn', None) is None:
             self._local.stm_conn = sqlite3.connect(
                 self.short_db,
                 check_same_thread=False,
@@ -97,7 +97,7 @@ class SqliteMemoryAdapter:
     
     def _get_ltm_conn(self):
         """Get thread-local long-term memory connection."""
-        if not hasattr(self._local, 'ltm_conn'):
+        if getattr(self._local, 'ltm_conn', None) is None:
             self._local.ltm_conn = sqlite3.connect(
                 self.long_db,
                 check_same_thread=False,
@@ -273,3 +273,22 @@ class SqliteMemoryAdapter:
                 except Exception:
                     pass
             self._all_connections.clear()
+
+    def close_thread_connections(self):
+        """Close only the calling thread's connections.
+
+        Leaves the shared adapter and other threads' connections intact so the
+        adapter can be reused; the calling thread lazily reopens its own
+        connections on next access.
+        """
+        for attr in ("stm_conn", "ltm_conn"):
+            conn = getattr(self._local, attr, None)
+            if conn is not None:
+                try:
+                    with self._connection_lock:
+                        self._all_connections.discard(conn)
+                    conn.close()
+                except Exception:
+                    pass
+                finally:
+                    setattr(self._local, attr, None)
