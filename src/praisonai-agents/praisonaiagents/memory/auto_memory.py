@@ -16,6 +16,7 @@ when explicitly enabled to avoid impacting performance.
 """
 
 import re
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
 
@@ -271,6 +272,9 @@ class AutoMemory:
         
         # Track what we've already processed to avoid duplicates
         self._processed_hashes: set = set()
+        self._processing_lock = threading.RLock()
+        self._pending_memories: Dict[str, List[Dict[str, Any]]] = {}
+        self._stored_offsets: Dict[str, int] = {}
     
     def process_interaction(
         self,
@@ -289,6 +293,12 @@ class AutoMemory:
         Returns:
             List of extracted memories
         """
+        with self._processing_lock:
+            return self._process_interaction(user_message, assistant_response, store)
+
+    def _process_interaction(
+        self, user_message: str, assistant_response: Optional[str], store: bool
+    ) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
         
@@ -303,23 +313,29 @@ class AutoMemory:
         if text_hash in self._processed_hashes:
             return []
         
-        # Quick filter
-        if not self.extractor.should_remember(text):
-            return []
-        
-        # Extract memories
-        memories = self.extractor.extract(text)
+        if text_hash in self._pending_memories:
+            memories = self._pending_memories[text_hash]
+        else:
+            # Quick filter
+            if not self.extractor.should_remember(text):
+                return []
+            memories = self.extractor.extract(text)
         
         if store and memories:
-            self._store_memories(memories)
+            self._pending_memories[text_hash] = memories
+            self._store_memories(memories, text_hash)
             # Only a completed storage operation consumes deduplication.
             self._processed_hashes.add(text_hash)
+            self._pending_memories.pop(text_hash, None)
+            self._stored_offsets.pop(text_hash, None)
         
         return memories
     
-    def _store_memories(self, memories: List[Dict[str, Any]]):
+    def _store_memories(self, memories: List[Dict[str, Any]], text_hash: Optional[str] = None):
         """Store extracted memories in the base memory."""
-        for mem in memories:
+        for index, mem in enumerate(memories):
+            if text_hash is not None and index < self._stored_offsets.get(text_hash, 0):
+                continue
             mem_type = mem.get("type", "")
             content = mem.get("content", "")
             importance = mem.get("importance", 0.5)
@@ -345,6 +361,9 @@ class AutoMemory:
                 # Store as long-term memory
                 self.memory.add_long_term(content, importance=importance)
             
+            if text_hash is not None:
+                self._stored_offsets[text_hash] = index + 1
+
             if self.verbose:
                 logger.info(f"Auto-stored memory: {mem_type} - {content[:50]}...")
     
