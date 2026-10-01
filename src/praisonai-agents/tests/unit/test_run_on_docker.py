@@ -308,6 +308,7 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     instance kept billing until the provider's own idle timer noticed, which
     docker and flyio do not have."""
     import gc
+    import time
 
     from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 
@@ -338,6 +339,12 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
     del backend
     gc.collect()
+    # During live GC the finalizer reclaims fire-and-forget on the shared
+    # AsyncBridge's background loop, so the shutdown lands a beat after
+    # gc.collect() returns. Wait (bounded) for it rather than racing it.
+    deadline = time.monotonic() + 5.0
+    while not released and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
 
