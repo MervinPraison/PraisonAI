@@ -1397,7 +1397,124 @@ class DefaultSessionStore:
     ) -> bool:
         """Add an assistant message to a session."""
         return self.add_message(session_id, "assistant", content, metadata)
+
+    def upsert_partial_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        finalize: bool = False,
+    ) -> bool:
+        """Create or update the single in-progress assistant turn (Issue #5407).
+
+        Streamed output is only persisted today after a turn completes, so an
+        interrupt mid-generation (Ctrl-C / crash) loses the whole partial turn.
+        This writes the latest known partial text to a single trailing
+        assistant message tagged ``metadata={"partial": True}`` and overwrites
+        it on each flush instead of appending a new message per token, keeping
+        the write cheap.
+
+        When ``finalize`` is True the partial flag is dropped, promoting the
+        trailing message to a normal assistant turn. If there is no partial
+        message to finalize and ``content`` is non-empty, a normal assistant
+        message is appended (the fallback path when no partial was ever
+        flushed).
+
+        Args:
+            session_id: The session ID.
+            content: The full assistant text known so far.
+            finalize: When True, mark the turn complete (clear the partial flag).
+
+        Returns:
+            True if the store was updated successfully.
+        """
+        filepath = self._get_session_path(session_id)
+        with FileLock(filepath, self.lock_timeout):
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                logger.error(
+                    f"Failed to upsert partial message for {session_id}: read error"
+                )
+                return False
+
+            trailing = session.messages[-1] if session.messages else None
+            is_partial = (
+                trailing is not None
+                and trailing.role == "assistant"
+                and bool(trailing.metadata.get("partial"))
+            )
+
+            if is_partial:
+                if finalize and not content:
+                    # Interrupted with no text ever produced: drop the empty
+                    # placeholder rather than leaving a blank partial turn.
+                    session.messages.pop()
+                else:
+                    trailing.content = content
+                    trailing.timestamp = time.time()
+                    if finalize:
+                        trailing.metadata.pop("partial", None)
+                        if not trailing.metadata:
+                            trailing.metadata = {}
+            else:
+                if finalize and not content:
+                    return True
+                session.messages.append(
+                    SessionMessage(
+                        role="assistant",
+                        content=content,
+                        timestamp=time.time(),
+                        metadata={} if finalize else {"partial": True},
+                    )
+                )
+
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            if finalize:
+                # Only enforce the retention window on finalize so a per-token
+                # partial flush never triggers a compaction mid-turn.
+                self._enforce_window(session)
+
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to upsert partial message for {session_id}")
+                return False
+
+            with self._lock:
+                self._cache[session_id] = session
+
+        if finalize and session.messages:
+            self._mirror_append(session_id, [session.messages[-1]])
+        return True
+
     
+    def discard_partial_assistant_message(self, session_id: str) -> bool:
+        """Drop a trailing in-progress assistant turn, if any (Issue #5407).
+
+        Used when the authoritative assistant turn is written through another
+        path (e.g. a tool-call turn) so a stale partial record does not linger.
+        No-op when the trailing message is not a partial.
+        """
+        filepath = self._get_session_path(session_id)
+        with FileLock(filepath, self.lock_timeout):
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                return False
+            trailing = session.messages[-1] if session.messages else None
+            if (
+                trailing is None
+                or trailing.role != "assistant"
+                or not trailing.metadata.get("partial")
+            ):
+                return True
+            session.messages.pop()
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                return False
+            with self._lock:
+                self._cache[session_id] = session
+        return True
+
     def get_chat_history(
         self,
         session_id: str,

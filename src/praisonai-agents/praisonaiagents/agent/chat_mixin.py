@@ -5007,6 +5007,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Temporarily disable verbose mode to prevent console output conflicts during streaming
             original_verbose = self.verbose
             self.verbose = False
+            # Initialize persistence so streamed turns reach the session store
+            # incrementally (Issue #5407). chat()/achat() do this already; the
+            # streaming path previously skipped it, so an interrupted stream
+            # persisted nothing at all.
+            self._init_db_session()
+            self._init_session_store()
             memory_prefetch_context = self._prefetch_memory(prompt)
 
             # Ephemeral attachments (images / data URIs) are folded into a
@@ -5070,6 +5076,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
+                    # Persist the user turn so a recovered partial assistant turn
+                    # is paired with its prompt on resume (Issue #5407).
+                    self._persist_message("user", normalized_content)
                 
                 try:
                     # Use the new streaming generator from LLM class
@@ -5149,12 +5158,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         **stream_sampling_kwargs
                     ):
                         response_content += chunk
+                        # Flush the growing partial turn so an interrupt mid
+                        # stream retains it in the store (Issue #5407, debounced).
+                        self._persist_assistant_delta(response_content)
                         yield chunk
-                    
+
                     # Add complete response to chat history
                     if response_content:
                         self._append_to_chat_history({"role": "assistant", "content": response_content})
-                        
+                    # Finalize the streamed turn (promotes the partial record or
+                    # falls back to a single terminal write).
+                    self._finalize_assistant_turn(response_content)
+
+                except GeneratorExit:
+                    # Consumer stopped iterating (e.g. Ctrl-C). Keep whatever
+                    # was produced so --continue can recover it (Issue #5407).
+                    self._persist_assistant_delta(response_content, force=True)
+                    raise
                 except ToolExecutionError:
                     self._rollback_chat_history_to(chat_history_length)
                     raise
@@ -5228,6 +5248,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
+                    # Persist the user turn so a recovered partial assistant turn
+                    # is paired with its prompt on resume (Issue #5407).
+                    self._persist_message("user", normalized_content)
                 
                 try:
                     # Check if OpenAI client is available
@@ -5329,6 +5352,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     content=chunk_content
                                 ))
                             
+                            # Flush the growing partial turn so an interrupt
+                            # mid stream retains it in the store (Issue #5407,
+                            # debounced).
+                            self._persist_assistant_delta(response_text)
                             yield chunk_content
                         
                         # Handle tool calls (accumulate but don't yield as chunks)
@@ -5364,6 +5391,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # append exactly the assistant tool-call and tool-result
                         # messages onto the original request context below.
                         tool_turn_start = len(self.chat_history)
+                        # Drop any partial record for this turn before writing
+                        # the authoritative tool-call assistant turn below so the
+                        # store never keeps a stale partial (Issue #5407).
+                        self._discard_partial_assistant_turn()
                         # Add assistant message with tool calls to chat history
                         assistant_message = {"role": "assistant", "content": response_text}
                         if tool_calls_data:
@@ -5594,7 +5625,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Add complete response to chat history (text-only response)
                         if response_text:
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
-                        
+                        # Finalize the streamed turn in the store (Issue #5407).
+                        self._finalize_assistant_turn(response_text)
+
+                except GeneratorExit:
+                    # Consumer stopped iterating (e.g. Ctrl-C). Keep whatever
+                    # was produced so --continue can recover it (Issue #5407).
+                    self._persist_assistant_delta(response_text, force=True)
+                    raise
                 except ToolExecutionError:
                     self._rollback_chat_history_to(chat_history_length)
                     raise
