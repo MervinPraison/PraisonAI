@@ -35,3 +35,18 @@ def test_successful_atomic_write_does_not_leave_temp_file(tmp_path, kind):
     store(memory, kind, 'successful record', {'valid': True})
     assert 'successful record' in path_for(memory, kind).read_text(encoding='utf-8')
     assert list(memory.user_path.glob('.*.tmp')) == []
+
+
+def test_os_replace_failure_cleans_temp_file_and_returns_false(tmp_path, monkeypatch):
+    memory = FileMemory(base_path=str(tmp_path))
+    store(memory, 'short_term', 'existing record', {'valid': True})
+    target = memory.short_term_file
+    before = target.read_bytes()
+
+    def failing_replace(src, dst):
+        raise OSError('simulated replace failure')
+
+    monkeypatch.setattr('os.replace', failing_replace)
+    assert memory._write_json(target, [{'content': 'unreplaced record'}]) is False
+    assert target.read_bytes() == before
+    assert list(memory.user_path.glob('.*.tmp')) == []
