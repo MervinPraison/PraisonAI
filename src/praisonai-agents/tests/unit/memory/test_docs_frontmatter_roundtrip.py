@@ -46,6 +46,29 @@ def test_frontmatter_delimiters_are_complete_lines(tmp_path):
     assert doc.content == "Body\n---\nMore body"
 
 
+@pytest.mark.parametrize("opening,closing", [
+    ("---", "--- "),
+    ("---", "---\t"),
+    ("--- \t", "--- \t"),
+])
+def test_frontmatter_delimiters_allow_trailing_whitespace(tmp_path, opening, closing):
+    options = dict(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))
+    manager = DocsManager(**options)
+    docs_dir = tmp_path / manager.DOCS_DIR_NAME
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "reference.md").write_text(
+        f'{opening}\ndescription: "before---after"\npriority: 200\ntags: [reference]\n{closing}\nBody',
+        encoding="utf-8",
+    )
+    manager.reload()
+    for current in (manager, DocsManager(**options)):
+        doc = current.get_doc("reference")
+        assert doc.description == "before---after"
+        assert doc.priority == 200
+        assert doc.tags == ["reference"]
+        assert doc.content == "Body"
+
+
 @pytest.mark.parametrize("source", ["---\ndescription: [\n---\nBody", "---\nunfinished"])
 def test_invalid_or_unclosed_frontmatter_preserves_original_text(tmp_path, source):
     manager = DocsManager(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))

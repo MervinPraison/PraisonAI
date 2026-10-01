@@ -128,9 +128,9 @@ class DocsManager:
         
         # Check for YAML frontmatter
         lines = content.splitlines(keepends=True)
-        if lines and lines[0].rstrip("\r\n") == "---":
+        if lines and lines[0].rstrip("\r\n \t") == "---":
             for end in range(1, len(lines)):
-                if lines[end].rstrip("\r\n") != "---":
+                if lines[end].rstrip("\r\n \t") != "---":
                     continue
                 try:
                     import yaml
