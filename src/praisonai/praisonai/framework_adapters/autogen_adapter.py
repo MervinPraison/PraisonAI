@@ -301,10 +301,40 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                     "message": task_spec.description,
                     "summary_method": "last_msg",
                 }
+                # Honour the adapter contract's task_callback hook. AutoGen v0.2
+                # has no first-class per-step task hook, so fire a prepared event
+                # here (mirroring the retrofitted agent_callback above) and a
+                # completed event after initiate_chats below.
+                if task_callback:
+                    try:
+                        task_callback({
+                            "event": "task_prepared",
+                            "task_spec": task_spec,
+                            "agent": agents[spec.key],
+                        })
+                    except Exception as e:
+                        logger.warning(
+                            "task_callback raised for %r: %s",
+                            getattr(task_spec, "name", task_spec), e,
+                        )
                 tasks.append(chat_task)
         
         # Execute tasks
         response = user_proxy.initiate_chats(tasks)
+
+        # Fan out task completion events now that AutoGen has run the chats.
+        if task_callback:
+            for chat_task, resp in zip(tasks, response or []):
+                try:
+                    task_callback({
+                        "event": "task_completed",
+                        "task": chat_task,
+                        "response": resp,
+                        "summary": getattr(resp, "summary", None),
+                    })
+                except Exception as e:
+                    logger.warning("task_callback completion raised: %s", e)
+
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
         
         logger.info("AutoGen v0.2 execution completed")
