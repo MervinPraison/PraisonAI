@@ -181,6 +181,7 @@ class RulesManager:
         self.verbose = verbose
         
         self._rules: Dict[str, Rule] = {}
+        self._extra_rule_files: List[str] = []
         self._load_all_rules()
     
     def _log(self, msg: str, level: int = logging.INFO):
@@ -515,6 +516,9 @@ class RulesManager:
             
             current = current.parent
         
+        for path in self._extra_rule_files:
+            self._load_extra_rule_file(path)
+
         self._log(f"Loaded {len(self._rules)} rules total")
     
     def add_rule_file(self, path: str) -> int:
@@ -532,6 +536,13 @@ class RulesManager:
         Returns:
             Number of rule files successfully added.
         """
+        path = str(path)
+        if path not in self._extra_rule_files:
+            self._extra_rule_files.append(path)
+        return self._load_extra_rule_file(path)
+
+    def _load_extra_rule_file(self, path: str) -> int:
+        """Load the current matches for a registered instruction file or glob."""
         candidate = Path(path)
         if candidate.is_absolute():
             matches = [candidate] if candidate.exists() else list(
