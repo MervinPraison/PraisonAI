@@ -168,9 +168,9 @@ describe('observability registry honesty', () => {
       .filter(t => t.delivers)
       .map(t => t.name)
       .sort();
-    // Langfuse is the only external integration that actually posts anywhere.
+    // These are the external integrations that actually post somewhere.
     // Adding a name here without implementing delivery re-introduces the bug.
-    expect(delivering).toEqual(['langfuse']);
+    expect(delivering).toEqual(['langfuse', 'langsmith']);
   });
 });
 
@@ -210,6 +210,89 @@ describe('LangfuseObservabilityAdapter delivery state', () => {
       await adapter.flush();
       const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n');
       expect(messages.toLowerCase()).toContain('delivered nothing');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+describe('LangSmithObservabilityAdapter delivery (mock HTTP transport)', () => {
+  function makeMockClient() {
+    const posts: any[] = [];
+    const patches: any[] = [];
+    const client = {
+      async post(url: string, body: any) {
+        posts.push({ url, body });
+        return { status: 201 };
+      },
+      async patch(url: string, body: any) {
+        patches.push({ url, body });
+        return { status: 200 };
+      }
+    };
+    return { client, posts, patches };
+  }
+
+  it('is disabled with no API key and warns that flush delivered nothing (OBS-DEL-002)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+      delete process.env.LANGSMITH_API_KEY;
+      delete process.env.LANGCHAIN_API_KEY;
+      const adapter = new LangSmithObservabilityAdapter();
+      await adapter.initialize();
+      expect(adapter.isEnabled).toBe(false);
+      expect(adapter.delivers).toBe(true);
+      await adapter.flush();
+      const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n');
+      expect(messages.toLowerCase()).toContain('delivered nothing');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('posts a run for the agent root and child spans, and patches on end (OBS-DEL-001/003)', async () => {
+    const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+    const adapter = new LangSmithObservabilityAdapter();
+    const { client, posts, patches } = makeMockClient();
+    // Inject a live transport, exactly as the factory would after a valid key.
+    (adapter as any).client = client;
+    expect(adapter.isEnabled).toBe(true);
+
+    const trace = adapter.startTrace('agent-run', { task: 'demo' });
+    const toolSpan = adapter.startSpan(trace.traceId, 'search', 'tool');
+    adapter.endSpan(toolSpan.spanId, 'completed');
+    adapter.endTrace(trace.traceId, 'completed');
+    await adapter.flush();
+
+    // Root run + one child run posted.
+    expect(posts.map(p => p.url)).toEqual(['/runs', '/runs']);
+    const root = posts[0].body;
+    const child = posts[1].body;
+    expect(root.run_type).toBe('chain');
+    expect(child.run_type).toBe('tool');
+    // Child is parented to the root trace so it nests under the agent span.
+    expect(child.parent_run_id).toBe(trace.traceId);
+    expect(child.trace_id).toBe(trace.traceId);
+    expect(child.dotted_order.startsWith(root.dotted_order)).toBe(true);
+    // Both runs are closed with an end_time patch.
+    expect(patches.length).toBe(2);
+    expect(patches.every((p: any) => typeof p.body.end_time === 'string')).toBe(true);
+  });
+
+  it('rejects a non-http(s) endpoint and stays disabled (SR-003)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { LangSmithObservabilityAdapter } = require(path.join(EXTERNAL_DIR, 'langsmith'));
+      const adapter = new LangSmithObservabilityAdapter({
+        name: 'langsmith',
+        apiKey: 'test-key',
+        baseUrl: 'ftp://evil.example'
+      });
+      await adapter.initialize();
+      expect(adapter.isEnabled).toBe(false);
+      const messages = warnSpy.mock.calls.map(c => String(c[0])).join('\n');
+      expect(messages.toLowerCase()).toContain('http(s)');
     } finally {
       warnSpy.mockRestore();
     }

@@ -220,10 +220,10 @@ export const OBSERVABILITY_TOOLS: Record<ObservabilityToolName, ObservabilityToo
   langsmith: {
     name: 'langsmith',
     package: 'langsmith',
-    envKey: 'LANGCHAIN_API_KEY',
+    envKey: 'LANGSMITH_API_KEY',
     description: 'LangSmith by LangChain',
-    delivers: false,
-    features: { traces: true, spans: true, events: true, errors: true, metrics: false, export: false },
+    delivers: true,
+    features: { traces: true, spans: true, events: true, errors: true, metrics: false, export: true },
     docsUrl: 'https://docs.smith.langchain.com'
   },
   langwatch: {
