@@ -524,9 +524,16 @@ class FailoverManager:
             }
     
     def reset_all(self) -> None:
-        """Reset all profiles to available status."""
+        """Reset all profiles and clear their coordinated cooldowns."""
         with self._lock:
             for profile in self._profiles:
+                try:
+                    self._coordinator.clear(profile.credential_id)
+                except Exception as e:
+                    logger.warning(
+                        f"Quota coordinator clear failed for '{profile.name}': {e}; "
+                        f"resetting local cooldown only"
+                    )
                 profile.reset()
 
 

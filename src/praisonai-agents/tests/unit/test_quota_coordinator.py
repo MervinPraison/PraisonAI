@@ -172,6 +172,61 @@ class TestFailoverCoordinatorWiring:
         mgr.mark_success(p)
         assert coord.is_benched(p.credential_id) is False
 
+    def test_reset_all_clears_default_coordinator_bench(self):
+        mgr = FailoverManager()
+        primary = AuthProfile(name="primary", provider="openai", api_key="k1")
+        backup = AuthProfile(
+            name="backup", provider="openai", api_key="k2", priority=1
+        )
+        mgr.add_profile(primary)
+        mgr.add_profile(backup)
+        mgr.mark_failure(primary, "429", is_rate_limit=True)
+        assert mgr.get_next_profile() is backup
+
+        mgr.reset_all()
+
+        assert mgr.get_next_profile() is primary
+        assert primary.is_available
+
+    def test_reset_all_clears_shared_bench_for_other_manager(self):
+        coord = LocalQuotaCoordinator()
+        mgr_a = FailoverManager(coordinator=coord)
+        mgr_b = FailoverManager(coordinator=coord)
+        primary_a = AuthProfile(name="primary-a", provider="openai", api_key="k")
+        primary_b = AuthProfile(name="primary-b", provider="openai", api_key="k")
+        backup_b = AuthProfile(
+            name="backup-b", provider="openai", api_key="backup", priority=1
+        )
+        mgr_a.add_profile(primary_a)
+        mgr_b.add_profile(primary_b)
+        mgr_b.add_profile(backup_b)
+        mgr_a.mark_failure(primary_a, "429", is_rate_limit=True)
+
+        mgr_a.reset_all()
+
+        assert not coord.is_benched(primary_a.credential_id)
+        assert mgr_b.get_next_profile() is primary_b
+
+    def test_reset_all_clear_failure_does_not_stop_local_resets(self):
+        class BrokenClearCoordinator(LocalQuotaCoordinator):
+            def clear(self, cred_id):
+                raise RuntimeError("backend down")
+
+        mgr = FailoverManager(coordinator=BrokenClearCoordinator())
+        primary = AuthProfile(name="primary", provider="openai", api_key="k1")
+        backup = AuthProfile(name="backup", provider="openai", api_key="k2")
+        mgr.add_profile(primary)
+        mgr.add_profile(backup)
+        mgr.mark_failure(primary, "429", is_rate_limit=True)
+        mgr.mark_failure(backup, "service unavailable")
+
+        mgr.reset_all()
+
+        assert primary.status == ProviderStatus.AVAILABLE
+        assert backup.status == ProviderStatus.AVAILABLE
+        assert primary.cooldown_until is None
+        assert backup.cooldown_until is None
+
     def test_recovery_clears_shared_bench(self):
         coord = LocalQuotaCoordinator()
         mgr = FailoverManager(coordinator=coord)
