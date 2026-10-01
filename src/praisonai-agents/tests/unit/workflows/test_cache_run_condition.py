@@ -49,3 +49,25 @@ def test_skipped_step_is_not_cached_when_gate_later_opens():
     enabled["value"] = True
     assert flow.run("same", verbose=False)["output"] == "done"
     assert calls == ["run"]
+
+
+def test_start_callback_prepares_context_before_cached_gate():
+    enabled = {"value": True}
+    starts = []
+    calls = []
+
+    def on_start(name, ctx):
+        starts.append(enabled["value"])
+        ctx.variables["allowed"] = enabled["value"]
+
+    step = Task(
+        name="conditional", should_run=lambda ctx: ctx.variables.get("allowed", False),
+        handler=lambda ctx: calls.append("run") or "done",
+    )
+    flow = AgentFlow(steps=[step], cache=True, hooks={"on_step_start": on_start})
+    assert flow.run("same", verbose=False)["output"] == "done"
+    assert flow.run("same", verbose=False)["output"] == "done"
+    enabled["value"] = False
+    assert flow.run("same", verbose=False)["steps"] == []
+    assert calls == ["run"]
+    assert starts == [True, True, False]
