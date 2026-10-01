@@ -98,6 +98,31 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         )
 
     @staticmethod
+    def _fire_task_callback(task_callback: Callable, payload: Dict[str, Any]) -> None:
+        """Invoke ``task_callback`` safely, honouring sync *and* async callbacks.
+
+        AutoGen v0.2's ``run()`` is sync-only, but the adapter contract lets a
+        caller hand us an ``async def`` callback (e.g. an observability sink that
+        awaits a network write). A bare ``task_callback(payload)`` would return
+        an un-awaited coroutine that never runs, so route the result through
+        :func:`dispatch_maybe_awaitable` which drains a returned coroutine (via
+        the shared bridge when inside a loop, or blocking when not). Callback
+        exceptions are caught and logged, never propagated into the chat.
+        """
+        from .._async_bridge import dispatch_maybe_awaitable, DispatchKind
+
+        try:
+            result = task_callback(payload)
+            dispatch_maybe_awaitable(
+                result, kind=DispatchKind.WRITE, op_name="autogen-task-callback"
+            )
+        except Exception as e:  # noqa: BLE001 - callbacks must never break the chat
+            logger.warning(
+                "task_callback raised for event %r: %s",
+                payload.get("event"), e,
+            )
+
+    @staticmethod
     def _wrap_tool_for_execution(tool: Callable, tool_name: str) -> Callable:
         """Translate a per-call tool timeout into an LLM-readable string.
 
@@ -306,17 +331,11 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                 # here (mirroring the retrofitted agent_callback above) and a
                 # completed event after initiate_chats below.
                 if task_callback:
-                    try:
-                        task_callback({
-                            "event": "task_prepared",
-                            "task_spec": task_spec,
-                            "agent": agents[spec.key],
-                        })
-                    except Exception as e:
-                        logger.warning(
-                            "task_callback raised for %r: %s",
-                            getattr(task_spec, "name", task_spec), e,
-                        )
+                    self._fire_task_callback(task_callback, {
+                        "event": "task_prepared",
+                        "task_spec": task_spec,
+                        "agent": agents[spec.key],
+                    })
                 tasks.append(chat_task)
         
         # Execute tasks
@@ -325,15 +344,12 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         # Fan out task completion events now that AutoGen has run the chats.
         if task_callback:
             for chat_task, resp in zip(tasks, response or []):
-                try:
-                    task_callback({
-                        "event": "task_completed",
-                        "task": chat_task,
-                        "response": resp,
-                        "summary": getattr(resp, "summary", None),
-                    })
-                except Exception as e:
-                    logger.warning("task_callback completion raised: %s", e)
+                self._fire_task_callback(task_callback, {
+                    "event": "task_completed",
+                    "task": chat_task,
+                    "response": resp,
+                    "summary": getattr(resp, "summary", None),
+                })
 
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
         
