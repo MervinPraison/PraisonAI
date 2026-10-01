@@ -1629,9 +1629,18 @@ class AgentFlow:
                     if verbose:
                         print(f"↩︎  cache hit: {step.name}")
                     previous_output = _cached.get("output")
-                    results.append({"step": step.name, "output": previous_output})
+                    cached_record = _cached.get("step_record") or {
+                        "step": step.name, "output": previous_output,
+                        "status": "completed", "retries": 0,
+                    }
+                    results.append(dict(cached_record))
+                    self.step_statuses[step.name] = cached_record["status"]
+                    if hasattr(step, "status"):
+                        step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    if _cached.get("stop"):
+                        break
                     i += 1
                     continue
             
@@ -1672,6 +1681,7 @@ class AgentFlow:
             retry_count = 0
             validation_feedback = None
             guardrail_failed = False
+            cached_variable_updates = {} if _cache_key is not None else None
             
             while retry_count <= max_retries:
                 step_error = None
@@ -1689,6 +1699,8 @@ class AgentFlow:
                             stop = result.stop_workflow
                             if result.variables:
                                 all_variables.update(result.variables)
+                                if cached_variable_updates is not None:
+                                    cached_variable_updates.update(result.variables)
                         else:
                             output = str(result)
                             
@@ -1985,16 +1997,20 @@ class AgentFlow:
             # Only a SUCCESSFUL step is cached. Caching a failure would serve
             # the failure again on every re-run, turning a transient error into
             # a permanent one that no retry could clear. The step's output
-            # variable is stored too: a fresh run starts with empty working
-            # variables, so a cache HIT that only restored `output` would leave
-            # `<step>_output` (or step.output_variable) missing and break the
-            # next step's substitutions. We snapshot exactly the delta this step
-            # writes below (var_name = output_variable or f"{name}_output").
+            # variables and stop signal must be stored too: a cache hit must
+            # preserve handler state and control flow, not just output text.
+            # Store only this step's variable updates, including its output
+            # variable unless it stopped before that variable was written.
             if _cache_key is not None and not step_failed:
-                _cached_var_name = step.output_variable or f"{step.name}_output"
+                if not stop:
+                    _cached_var_name = step.output_variable or f"{step.name}_output"
+                    cached_variable_updates[_cached_var_name] = output
                 _step_cache.set(
                     _cache_key,
-                    {"output": output, "variables": {_cached_var_name: output}},
+                    {
+                        "output": output, "variables": cached_variable_updates,
+                        "stop": stop, "step_record": step_record,
+                    },
                 )
             
             if verbose:

@@ -11,7 +11,7 @@ from praisonaiagents.workflows.step_cache import (
     make_step_key,
     resolve_step_cache,
 )
-from praisonaiagents.workflows.workflows import AgentFlow, Parallel
+from praisonaiagents.workflows.workflows import AgentFlow, Parallel, StepResult
 
 
 def _counting_step(name, calls):
@@ -55,6 +55,54 @@ class TestCachingWorks:
 
 
 class TestCorrectnessOnAHit:
+    def test_a_cache_hit_preserves_early_stop(self):
+        calls = []
+
+        def finish(ctx):
+            calls.append("finish")
+            return StepResult(
+                output="done", stop_workflow=True, variables={"finished": True}
+            )
+
+        def downstream(ctx):
+            calls.append("downstream")
+            return "unexpected"
+
+        flow = AgentFlow(steps=[finish, downstream], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert calls == ["finish"]
+        assert second == first
+        assert "finish_output" not in second["variables"]
+
+    def test_a_cache_hit_restores_handler_variables_for_downstream(self):
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output="ready", variables={"answer": 42})
+
+        def consume(ctx):
+            calls.append("consume")
+            return str(ctx.variables.get("answer", "missing"))
+
+        flow = AgentFlow(steps=[produce, consume], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert first["output"] == second["output"] == "42"
+        assert second["variables"]["answer"] == 42
+        assert calls == ["produce", "consume"]
+
+    def test_a_cache_hit_reports_completed_step_status(self):
+        flow = AgentFlow(steps=[_counting_step("upstream", [])], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert second["steps"] == first["steps"]
+        assert flow.step_statuses["upstream"] == "completed"
+
     def test_a_cache_hit_still_exposes_the_step_output_variable(self):
         """A fresh run starts with empty working variables. A hit that restored
         only `output` would leave `<step>_output` missing from the run's
