@@ -535,7 +535,11 @@ def is_replay_unsafe(error: Exception) -> bool:
     # that point is safe to replay even though the text also mentions "reset"
     # or "timeout". This check wins over the generic read/reset signals below.
     error_text = f"{type(error).__name__} {error}".lower()
-    if re.search(r"handshake", error_text):
+    if re.search(
+        r"\bhandshake\s+(?:failed|failure|error|aborted|(?:read\s+)?(?:timed?\s*out|timeout))\b"
+        r"|\b(?:during|in)\s+(?:the\s+)?(?:(?:tls|ssl)\s+)?handshake\b",
+        error_text,
+    ):
         return False
 
     # 3. Explicit read/reset signals win over transport labels or a message

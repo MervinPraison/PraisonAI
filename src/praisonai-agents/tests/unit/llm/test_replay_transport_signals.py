@@ -42,7 +42,25 @@ def test_explicit_connect_failure_keeps_type_precedence():
     [
         "TLS handshake failed: connection reset by peer",
         "SSL handshake read timed out",
+        "connection reset during TLS handshake",
+        "SSL handshake timed out",
     ],
 )
 def test_handshake_scoped_failure_stays_pre_dispatch(error_type, message):
     assert is_replay_unsafe(error_type(message)) is False
+
+
+@pytest.mark.parametrize("error_type", [Exception, ssl.SSLError])
+@pytest.mark.parametrize("message", [
+    "TLS handshake completed; read timeout",
+    "connection reset after TLS handshake",
+    "handshake succeeded, response ended prematurely",
+])
+def test_completed_handshake_does_not_hide_response_failure(error_type, message):
+    error = error_type(message)
+    assert is_replay_unsafe(error) is True
+    decision = LLM(model="fake").resolve_failover_decision(
+        error, {"attempt": 1, "max_retries": 3, "side_effecting": True},
+    )
+    assert decision.action == "surface_error"
+    assert decision.reason == "provider_outcome_unknown"
