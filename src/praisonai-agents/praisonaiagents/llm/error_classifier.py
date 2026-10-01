@@ -678,6 +678,8 @@ def extract_retry_after(
     #    mistaken for an unrelated positive integer.
     number = r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?![\d.eE+-])"
     patterns = [
+        r'"?retryDelay"?\s*:\s*"?' + number + r's\b',
+        r"try again in\s+" + number,
         r"retry.?after[:\s]+" + number,
         r"retry[:\s]+" + number,
         r"wait[:\s]+" + number,

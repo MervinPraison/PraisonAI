@@ -855,29 +855,15 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             Retry delay in seconds, or default if not found
         """
-        # Try to find retry delay patterns like "retryDelay: 58s" or "retry after 58 seconds"
-        patterns = [
-            r'"retryDelay":\s*"(\d+)s"',  # JSON format: "retryDelay": "58s"
-            r'retryDelay:\s*"?(\d+)s"?',  # retryDelay: 58s or retryDelay: "58s"
-            r'retry.{0,10}?(\d+)\s*second',  # retry after 58 seconds (non-greedy)
-            r'wait\s+(\d+)\s*second',  # wait 58 seconds
-            r'try again in (\d+)',  # try again in 58
-            r'Retry-After:\s*(\d+)',  # HTTP Retry-After header
-        ]
-
         # Max delay cap to prevent unbounded sleep (5 minutes default)
         max_delay = 300
         if self._rate_limiter is not None and hasattr(self._rate_limiter, 'max_retry_delay'):
             max_delay = self._rate_limiter.max_retry_delay
 
-        for pattern in patterns:
-            match = re.search(pattern, error_message, re.IGNORECASE)
-            if match:
-                delay = float(match.group(1))
-                # Clamp to safe bounds [0, max_delay] to prevent unbounded sleep
-                return max(0, min(delay, max_delay))
+        from .error_classifier import extract_retry_after
 
-        return self._retry_delay
+        delay = extract_retry_after(Exception(error_message), cap_seconds=max_delay)
+        return self._retry_delay if delay is None else delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if an exception is a rate limit error.
