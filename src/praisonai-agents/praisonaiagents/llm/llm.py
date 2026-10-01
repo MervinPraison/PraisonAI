@@ -5038,6 +5038,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         try:
                             follow_up_iterations = 0
                             max_follow_up = kwargs.get("max_iterations", getattr(self, "max_iter", 20))
+                            # The guardrail must bound the *total* tools executed
+                            # across every follow-up batch, not each batch alone;
+                            # otherwise several sub-limit batches together run more
+                            # (repeated side-effecting) calls than configured. Seed
+                            # with the first streamed batch already executed above.
+                            total_tool_calls_executed = len(tool_calls)
                             while follow_up_iterations < max_follow_up:
                                 follow_up_iterations += 1
                                 if _stream_is_cancelled():
@@ -5067,13 +5073,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         yield follow_content
                                     break
 
-                                if len(follow_tool_calls) > max_tool_calls_per_turn:
+                                if (total_tool_calls_executed + len(follow_tool_calls)
+                                        > max_tool_calls_per_turn):
                                     logging.warning(
                                         f"Tool call limit reached ({max_tool_calls_per_turn}). "
                                         "Stopping to prevent infinite loop.")
                                     if follow_content:
                                         yield follow_content
                                     break
+                                total_tool_calls_executed += len(follow_tool_calls)
 
                                 # Any prose emitted alongside the calls is part
                                 # of the answer.
@@ -5114,25 +5122,65 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         iteration_index=0,
                                     ))
 
-                                follow_results = executor.execute_batch(
-                                    follow_batch, execute_tool_fn,
-                                    timeout_ms=self.tool_timeout_ms,
-                                    cancel_token=cancel_token,
-                                )
-                                for tool_result in follow_results:
-                                    self._register_deferred_if_any(tool_result)
-                                    if is_ollama and tool_result.error is None:
-                                        self._record_ollama_tool_result(
-                                            ollama_tool_result_mapping,
+                                if is_ollama and not parallel_tool_calls:
+                                    # Mirror the first streamed batch: an Ollama
+                                    # follow-up batch can also contain a call whose
+                                    # argument names an earlier call in the *same*
+                                    # batch. Execute one at a time so each result is
+                                    # recorded before the next call's args are
+                                    # resolved; otherwise the dependent call runs
+                                    # with an unresolved placeholder.
+                                    follow_results = []
+                                    for _tool_call in follow_batch:
+                                        _tool_call.arguments = self._resolve_ollama_chained_args(
+                                            _tool_call.arguments, ollama_tool_result_mapping,
+                                            _tool_call.function_name, tools,
+                                        )
+                                        _tool_call.arguments = self._filter_ollama_dispatch_arguments(
+                                            _tool_call.function_name,
+                                            _tool_call.arguments,
+                                            tools,
+                                        )
+                                        _result = executor.execute_batch(
+                                            [_tool_call], execute_tool_fn,
+                                            timeout_ms=self.tool_timeout_ms,
+                                            cancel_token=cancel_token,
+                                        )
+                                        follow_results.extend(_result)
+                                        if _result and _result[0].error is None:
+                                            self._record_ollama_tool_result(
+                                                ollama_tool_result_mapping,
+                                                _tool_call.function_name,
+                                                _result[0].result,
+                                            )
+                                    for tool_result in follow_results:
+                                        self._register_deferred_if_any(tool_result)
+                                        messages.append(self._create_tool_message(
                                             tool_result.function_name,
                                             tool_result.result,
-                                        )
-                                    messages.append(self._create_tool_message(
-                                        tool_result.function_name,
-                                        tool_result.result,
-                                        tool_result.tool_call_id,
-                                        tool_result.is_ollama,
-                                    ))
+                                            tool_result.tool_call_id,
+                                            tool_result.is_ollama,
+                                        ))
+                                else:
+                                    follow_results = executor.execute_batch(
+                                        follow_batch, execute_tool_fn,
+                                        timeout_ms=self.tool_timeout_ms,
+                                        cancel_token=cancel_token,
+                                    )
+                                    for tool_result in follow_results:
+                                        self._register_deferred_if_any(tool_result)
+                                        if is_ollama and tool_result.error is None:
+                                            self._record_ollama_tool_result(
+                                                ollama_tool_result_mapping,
+                                                tool_result.function_name,
+                                                tool_result.result,
+                                            )
+                                        messages.append(self._create_tool_message(
+                                            tool_result.function_name,
+                                            tool_result.result,
+                                            tool_result.tool_call_id,
+                                            tool_result.is_ollama,
+                                        ))
                                 for _err_msg in follow_parse_errors:
                                     messages.append(_err_msg)
 
@@ -7696,8 +7744,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         - When a *different* non-empty ``id`` reuses an already-populated index
           (some providers reuse ``index=0`` for distinct parallel calls), a new
           slot is started instead of concatenating two calls' arguments into one
-          invalid-JSON blob.
+          invalid-JSON blob. Once an index has been re-pointed to that new slot,
+          later *id-less* argument chunks carrying the same index are routed to
+          the new slot too (via ``_stream_index_route``) rather than reopening
+          the first call and corrupting its JSON.
         """
+        # Per-accumulation routing: maps a provider ``index`` to the latest
+        # appended slot when that index has been reused for a new call. Reset
+        # whenever a fresh (empty) ``tool_calls`` list begins a new stream so the
+        # map never leaks across turns.
+        route_key = id(tool_calls)
+        index_route = getattr(self, "_stream_index_route", None)
+        if index_route is None or not isinstance(index_route, dict):
+            index_route = {}
+            self._stream_index_route = index_route
+        if not tool_calls:
+            index_route.pop(route_key, None)
+        routes: Dict[int, int] = index_route.setdefault(route_key, {})
+
         for tc in getattr(delta, "tool_calls", None) or []:
             idx = getattr(tc, "index", None)
             if idx is None:
@@ -7708,7 +7772,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     "type": "function",
                     "function": {"name": "", "arguments": ""},
                 })
-            slot = tool_calls[idx]
+            # Honour an earlier re-point for this index so continuation chunks
+            # land on the new call rather than the original slot.
+            slot_idx = routes.get(idx, idx)
+            if slot_idx >= len(tool_calls):
+                slot_idx = idx
+            slot = tool_calls[slot_idx]
 
             tc_id = getattr(tc, "id", None)
             # A different, non-empty id at an already-identified slot means the
@@ -7721,6 +7790,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     "function": {"name": "", "arguments": ""},
                 }
                 tool_calls.append(slot)
+                routes[idx] = len(tool_calls) - 1
             if tc_id and not slot["id"]:
                 slot["id"] = tc_id
 
