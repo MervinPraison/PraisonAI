@@ -2981,6 +2981,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            # A cache hit means the gated-in step is being served a prior result,
+            # so its status is "completed" -- not whatever a previous run left in
+            # step_statuses. Without this reset, a step that was gated OUT on an
+            # earlier run ("skipped") and is now gated IN would still report
+            # "skipped" to callers even though its cached output is returned.
+            if hasattr(step, "status"):
+                step.status = "completed"
+            self.step_statuses[step.name] = "completed"
             # Copy: a caller mutating a returned result must not edit the cache.
             return dict(hit)
         result = self._execute_single_step_uncached(
