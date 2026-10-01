@@ -71,6 +71,12 @@ from ._commands import (
     build_command_access_policy,
 )
 from ._session import BotSessionManager
+from ._streaming import (
+    StreamingConfig,
+    StreamingMode,
+    DraftStreamer,
+    build_streaming_config,
+)
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
@@ -144,7 +150,12 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         
         # Initialize allow_silence from config
         self._allow_silence = getattr(self.config, 'allow_silence', False)
-        
+
+        # Initialize streaming config based on BotConfig (shared with Telegram /
+        # Discord so ``streaming.mode: draft|auto`` is honoured identically
+        # across channels that support in-place edits — Issue #5415).
+        self._streaming_config = build_streaming_config(self.config)
+
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._app = None
@@ -186,6 +197,69 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Audio capabilities
         self._stt_enabled: bool = False
     
+    def configure_streaming(self, config: StreamingConfig) -> None:
+        """Configure streaming reply mode.
+
+        Args:
+            config: Streaming configuration. Set mode=StreamingMode.OFF to disable.
+        """
+        self._streaming_config = config
+        logger.debug("SlackBot: streaming configured, mode=%s", config.mode)
+
+    async def _maybe_stream_reply(
+        self,
+        channel_id: str,
+        user_id: str,
+        text: str,
+        *,
+        thread_id: str = "",
+        message_id: str = "",
+    ) -> Optional[str]:
+        """Progressively stream a reply via DraftStreamer when configured.
+
+        Returns the final (hook-processed) response text when the streaming
+        path handled delivery, or ``None`` when streaming is disabled so the
+        caller falls back to its normal single-message send (Issue #5415).
+        """
+        streaming_enabled = (
+            self._streaming_config is not None
+            and self._streaming_config.mode != StreamingMode.OFF
+        )
+        if not streaming_enabled:
+            return None
+
+        streamer = DraftStreamer(
+            adapter=self,
+            channel_id=channel_id,
+            config=self._streaming_config,
+            platform="slack",
+        )
+        placeholder_message_id = await streamer.start()
+        try:
+            response = await self._session.chat(
+                self._agent, user_id, text,
+                chat_id=channel_id,
+                thread_id=thread_id,
+                message_id=message_id,
+                account=getattr(self.config, "account", "default"),
+                stream_callback=streamer.on_event,
+            )
+            send_result = self.fire_message_sending(channel_id, str(response))
+            if send_result["cancel"]:
+                try:
+                    await self.delete_message(channel_id, placeholder_message_id)
+                except Exception:
+                    pass
+                return ""
+            await streamer.finalize(send_result["content"])
+            return send_result["content"]
+        except Exception:
+            try:
+                await self.delete_message(channel_id, placeholder_message_id)
+            except Exception:
+                pass
+            raise
+
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for audio file transcription."""
         self._stt_enabled = enabled
@@ -622,6 +696,26 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
                     text = await self._debouncer.debounce(user_id, text)
+
+                    # Streaming path: progressively edit a placeholder in place
+                    # using the shared DraftStreamer, mirroring Telegram/Discord
+                    # (Issue #5415). Returns None when streaming is disabled.
+                    streamed = await self._maybe_stream_reply(
+                        str(channel_id) if channel_id else "",
+                        user_id, text,
+                        thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                    )
+                    if streamed is not None:
+                        if streamed:
+                            self.fire_message_sent(channel_id, streamed)
+                            if ack_ctx and self._client:
+                                await self._ack.done(
+                                    ack_ctx, react_fn=_slack_react,
+                                    unreact_fn=_slack_unreact,
+                                )
+                        return
+
                     response = await self._session.chat(
                         self._agent, user_id, text,
                         chat_id=str(channel_id) if channel_id else "",
@@ -707,6 +801,21 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"@mention received: {text[:100]}...")
+
+                    # Streaming path: progressively edit a placeholder in place
+                    # using the shared DraftStreamer (Issue #5415). Returns None
+                    # when streaming is disabled so the plain path runs.
+                    streamed = await self._maybe_stream_reply(
+                        str(event.get("channel", "")),
+                        user_id, text,
+                        thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                    )
+                    if streamed is not None:
+                        if streamed:
+                            self.fire_message_sent(event.get("channel", ""), streamed)
+                        return
+
                     response = await self._session.chat(
                         self._agent, user_id, text,
                         chat_id=str(event.get("channel", "")),
