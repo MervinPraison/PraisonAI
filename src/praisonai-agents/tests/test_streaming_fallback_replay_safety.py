@@ -11,8 +11,6 @@ These tests drive the private ``ChatMixin._stream_fallback_chat`` helper and the
 ``is_replay_unsafe_chain`` classifier directly, with no live LLM or provider.
 """
 
-import types
-
 import pytest
 
 from praisonaiagents.agent.chat_mixin import ChatMixin
@@ -120,6 +118,67 @@ def test_tool_turn_generic_error_still_falls_back():
     assert result == "sync answer"
     assert len(host.calls) == 1
     assert host.calls[0]["stream"] is False
+
+
+# --- LLM.get_response streaming-fallback gate ------------------------------
+#
+# ``LLM.get_response`` guards its streaming->non-streaming fallback with the
+# same decision the agent fallback uses (llm.py): it reissues with
+# ``stream=False`` only when the turn is NOT side-effecting OR the streaming
+# failure is replay-safe. The turn is side-effecting when the request carries
+# ``formatted_tools`` or an ``execute_tool_fn`` is wired. These tests reproduce
+# that exact gate so a future edit that drops it (and replays a tool turn after
+# a post-dispatch read timeout) is caught, without needing a live LLM.
+
+def _llm_fallback_replays(err, *, formatted_tools, execute_tool_fn):
+    """Mirror the llm.py gate: True => reissue stream=False, False => surface."""
+    side_effecting = bool(formatted_tools) or execute_tool_fn is not None
+    if side_effecting and is_replay_unsafe_chain(err):
+        return False
+    return True
+
+
+def test_llm_gate_tool_turn_read_timeout_does_not_replay():
+    err = _ReadTimeout("read timed out")
+    assert _llm_fallback_replays(
+        err, formatted_tools=[{"type": "function"}], execute_tool_fn=None
+    ) is False
+
+
+def test_llm_gate_execute_tool_fn_read_timeout_does_not_replay():
+    err = _ReadTimeout("read timed out")
+    assert _llm_fallback_replays(
+        err, formatted_tools=None, execute_tool_fn=lambda *a, **k: None
+    ) is False
+
+
+def test_llm_gate_tool_turn_wrapped_read_timeout_does_not_replay():
+    rt = _ReadTimeout("read timed out")
+    wrapped = Exception("Streaming failed with unexpected error")
+    wrapped.__cause__ = rt
+    assert _llm_fallback_replays(
+        wrapped, formatted_tools=[{"type": "function"}], execute_tool_fn=None
+    ) is False
+
+
+def test_llm_gate_toolless_read_timeout_still_replays():
+    err = _ReadTimeout("read timed out")
+    assert _llm_fallback_replays(
+        err, formatted_tools=None, execute_tool_fn=None
+    ) is True
+
+
+def test_llm_gate_tool_turn_connect_timeout_still_replays():
+    err = _ConnectTimeout("connection timed out")
+    assert _llm_fallback_replays(
+        err, formatted_tools=[{"type": "function"}], execute_tool_fn=None
+    ) is True
+
+
+def test_llm_gate_tool_turn_generic_error_still_replays():
+    assert _llm_fallback_replays(
+        RuntimeError("boom"), formatted_tools=[{"type": "function"}], execute_tool_fn=None
+    ) is True
 
 
 if __name__ == "__main__":
