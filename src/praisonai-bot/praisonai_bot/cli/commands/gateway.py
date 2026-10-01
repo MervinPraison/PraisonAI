@@ -1854,6 +1854,44 @@ def gateway_send(
         raise typer.Exit(1)
 
 
+@app.command("schema")
+def gateway_schema(
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the JSON Schema to a file instead of stdout "
+        "(e.g. gateway.schema.json for editor config / CI linting).",
+    ),
+):
+    """Emit the gateway.yaml / bot.yaml JSON Schema (for editors / CI).
+
+    Derived from the canonical Pydantic ``GatewayConfigSchema`` so a mistyped
+    key is flagged at author time instead of only at gateway startup. Point your
+    editor's YAML language server at the output, or lint configs in CI:
+
+        praisonai gateway schema                     # print to stdout
+        praisonai gateway schema -o gateway.schema.json  # write to a file
+    """
+    import json
+
+    from praisonai_bot.bots._config_schema import gateway_config_json_schema
+
+    schema_json = json.dumps(gateway_config_json_schema(), indent=2)
+    if output:
+        from pathlib import Path
+
+        out_path = Path(output)
+        try:
+            out_path.write_text(schema_json + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"Failed to write {out_path}: {exc}")
+            raise typer.Exit(1)
+        print(f"Wrote gateway JSON Schema to {out_path}")
+    else:
+        sys.stdout.write(schema_json + "\n")
+
+
 hooks_app = typer.Typer(
     help="Manage inbound trigger hooks (POST /hooks/<path>) in gateway.yaml",
     no_args_is_help=True,

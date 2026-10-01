@@ -23,6 +23,22 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 
+#: Stable, published URL for the ``gateway.yaml`` / ``bot.yaml`` JSON Schema,
+#: mirroring the ``agents.yaml`` convention (``AGENTS_SCHEMA_URL``). Editors that
+#: speak the YAML language server use this via a leading
+#: ``# yaml-language-server: $schema=<url>`` header to provide autocomplete,
+#: inline validation, and hover docs while authoring the gateway/bot config.
+GATEWAY_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/"
+    "src/praisonai-bot/praisonai_bot/bots/gateway.schema.json"
+)
+
+#: Leading YAML comment prepended to scaffolded ``gateway.yaml`` / ``bot.yaml``
+#: files so editors wire up validation out of the box. A leading comment is
+#: ignored by ``yaml.safe_load``, so execution is unaffected.
+GATEWAY_SCHEMA_HEADER = f"# yaml-language-server: $schema={GATEWAY_SCHEMA_URL}\n"
+
+
 def _register_redaction(value: str) -> None:
     """Register a resolved secret value for log redaction (best-effort).
 
@@ -1504,6 +1520,31 @@ class GatewayConfigSchema(BaseModel):
 
 # Legacy alias for backward compatibility
 BotYamlSchema = GatewayConfigSchema
+
+
+def gateway_config_json_schema() -> Dict[str, Any]:
+    """Canonical JSON Schema for ``gateway.yaml`` / ``bot.yaml`` (draft-07).
+
+    Derived directly from :class:`GatewayConfigSchema` (Pydantic's
+    ``model_json_schema``) and decorated with the standard ``$schema``/``$id``/
+    ``title`` metadata so the artefact is self-describing and mirrors the
+    ``agents.yaml`` convention (``generate_agents_schema``). This is the single
+    source of truth surfaced to editors (via the ``# yaml-language-server``
+    header) and to CI linting, so a mistyped key is flagged at author time
+    instead of only at gateway startup.
+    """
+    schema: Dict[str, Any] = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": GATEWAY_SCHEMA_URL,
+        **GatewayConfigSchema.model_json_schema(),
+        "title": "PraisonAI Gateway / Bot Configuration",
+        "description": (
+            "Schema for gateway.yaml / bot.yaml consumed by the PraisonAI "
+            "gateway and single-bot runtime (gateway server, agents, channels, "
+            "routing, schedules, hooks, streaming and delivery)."
+        ),
+    }
+    return schema
 
 
 def validate_gateway_config(raw: Dict[str, Any], apply_env_substitution: bool = True) -> GatewayConfigSchema:
