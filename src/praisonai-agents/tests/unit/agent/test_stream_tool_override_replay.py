@@ -102,3 +102,93 @@ def test_native_stream_prompt_matches_effective_tools(override, stream_agent):
     assert ('configured_tool' in system_prompt) is enabled
     assert ('You have access to the following tools:' in system_prompt) is enabled
     assert bool(sent[0].get('tools')) is enabled
+
+
+@pytest.mark.parametrize('failure', ['empty', 'create', 'iterator'])
+def test_post_tool_answer_failure_does_not_replay_turn(failure):
+    effects = []
+
+    def counted_tool() -> str:
+        """Record one local execution."""
+        effects.append('executed')
+        return 'local result'
+
+    agent = Agent(instructions='Answer briefly', tools=[counted_tool], context=False)
+    agent._using_custom_llm = False
+    requests = []
+    original = RuntimeError('answer generation failed')
+
+    def build_messages(prompt, system_prompt=None, **kwargs):
+        return [{'role': 'user', 'content': prompt}], prompt
+
+    def broken_answer():
+        yield SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content='partial answer', tool_calls=None),
+        )])
+        raise original
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        if len(requests) == 1:
+            call = SimpleNamespace(index=0, id='call_local', function=SimpleNamespace(
+                name='counted_tool', arguments='{}',
+            ))
+            delta = SimpleNamespace(content=None, tool_calls=[call])
+            return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
+        if failure == 'create':
+            raise original
+        return broken_answer() if failure == 'iterator' else iter([])
+
+    agent._Agent__openai_client = SimpleNamespace(
+        build_messages=build_messages,
+        sync_client=SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create),
+        )),
+    )
+    fallback = []
+
+    def chat(prompt, **kwargs):
+        fallback.append(prompt)
+        counted_tool()
+        return 'replayed answer'
+
+    agent.chat = chat
+    try:
+        error = None
+        try:
+            list(agent._start_stream_impl('Use the counted tool'))
+        except RuntimeError as exc:
+            error = exc
+        assert effects == ['executed']
+        assert fallback == []
+        assert error is not None
+        if failure != 'empty':
+            assert error is original
+        else:
+            assert 'no answer' in str(error)
+        assert len(requests) == 2
+        assert requests[1].get('tools') is None
+        assert any(m.get('tool_call_id') == 'call_local' for m in agent.chat_history)
+    finally:
+        agent.close()
+
+
+def test_custom_stream_failure_after_tool_execution_does_not_replay(stream_agent):
+    agent = stream_agent
+    agent._using_custom_llm = True
+    effects = []
+    original = RuntimeError('answer generation failed')
+
+    def stream(**kwargs):
+        effects.append(kwargs['execute_tool_fn']('configured_tool', {}))
+        raise original
+        yield
+
+    agent.llm_instance = SimpleNamespace(get_response_stream=stream)
+    fallback = []
+    agent.chat = lambda *args, **kwargs: fallback.append(args) or 'replayed'
+    with pytest.raises(RuntimeError) as exc_info:
+        list(agent._start_stream_impl('Use the tool'))
+    assert exc_info.value is original
+    assert effects == ['result']
+    assert fallback == []

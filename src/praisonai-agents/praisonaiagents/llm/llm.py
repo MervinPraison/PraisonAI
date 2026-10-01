@@ -4626,6 +4626,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         def _stream_cancel_reason() -> str:
             return getattr(cancel_token, "reason", None) or "user"
 
+        tool_execution_started = False
+        if execute_tool_fn is not None:
+            from functools import wraps
+
+            stream_executor = execute_tool_fn
+
+            @wraps(stream_executor)
+            def tracked_stream_executor(*args, **tool_kwargs):
+                nonlocal tool_execution_started
+                tool_execution_started = True
+                return stream_executor(*args, **tool_kwargs)
+
+            execute_tool_fn = tracked_stream_executor
+
         try:
             import litellm
             
@@ -4958,7 +4972,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Switching response mode still replays the provider call.
                     # Do not undo the retry gate, including iterator failures
                     # wrapped by the streaming error handler above.
-                    if formatted_tools and self._is_post_dispatch_failure(e):
+                    if tool_execution_started or (formatted_tools and self._is_post_dispatch_failure(e)):
                         raise
                     error_msg = str(e).lower()
                     

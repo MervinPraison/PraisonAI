@@ -119,3 +119,45 @@ def test_exception_chain_cycle_does_not_prevent_safe_fallback():
     second.__cause__ = first
     assert host._stream_fallback_chat('question', {}, first) == 'fallback answer'
     assert host.calls == 1
+
+
+@pytest.mark.parametrize('parallel', [False, True])
+def test_llm_does_not_switch_modes_after_local_tool_dispatch(parallel):
+    llm = LLM(model='fake')
+    llm._build_messages = lambda **kw: ([], kw['prompt'])
+    llm._format_tools_for_litellm = lambda tools: tools
+    llm._supports_streaming_tools = lambda: True
+    llm._build_completion_params = lambda **kw: kw
+    requests = []
+    effects = []
+    original = RuntimeError('tool result processing failed')
+
+    def execute_tool(name, args, tool_call_id=None, **kwargs):
+        effects.append(name)
+        return 'local result'
+
+    def completion(**kwargs):
+        requests.append(kwargs['stream'])
+        if kwargs['stream']:
+            call = SimpleNamespace(index=0, id='call_local', type='function',
+                                   function=SimpleNamespace(name='counted_tool', arguments='{}'))
+            delta = SimpleNamespace(content=None, tool_calls=[call])
+            return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content='replayed answer', tool_calls=None,
+        ))])
+
+    def fail_result_processing(result):
+        raise original
+
+    llm._completion_with_retry = completion
+    llm._register_deferred_if_any = fail_result_processing
+    error = None
+    try:
+        list(llm.get_response_stream('Use the tool', tools=[{'type': 'function'}],
+                                     execute_tool_fn=execute_tool, parallel_tool_calls=parallel))
+    except RuntimeError as exc:
+        error = exc
+    assert effects == ['counted_tool']
+    assert requests == [True]
+    assert error is original

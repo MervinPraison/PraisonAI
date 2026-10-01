@@ -5064,6 +5064,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # begin_durable_run), so the prompt reaching this generator is already
         # validated/transformed. Kept out of this impl so a blocked prompt never
         # opens a durable run that would then finalize as "succeeded".
+        tool_execution_started = False
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
@@ -5189,6 +5190,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     )
                     if _stream_cancel_token is not None:
                         stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
+                    from functools import wraps
+
+                    stream_executor = self._durable_sync_tool_executor(self.execute_tool)
+
+                    @wraps(stream_executor)
+                    def tracked_stream_executor(*args, **tool_kwargs):
+                        nonlocal tool_execution_started
+                        tool_execution_started = True
+                        return stream_executor(*args, **tool_kwargs)
+
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
@@ -5205,9 +5216,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_name=kwargs.get('task_name'),
                         task_description=kwargs.get('task_description'),
                         task_id=kwargs.get('task_id'),
-                        execute_tool_fn=self._durable_sync_tool_executor(
-                            self.execute_tool
-                        ),
+                        execute_tool_fn=tracked_stream_executor,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         **stream_sampling_kwargs
@@ -5223,6 +5232,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
+                    if tool_execution_started:
+                        raise
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
                     logging.error(f"Custom LLM streaming error: {e}")
@@ -5507,6 +5518,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     )
                                     _tool_started = time_module.perf_counter()
                                     try:
+                                        # Even an executor error can follow an
+                                        # effect. Never replay this turn once
+                                        # local tool execution has begun.
+                                        tool_execution_started = True
                                         tool_result = executor(
                                             tool_call['function']['name'],
                                             parsed_args,
@@ -5664,6 +5679,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
+                    if tool_execution_started:
+                        # Keep completed tool turns and surface answer failures;
+                        # rolling back and calling chat() can execute them again.
+                        raise
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
                     logging.error(f"OpenAI streaming error: {e}")
@@ -5688,6 +5707,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Restore verbose mode on any error
             self.verbose = original_verbose
+            if tool_execution_started:
+                raise
             if getattr(e, '_praisonai_stream_fallback_exhausted', False):
                 # The inner fallback already ran chat() and it failed too.
                 # Running it a second time would only bury the streaming
