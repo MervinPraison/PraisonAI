@@ -35,3 +35,11 @@ def test_complete_duration_field_is_preserved(message):
 @pytest.mark.parametrize('token', ['1.2.3', '1e-1.2', '0.5..'])
 def test_embedded_period_remains_invalid(token):
     assert extract_retry_after(Exception('try again in ' + token)) is None
+
+
+@pytest.mark.parametrize('token', ['1e2.', '0.5.', '1.', '-5', '1e309'])
+@pytest.mark.parametrize('prefix', ['retry after ', 'wait ', 'try again in '])
+def test_invalid_first_duration_does_not_hide_later_hint(token, prefix):
+    message = f'rate limit: {prefix}{token} seconds, {prefix}20 seconds'
+    assert extract_retry_after(Exception(message)) == 20
+    assert LLM(model='fake')._parse_retry_delay(message) == 20

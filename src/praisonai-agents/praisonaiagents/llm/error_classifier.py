@@ -678,8 +678,8 @@ def extract_retry_after(
     #    mistaken for an unrelated positive integer.
     # A period may terminate a sentence, but may not split an embedded token.
     number = (
-        r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
-        r"(?![\deE+-]|\.(?!\s|$|[\"')\]}]))"
+        r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)"
+        r"(?![\deE+-]|\.(?!\s|$|[\"')\]}])|\.\s*(?:seconds?|s)\b)"
     )
     patterns = [
         # Quoted duration values must close immediately after the unit.
@@ -693,8 +693,8 @@ def extract_retry_after(
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, error_str, re.IGNORECASE)
-        if match:
+        # Invalid earlier hints must not hide a later valid hint of this form.
+        for match in re.finditer(pattern, error_str, re.IGNORECASE):
             try:
                 delay = float(match.group(1))
                 if math.isfinite(delay) and delay >= 0:
