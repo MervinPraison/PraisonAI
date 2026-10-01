@@ -12,6 +12,12 @@ import uuid
 
 OUTPUT_ROOT = "media-output"
 
+MINIMAX_IMAGE_MODEL = "minimax/image-01"
+MINIMAX_IMAGE_ENDPOINTS = {
+    "global_en": "https://api.minimax.io/v1/image_generation",
+    "cn_zh": "https://api.minimaxi.com/v1/image_generation",
+}
+
 # Video model catalog. Each entry declares the env key that unlocks it, so the
 # desktop can show a model picker instead of the old hardcoded Replicate path.
 # Replicate stays a preset (not the sole path); SDK providers route through
@@ -45,7 +51,7 @@ VIDEO_MODELS = [
 
 
 class MediaSupervisor:
-    """Generate images (OpenAI) and optional video (Replicate) from settings/env keys."""
+    """Generate images and optional video from settings/env keys."""
 
     def __init__(self, home: pathlib.Path):
         self.home = home
@@ -75,7 +81,7 @@ class MediaSupervisor:
 
         return {
             "image": True,
-            "image_models": ["dall-e-3", "dall-e-2"],
+            "image_models": ["dall-e-3", "dall-e-2", MINIMAX_IMAGE_MODEL],
             "video": bool(os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_API_KEY")),
             "video_models": self.list_video_models(),
             "video_hint": (
@@ -104,22 +110,26 @@ class MediaSupervisor:
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("prompt is required")
-        api_key = self._openai_key(settings)
-        if not api_key:
-            raise ValueError("OpenAI API key required (Settings or OPENAI_API_KEY)")
+        is_minimax = model.startswith("minimax/")
+        if is_minimax:
+            req = self._minimax_image_request(prompt, model=model, size=size)
+        else:
+            api_key = self._openai_key(settings)
+            if not api_key:
+                raise ValueError("OpenAI API key required (Settings or OPENAI_API_KEY)")
 
-        body = json.dumps(
-            {"model": model, "prompt": prompt, "n": 1, "size": size}
-        ).encode()
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/images/generations",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-        )
+            body = json.dumps(
+                {"model": model, "prompt": prompt, "n": 1, "size": size}
+            ).encode()
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/images/generations",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 payload = json.loads(resp.read().decode())
@@ -127,9 +137,19 @@ class MediaSupervisor:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
 
-        item = (payload.get("data") or [{}])[0]
-        url = item.get("url")
-        b64 = item.get("b64_json")
+        if is_minimax:
+            status = payload.get("base_resp") or {}
+            if status.get("status_code") != 0:
+                raise RuntimeError(status.get("status_msg") or "MiniMax image generation failed")
+            data = payload.get("data") or {}
+            url = (data.get("image_urls") or [None])[0]
+            b64 = (data.get("image_base64") or [None])[0]
+            if not url and not b64:
+                raise RuntimeError("MiniMax image generation returned no images")
+        else:
+            item = (payload.get("data") or [{}])[0]
+            url = item.get("url")
+            b64 = item.get("b64_json")
         file_id = f"img_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         local_path = self.out / "images" / f"{file_id}.png"
 
@@ -152,6 +172,45 @@ class MediaSupervisor:
             "model": model,
             "prompt": prompt,
         }
+
+    def _minimax_image_request(
+        self, prompt: str, *, model: str, size: str
+    ) -> urllib.request.Request:
+        import os
+
+        if model != MINIMAX_IMAGE_MODEL:
+            raise ValueError(f"Unknown MiniMax image model: {model!r}")
+        api_key = str(os.environ.get("MINIMAX_API_KEY") or "").strip()
+        if not api_key:
+            raise ValueError("MiniMax API key required (MINIMAX_API_KEY)")
+        region = str(os.environ.get("MINIMAX_IMAGE_REGION") or "global_en").strip()
+        if region not in MINIMAX_IMAGE_ENDPOINTS:
+            raise ValueError("MINIMAX_IMAGE_REGION must be global_en or cn_zh")
+        try:
+            width, height = (int(part) for part in size.split("x"))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError("MiniMax image size must be WIDTHxHEIGHT") from exc
+        if any(value < 512 or value > 2048 or value % 8 for value in (width, height)):
+            raise ValueError("MiniMax image dimensions must be 512-2048 and divisible by 8")
+        body = json.dumps(
+            {
+                "model": model.split("/", 1)[1],
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "n": 1,
+                "response_format": "url",
+            }
+        ).encode()
+        return urllib.request.Request(
+            MINIMAX_IMAGE_ENDPOINTS[region],
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
     def generate_video(
         self,

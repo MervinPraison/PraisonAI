@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import io
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import media
 
@@ -134,6 +139,92 @@ class MediaSupervisorTests(unittest.TestCase):
         finally:
             if old is not None:
                 os.environ["OPENAI_API_KEY"] = old
+
+
+class MiniMaxImageTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="desktop-minimax-image-")
+        self.addCleanup(self.tmp.cleanup)
+        self.sup = media.MediaSupervisor(Path(self.tmp.name))
+        self.env = patch.dict(os.environ, {"MINIMAX_API_KEY": "test-key"}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_catalog_contains_image_model(self):
+        self.assertIn(media.MINIMAX_IMAGE_MODEL, self.sup.capabilities()["image_models"])
+
+    def test_regional_requests_save_images_and_map_dimensions(self):
+        image = b"generated-image"
+        for region, endpoint in media.MINIMAX_IMAGE_ENDPOINTS.items():
+            with self.subTest(region=region), patch.dict(os.environ, {"MINIMAX_IMAGE_REGION": region}):
+                payload = {
+                    "base_resp": {"status_code": 0},
+                    "data": {"image_urls": ["https://example.com/generated.png"]},
+                }
+                with patch("media.urllib.request.urlopen", side_effect=[
+                    io.BytesIO(json.dumps(payload).encode()), io.BytesIO(image),
+                ]) as request:
+                    result = self.sup.generate_image(
+                        "a lighthouse", settings={"api_key": "unrelated-key"},
+                        model=media.MINIMAX_IMAGE_MODEL, size="1792x1024",
+                    )
+                req = request.call_args_list[0].args[0]
+                self.assertEqual(req.full_url, endpoint)
+                self.assertEqual(req.get_header("Authorization"), "Bearer test-key")
+                self.assertEqual(json.loads(req.data), {
+                    "model": media.MINIMAX_IMAGE_MODEL.split("/", 1)[1],
+                    "prompt": "a lighthouse", "width": 1792, "height": 1024,
+                    "n": 1, "response_format": "url",
+                })
+                self.assertEqual(Path(result["path"]).read_bytes(), image)
+                self.assertEqual(result["url"], "https://example.com/generated.png")
+                self.assertEqual(result["model"], media.MINIMAX_IMAGE_MODEL)
+                self.assertEqual(result["data_url"], "data:image/png;base64," + base64.b64encode(image).decode())
+
+    def test_base64_response_is_saved_without_download(self):
+        image = b"generated-image"
+        payload = {
+            "base_resp": {"status_code": 0},
+            "data": {"image_base64": [base64.b64encode(image).decode()]},
+        }
+        with patch("media.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+            result = self.sup.generate_image("a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL)
+        request.assert_called_once()
+        self.assertEqual(Path(result["path"]).read_bytes(), image)
+        self.assertIsNone(result["url"])
+
+    def test_application_error_and_empty_output_fail_without_saving(self):
+        for payload, message in [
+            ({"base_resp": {"status_code": 1004, "status_msg": "Authentication failed"}}, "Authentication failed"),
+            ({"base_resp": {"status_code": 0}, "data": {"image_urls": []}}, "returned no images"),
+            ({"data": {}}, "generation failed"),
+        ]:
+            with self.subTest(payload=payload), patch("media.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+                with self.assertRaisesRegex(RuntimeError, message):
+                    self.sup.generate_image("a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL)
+                request.assert_called_once()
+        self.assertEqual(list((self.sup.out / "images").iterdir()), [])
+
+    def test_requires_dedicated_key(self):
+        with patch.dict(os.environ, {}, clear=True), patch("media.urllib.request.urlopen") as request:
+            with self.assertRaisesRegex(ValueError, "MINIMAX_API_KEY"):
+                self.sup.generate_image("a lighthouse", settings={"api_key": "unrelated-key"}, model=media.MINIMAX_IMAGE_MODEL)
+            request.assert_not_called()
+
+    def test_unknown_region_is_rejected_before_request(self):
+        with patch.dict(os.environ, {"MINIMAX_IMAGE_REGION": "unknown"}), patch("media.urllib.request.urlopen") as request:
+            with self.assertRaisesRegex(ValueError, "MINIMAX_IMAGE_REGION"):
+                self.sup.generate_image("a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL)
+            request.assert_not_called()
+
+    def test_invalid_sizes_and_models_are_rejected_before_request(self):
+        with patch("media.urllib.request.urlopen") as request:
+            for size in ("auto", "1x1024", "1025x1024", "4096x1024", "1024x1024x1024"):
+                with self.subTest(size=size), self.assertRaises(ValueError):
+                    self.sup.generate_image("a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL, size=size)
+            with self.assertRaisesRegex(ValueError, "Unknown MiniMax image model"):
+                self.sup.generate_image("a lighthouse", settings={}, model="minimax/unknown")
+            request.assert_not_called()
 
 
 if __name__ == "__main__":
