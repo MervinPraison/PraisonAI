@@ -1613,6 +1613,14 @@ class AgentFlow:
                 variables=all_variables.copy()
             )
 
+            # Preserve the preparation hook before the gate: it may populate
+            # context variables used by should_run, including on cached runs.
+            if self.on_step_start:
+                try:
+                    self.on_step_start(step.name, context)
+                except Exception as e:
+                    logger.error(f"on_step_start callback failed: {e}")
+
             # Check should_run condition
             if step.should_run:
                 try:
@@ -1663,12 +1671,6 @@ class AgentFlow:
             if hasattr(step, 'status'):
                 step.status = "running"
             self.step_statuses[step.name] = "running"
-
-            if self.on_step_start:
-                try:
-                    self.on_step_start(step.name, context)
-                except Exception as e:
-                    logger.error(f"on_step_start callback failed: {e}")
 
             # Gap 3c: Check for cross-step handoff cycles
             self._check_handoff_cycle(step)
