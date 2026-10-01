@@ -40,12 +40,14 @@ def test_retention_survives_public_hierarchy_writes(
             SessionData(session_id="source", messages=messages).to_dict(),
             new_session_id="imported",
         )
+        active = ["0", "1", "2", "3", "4"]
+        archived = []
 
     result = json.loads((tmp_path / f"{result_id}.json").read_text(encoding="utf-8"))
     raw_active = [message for message in result["messages"] if not message["metadata"].get("compaction")]
     assert [message["content"] for message in raw_active] == active
     assert [message["content"] for message in result["archived_messages"]] == archived
-    if retention == "compact":
+    if retention == "compact" and operation != "import":
         summary = result["messages"][0]
         assert summary["role"] == "system"
         assert summary["metadata"]["compaction"] is True
@@ -53,6 +55,25 @@ def test_retention_survives_public_hierarchy_writes(
     reopened = HierarchicalSessionStore(session_dir=str(tmp_path))
     fresh = reopened.get_extended_session(result_id, force_reload=True)
     assert [message.content for message in fresh.archived_messages] == archived
+
+
+@pytest.mark.parametrize("retention", ["keep_all", "compact", "truncate"])
+def test_import_restores_export_larger_than_destination_window(tmp_path, retention):
+    store = HierarchicalSessionStore(
+        session_dir=str(tmp_path), max_messages=100, active_window=2,
+        retention=retention,
+    )
+    data = SessionData(
+        session_id="source",
+        messages=[SessionMessage("user", str(index), timestamp=index) for index in range(5)],
+        archived_messages=[SessionMessage("user", "archived", timestamp=-1)],
+    ).to_dict()
+
+    imported_id = store.import_session(data)
+
+    saved = json.loads((tmp_path / f"{imported_id}.json").read_text(encoding="utf-8"))
+    assert saved["messages"] == data["messages"]
+    assert saved["archived_messages"] == data["archived_messages"]
 
 
 def test_truncate_does_not_persist_orphaned_tool_result(tmp_path):

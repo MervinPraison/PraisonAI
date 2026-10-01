@@ -307,14 +307,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
             return cached
         return self._read_session_fresh(session_id)
     
-    def _save_extended_session(self, session: ExtendedSessionData) -> bool:
+    def _save_extended_session(
+        self, session: ExtendedSessionData, *, apply_retention: bool = True
+    ) -> bool:
         """Save extended session to disk."""
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         
         # Match the inherited retention policy, including non-destructive
         # compaction and tool-exchange-aware truncation.
-        self._enforce_window(session)
+        if apply_retention:
+            self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
             try:
@@ -754,7 +757,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.children_ids = []
         session.forked_from_message_id = None
         
-        if not self._save_extended_session(session):
+        # Restore the exported record in full, independent of the destination
+        # window. Retention applies to subsequent ordinary writes.
+        if not self._save_extended_session(session, apply_retention=False):
             raise OSError(f"Failed to save imported session {session.session_id}")
         return session.session_id
 
