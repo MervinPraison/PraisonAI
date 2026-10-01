@@ -9,6 +9,7 @@ from praisonaiagents.llm.llm import LLM
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['sync', 'async'])
+@pytest.mark.parametrize('model', ['gpt-4o-mini', 'o1', 'o3'])
 @pytest.mark.parametrize('configured,override,expected', [
     (0.0, None, 0.0),
     (0.15, None, 0.15),
@@ -16,9 +17,9 @@ from praisonaiagents.llm.llm import LLM
     (0.15, 0.75, 0.75),
     (0.15, 0.0, 0.0),
 ])
-async def test_public_responses_temperature_configuration(mode, configured, override, expected):
+async def test_public_responses_temperature_configuration(mode, model, configured, override, expected):
     """Sync and async public requests must preserve zero, defaults and overrides."""
-    llm = LLM(model='gpt-4o-mini', temperature=configured)
+    llm = LLM(model=model, temperature=configured)
     requests = []
 
     def response(**kwargs):
@@ -39,7 +40,7 @@ async def test_public_responses_temperature_configuration(mode, configured, over
         answer = await llm.get_response_async('question', **kwargs)
     assert answer == 'answer'
     assert len(requests) == 1
-    if expected is None:
+    if expected is None or model in ('o1', 'o3'):
         assert 'temperature' not in requests[0]
     else:
         assert requests[0]['temperature'] == expected
