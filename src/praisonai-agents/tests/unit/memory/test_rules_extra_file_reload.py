@@ -98,6 +98,56 @@ def test_same_named_glob_matches_are_all_retained(manager):
         manager.reload()
 
 
+def test_same_named_glob_rules_reach_path_scoped_prompt(manager, monkeypatch):
+    from praisonaiagents import Agent
+
+    for directory, content in (("a", "GLOB_A_MARKER"), ("b", "GLOB_B_MARKER")):
+        path = manager.workspace_path / "instructions" / directory
+        path.mkdir(parents=True)
+        (path / "rules.md").write_text(
+            f'---\nglobs: ["*.py"]\nactivation: glob\n---\n{content}', encoding="utf-8"
+        )
+    assert manager.add_rule_file("instructions/*/rules.md") == 2
+    agent = Agent(name="test", llm="gpt-4o-mini")
+    agent._rules_manager = manager
+    agent._rules_manager_initialized = True
+    monkeypatch.setattr(agent, "_collect_touched_file_paths", lambda: ["foo.py", "bar.py"])
+    for _ in range(2):
+        matched = manager.get_glob_rules_for_paths(["foo.py", "bar.py", "foo.py"])
+        assert len(matched) == 2
+        assert manager.get_glob_rules_for_paths(["foo.py"], exclude_names={"rules"}) == []
+        prompt = agent._append_glob_rules_context("Base prompt")
+        assert prompt.count("GLOB_A_MARKER") == prompt.count("GLOB_B_MARKER") == 1
+        manager.reload()
+
+
+@pytest.mark.parametrize("rule_scope,delete_scope", [
+    ("workspace", "workspace"), ("workspace", None), ("global", "global"), ("global", None),
+])
+def test_registered_discovered_rule_remains_deletable(manager, rule_scope, delete_scope):
+    from pathlib import Path
+
+    rule = manager.create_rule("custom", "Scoped instruction", scope=rule_scope)
+    path = Path(rule.file_path)
+    assert manager.add_rule_file(str(path)) == 1
+    manager.reload()
+    assert manager.delete_rule("custom", scope=delete_scope)
+    assert not path.exists()
+    assert manager.get_all_rules() == []
+    manager.reload()
+    assert manager.get_all_rules() == []
+
+
+def test_explicit_workspace_registration_does_not_grant_global_deletion(manager):
+    from pathlib import Path
+
+    rule = manager.create_rule("custom", "Scoped instruction")
+    assert manager.add_rule_file(rule.file_path) == 1
+    assert not manager.delete_rule("custom", scope="global")
+    assert Path(rule.file_path).exists()
+    assert "Scoped instruction" in manager.build_rules_context()
+
+
 def test_overlapping_specs_and_path_spellings_share_one_rule(manager):
     directory = manager.workspace_path / "instructions"
     directory.mkdir()

@@ -569,9 +569,15 @@ class RulesManager:
                     if existing.file_path
                     and os.path.normcase(str(Path(existing.file_path).resolve())) == source
                 ]
+                # Keep a discovered scope key so public name lookup/deletion
+                # still addresses this file, without retaining a second copy.
+                storage_key = next(
+                    (key for key in duplicates if not key.startswith("extra:")),
+                    f"extra:{source}",
+                )
                 for key in duplicates:
                     del self._rules[key]
-                self._rules[f"extra:{source}"] = rule
+                self._rules[storage_key] = rule
                 added += 1
         self._log(f"Added {added} extra rule file(s) from '{path}'")
         return added
@@ -712,7 +718,7 @@ class RulesManager:
 
         Only rules with ``activation == "glob"`` are considered; ``always``
         rules are handled up front by the system-prompt builder. Results are
-        deduplicated by rule name and any name in ``exclude_names`` is skipped
+        deduplicated by file identity and any name in ``exclude_names`` is skipped
         so already-injected rules are not emitted twice.
 
         Args:
@@ -728,11 +734,15 @@ class RulesManager:
         for rule in self._rules.values():
             if rule.activation != "glob":
                 continue
-            if rule.name in exclude or rule.name in seen:
+            identity = (
+                os.path.normcase(str(Path(rule.file_path).resolve()))
+                if rule.file_path else rule.name
+            )
+            if rule.name in exclude or identity in seen:
                 continue
             if any(rule.matches_file(fp) for fp in file_paths):
                 matched.append(rule)
-                seen.add(rule.name)
+                seen.add(identity)
         matched.sort(key=lambda r: r.priority, reverse=True)
         return matched
 
