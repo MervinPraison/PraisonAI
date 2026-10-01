@@ -6468,6 +6468,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not choices:
                 from .openai_client import OpenAIClient
                 finish_reason = OpenAIClient._responses_incomplete_finish_reason(response)
+                refusal = OpenAIClient._extract_responses_refusal(response)
             if finish_reason is None and not refusal:
                 return
             from ..agent.run_outcome import classify_finish_reason
@@ -7279,6 +7280,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                    else getattr(event, "response", None))
                 self._record_finish_reason(_final_response)
 
+            if evt_type == "response.refusal.delta":
+                refusal = event.get("delta", "") if isinstance(event, dict) else getattr(event, "delta", "")
+                self._record_finish_reason({"choices": [{"message": {"refusal": refusal}}]})
+
             # ── Text delta ──────────────────────────────────────────
             if evt_type == "response.output_text.delta":
                 delta_text = (event.get("delta", "") if isinstance(event, dict)
@@ -7408,6 +7413,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 _final_response = (event.get("response") if isinstance(event, dict)
                                    else getattr(event, "response", None))
                 self._record_finish_reason(_final_response)
+
+            if evt_type == "response.refusal.delta":
+                refusal = event.get("delta", "") if isinstance(event, dict) else getattr(event, "delta", "")
+                self._record_finish_reason({"choices": [{"message": {"refusal": refusal}}]})
 
             if evt_type == "response.output_text.delta":
                 delta_text = (event.get("delta", "") if isinstance(event, dict)
