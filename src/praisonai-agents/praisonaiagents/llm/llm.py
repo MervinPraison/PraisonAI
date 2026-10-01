@@ -7171,7 +7171,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             params["temperature"] = temperature
         if self.max_tokens:
             params["max_output_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
         if self.base_url:
             params["base_url"] = self.base_url
