@@ -294,6 +294,21 @@ class TestStructuredRetryAfter:
             retry_after = _math.nan
         assert extract_retry_after(_ProviderError("retry after 12 seconds")) == 12.0
 
+    def test_negative_message_hint_is_ignored(self):
+        """An echoed negative Retry-After in the message must not become a
+        positive delay that would park a scheduler hold (issue #5424)."""
+        assert extract_retry_after(Exception("retry after -3600 seconds")) is None
+        assert extract_retry_after(Exception("Retry-After: -60")) is None
+        assert extract_retry_after(Exception("wait -120 seconds")) is None
+        assert extract_retry_after(Exception("-90 second cooldown")) is None
+
+    def test_invalid_hints_fall_through_to_valid_message_delay(self):
+        """A negative header + echoed negative seconds yields no delay; a later
+        positive number is not spuriously fabricated."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "-5"}
+        assert extract_retry_after(_ProviderError("retry after -3600 seconds")) is None
+
 
 class TestRetryLogic:
     

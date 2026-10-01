@@ -103,6 +103,16 @@ def test_negative_retry_after_does_not_hold():
     assert quota_hold_from_failure(_RateLimited(-30), 1000.0) is None
 
 
+def test_echoed_negative_retry_after_in_message_does_not_hold():
+    # A provider that echoes a negative Retry-After in the error message (e.g.
+    # "retry after -3600 seconds") must not be read as a positive window that
+    # parks the job on an invalid reset hint (issue #5424 / greptile #1).
+    hold = quota_hold_from_failure(
+        "429 Too Many Requests, retry after -3600 seconds", 1000.0, slack_seconds=60.0
+    )
+    assert hold is None
+
+
 # ── is_due hold guard ─────────────────────────────────────────────────
 
 
