@@ -106,6 +106,35 @@ def test_included_recipe_leaves_reuse_cache_without_cross_recipe_hits(tmp_path, 
     assert first["variables"]["parallel_outputs"][0] != first["variables"]["parallel_outputs"][1]
 
 
+def test_cache_hit_resets_skipped_status_to_completed():
+    """A cache hit after a prior gate-out must report completed, not skipped.
+
+    A nested leaf runs and is cached, then its gate skips it on a later run
+    (status -> "skipped"), then the gate opens again. The third run is served
+    the cached output; without resetting status the step would still report
+    "skipped" despite returning a real completed result.
+    """
+    enabled = {"value": True}
+    calls = []
+    step = Task(
+        name="leaf",
+        handler=lambda ctx: calls.append("run") or "done",
+        should_run=lambda ctx: enabled["value"],
+    )
+    flow = AgentFlow(steps=[Parallel(steps=[step])], cache=True)
+
+    flow.run("same", verbose=False)            # runs, result cached
+    assert flow.step_statuses["leaf"] == "completed"
+    enabled["value"] = False
+    flow.run("same", verbose=False)            # gated out
+    assert flow.step_statuses["leaf"] == "skipped"
+    enabled["value"] = True
+    flow.run("same", verbose=False)            # cache hit, gate open again
+    # Only one real execution; the third run was served from cache.
+    assert calls == ["run"]
+    assert flow.step_statuses["leaf"] == "completed"
+
+
 @pytest.mark.skipif(
     os.getenv("RUN_REAL_KEY_TESTS") != "1" or not os.getenv("OPENAI_API_KEY"),
     reason="requires an explicitly enabled real test provider",
