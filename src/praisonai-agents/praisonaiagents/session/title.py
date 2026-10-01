@@ -66,6 +66,9 @@ def generate_title(
         ... )
         >>> # Returns something like: "Python Code Debugging Help"
     """
+    if max_length <= 0:
+        return ""
+
     # Fallback title from user message if generation fails
     fallback_title = _create_fallback_title(user_msg, max_length)
     
@@ -119,6 +122,9 @@ async def generate_title_async(
     Returns:
         Generated title string, or fallback based on user message
     """
+    if max_length <= 0:
+        return ""
+
     fallback_title = _create_fallback_title(user_msg, max_length)
     
     try:
@@ -181,7 +187,7 @@ def _truncate_title(title: str, max_length: int) -> str:
         return ""
     if len(title) <= max_length:
         return title
-    if max_length < 3:
+    if max_length <= 3:
         return title[:max_length]
     return title[:max_length - 3] + "..."
 
