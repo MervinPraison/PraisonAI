@@ -17,11 +17,13 @@ def base_session(tmp_path):
     assert store.set_gateway_info("session", gateway_session_id="gateway", agent_id="agent")
     assert store.set_runtime_state("session", "native", "turn", {"status": "saved"})
     assert store.append_compaction_checkpoint("session", "resume summary", tokens_before=20, tokens_after=5)
-    return store, store.get_session("session")
+    session = store.get_session("session")
+    assert session.archived_messages
+    return store, session
 
 
 @pytest.mark.parametrize("operation", ["read", "set_title", "add_message"])
-@pytest.mark.parametrize("field_name", ["gateway_session_id", "agent_id", "runtime_state", "last_compaction"])
+@pytest.mark.parametrize("field_name", ["gateway_session_id", "agent_id", "runtime_state", "last_compaction", "archived_messages"])
 def test_hierarchy_load_and_mutation_keep_base_fields(base_session, operation, field_name):
     plain, before = base_session
     # Preserve the existing archive without triggering a new compaction whose
