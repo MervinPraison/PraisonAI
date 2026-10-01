@@ -450,12 +450,12 @@ class FileMemory:
     def _save_long_term(self):
         """Save long-term memory to file."""
         data = [item.to_dict() for item in self._long_term]
-        self._write_json(self.long_term_file, data)
+        return self._write_json(self.long_term_file, data)
     
     def _save_entities(self):
         """Save entities to file."""
         data = {k: v.to_dict() for k, v in self._entities.items()}
-        self._write_json(self.entities_file, data)
+        return self._write_json(self.entities_file, data)
     
     def _save_summaries(self):
         """Save summaries to file."""
@@ -585,6 +585,7 @@ class FileMemory:
                 importance=importance
             )
             
+            previous_items = self._long_term[:]
             self._long_term.append(item)
             
             # Enforce limit
@@ -594,7 +595,9 @@ class FileMemory:
                 self._long_term.sort(key=lambda x: x.importance, reverse=True)
                 self._long_term = self._long_term[:limit]
             
-            self._save_long_term()
+            if self._save_long_term() is False:
+                self._long_term = previous_items
+                raise OSError("Failed to persist long-term memory")
             self._log(f"Added long-term memory: {content[:50]}...")
             
             # Emit trace event
@@ -641,6 +644,8 @@ class FileMemory:
                 k: EntityItem.from_dict(v)
                 for k, v in self._read_json(self.entities_file, {}).items()
             }
+            from copy import deepcopy
+            previous_entities = deepcopy(self._entities)
             entity_id = self._generate_id(f"{name}:{entity_type}")
             
             # Check if entity exists
@@ -663,7 +668,9 @@ class FileMemory:
                 )
                 self._entities[entity_id] = entity
             
-            self._save_entities()
+            if self._save_entities() is False:
+                self._entities = previous_entities
+                raise OSError("Failed to persist entity memory")
             self._log(f"Added/updated entity: {name} ({entity_type})")
             
             return entity_id
