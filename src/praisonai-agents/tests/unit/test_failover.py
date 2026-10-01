@@ -262,6 +262,44 @@ class TestFailoverManager:
         
         assert p1.status == ProviderStatus.AVAILABLE
         assert p2.status == ProviderStatus.AVAILABLE
+
+    def test_reset_all_clears_default_coordinator_bench(self):
+        """reset_all() must clear the default coordinator's retained bench.
+
+        A manager-recorded failure benches the credential fleet-wide. Without
+        clearing it, get_next_profile() re-applies the cooldown and undoes the
+        reset, keeping the backup selected.
+        """
+        manager = FailoverManager()
+        primary = AuthProfile(name="primary", provider="openai", api_key="example-primary")
+        backup = AuthProfile(
+            name="backup", provider="openai", api_key="example-backup", priority=1
+        )
+        manager.add_profile(primary)
+        manager.add_profile(backup)
+        manager.mark_failure(primary, "429", is_rate_limit=True)
+        assert manager.get_next_profile() is backup
+
+        manager.reset_all()
+
+        assert primary.is_available
+        assert manager.get_next_profile() is primary
+
+    def test_reset_all_clears_shared_coordinator_bench(self):
+        """reset_all() must clear entries in an explicitly shared coordinator."""
+        from praisonaiagents.llm.quota import LocalQuotaCoordinator
+
+        coordinator = LocalQuotaCoordinator()
+        manager = FailoverManager(coordinator=coordinator)
+        primary = AuthProfile(name="primary", provider="openai", api_key="example-primary")
+        manager.add_profile(primary)
+        manager.mark_failure(primary, "429", is_rate_limit=True)
+        assert coordinator.is_benched(primary.credential_id)
+
+        manager.reset_all()
+
+        assert not coordinator.is_benched(primary.credential_id)
+        assert primary.is_available
     
     def test_on_failover_callback(self):
         """Test failover callback."""

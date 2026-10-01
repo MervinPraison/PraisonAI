@@ -524,10 +524,24 @@ class FailoverManager:
             }
     
     def reset_all(self) -> None:
-        """Reset all profiles to available status."""
+        """Reset all profiles to available status.
+
+        Clears both the local profile state and any retained coordinator
+        benches. Without clearing the coordinator, a subsequent
+        ``get_next_profile()`` would re-apply the old cooldown via
+        ``_sync_bench_from_coordinator()`` and silently undo the reset.
+        Fail-open: a coordinator hiccup must never wedge the local reset.
+        """
         with self._lock:
             for profile in self._profiles:
                 profile.reset()
+                try:
+                    self._coordinator.clear(profile.credential_id)
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning(
+                        f"Quota coordinator clear failed for '{profile.name}': {e}; "
+                        f"local reset applied"
+                    )
 
 
 @runtime_checkable
