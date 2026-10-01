@@ -537,8 +537,9 @@ class RulesManager:
             Number of rule files successfully added.
         """
         path = str(path)
-        if path not in self._extra_rule_files:
-            self._extra_rule_files.append(path)
+        if path in self._extra_rule_files:
+            self._extra_rule_files.remove(path)
+        self._extra_rule_files.append(path)
         return self._load_extra_rule_file(path)
 
     def _load_extra_rule_file(self, path: str) -> int:
@@ -554,13 +555,23 @@ class RulesManager:
                 matches = list(self.workspace_path.glob(path))
 
         added = 0
-        for file_path in matches:
+        for file_path in sorted(matches, key=str):
             if not file_path.is_file():
                 continue
             rule = self._load_root_instruction_file(file_path)
             if rule:
                 rule.priority = rule.priority + 200  # Explicit files win
-                self._rules[f"extra:{rule.name}"] = rule
+                source = os.path.normcase(str(file_path.resolve()))
+                # Explicit registration replaces any auto-discovered or previous
+                # copy of this file, but keeps distinct files with the same name.
+                duplicates = [
+                    key for key, existing in self._rules.items()
+                    if existing.file_path
+                    and os.path.normcase(str(Path(existing.file_path).resolve())) == source
+                ]
+                for key in duplicates:
+                    del self._rules[key]
+                self._rules[f"extra:{source}"] = rule
                 added += 1
         self._log(f"Added {added} extra rule file(s) from '{path}'")
         return added
@@ -613,6 +624,12 @@ class RulesManager:
             if key in self._rules:
                 return self._rules[key]
         
+        # For ambiguous explicit names, the latest registration retains the
+        # existing name-lookup precedence; all distinct files remain in context.
+        for key, rule in reversed(list(self._rules.items())):
+            if key.startswith("extra:") and rule.name == name:
+                return rule
+
         # Also check without scope prefix
         for rule in self._rules.values():
             if rule.name == name:

@@ -6233,12 +6233,12 @@ Summary:"""
             for extra in extra_files:
                 self._rules_manager.add_rule_file(extra)
             
-            # Discovery gate: if no rules were found, drop the manager so that
-            # zero-config runs incur no per-run injection cost.
+            # Keep explicit registrations so an initially empty glob can gain
+            # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
                 logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
-            else:
+            elif not extra_files:
                 self._rules_manager = None
         except ImportError:
             logging.debug("RulesManager not available")
