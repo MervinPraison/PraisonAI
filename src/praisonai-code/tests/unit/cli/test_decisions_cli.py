@@ -22,3 +22,14 @@ def test_decisions_run_json():
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["answers"]["team"]["choice"] == "billing"
+
+
+def test_decisions_triage_rejects_non_choice_route_question():
+    from praisonai_code.cli.commands.decisions import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["triage", "charged twice", "--route-question", "refund", "--skip-chat"]
+    )
+    assert result.exit_code != 0
+    assert "choice question" in result.output

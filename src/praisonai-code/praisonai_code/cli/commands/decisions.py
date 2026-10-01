@@ -68,7 +68,7 @@ def decisions_run(
         raise typer.Exit(code=1) from exc
 
     if json_output:
-        output.print(json.dumps(result.raw or {"model": result.model, "answers": result.answers}, indent=2))
+        print(json.dumps(result.raw or {"model": result.model, "answers": result.answers}, indent=2))
         return
 
     output.print_info(f"model={result.model}")
@@ -113,11 +113,18 @@ def decisions_triage(
     )
 
     output = get_output_controller()
+    questions = default_ticket_triage_questions()
+    if questions.get(route, {}).get("type") != "choice":
+        raise typer.BadParameter(
+            f"--route-question must name a choice question; {route!r} is "
+            f"{questions.get(route, {}).get('type')!r}. Choice questions: "
+            f"{[k for k, v in questions.items() if v.get('type') == 'choice']}"
+        )
     plan = DecisionRoutePlan(
         route_question=route,
         decision_model=model,
         api_base=api_base,
-        questions=default_ticket_triage_questions(),
+        questions=questions,
         routes={
             "billing": billing_model,
             "technical": technical_model,
@@ -132,7 +139,7 @@ def decisions_triage(
             decision = triage_decision(text, questions=plan.questions, decision_model=model, api_base=api_base)
             payload = {"route": decision.choice(route), "answers": decision.answers, "model": decision.model}
             if json_output:
-                output.print(json.dumps(payload, indent=2, default=str))
+                print(json.dumps(payload, indent=2, default=str))
             else:
                 output.print_info(json.dumps(payload, indent=2, default=str))
             return
@@ -145,7 +152,7 @@ def decisions_triage(
             "response_preview": str(out["response"])[:500],
         }
         if json_output:
-            output.print(json.dumps(payload, indent=2, default=str))
+            print(json.dumps(payload, indent=2, default=str))
         else:
             output.print_info(f"route={out['route']} confidence={out['confidence']}")
             output.print(str(out["response"])[:2000])

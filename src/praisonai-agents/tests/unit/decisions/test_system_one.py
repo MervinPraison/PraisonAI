@@ -90,6 +90,68 @@ def test_resolve_base_url_env(monkeypatch):
     assert resolve_system_one_base_url() == "http://127.0.0.1:11434"
 
 
+def test_default_timeout_honours_explicit_120(monkeypatch):
+    from praisonaiagents.decisions.system_one import _default_timeout
+
+    monkeypatch.delenv("SYSTEM_ONE_TIMEOUT", raising=False)
+    monkeypatch.delenv("OLLAMA_SYSTEM_ONE_TIMEOUT", raising=False)
+    assert _default_timeout(120.0) == 120.0
+    assert _default_timeout(5.0) == 5.0
+    assert _default_timeout(None) == 120.0
+    monkeypatch.setenv("SYSTEM_ONE_TIMEOUT", "30")
+    assert _default_timeout(None) == 30.0
+    assert _default_timeout(7.0) == 7.0
+
+
+def test_validate_base_url_rejects_plain_http_remote():
+    from praisonaiagents.decisions.system_one import _validate_base_url
+
+    _validate_base_url("http://127.0.0.1:11434")
+    _validate_base_url("http://localhost:11434")
+    _validate_base_url("https://api.typesafe.ai")
+    with pytest.raises(ValueError):
+        _validate_base_url("http://evil.example.com")
+    with pytest.raises(ValueError):
+        _validate_base_url("ftp://127.0.0.1")
+
+
+def test_typesafe_key_not_sent_to_ollama_host(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_BASE_URL", raising=False)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret-typesafe")
+    monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["auth"] = req.headers.get("Authorization")
+        return io.BytesIO(json.dumps({"model": "nimble", "answers": {}}).encode())
+
+    with mock.patch("urllib.request.urlopen", fake_urlopen):
+        system_one(
+            state={"ticket": "x"},
+            questions={"team": choice_question("Team?", {"billing": "pay"})},
+            model="nimble",
+        )
+    assert captured["auth"] == "Bearer ollama"
+
+
+def test_typesafe_key_sent_to_typesafe_base(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://api.typesafe.ai")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret-typesafe")
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["auth"] = req.headers.get("Authorization")
+        return io.BytesIO(json.dumps({"model": "nimble", "answers": {}}).encode())
+
+    with mock.patch("urllib.request.urlopen", fake_urlopen):
+        system_one(
+            state={"ticket": "x"},
+            questions={"team": choice_question("Team?", {"billing": "pay"})},
+            model="nimble",
+        )
+    assert captured["auth"] == "Bearer secret-typesafe"
+
+
 @pytest.mark.skipif(
     not __import__("os").environ.get("RUN_OLLAMA_DECISION_TESTS"),
     reason="Set RUN_OLLAMA_DECISION_TESTS=1 with Ollama 0.35+ and `ollama pull nimble`",

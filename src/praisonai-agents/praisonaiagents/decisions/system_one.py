@@ -5,12 +5,14 @@ See: https://ollama.com/blog/ollama-now-supports-jev-style-decision-models
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Mapping, MutableMapping, Optional
+from urllib.parse import urlparse
 
 KNOWN_DECISION_MODELS = frozenset({"nimble", "tev1", "tev1:0.8b"})
 
@@ -23,20 +25,51 @@ def is_decision_model(model: str) -> bool:
     return name.startswith("tev1")
 
 
-def resolve_system_one_base_url(api_base: Optional[str] = None) -> str:
-    """Resolve base URL for ``/v1/systemone`` (Ollama 0.35+ or TypeSafe cloud)."""
+def _base_source(api_base: Optional[str] = None) -> tuple[str, Optional[str]]:
+    """Return ``(base_url, source)`` where *source* names the env var selected.
+
+    *source* is ``None`` when ``api_base`` is explicit, ``"TYPESAFE_BASE_URL"`` or
+    ``"OLLAMA_HOST"`` when resolved from the environment, or ``"default"`` for the
+    loopback fallback. The source lets callers scope credentials to the host that
+    was actually chosen (so a TypeSafe key is never sent to an Ollama host).
+    """
     if api_base:
-        return api_base.rstrip("/")
+        return api_base.rstrip("/"), None
     for key in ("TYPESAFE_BASE_URL", "OLLAMA_HOST"):
         raw = (os.environ.get(key) or "").strip()
         if raw:
             from praisonaiagents.local.target import parse_ollama_host
 
             parsed = parse_ollama_host(raw) if not raw.startswith("http") else raw.rstrip("/")
-            if parsed:
-                return parsed.rstrip("/")
-            return raw.rstrip("/")
-    return "http://127.0.0.1:11434"
+            return (parsed or raw).rstrip("/"), key
+    return "http://127.0.0.1:11434", "default"
+
+
+def resolve_system_one_base_url(api_base: Optional[str] = None) -> str:
+    """Resolve base URL for ``/v1/systemone`` (Ollama 0.35+ or TypeSafe cloud)."""
+    return _base_source(api_base)[0]
+
+
+def _is_loopback_host(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_base_url(base: str) -> None:
+    """Reject non-HTTP(S) schemes and plain HTTP to non-loopback hosts."""
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"system_one requires an http(s) base URL, got {base!r}")
+    if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+        raise ValueError(
+            f"system_one refuses plain HTTP for non-loopback host {parsed.hostname!r}; use https"
+        )
 
 
 def choice_question(instructions: str, criteria: Mapping[str, str]) -> dict[str, Any]:
@@ -86,8 +119,8 @@ class SystemOneResult:
         return float(val) if val is not None else None
 
 
-def _default_timeout(explicit: float) -> float:
-    if explicit != 120.0:
+def _default_timeout(explicit: Optional[float]) -> float:
+    if explicit is not None:
         return explicit
     raw = (os.environ.get("SYSTEM_ONE_TIMEOUT") or os.environ.get("OLLAMA_SYSTEM_ONE_TIMEOUT") or "").strip()
     if raw:
@@ -95,13 +128,16 @@ def _default_timeout(explicit: float) -> float:
             return float(raw)
         except ValueError:
             pass
-    return 600.0
+    return 120.0
 
 
-def _default_api_key(api_key: Optional[str]) -> Optional[str]:
+def _default_api_key(api_key: Optional[str], *, allow_typesafe_key: bool) -> Optional[str]:
+    """Resolve the bearer key, scoping ``TYPESAFE_API_KEY`` to TypeSafe hosts only."""
     if api_key is not None:
         return api_key
-    return os.environ.get("TYPESAFE_API_KEY") or os.environ.get("OLLAMA_API_KEY") or "ollama"
+    if allow_typesafe_key and os.environ.get("TYPESAFE_API_KEY"):
+        return os.environ["TYPESAFE_API_KEY"]
+    return os.environ.get("OLLAMA_API_KEY") or "ollama"
 
 
 def _build_payload(
@@ -133,7 +169,7 @@ def system_one(
     model: Optional[str] = None,
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
-    timeout: float = 120.0,
+    timeout: Optional[float] = None,
 ) -> SystemOneResult:
     """
     Run a System One decision request against Ollama or TypeSafe.
@@ -161,11 +197,12 @@ def system_one(
         or os.environ.get("OLLAMA_DECISION_MODEL")
         or "nimble"
     )
-    base = resolve_system_one_base_url(api_base)
+    base, source = _base_source(api_base)
+    _validate_base_url(base)
     url = f"{base}/v1/systemone"
     body = json.dumps(_build_payload(model=resolved_model, state=state, questions=questions)).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    key = _default_api_key(api_key)
+    key = _default_api_key(api_key, allow_typesafe_key=source == "TYPESAFE_BASE_URL")
     if key:
         headers["Authorization"] = f"Bearer {key}"
     timeout = _default_timeout(timeout)
@@ -192,7 +229,7 @@ async def asystem_one(
     model: Optional[str] = None,
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
-    timeout: float = 120.0,
+    timeout: Optional[float] = None,
 ) -> SystemOneResult:
     """Async ``system_one`` using aiohttp (already a core dependency)."""
     import aiohttp
@@ -203,11 +240,12 @@ async def asystem_one(
         or os.environ.get("OLLAMA_DECISION_MODEL")
         or "nimble"
     )
-    base = resolve_system_one_base_url(api_base)
+    base, source = _base_source(api_base)
+    _validate_base_url(base)
     url = f"{base}/v1/systemone"
     payload = _build_payload(model=resolved_model, state=state, questions=questions)
     headers: MutableMapping[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
-    key = _default_api_key(api_key)
+    key = _default_api_key(api_key, allow_typesafe_key=source == "TYPESAFE_BASE_URL")
     if key:
         headers["Authorization"] = f"Bearer {key}"
     timeout_obj = aiohttp.ClientTimeout(total=_default_timeout(timeout))

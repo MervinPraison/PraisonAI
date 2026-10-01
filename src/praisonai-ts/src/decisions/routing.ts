@@ -1,5 +1,9 @@
 import type { QuestionSpec, SystemOneResult } from './system-one';
-import { systemOne } from './system-one';
+import { getChoice, systemOne } from './system-one';
+
+function hasOwnRoute(routes: Record<string, RouteTarget>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(routes, key);
+}
 
 export interface AgentLike {
   start(prompt: string): Promise<unknown> | unknown;
@@ -49,15 +53,15 @@ export async function triagedStart(
     model: plan.decisionModel,
     apiBase: plan.apiBase,
   });
-  let route = decision.answers[routeQuestion]?.choice;
+  let route = getChoice(decision, routeQuestion);
   const conf = decision.answers[routeQuestion]?.confidence;
-  if (plan.minConfidence != null && conf != null && conf < plan.minConfidence) {
+  if (plan.minConfidence != null && (conf == null || conf < plan.minConfidence)) {
     route = plan.fallbackRoute ?? route;
   }
-  if (!route || !(route in plan.routes)) {
+  if (!route || !hasOwnRoute(plan.routes, route)) {
     route = plan.fallbackRoute ?? route;
   }
-  if (!route || !(route in plan.routes)) {
+  if (!route || !hasOwnRoute(plan.routes, route)) {
     throw new Error(`No route for ${routeQuestion}=${String(route)}`);
   }
   const target = plan.routes[route];
@@ -68,7 +72,7 @@ export async function triagedStart(
     }
     response = await createAgent(target).start(prompt);
   } else if (typeof target === 'function') {
-    response = target(decision);
+    response = await target(decision);
   } else {
     response = await target.start(prompt);
   }

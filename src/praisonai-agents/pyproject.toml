@@ -145,6 +145,7 @@ all = [
     "praisonaiagents[knowledge]",
     "praisonaiagents[graph]",
     "praisonaiagents[llm]",
+    "praisonaiagents[decisions]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
     "praisonaiagents[telemetry]",

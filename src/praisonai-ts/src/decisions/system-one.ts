@@ -61,7 +61,11 @@ export function resolveSystemOneBaseUrl(apiBase?: string): string {
     (typeof process !== 'undefined' && process.env?.TYPESAFE_BASE_URL) ||
     (typeof process !== 'undefined' && process.env?.OLLAMA_HOST) ||
     'http://127.0.0.1:11434';
-  return fromEnv.replace(/\/+$/, '');
+  // OLLAMA_HOST is often a bare host:port (e.g. 127.0.0.1:11434) without a
+  // scheme; fetch() rejects such URLs. Mirror the Python client by prepending
+  // http:// when no scheme is present.
+  const withScheme = /^https?:\/\//i.test(fromEnv) ? fromEnv : `http://${fromEnv}`;
+  return withScheme.replace(/\/+$/, '');
 }
 
 function defaultApiKey(apiKey?: string): string | undefined {

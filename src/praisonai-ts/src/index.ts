@@ -964,8 +964,15 @@ export {
   resolveSystemOneBaseUrl,
   scoreQuestion,
   systemOne,
+  defaultTicketTriageQuestions,
+  triagedStart,
 } from './decisions';
 export type { QuestionSpec, SystemOneAnswer, SystemOneOptions, SystemOneResult } from './decisions';
+export type {
+  DecisionRoutePlan,
+  RouteTarget,
+  AgentLike as DecisionAgentLike,
+} from './decisions';
 
 // Export Trace Module (Python parity with praisonaiagents/trace)
 export {

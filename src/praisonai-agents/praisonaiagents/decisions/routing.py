@@ -36,10 +36,18 @@ class DecisionRoutePlan:
     fallback_route: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.route_question not in self.questions and self.questions:
+        if not self.questions:
+            raise ValueError("DecisionRoutePlan requires a non-empty questions mapping")
+        if self.route_question not in self.questions:
             raise ValueError(
                 f"route_question {self.route_question!r} missing from questions keys "
                 f"{list(self.questions.keys())}"
+            )
+        route_q = self.questions[self.route_question]
+        if route_q.get("type") != "choice":
+            raise ValueError(
+                f"route_question {self.route_question!r} must be a choice question, "
+                f"got type {route_q.get('type')!r}"
             )
 
 
@@ -76,9 +84,8 @@ def triage_decision(
     extra_state: Optional[Mapping[str, Any]] = None,
 ) -> SystemOneResult:
     """Run System One on *message* without invoking a chat LLM."""
-    state = {state_key: message}
-    if extra_state:
-        state.update(dict(extra_state))
+    state = dict(extra_state or {})
+    state[state_key] = message
     return system_one(
         state=state,
         questions=questions,
@@ -122,7 +129,7 @@ def triaged_start(
     )
     route_key = resolve_route_key(decision, plan.route_question)
     conf = decision.confidence(plan.route_question)
-    if plan.min_confidence is not None and conf is not None and conf < plan.min_confidence:
+    if plan.min_confidence is not None and (conf is None or conf < plan.min_confidence):
         route_key = plan.fallback_route or route_key
     if not route_key or route_key not in plan.routes:
         route_key = plan.fallback_route or next(iter(plan.routes), None)
