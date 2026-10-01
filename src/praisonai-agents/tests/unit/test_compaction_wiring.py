@@ -80,15 +80,34 @@ class TestCompactionMaxTokensResolution:
         # Must be far above the old flat 8000 for a large-context model.
         assert resolved > 8000
 
+    @staticmethod
+    def _content_for_tokens(compactor, target_tokens):
+        """Build text whose size is measured by the compactor's own tokeniser.
+
+        A fixed chars-per-token ratio is unsafe: a degenerate ``"A" * n`` string
+        collapses to far fewer tokens under tiktoken (available when its vocab is
+        cached, e.g. on CI) than the 4-chars/token heuristic assumes, so sizing by
+        a hard-coded ratio makes the assertion environment-dependent. Measuring
+        with ``compactor.estimate_tokens`` keeps the test deterministic under both
+        the accurate and heuristic token-counting paths.
+        """
+        word = "lorem ipsum dolor sit amet "
+        text = word * max(1, target_tokens // max(1, compactor.estimate_tokens(word)))
+        while compactor.estimate_tokens(text) < target_tokens:
+            text += word * 256
+        return text
+
     def test_unset_does_not_trigger_within_window(self):
         from praisonaiagents.config.feature_configs import ExecutionConfig
         from praisonaiagents.compaction import ContextCompactor
         agent = self._make_agent("gpt-4o")  # 128k window
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
-        # ~30k tokens of conversation should fit comfortably in a 128k model.
-        msgs = [{"role": "user", "content": "A" * 4 * 30000}]
         compactor = ContextCompactor(max_tokens=resolved)
+        # A conversation well under the resolved budget must not trigger.
+        content = self._content_for_tokens(compactor, resolved // 2)
+        assert compactor.estimate_tokens(content) < resolved
+        msgs = [{"role": "user", "content": content}]
         assert compactor.needs_compaction(msgs) is False
 
     def test_unset_triggers_when_budget_approached(self):
@@ -97,9 +116,11 @@ class TestCompactionMaxTokensResolution:
         agent = self._make_agent("gpt-4o")
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
-        # Well beyond the working budget must trigger compaction.
-        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
         compactor = ContextCompactor(max_tokens=resolved)
+        # Well beyond the working budget must trigger compaction.
+        content = self._content_for_tokens(compactor, resolved + 50000)
+        assert compactor.estimate_tokens(content) > resolved
+        msgs = [{"role": "user", "content": content}]
         assert compactor.needs_compaction(msgs) is True
 
 
