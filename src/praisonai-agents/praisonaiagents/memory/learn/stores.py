@@ -197,6 +197,9 @@ class BaseStore(ABC):
         """Refresh before telemetry writes; use cached entries on backend outage."""
         try:
             self._load()
+        except (KeyError, TypeError, ValueError, AttributeError):
+            # Invalid records are data errors, not temporary backend outages.
+            raise
         except Exception:
             import logging
             logging.warning("Failed to refresh learning store; using read-only cached entries.")

@@ -120,3 +120,21 @@ def test_backend_outage_mutations_fail_without_writing(tmp_path, operation):
             store.delete(target.id)
     assert backend.saves == saves_before
     assert store.get(target.id).content == "cached target"
+
+
+@pytest.mark.parametrize("operation", ["search", "list_all"])
+@pytest.mark.parametrize("missing_field", ["id", "content"])
+def test_malformed_record_is_not_treated_as_backend_outage(tmp_path, operation, missing_field):
+    backend = UnavailableBackend()
+    store = InsightStore(store_path=str(tmp_path / "insights.json"), backend=backend)
+    target = store.add("cached target")
+    malformed = target.to_dict()
+    del malformed[missing_field]
+    backend.data = {target.id: malformed}
+    saves_before = backend.saves
+    with pytest.raises(KeyError, match=missing_field):
+        if operation == "search":
+            store.search("target")
+        else:
+            store.list_all()
+    assert backend.saves == saves_before
