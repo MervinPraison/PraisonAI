@@ -317,7 +317,8 @@ class DocsManager:
                     parts.append(section[:remaining] + "\n... (truncated)")
                 break
         
-        return "\n".join(parts)
+        # Include heading/separators and truncation marker in the final budget.
+        return "\n".join(parts)[:max(0, max_chars)]
     
     def create_doc(
         self,

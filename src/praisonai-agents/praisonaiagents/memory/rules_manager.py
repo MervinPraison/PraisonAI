@@ -672,7 +672,8 @@ class RulesManager:
                     parts.append(section[:remaining] + "\n... (truncated)")
                 break
         
-        return "\n".join(parts)
+        # Include separators and truncation marker in the final budget.
+        return "\n".join(parts)[:max(0, max_chars)]
     
     def get_glob_rules_for_paths(
         self,
