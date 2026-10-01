@@ -1,6 +1,8 @@
 """Portable imports refresh the indexed store's content and routing views."""
 
 import pytest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
 from praisonaiagents.session.store import DefaultSessionStore
@@ -92,3 +94,63 @@ def test_warm_import_indexes_archived_turns(make_store):
     hits = destination.search("pelican")
     assert [hit.session_id for hit in hits] == ["session"]
     assert any(message["archived"] for message in hits[0].messages)
+
+
+@pytest.mark.parametrize("separate_store", [False, True])
+def test_write_between_import_save_and_index_keeps_newer_content(make_store, monkeypatch, separate_store):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "pelican imported turn")
+    destination = make_store(SqliteSessionStore)
+    destination.search("pelican")
+    writer = destination
+    if separate_store:
+        writer = SqliteSessionStore(session_dir=destination.session_dir, db_path=destination.db_path)
+        writer.search("pelican")
+
+    saved = threading.Event()
+    resume = threading.Event()
+    original = DefaultSessionStore._save_imported_session
+
+    def delayed_save(store, session):
+        result = original(store, session)
+        saved.set()
+        assert resume.wait(5), "concurrent writer did not finish"
+        return result
+
+    monkeypatch.setattr(DefaultSessionStore, "_save_imported_session", delayed_save)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            importing = executor.submit(destination.import_sessions, source.export_all())
+            try:
+                assert saved.wait(5), "import did not persist the JSON"
+                assert writer.set_chat_history("session", [{"role": "user", "content": "narwhal newer turn"}])
+                assert writer.set_gateway_info("session", gateway_session_id="new-gateway", agent_id="new-agent")
+                assert writer.search("narwhal")
+            finally:
+                resume.set()
+            assert importing.result(timeout=5).imported == 1
+        destination.invalidate_cache()
+        assert destination.get_session("session").messages[0].content == "narwhal newer turn"
+        assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
+        assert destination.search("pelican") == []
+        assert destination.get_by_gateway_session("new-gateway").session_id == "session"
+        assert destination.list_sessions_by_gateway_agent("new-agent") == ["session"]
+    finally:
+        if separate_store and writer._conn is not None:
+            writer._conn.close()
+
+
+def test_post_import_refresh_failure_does_not_report_durable_write_failure(make_store, monkeypatch):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "durable imported note")
+    destination = make_store(SqliteSessionStore)
+
+    def unavailable(*args):
+        raise OSError("injected index refresh read failure")
+
+    monkeypatch.setattr(destination, "_read_session_fresh", unavailable)
+    report = destination.import_sessions(source.export_all())
+    assert report.imported == 1
+    assert report.skipped == []
+    reader = DefaultSessionStore(session_dir=destination.session_dir)
+    assert reader.get_session("session").messages[0].content == "durable imported note"

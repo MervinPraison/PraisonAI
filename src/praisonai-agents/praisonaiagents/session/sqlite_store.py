@@ -374,7 +374,10 @@ class SqliteSessionStore(DefaultSessionStore):
         """Refresh recall and routing after a verbatim portable restore."""
         ok = super()._save_imported_session(session)
         if ok:
-            self._index_session(session)
+            try:
+                self._index_session(self._read_session_fresh(session.session_id))
+            except Exception as exc:
+                logger.debug("Post-import index refresh failed for %s: %s", session.session_id, exc)
         return ok
 
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
