@@ -27,6 +27,20 @@ manager = SandboxManager(SandboxConfig.subprocess())
 result = await manager.run_code("print('hello')")
 ```
 
+## Tenki compute lifecycle
+
+Install `praisonai-sandbox[tenki]` to use `TenkiCompute` with Tenki SDK 1.4.0 or
+newer. With `ComputeConfig(auto_shutdown=True)`, the provider terminates the
+sandbox after `idle_timeout_s` without an active command, package installation,
+or file transfer. Activity restarts the idle countdown; status checks do not.
+
+Idle cleanup runs while the Python process is alive and does not track background
+processes after their launching command returns. Always call `shutdown()` in a
+`finally` block (or use the framework's managed cleanup). Tenki's server-side
+maximum lifetime is a separate safeguard and is not an idle timeout.
+
+Timed-out commands return exit code `124` and preserve any partial output.
+
 ## Console script
 
 ```bash
