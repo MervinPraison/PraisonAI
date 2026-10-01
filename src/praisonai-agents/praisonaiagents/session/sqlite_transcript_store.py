@@ -286,6 +286,32 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 self._cache[session.session_id] = session
             return True
 
+    def _save_imported_session(self, session: SessionData) -> bool:
+        """Restore to the database without applying the destination's window."""
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        return self._write_row(session)
+
+    def export_all(self) -> Dict[str, Any]:
+        """Export durable database rows, not legacy JSON sidecar files."""
+        return {
+            "version": self.PORTABLE_VERSION,
+            "sessions": [data for data in self._all_rows() if isinstance(data, dict)],
+        }
+
+    def _collect_lineage(
+        self, session: SessionData, *, exclude: str
+    ) -> List[Dict[str, Any]]:
+        """Collect persisted database records from the same conversation chain."""
+        lineage = self._lineage_key(session.to_dict())
+        if not lineage:
+            return []
+        return [
+            data for data in self._all_rows()
+            if isinstance(data, dict)
+            and data.get("session_id") != exclude
+            and self._lineage_key(data) == lineage
+        ]
+
     def _modify_session_locked(
         self,
         session_id: str,
