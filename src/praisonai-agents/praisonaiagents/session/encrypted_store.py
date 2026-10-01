@@ -172,6 +172,28 @@ class EncryptedSessionStore:
     def add_assistant_message(self, session_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         return self.add_message(session_id, "assistant", content, metadata)
 
+    def upsert_partial_assistant_message(
+        self, session_id: str, content: str, *, finalize: bool = False
+    ) -> bool:
+        # Streamed partial/finalized turns must be encrypted like any other
+        # content; left to __getattr__ this would forward plaintext straight to
+        # the inner store's disk write, defeating the encrypted store (Issue
+        # #5407). Only forward when the inner store actually supports it so a
+        # leaner wrapped store keeps raising the same AttributeError it would
+        # without the wrapper.
+        inner = getattr(self._store, "upsert_partial_assistant_message", None)
+        if inner is None:
+            raise AttributeError("upsert_partial_assistant_message")
+        return inner(session_id, self._encrypt(content), finalize=finalize)
+
+    def discard_partial_assistant_message(self, session_id: str) -> bool:
+        # No content crosses here, but forward explicitly so the capability is
+        # only advertised when the wrapped store really has it.
+        inner = getattr(self._store, "discard_partial_assistant_message", None)
+        if inner is None:
+            raise AttributeError("discard_partial_assistant_message")
+        return inner(session_id)
+
     def get_chat_history(self, session_id: str, max_messages: Optional[int] = None) -> List[Dict[str, Any]]:
         rows = self._store.get_chat_history(session_id, max_messages)
         return [self._decrypt_row(row) for row in rows or []]

@@ -6,7 +6,10 @@ the ``upsert_partial_assistant_message`` / ``discard_partial_assistant_message``
 seam on the default JSON store.
 """
 
+import os
 import tempfile
+
+import pytest
 
 from praisonaiagents.session.store import DefaultSessionStore
 
@@ -135,3 +138,111 @@ class TestMemoryMixinSeam:
         agent._persist_assistant_delta("x", force=True)
         agent._finalize_assistant_turn("final text")
         assert ("assistant", "final text") in store.calls
+
+
+class TestFailedFinalizationRecovery:
+    """A failed durable write must not silently report success (Issue #5407)."""
+
+    def test_finalize_write_failure_propagates(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("s", "q")
+            store.upsert_partial_assistant_message("s", "partial")
+            # Simulate a disk-full / corruption on the durable write.
+            monkeypatch.setattr(
+                store, "_atomic_write_json", lambda *a, **k: False
+            )
+            ok = store.upsert_partial_assistant_message(
+                "s", "final answer", finalize=True
+            )
+            assert ok is False  # failure surfaced, not swallowed
+
+
+class TestSqliteTranscriptPartialPersistence:
+    """The SQLite transcript store must honour partial writes through its
+    authoritative row path, not a stray JSON file (Issue #5407)."""
+
+    def _store(self):
+        from praisonaiagents.session.sqlite_transcript_store import (
+            SqliteTranscriptStore,
+        )
+
+        return SqliteTranscriptStore(db_path=":memory:")
+
+    def test_partial_then_finalize_visible_in_row(self):
+        store = self._store()
+        store.add_user_message("s", "q")
+        store.upsert_partial_assistant_message("s", "draft")
+        # Read back through the authoritative row, not a JSON file.
+        session = store.get_session("s")
+        assert session.messages[-1].content == "draft"
+        assert session.messages[-1].metadata.get("partial") is True
+
+        store.upsert_partial_assistant_message("s", "final", finalize=True)
+        history = store.get_chat_history("s")
+        assert [m["content"] for m in history] == ["q", "final"]
+
+    def test_discard_partial_in_row(self):
+        store = self._store()
+        store.add_user_message("s", "q")
+        store.upsert_partial_assistant_message("s", "stale")
+        assert store.discard_partial_assistant_message("s") is True
+        assert [m["role"] for m in store.get_chat_history("s")] == ["user"]
+
+
+class TestEncryptedPartialPersistence:
+    """Streamed partial content must be encrypted at rest, not forwarded raw
+    through ``__getattr__`` (Issue #5407)."""
+
+    def _crypto(self):
+        pytest.importorskip("cryptography")
+
+    def test_partial_content_encrypted_on_disk(self):
+        self._crypto()
+        from praisonaiagents.session.encrypted_store import (
+            EncryptedSessionStore,
+            generate_session_key,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = generate_session_key()
+            inner = DefaultSessionStore(session_dir=tmpdir)
+            store = EncryptedSessionStore(inner, key=key)
+            store.add_user_message("s", "q")
+            store.upsert_partial_assistant_message("s", "secret partial")
+
+            # Raw disk bytes must not contain the plaintext.
+            on_disk = ""
+            for name in os.listdir(tmpdir):
+                if name.endswith(".json"):
+                    with open(os.path.join(tmpdir, name)) as fh:
+                        on_disk += fh.read()
+            assert "secret partial" not in on_disk
+
+            # But the wrapper decrypts it back for the caller.
+            history = store.get_chat_history("s")
+            assert history[-1]["content"] == "secret partial"
+
+    def test_finalize_encrypted_and_recoverable(self):
+        self._crypto()
+        from praisonaiagents.session.encrypted_store import (
+            EncryptedSessionStore,
+            generate_session_key,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = generate_session_key()
+            store = EncryptedSessionStore(
+                DefaultSessionStore(session_dir=tmpdir), key=key
+            )
+            store.add_user_message("s", "q")
+            store.upsert_partial_assistant_message("s", "draft answer")
+            store.upsert_partial_assistant_message(
+                "s", "final answer", finalize=True
+            )
+            # Resume with the same key decrypts the finalized turn.
+            resumed = EncryptedSessionStore(
+                DefaultSessionStore(session_dir=tmpdir), key=key
+            )
+            history = resumed.get_chat_history("s")
+            assert [m["content"] for m in history] == ["q", "final answer"]

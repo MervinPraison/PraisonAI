@@ -1428,23 +1428,22 @@ class DefaultSessionStore:
         Returns:
             True if the store was updated successfully.
         """
-        filepath = self._get_session_path(session_id)
-        with FileLock(filepath, self.lock_timeout):
-            try:
-                session = self._load_session_from_disk(session_id, filepath)
-            except OSError:
-                logger.error(
-                    f"Failed to upsert partial message for {session_id}: read error"
-                )
-                return False
+        # Short-circuit: finalizing with no text and no prior partial is a
+        # no-op, so avoid a needless read-modify-write.
+        if finalize and not content and not self._has_trailing_partial(session_id):
+            return True
 
+        # Capture the finalized message so it can be mirrored after the write
+        # succeeds, without re-reading the session.
+        finalized_holder: Dict[str, Any] = {}
+
+        def _apply(session: SessionData) -> None:
             trailing = session.messages[-1] if session.messages else None
             is_partial = (
                 trailing is not None
                 and trailing.role == "assistant"
-                and bool(trailing.metadata.get("partial"))
+                and bool((trailing.metadata or {}).get("partial"))
             )
-
             if is_partial:
                 if finalize and not content:
                     # Interrupted with no text ever produced: drop the empty
@@ -1455,38 +1454,52 @@ class DefaultSessionStore:
                     trailing.timestamp = time.time()
                     if finalize:
                         trailing.metadata.pop("partial", None)
-                        if not trailing.metadata:
+                        if trailing.metadata is None:
                             trailing.metadata = {}
+                        finalized_holder["message"] = trailing
             else:
                 if finalize and not content:
-                    return True
-                session.messages.append(
-                    SessionMessage(
-                        role="assistant",
-                        content=content,
-                        timestamp=time.time(),
-                        metadata={} if finalize else {"partial": True},
-                    )
+                    return
+                message = SessionMessage(
+                    role="assistant",
+                    content=content,
+                    timestamp=time.time(),
+                    metadata={} if finalize else {"partial": True},
                 )
+                session.messages.append(message)
+                if finalize:
+                    finalized_holder["message"] = message
 
-            session.updated_at = datetime.now(timezone.utc).isoformat()
-            if finalize:
-                # Only enforce the retention window on finalize so a per-token
-                # partial flush never triggers a compaction mid-turn.
-                self._enforce_window(session)
+        # Route through the transactional read-modify-write seam so SQLite-
+        # backed stores write their authoritative row (not a stray JSON file),
+        # concurrent turns stay serialized, failed writes propagate (and spill
+        # for recovery), and search indexes refresh on finalize — rather than
+        # re-implementing a FileLock+JSON write that only the default store
+        # honours (Issue #5407).
+        if not self._modify_session_locked(
+            session_id, _apply, error_label="upsert partial assistant message"
+        ):
+            return False
 
-            if not self._atomic_write_json(filepath, session.to_dict()):
-                logger.error(f"Failed to upsert partial message for {session_id}")
-                return False
-
-            with self._lock:
-                self._cache[session_id] = session
-
-        if finalize and session.messages:
-            self._mirror_append(session_id, [session.messages[-1]])
+        # Only a finalized turn is a completed record the mirror should carry;
+        # per-token partials are intentionally local until finalize.
+        if finalize and finalized_holder.get("message") is not None:
+            self._mirror_append(session_id, [finalized_holder["message"]])
         return True
 
-    
+    def _has_trailing_partial(self, session_id: str) -> bool:
+        """Return True if the session's last turn is an in-progress partial."""
+        try:
+            session = self._read_session_fresh(session_id)
+        except Exception:
+            return False
+        trailing = session.messages[-1] if session.messages else None
+        return (
+            trailing is not None
+            and trailing.role == "assistant"
+            and bool((trailing.metadata or {}).get("partial"))
+        )
+
     def discard_partial_assistant_message(self, session_id: str) -> bool:
         """Drop a trailing in-progress assistant turn, if any (Issue #5407).
 
@@ -1494,26 +1507,22 @@ class DefaultSessionStore:
         path (e.g. a tool-call turn) so a stale partial record does not linger.
         No-op when the trailing message is not a partial.
         """
-        filepath = self._get_session_path(session_id)
-        with FileLock(filepath, self.lock_timeout):
-            try:
-                session = self._load_session_from_disk(session_id, filepath)
-            except OSError:
-                return False
+        # Nothing to discard: skip the read-modify-write entirely.
+        if not self._has_trailing_partial(session_id):
+            return True
+
+        def _apply(session: SessionData) -> None:
             trailing = session.messages[-1] if session.messages else None
             if (
-                trailing is None
-                or trailing.role != "assistant"
-                or not trailing.metadata.get("partial")
+                trailing is not None
+                and trailing.role == "assistant"
+                and bool((trailing.metadata or {}).get("partial"))
             ):
-                return True
-            session.messages.pop()
-            session.updated_at = datetime.now(timezone.utc).isoformat()
-            if not self._atomic_write_json(filepath, session.to_dict()):
-                return False
-            with self._lock:
-                self._cache[session_id] = session
-        return True
+                session.messages.pop()
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="discard partial assistant message"
+        )
 
     def get_chat_history(
         self,

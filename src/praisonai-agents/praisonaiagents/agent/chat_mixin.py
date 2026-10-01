@@ -5326,6 +5326,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_calls_data = []
                     first_token_emitted = False
                     last_content_time = None
+                    # Track the text of the phase currently streaming so a
+                    # GeneratorExit (consumer Ctrl-C) recovers *that* phase's
+                    # answer. Before tools this is response_text; after tools it
+                    # becomes the post-tool follow-up answer. Without this the
+                    # interrupt handler would force a stale (usually empty)
+                    # pre-tool response_text over the real answer (Issue #5407).
+                    active_stream = {"text": "", "after_tools": False}
                     
                     for chunk in completion:
                         delta = chunk.choices[0].delta
@@ -5355,6 +5362,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Flush the growing partial turn so an interrupt
                             # mid stream retains it in the store (Issue #5407,
                             # debounced).
+                            active_stream["text"] = response_text
                             self._persist_assistant_delta(response_text)
                             yield chunk_content
                         
@@ -5395,6 +5403,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # the authoritative tool-call assistant turn below so the
                         # store never keeps a stale partial (Issue #5407).
                         self._discard_partial_assistant_turn()
+                        # From here the post-tool answer is the recoverable
+                        # phase; reset the interrupt tracker so a Ctrl-C during
+                        # the follow-up persists that answer, not the pre-tool
+                        # text we just discarded (Issue #5407).
+                        active_stream["after_tools"] = True
+                        active_stream["text"] = ""
                         # Add assistant message with tool calls to chat history
                         assistant_message = {"role": "assistant", "content": response_text}
                         if tool_calls_data:
@@ -5595,6 +5609,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if piece:
                                 followup_text += piece
                                 followup_last_content_time = time_module.perf_counter()
+                                # Flush the post-tool answer incrementally too so
+                                # an interrupt during the follow-up keeps it
+                                # (Issue #5407, debounced).
+                                active_stream["text"] = followup_text
+                                self._persist_assistant_delta(followup_text)
                                 yield piece
                         if followup_last_content_time:
                             self.stream_emitter.emit(StreamEvent(
@@ -5610,6 +5629,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}
                             )
+                            # Finalize the post-tool answer so resume sees a
+                            # completed turn, not a dangling partial (Issue
+                            # #5407).
+                            self._finalize_assistant_turn(followup_text)
                         else:
                             # Tools ran and the model then said nothing. Simply
                             # returning here is indistinguishable from a model
@@ -5630,8 +5653,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 except GeneratorExit:
                     # Consumer stopped iterating (e.g. Ctrl-C). Keep whatever
-                    # was produced so --continue can recover it (Issue #5407).
-                    self._persist_assistant_delta(response_text, force=True)
+                    # the *current* phase produced so --continue can recover it.
+                    # After a tool round the recoverable text is the post-tool
+                    # follow-up answer, not the pre-tool response_text that was
+                    # already discarded (Issue #5407).
+                    self._persist_assistant_delta(
+                        active_stream["text"], force=True
+                    )
                     raise
                 except ToolExecutionError:
                     self._rollback_chat_history_to(chat_history_length)
