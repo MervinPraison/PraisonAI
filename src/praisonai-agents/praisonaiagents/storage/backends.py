@@ -69,6 +69,17 @@ class FileBackend:
         # Sanitize key for filesystem
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         return self.storage_dir / f"{safe_key}{self.suffix}"
+
+    def _path_to_key(self, file_path: Path) -> Optional[str]:
+        """Recognize records using the full configured suffix."""
+        if not file_path.is_file():
+            return None
+        if self.suffix:
+            if file_path.name.endswith(self.suffix):
+                return file_path.name[:-len(self.suffix)]
+            return None
+        # Preserve the existing no-extension selection for an empty suffix.
+        return file_path.name if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
@@ -133,8 +144,8 @@ class FileBackend:
         keys = []
         
         for file_path in self.storage_dir.iterdir():
-            if file_path.is_file() and file_path.suffix == self.suffix:
-                key = file_path.stem
+            key = self._path_to_key(file_path)
+            if key is not None:
                 if not prefix or key.startswith(prefix):
                     keys.append(key)
         
@@ -149,7 +160,7 @@ class FileBackend:
         count = 0
         with self._lock:
             for file_path in self.storage_dir.iterdir():
-                if file_path.is_file() and file_path.suffix == self.suffix:
+                if self._path_to_key(file_path) is not None:
                     try:
                         file_path.unlink()
                         count += 1
