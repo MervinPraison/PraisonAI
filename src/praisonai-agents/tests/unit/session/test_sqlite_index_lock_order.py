@@ -86,8 +86,8 @@ def test_corruption_callback_can_query_during_backfill(store, monkeypatch):
     callbacks, failures = [], []
 
     def on_corruption(*args):
-        callbacks.append(store.get_by_gateway_session("other-gateway").session_id)
-        assert [hit.session_id for hit in store.search("narwhal")] == ["other"]
+        callbacks.append((store.get_by_gateway_session("other-gateway").session_id,
+                          [hit.session_id for hit in store.search("narwhal")]))
 
     monkeypatch.setattr(store, "_fire_corruption_hook", on_corruption)
 
@@ -102,7 +102,7 @@ def test_corruption_callback_can_query_during_backfill(store, monkeypatch):
     worker.join(2)
     assert not worker.is_alive(), "corruption callback deadlocked during backfill"
     assert failures == []
-    assert callbacks == ["other"]
+    assert callbacks == [("other", ["other"])]
     assert store._backfilled
 
 
