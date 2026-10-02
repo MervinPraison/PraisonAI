@@ -39,6 +39,25 @@ GATEWAY_SCHEMA_URL = (
 GATEWAY_SCHEMA_HEADER = f"# yaml-language-server: $schema={GATEWAY_SCHEMA_URL}\n"
 
 
+def resolve_model_by_provider() -> str:
+    """Resolve a default model for whichever provider credential is present.
+
+    Reuses the existing detection helper
+    (``praisonai_code.llm.env.default_model_for_available_provider``) through
+    the lazy cross-tier bridge so the gateway path leads with the provider the
+    operator already has (Anthropic/Gemini/Ollama/…) instead of assuming
+    OpenAI. Falls back to ``gpt-4o-mini`` only when no provider is detected or
+    the helper is unavailable.
+    """
+    try:
+        from praisonai_bot._code_bridge import import_code_module
+
+        env = import_code_module("praisonai_code.llm.env")
+        return env.default_model_for_available_provider()
+    except Exception:  # pragma: no cover - detection is best-effort
+        return "gpt-4o-mini"
+
+
 def _register_redaction(value: str) -> None:
     """Register a resolved secret value for log redaction (best-effort).
 
@@ -57,7 +76,12 @@ class AgentConfigSchema(BaseModel):
     """Schema for agent configuration in bot.yaml."""
     name: str = "assistant"
     instructions: str = ""
-    model: Optional[str] = "gpt-4o-mini"
+    # Provider-agnostic by default (Issue #5609). ``None`` / ``"auto"`` resolve
+    # at load time to the model for whichever provider credential is actually
+    # present (via ``resolved_model()``), so an operator with only an
+    # Anthropic/Gemini/Ollama key is not silently handed an OpenAI model. An
+    # explicit ``model:`` always wins.
+    model: Optional[str] = None
     llm: Optional[str] = None  # Alias for model
     memory: bool = False
     tools: List[str] = Field(default_factory=list)
@@ -73,6 +97,19 @@ class AgentConfigSchema(BaseModel):
         if self.llm and "model" not in self.model_fields_set:
             self.model = self.llm
         return self
+
+    def resolved_model(self) -> str:
+        """Return the effective model, detecting the provider when unset.
+
+        An explicit, non-``"auto"`` ``model`` (or ``llm`` alias) always wins.
+        When the model is unset or ``"auto"``, resolve it to the detected
+        provider's default (Issue #5609), with ``gpt-4o-mini`` as the
+        last-resort fallback handled inside ``resolve_model_by_provider``.
+        """
+        model = self.model
+        if model and model.strip().lower() != "auto":
+            return model
+        return resolve_model_by_provider()
 
 
 class SessionResetConfigSchema(BaseModel):
