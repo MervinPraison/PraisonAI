@@ -49,7 +49,8 @@ def measure_instantiation(create_fn, iterations=ITERATIONS, warmup=WARMUP):
     return sum(times) / len(times)
 
 
-def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
+def run_benchmark(skip_crewai: bool = False, quiet: bool = False,
+                  iterations: int = ITERATIONS, warmup: int = WARMUP):
     """Run the benchmark across all available frameworks (without tools)."""
     results = {}
 
@@ -57,22 +58,25 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
         if not quiet:
             print(msg)
 
+    def measure(create_fn):
+        return measure_instantiation(create_fn, iterations=iterations, warmup=warmup)
+
     log('=' * 60)
     log('PraisonAI Agents - Performance Benchmark')
     log('=' * 60)
-    log(f'\nIterations: {ITERATIONS}')
-    log(f'Warmup: {WARMUP}')
+    log(f'\nIterations: {iterations}')
+    log(f'Warmup: {warmup}')
     log('Metric: Agent instantiation time (microseconds)\n')
     
     # PraisonAI (without tools)
     log("Testing PraisonAI...")
     from praisonaiagents import Agent as PraisonAgent
     
-    results['PraisonAI'] = measure_instantiation(
+    results['PraisonAI'] = measure(
         lambda: PraisonAgent(name='Test', model='gpt-4o-mini', output="silent")
     )
     
-    results['PraisonAI (LiteLLM)'] = measure_instantiation(
+    results['PraisonAI (LiteLLM)'] = measure(
         lambda: PraisonAgent(name='Test', model='openai/gpt-4o-mini', output="silent")
     )
     
@@ -82,7 +86,7 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
     try:
         from agno.agent import Agent as AgnoAgent
         from agno.models.openai import OpenAIChat
-        results['Agno'] = measure_instantiation(
+        results['Agno'] = measure(
             lambda: AgnoAgent(model=OpenAIChat(id='gpt-4o-mini'))
         )
     except ImportError:
@@ -90,7 +94,7 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
     
     try:
         from pydantic_ai import Agent as PydanticAgent
-        results['PydanticAI'] = measure_instantiation(
+        results['PydanticAI'] = measure(
             lambda: PydanticAgent('openai:gpt-4o-mini')
         )
     except ImportError:
@@ -98,7 +102,7 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
     
     try:
         from agents import Agent as OpenAIAgent
-        results['OpenAI Agents SDK'] = measure_instantiation(
+        results['OpenAI Agents SDK'] = measure(
             lambda: OpenAIAgent(name='Test', model='gpt-4o-mini')
         )
     except ImportError:
@@ -114,7 +118,7 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
             """Get weather info."""
             return 'sunny' if city == 'sf' else 'cloudy'
         
-        results['LangGraph'] = measure_instantiation(
+        results['LangGraph'] = measure(
             lambda: create_react_agent(model=ChatOpenAI(model='gpt-4o-mini'), tools=[get_weather_lg])
         )
     except ImportError:
@@ -132,7 +136,7 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
                 """Get weather info."""
                 return 'sunny' if city == 'sf' else 'cloudy'
 
-            results['CrewAI'] = measure_instantiation(
+            results['CrewAI'] = measure(
                 lambda: CrewAgent(
                     role='Weather Agent',
                     goal='Provide weather info',
@@ -184,8 +188,13 @@ def get_package_versions():
     return versions
 
 
-def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
-    """Save benchmark results to a markdown file and update README."""
+def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md', *,
+                 iterations: int = ITERATIONS, log=print):
+    """Save benchmark results to a markdown file and update README.
+
+    Status messages are emitted via ``log`` (defaults to ``print``). Pass a
+    stderr logger when stdout must stay machine-readable (e.g. ``--json``).
+    """
     import os
     import re
     from datetime import datetime
@@ -212,7 +221,7 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
     with open(filepath, 'w') as f:
         f.write('# PraisonAI Agents - Benchmark Results\n\n')
         f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-        f.write(f'**Iterations:** {ITERATIONS}\n')
+        f.write(f'**Iterations:** {iterations}\n')
         f.write('**Test:** Agent instantiation (without tools)\n\n')
         f.write('## Results\n\n')
         f.write('| Framework | Avg Time (μs) | Relative |\n')
@@ -229,17 +238,17 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
         f.write('python benchmarks/simple_benchmark.py\n')
         f.write('```\n')
     
-    print(f'\nResults saved to: {filepath}')
+    log(f'\nResults saved to: {filepath}')
     
     # Also update the main README.md
     readme_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'README.md')
     if os.path.exists(readme_path):
-        update_readme(readme_path, table_rows)
+        update_readme(readme_path, table_rows, log=log)
     
     return filepath
 
 
-def update_readme(readme_path: str, table_rows: list):
+def update_readme(readme_path: str, table_rows: list, *, log=print):
     """Update the performance section in README.md with latest results."""
     import re
     
@@ -260,7 +269,7 @@ def update_readme(readme_path: str, table_rows: list):
         with open(readme_path, 'w') as f:
             f.write(content)
         
-        print(f'README.md updated: {readme_path}')
+        log(f'README.md updated: {readme_path}')
 
 
 def main():
@@ -274,16 +283,26 @@ def main():
                         help='Exit non-zero if PraisonAI instantiation exceeds the budget in thresholds.json')
     args = parser.parse_args()
 
-    results = run_benchmark(skip_crewai=args.skip_crewai, quiet=args.json)
+    thresholds = load_thresholds()
+    iterations = int(thresholds.get('iterations', ITERATIONS))
+    warmup = int(thresholds.get('warmup', WARMUP))
+
+    results = run_benchmark(
+        skip_crewai=args.skip_crewai,
+        quiet=args.json,
+        iterations=iterations,
+        warmup=warmup,
+    )
 
     if args.save:
-        save_results(results)
+        # Keep stdout machine-readable under --json by sending save status to stderr.
+        save_log = (lambda msg='': print(msg, file=sys.stderr)) if args.json else print
+        save_results(results, iterations=iterations, log=save_log)
     elif not args.json:
         print('\nResults not saved (use --save flag to save results to file)')
 
     exit_code = 0
     if args.fail_over_threshold:
-        thresholds = load_thresholds()
         max_us = thresholds['praisonai_instantiation_us_max']
         actual_us = results.get('PraisonAI')
         if actual_us is not None and actual_us > max_us:
@@ -294,7 +313,7 @@ def main():
             exit_code = 1
 
     if args.json:
-        print(json.dumps({'results': results, 'iterations': ITERATIONS, 'warmup': WARMUP}))
+        print(json.dumps({'results': results, 'iterations': iterations, 'warmup': warmup}))
 
     return exit_code
 
