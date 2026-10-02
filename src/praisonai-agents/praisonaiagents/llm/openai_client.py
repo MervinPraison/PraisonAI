@@ -1076,6 +1076,7 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or None if error
         """
+        raw = None
         # Lazy import StreamEvent types only when needed
         _emit = emit_events and stream_callback is not None
         if _emit:
@@ -1135,6 +1136,9 @@ class OpenAIClient:
                 except (FileNotFoundError, ValueError):
                     raise
                 except Exception as e:
+                    status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                    if status == "failed":
+                        raise
                     self.logger.warning(f"Responses API streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
@@ -1305,6 +1309,9 @@ class OpenAIClient:
             return final_response
             
         except Exception as e:
+            status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+            if status == "failed":
+                raise
             self.logger.error(f"Error in stream processing: {e}")
             return None
     
@@ -1341,6 +1348,7 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or None if error
         """
+        raw = None
         # Lazy import StreamEvent types only when needed
         _emit = emit_events and stream_callback is not None
         if _emit:
@@ -1409,6 +1417,9 @@ class OpenAIClient:
                 except (FileNotFoundError, ValueError):
                     raise
                 except Exception as e:
+                    status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                    if status == "failed":
+                        raise
                     self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
@@ -1571,6 +1582,9 @@ class OpenAIClient:
             return final_response
             
         except Exception as e:
+            status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+            if status == "failed":
+                raise
             self.logger.error(f"Error in async stream processing: {e}")
             return None
 

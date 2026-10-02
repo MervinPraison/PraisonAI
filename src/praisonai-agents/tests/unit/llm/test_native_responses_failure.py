@@ -4,13 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 from openai.types.responses import ResponseError
+from openai.types.chat import ChatCompletionChunk
 
 from praisonaiagents.llm.llm import LLMResponseError
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['sync', 'async'])
+@pytest.mark.parametrize('mode', ['sync', 'async', 'sync_stream', 'async_stream'])
 @pytest.mark.parametrize('shape', ['sdk', 'dict'])
 @pytest.mark.parametrize('profile', ['failed', 'missing_error', 'completed', 'unsupported'])
 async def test_native_responses_failure_and_compatibility_fallback(mode, shape, profile, monkeypatch):
@@ -38,10 +39,21 @@ async def test_native_responses_failure_and_compatibility_fallback(mode, shape, 
 
     def chat(**kwargs):
         calls.append('chat')
+        if kwargs.get('stream'):
+            return iter([ChatCompletionChunk(
+                id='chat-test', object='chat.completion.chunk', created=0, model='gpt-4o-mini',
+                choices=[{'index': 0, 'delta': {'content': 'fallback'}, 'finish_reason': 'stop'}],
+            )])
         return fallback
 
     async def achat(**kwargs):
-        return chat(**kwargs)
+        result = chat(**kwargs)
+        if kwargs.get('stream'):
+            async def chunks():
+                for chunk in result:
+                    yield chunk
+            return chunks()
+        return result
 
     client = OpenAIClient(api_key='sk-test-not-real')
     client._sync_client = SimpleNamespace(
@@ -53,6 +65,10 @@ async def test_native_responses_failure_and_compatibility_fallback(mode, shape, 
 
     async def invoke():
         messages = [{'role': 'user', 'content': 'question'}]
+        if mode == 'sync_stream':
+            return client.process_stream_response(messages, model='gpt-4o-mini')
+        if mode == 'async_stream':
+            return await client.process_stream_response_async(messages, model='gpt-4o-mini')
         return client.create_completion(messages) if mode == 'sync' else await client.acreate_completion(messages)
 
     if profile in ('failed', 'missing_error'):
