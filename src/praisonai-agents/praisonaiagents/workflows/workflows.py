@@ -236,6 +236,7 @@ class StepResult:
     output: str = ""  # Step output content
     stop_workflow: bool = False  # If True, stop the entire workflow early
     variables: Dict[str, Any] = field(default_factory=dict)  # Variables to add/update
+    skipped: bool = False  # Completion observer outcome when no handler ran
 
 # Aliases for backward compatibility
 StepInput = WorkflowContext
@@ -1638,7 +1639,7 @@ class AgentFlow:
                         self.step_statuses[step.name] = "skipped"
                         if self.on_step_complete:
                             try:
-                                self.on_step_complete(step.name, StepResult(output=""))
+                                self.on_step_complete(step.name, StepResult(output="", skipped=True))
                             except Exception as e:
                                 logger.error(f"on_step_complete callback failed: {e}")
                         i += 1
@@ -1653,7 +1654,7 @@ class AgentFlow:
             _cache_key = None
             if _step_cache is not None:
                 from .step_cache import make_step_key
-                _cache_key = make_step_key(step, previous_output, input, all_variables)
+                _cache_key = make_step_key(step, context.previous_result, context.input, context.variables)
                 _cached = _step_cache.get(_cache_key)
                 if _cached is not None:
                     if verbose:
