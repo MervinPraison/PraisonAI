@@ -112,6 +112,28 @@ def test_partial_retry_does_not_duplicate_successful_records(tmp_path, monkeypat
     assert sorted(contents) == ["concise explanations", "examples"]
 
 
+def test_pending_preview_mutation_does_not_change_retry(tmp_path, monkeypatch):
+    memory = FileMemory(user_id="preview-pending", base_path=tmp_path)
+    auto = AutoMemory(memory)
+    original = memory.add_long_term
+    calls = []
+    def fail_second(content, **kwargs):
+        calls.append(content)
+        if len(calls) == 2:
+            raise OSError("partial outage")
+        return original(content, **kwargs)
+    monkeypatch.setattr(memory, "add_long_term", fail_second)
+    text = "I prefer concise explanations. I like examples."
+    with pytest.raises(OSError):
+        auto.process_interaction(text)
+    preview = auto.process_interaction(text, store=False)
+    preview[1]["content"] = "caller mutation"
+    preview.clear()
+    monkeypatch.setattr(memory, "add_long_term", original)
+    assert auto.process_interaction(text)
+    assert sorted(item.content for item in memory.get_long_term()) == ["concise explanations", "examples"]
+
+
 def test_concurrent_identical_calls_store_once(tmp_path, monkeypatch):
     memory = FileMemory(user_id="concurrent", base_path=tmp_path)
     auto = AutoMemory(memory)
