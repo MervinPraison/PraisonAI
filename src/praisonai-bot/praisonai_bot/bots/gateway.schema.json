@@ -24,7 +24,7 @@
               "type": "null"
             }
           ],
-          "default": "gpt-4o-mini",
+          "default": null,
           "title": "Model"
         },
         "llm": {
