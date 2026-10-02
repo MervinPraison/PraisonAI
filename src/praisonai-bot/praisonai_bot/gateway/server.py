@@ -131,6 +131,29 @@ from .unicode_utils import safe_error_message, safe_log_message, extract_root_ca
 from .supervisor import ChannelState, ChannelSupervisor
 
 
+def _installed_gateway_version() -> str:
+    """Return the installed ``praisonai-bot`` version, not a hardcoded literal.
+
+    Automated version/upgrade checks read this off ``/info`` and the MCP
+    ``serverInfo``; a hardcoded constant (#5363) actively misled them. Prefer
+    the packaged ``_version.py`` and fall back to installed metadata.
+    """
+    try:
+        from praisonai_bot._version import __version__ as _v
+        if _v:
+            return str(_v)
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version as _pkg_version
+    except ImportError:  # pragma: no cover - py<3.8
+        from importlib_metadata import version as _pkg_version  # type: ignore
+    try:
+        return _pkg_version("praisonai-bot")
+    except Exception:
+        return "0.0.0"
+
+
 # Per-platform token env-var fallbacks used by the generic channel-launch path
 # (Issue #3578). Channels whose credentials live in the environment rather than
 # gateway.yaml (email/AgentMail/Linear) resolve their token from the first env
@@ -1696,7 +1719,8 @@ class WebSocketGateway:
             api_cfg = getattr(self.config, "api", None)
             return JSONResponse({
                 "name": "PraisonAI Gateway",
-                "version": "1.0.0",
+                "version": _installed_gateway_version(),
+                "protocol_version": GATEWAY_PROTOCOL_VERSION,
                 "agents": list(self._agents.keys()),
                 "sessions": len(self._sessions),
                 "clients": len(self._clients),

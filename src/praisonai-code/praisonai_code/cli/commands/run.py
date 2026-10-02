@@ -1899,6 +1899,12 @@ def _run_from_file(
     
     # Note: Credential check already done in run_main() entry point
     
+    # Capture the re-entrancy sentinel's prior value *before* the guarded block
+    # so the ``finally`` restore below can never hit an UnboundLocalError when an
+    # early statement (e.g. the ``PraisonAI`` import) raises before assignment.
+    import os as _os_guard
+    _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
+
     try:
         # Use existing PraisonAI class
         from praisonai_code.cli.main import PraisonAI
@@ -1909,8 +1915,6 @@ def _run_from_file(
         # delegation loops forever ("maximum recursion depth exceeded"). Setting
         # this sentinel tells the legacy ``run`` branch we are already inside a
         # modern run so it executes the YAML directly instead of bouncing back.
-        import os as _os_guard
-        _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
         _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
 
         praison = PraisonAI(
