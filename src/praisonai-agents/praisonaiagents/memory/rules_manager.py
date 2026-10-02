@@ -851,6 +851,7 @@ class RulesManager:
         try:
             Path(rule.file_path).unlink()
             del self._rules[key]
+            self._explicit_rule_keys.discard(key)
             self._log(f"Deleted rule '{name}'")
             return True
         except Exception as e:

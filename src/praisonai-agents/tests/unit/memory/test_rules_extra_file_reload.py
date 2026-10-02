@@ -175,6 +175,19 @@ def test_explicit_workspace_registration_does_not_grant_global_deletion(manager)
     assert "Scoped instruction" in manager.build_rules_context()
 
 
+@pytest.mark.parametrize("scope", ["workspace", "global"])
+def test_deleted_registered_rule_recreation_does_not_steal_precedence(manager, scope):
+    """Only a live explicit registration participates in immediate lookup."""
+    original = manager.create_rule("custom", "Old scoped", scope=scope)
+    other = manager.workspace_path / "custom.md"
+    other.write_text("Latest explicit", encoding="utf-8")
+    assert manager.add_rule_file(original.file_path) == 1
+    assert manager.add_rule_file(str(other)) == 1
+    assert manager.delete_rule("custom", scope=scope)
+    manager.create_rule("custom", "Recreated automatic", scope=scope)
+    assert manager.get_rule_by_name("custom").content == "Latest explicit"
+
+
 def test_overlapping_specs_and_path_spellings_share_one_rule(manager):
     directory = manager.workspace_path / "instructions"
     directory.mkdir()
