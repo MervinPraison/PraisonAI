@@ -33,9 +33,10 @@ def test_snapshot_survives_retention_and_reopen(tmp_path, retention):
     assert restored.get("last_compaction") == before.get("last_compaction")
 
 
-def test_snapshot_restores_large_import_without_reapplying_window(tmp_path):
+@pytest.mark.parametrize("retention", ["compact", "truncate", "keep_all"])
+def test_snapshot_restores_large_import_without_reapplying_window(tmp_path, retention):
     store = HierarchicalSessionStore(
-        session_dir=str(tmp_path), max_messages=100, active_window=2, retention="truncate"
+        session_dir=str(tmp_path), max_messages=100, active_window=2, retention=retention
     )
     exported = SessionData(
         session_id="source",
@@ -44,6 +45,9 @@ def test_snapshot_restores_large_import_without_reapplying_window(tmp_path):
     ).to_dict()
     session_id = store.import_session(exported)
     snapshot_id = store.create_snapshot(session_id)
+    live = json.loads((tmp_path / f"{session_id}.json").read_text(encoding="utf-8"))
+    assert live["messages"] == exported["messages"]
+    assert live["archived_messages"] == exported["archived_messages"]
     assert store.add_message(session_id, "user", "later")
 
     assert store.revert_to_snapshot(session_id, snapshot_id)

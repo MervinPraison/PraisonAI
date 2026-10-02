@@ -571,8 +571,11 @@ class HierarchicalSessionStore(DefaultSessionStore):
             session.last_compaction = captured.last_compaction
             session.snapshots.append(snapshot)
 
+        # Recording a snapshot must not compact or truncate an imported live
+        # transcript, so skip retention on this write.
         if not self._modify_session_locked(
-            session_id, _record_snapshot, error_label="create snapshot"
+            session_id, _record_snapshot, error_label="create snapshot",
+            apply_retention=False,
         ):
             raise OSError(f"Failed to save snapshot {snapshot.id} for session {session_id}")
         
