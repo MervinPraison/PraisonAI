@@ -697,7 +697,11 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         if hasattr(agent, 'name'):
             info["name"] = agent.name
         if hasattr(agent, 'instructions'):
-            info["instructions"] = agent.instructions[:200] + "..." if len(agent.instructions) > 200 else agent.instructions
+            instructions = agent.instructions
+            if isinstance(instructions, str) and len(instructions) > 200:
+                info["instructions"] = instructions[:200] + "..."
+            else:
+                info["instructions"] = instructions
         if hasattr(agent, 'tools') and agent.tools:
             info["tools"] = [getattr(tool, 'name', str(tool)) for tool in agent.tools[:5]]  # First 5 tools
             if len(agent.tools) > 5:
