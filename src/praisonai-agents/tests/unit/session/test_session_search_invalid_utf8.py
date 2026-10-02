@@ -32,3 +32,33 @@ def test_search_skips_invalid_utf8_candidate(tmp_path, backend):
         conn = getattr(store, "_conn", None)
         if conn is not None:
             conn.close()
+
+
+@pytest.mark.parametrize("operation", ["list", "agent", "gateway", "gateway_agent", "export_all", "lineage"])
+def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
+    import praisonaiagents.session.store as module
+
+    store = DefaultSessionStore(session_dir=str(tmp_path))
+    assert store.add_message("valid", "user", "durable history")
+    assert store.set_agent_info("valid", agent_name="support")
+    assert store.set_gateway_info("valid", gateway_session_id="gateway", agent_id="agent")
+    assert store.update_session_metadata("valid", lineage_id="thread")
+    bad = tmp_path / "bad.json"
+    payload = b"\xff\xfe"
+    bad.write_bytes(payload)
+    original = module.os.listdir
+    monkeypatch.setattr(module.os, "listdir", lambda path: [bad.name, "valid.json"] if str(path) == str(tmp_path) else original(path))
+
+    if operation == "list":
+        assert [row["session_id"] for row in store.list_sessions()] == ["valid"]
+    elif operation == "agent":
+        assert store.list_sessions_by_agent("support") == ["valid"]
+    elif operation == "gateway":
+        assert store.get_by_gateway_session("gateway").session_id == "valid"
+    elif operation == "gateway_agent":
+        assert store.list_sessions_by_gateway_agent("agent") == ["valid"]
+    else:
+        exported = store.export_all() if operation == "export_all" else store.export_session("valid")
+        assert [row["session_id"] for row in exported["sessions"]] == ["valid"]
+        assert exported["sessions"][0]["messages"][0]["content"] == "durable history"
+    assert bad.read_bytes() == payload

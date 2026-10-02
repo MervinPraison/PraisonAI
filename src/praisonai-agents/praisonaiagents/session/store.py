@@ -1693,7 +1693,7 @@ class DefaultSessionStore:
                             "total_tokens": data.get("total_tokens") or data.get("token_count") or (data.get("metadata") or {}).get("total_tokens"),
                             "cost": data.get("cost") or (data.get("metadata") or {}).get("cost"),
                         })
-                    except (json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
                         continue
         except (IOError, OSError):
             pass
@@ -1727,7 +1727,7 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("agent_name") == agent_name:
                             session_ids.append(data.get("session_id", filename[:-5]))
-                    except (json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
                         continue
         except (IOError, OSError):
             pass
@@ -1835,7 +1835,7 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("gateway_session_id") == gateway_session_id:
                             return SessionData.from_dict(data)
-                    except (json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
                         continue
         except (IOError, OSError):
             pass
@@ -1865,7 +1865,7 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("agent_id") == agent_id:
                             session_ids.append(data.get("session_id", filename[:-5]))
-                    except (json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
                         continue
         except (IOError, OSError):
             pass
@@ -2269,7 +2269,7 @@ class DefaultSessionStore:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     sessions.append(json.load(f))
-            except (json.JSONDecodeError, IOError, OSError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError):
                 continue
         return {"version": self.PORTABLE_VERSION, "sessions": sessions}
 
@@ -2298,7 +2298,7 @@ class DefaultSessionStore:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError, OSError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError):
                 continue
             if data.get("session_id") == exclude:
                 continue
