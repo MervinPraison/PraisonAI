@@ -483,6 +483,8 @@ class SqliteTranscriptStore(DefaultSessionStore):
         ordering stable across batches without holding the writer's connection
         lock during decoded scoring. In-memory stores use a temporary database
         snapshot because their connection cannot be independently reopened.
+        Non-WAL files are also copied before scoring so slow decoding cannot
+        retain a source read transaction that prevents writers from committing.
         """
         from contextlib import closing
 
@@ -513,6 +515,15 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 if self.db_path == ":memory:":
                     with self._db_lock:
                         conn.backup(snapshot)
+                elif snapshot.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+                    source = snapshot
+                    snapshot = sqlite3.connect(":memory:")
+                    try:
+                        # Bounded backup steps release source read locks
+                        # between page batches; scoring uses only the copy.
+                        source.backup(snapshot, pages=128)
+                    finally:
+                        source.close()
                 snapshot.execute("BEGIN")
                 cursor = snapshot.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
                 while True:
