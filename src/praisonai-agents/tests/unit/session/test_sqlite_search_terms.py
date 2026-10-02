@@ -228,3 +228,69 @@ def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlit
     # cannot leave a rollback-journal reader blocking later commits.
     store._conn.execute("PRAGMA busy_timeout=50")
     assert store.add_message("after-search", "user", "writer resumed")
+
+
+def test_memory_backup_allows_a_write_before_copy_finishes(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, RLock, current_thread
+
+    store = SqliteTranscriptStore(session_dir=str(tmp_path), db_path=":memory:")
+    started, attempted, written, completed = Event(), Event(), Event(), Event()
+    observations = []
+    try:
+        assert store.add_message("reference", "user", "alpha beta " + "x" * 1_000_000)
+        conn = store._conn
+
+        class CoordinatedLock:
+            def __init__(self):
+                self.inner = RLock()
+
+            def acquire(self):
+                return self.inner.acquire()
+
+            def release(self):
+                self.inner.release()
+                assert written.wait(5), "writer could not progress between backup batches"
+
+            def __enter__(self):
+                if current_thread().name.startswith("writer"):
+                    attempted.set()
+                self.inner.acquire()
+                return self
+
+            def __exit__(self, *args):
+                self.inner.release()
+
+        class ObservedConnection:
+            def __getattr__(self, name):
+                return getattr(conn, name)
+
+            def backup(self, target, **kwargs):
+                started.set()
+                assert attempted.wait(5), "writer did not reach the store lock"
+                try:
+                    return conn.backup(target, **kwargs)
+                finally:
+                    completed.set()
+
+        def write():
+            try:
+                ok = store.add_message("concurrent", "user", "alpha beta written during backup")
+                observations.append(completed.is_set())
+                return ok
+            finally:
+                written.set()
+
+        monkeypatch.setattr(store, "_db_lock", CoordinatedLock())
+        monkeypatch.setattr(store, "_connect", lambda: ObservedConnection())
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="search") as searching, ThreadPoolExecutor(max_workers=1, thread_name_prefix="writer") as writing:
+            search = searching.submit(store.search, "alpha beta")
+            assert started.wait(5)
+            writer = writing.submit(write)
+            hits = search.result(timeout=10)
+            assert writer.result(timeout=5)
+        assert observations == [False]
+        assert {hit.session_id for hit in hits} == {"reference", "concurrent"}
+    finally:
+        if store._conn is not None:
+            store._conn.close()
