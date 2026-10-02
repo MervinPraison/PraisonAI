@@ -479,7 +479,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         per-session scoring, bookends, automated-demotion and lineage-dedup are
         then reused verbatim so results are identical in shape. Scanning spans
         the shared archived-plus-active projection so compacted history stays
-        recallable (Issue #5031).
+        recallable (Issue #5031). SQLite access is serialized in bounded batches;
+        decoded scoring does not hold the connection lock. Concurrent writes
+        are allowed, so results do not promise an atomic database snapshot.
         """
         from contextlib import closing
 
@@ -499,9 +501,17 @@ class SqliteTranscriptStore(DefaultSessionStore):
             # Stream payloads rather than materializing all transcript JSON.
             with self._db_lock:
                 cursor = conn.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
-                try:
-                    yield from cursor
-                finally:
+            try:
+                while True:
+                    with self._db_lock:
+                        batch = cursor.fetchmany(128)
+                    if not batch:
+                        break
+                    # Decoding and scoring can be expensive. Protect SQLite
+                    # calls, but let other operations run between batches.
+                    yield from batch
+            finally:
+                with self._db_lock:
                     cursor.close()
 
         hits: List[tuple] = []

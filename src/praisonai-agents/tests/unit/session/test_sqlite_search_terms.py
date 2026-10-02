@@ -54,13 +54,42 @@ def test_older_strong_match_survives_newer_partial_matches(tmp_path, sqlite_stor
     json_store = DefaultSessionStore(session_dir=str(tmp_path / "json"))
     for store in (json_store, sqlite_store):
         assert store.add_message("strong", "user", "alpha beta")
-        for index in range(26):
+        for index in range(260):
             assert store.add_message(f"newer-{index}", "user", "alpha only")
     expected = json_store.search("alpha beta", limit=limit)
     actual = sqlite_store.search("alpha beta", limit=limit)
     assert expected[0].session_id == "strong"
     assert actual[0].session_id == "strong"
     assert [hit.score for hit in actual] == [hit.score for hit in expected]
+
+
+def test_search_scoring_does_not_block_session_operations(sqlite_store, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    store = sqlite_store
+    assert store.add_message("reference", "user", "alpha beta")
+    scoring = Event()
+    release = Event()
+    original = store._searchable_messages
+
+    def paused_scoring(data):
+        scoring.set()
+        assert release.wait(5)
+        return original(data)
+
+    monkeypatch.setattr(store, "_searchable_messages", paused_scoring)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        search = pool.submit(store.search, "alpha beta")
+        try:
+            assert scoring.wait(5)
+            exists = pool.submit(store.session_exists, "reference")
+            write = pool.submit(store.add_message, "other", "user", "unrelated")
+            assert exists.result(timeout=1)
+            assert write.result(timeout=1)
+        finally:
+            release.set()
+        assert search.result(timeout=5)[0].session_id == "reference"
 
 
 @pytest.mark.parametrize("crowding", ["lineage", "automated", "metadata"])
