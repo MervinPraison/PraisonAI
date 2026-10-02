@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from openai.types.responses import EasyInputMessageParam
@@ -11,7 +12,14 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
-message_schema = TypeAdapter(EasyInputMessageParam)
+class PhaseMessage(EasyInputMessageParam, total=False):
+    """Keep SDK content validation while defining phase on older SDK releases."""
+
+    phase: Literal['commentary', 'final_answer']
+
+
+message_schema = TypeAdapter(PhaseMessage)
+sdk_message_schema = TypeAdapter(EasyInputMessageParam)
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +60,7 @@ async def test_public_responses_preserves_assistant_phase(entry, phase, with_too
     def respond(**kwargs):
         for item in kwargs['input']:
             if 'role' in item:
+                sdk_message_schema.validate_python(item, strict=True)
                 message_schema.validate_python(item, strict=True)
         requests.append(kwargs)
         return SimpleNamespace(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}])
