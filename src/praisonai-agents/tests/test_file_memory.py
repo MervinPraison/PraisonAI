@@ -119,6 +119,54 @@ class TestShortTermMemory:
             assert items[0].content == "Persistent memory"
 
 
+class TestAtomicWriteCleanup:
+    """Tests for atomic write staging-file cleanup (regression for #5491)."""
+
+    def test_serialization_error_leaves_no_temp_file(self):
+        """A non-serializable value must not leave a .*.tmp staging file behind."""
+        from pathlib import Path
+        from praisonaiagents.memory.file_memory import FileMemory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory = FileMemory(base_path=tmpdir)
+            target = memory.short_term_file
+
+            with pytest.raises(TypeError):
+                memory._write_json(target, {"bad": object()})
+
+            leftovers = list(Path(target.parent).glob(f".{target.name}.*.tmp"))
+            assert leftovers == [], f"leftover temp files: {leftovers}"
+
+    def test_serialization_error_preserves_existing_file(self):
+        """A failed write must not clobber the previously persisted file."""
+        from praisonaiagents.memory.file_memory import FileMemory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory = FileMemory(base_path=tmpdir)
+            target = memory.short_term_file
+
+            assert memory._write_json(target, [{"content": "keep me"}]) is True
+            original = target.read_text(encoding="utf-8")
+
+            with pytest.raises(TypeError):
+                memory._write_json(target, {"bad": object()})
+
+            assert target.read_text(encoding="utf-8") == original
+
+    def test_successful_write_removes_temp_file(self):
+        """A successful atomic write must leave no staging file behind."""
+        from pathlib import Path
+        from praisonaiagents.memory.file_memory import FileMemory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory = FileMemory(base_path=tmpdir)
+            target = memory.short_term_file
+
+            assert memory._write_json(target, [{"content": "ok"}]) is True
+            leftovers = list(Path(target.parent).glob(f".{target.name}.*.tmp"))
+            assert leftovers == [], f"leftover temp files: {leftovers}"
+
+
 class TestLongTermMemory:
     """Tests for long-term memory functionality."""
     

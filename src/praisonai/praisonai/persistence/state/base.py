@@ -115,3 +115,101 @@ class StateStore(ABC):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+
+class AsyncStateStore(ABC):
+    """
+    Abstract base class for async key-value state persistence.
+
+    Async sibling of :class:`StateStore`, matching the
+    :class:`~praisonai.persistence.conversation.base.AsyncConversationStore`
+    parity so third-party async backends (e.g. motor-backed MongoDB) have a
+    formal interface to subclass instead of implementing the sync ABC behind
+    ``run_sync`` shims. Async stores should implement this instead of
+    ``StateStore`` when they are natively async.
+    """
+
+    @abstractmethod
+    async def get(self, key: str) -> Optional[Any]:
+        """Get a value by key. Returns None if not found."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        ttl: Optional[int] = None,
+    ) -> None:
+        """Set a value. TTL is in seconds."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete(self, key: str) -> bool:
+        """Delete a key. Returns True if key existed."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def exists(self, key: str) -> bool:
+        """Check if a key exists."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def keys(self, pattern: str = "*") -> List[str]:
+        """List keys matching pattern."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def ttl(self, key: str) -> Optional[int]:
+        """Get remaining TTL in seconds. Returns None if no TTL or key doesn't exist."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def expire(self, key: str, ttl: int) -> bool:
+        """Set TTL on existing key. Returns True if key exists."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def hget(self, key: str, field: str) -> Optional[Any]:
+        """Get a field from a hash."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def hset(self, key: str, field: str, value: Any) -> None:
+        """Set a field in a hash."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def hgetall(self, key: str) -> Dict[str, Any]:
+        """Get all fields from a hash."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def hdel(self, key: str, *fields: str) -> int:
+        """Delete fields from a hash. Returns count deleted."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the store and release resources."""
+        raise NotImplementedError
+
+    async def get_json(self, key: str) -> Optional[Any]:
+        """Get and deserialize JSON value."""
+        value = await self.get(key)
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    async def set_json(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Serialize and set JSON value."""
+        await self.set(key, json.dumps(value), ttl)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return False

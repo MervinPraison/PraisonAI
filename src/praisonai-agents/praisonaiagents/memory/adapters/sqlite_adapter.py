@@ -19,6 +19,16 @@ from ..protocols import MemoryProtocol
 
 logger = get_logger(__name__)
 
+
+def _metadata_user_id(raw):
+    """Match the existing Python JSON reader, including non-finite values."""
+    try:
+        metadata = json.loads(raw) if raw else {}
+        return str(metadata["user_id"]) if isinstance(metadata, dict) and metadata.get("user_id") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 class SqliteMemoryAdapter:
     """
     SQLite-based memory adapter implementing MemoryProtocol.
@@ -73,12 +83,13 @@ class SqliteMemoryAdapter:
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
-        if not hasattr(self._local, 'stm_conn'):
+        if getattr(self._local, 'stm_conn', None) is None:
             self._local.stm_conn = sqlite3.connect(
                 self.short_db,
                 check_same_thread=False,
                 timeout=10.0
             )
+            self._local.stm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
             self._local.stm_conn.execute("""
                 CREATE TABLE IF NOT EXISTS short_term_memory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,12 +108,13 @@ class SqliteMemoryAdapter:
     
     def _get_ltm_conn(self):
         """Get thread-local long-term memory connection."""
-        if not hasattr(self._local, 'ltm_conn'):
+        if getattr(self._local, 'ltm_conn', None) is None:
             self._local.ltm_conn = sqlite3.connect(
                 self.long_db,
                 check_same_thread=False,
                 timeout=10.0
             )
+            self._local.ltm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
             self._local.ltm_conn.execute("""
                 CREATE TABLE IF NOT EXISTS long_term_memory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,10 +155,13 @@ class SqliteMemoryAdapter:
     ) -> List[Dict[str, Any]]:
         """Search short-term memory."""
         conn = self._get_stm_conn()
+        user_id = kwargs.get("user_id")
+        user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
+        params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM short_term_memory "
-            "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit)
+            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+            params
         )
         
         results = []
@@ -184,10 +199,13 @@ class SqliteMemoryAdapter:
     ) -> List[Dict[str, Any]]:
         """Search long-term memory."""
         conn = self._get_ltm_conn()
+        user_id = kwargs.get("user_id")
+        user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
+        params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM long_term_memory "
-            "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit)
+            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+            params
         )
         
         results = []
@@ -252,8 +270,10 @@ class SqliteMemoryAdapter:
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from both short-term and long-term."""
-        short_memories = self.search_short_term("", limit=1000)
-        long_memories = self.search_long_term("", limit=1000)
+        # SQLite's negative LIMIT means no upper bound. Enumeration must return
+        # every row; ordinary searches retain their default/explicit limits.
+        short_memories = self.search_short_term("", limit=-1)
+        long_memories = self.search_long_term("", limit=-1)
         
         # Mark memory types
         for memory in short_memories:
@@ -273,3 +293,29 @@ class SqliteMemoryAdapter:
                 except Exception:
                     pass
             self._all_connections.clear()
+
+    def close_thread_connections(self):
+        """Close only the calling thread's connections.
+
+        Leaves the shared adapter and other threads' connections intact so the
+        adapter can be reused; the calling thread lazily reopens its own
+        connections on next access.
+
+        A connection is only removed from the registry and cleared from
+        thread-local storage after it closes successfully. If ``close()`` raises,
+        the connection stays tracked so a later ``close_connections()`` /
+        ``close_thread_connections()`` can retry it, and the failure is logged
+        rather than silently swallowed.
+        """
+        for attr in ("stm_conn", "ltm_conn"):
+            conn = getattr(self._local, attr, None)
+            if conn is None:
+                continue
+            try:
+                conn.close()
+            except Exception as e:
+                logger.warning(f"Failed to close {attr}; keeping it tracked for retry: {e}")
+                continue
+            with self._connection_lock:
+                self._all_connections.discard(conn)
+            setattr(self._local, attr, None)

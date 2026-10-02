@@ -23,16 +23,28 @@ def register_memory_tools() -> None:
 
     @register_tool("praisonai.memory.show")
     def memory_show(user_id: Optional[str] = None) -> str:
-        """Show all stored memories (optionally filtered by user)."""
+        """Show stored memories; SQLite displays up to 1000 per tier."""
         try:
             from praisonaiagents.memory import Memory
 
             memory = Memory()
-            data = memory.get_all_memories()
-            if user_id:
+            adapter = getattr(memory, "memory_adapter", None)
+            if getattr(memory, "provider", None) == "sqlite" and adapter is not None:
+                # Display retains its previous bounded window. Full enumeration
+                # is a separate API and must not load the whole store here.
+                data = []
+                for tier in ("short", "long"):
+                    for record in getattr(adapter, f"search_{tier}_term")("", limit=1000, user_id=user_id):
+                        data.append({
+                            **record, "memory_type": f"{tier}_term", "type": f"{tier}_term",
+                        })
+            else:
+                data = memory.get_all_memories()
+            if user_id is not None:
                 data = [
                     m for m in data
-                    if str((m.get("metadata") or {}).get("user_id")) == str(user_id)
+                    if (m.get("metadata") or {}).get("user_id") is not None
+                    and str((m.get("metadata") or {}).get("user_id")) == str(user_id)
                 ]
             return str(data)
         except ImportError:
