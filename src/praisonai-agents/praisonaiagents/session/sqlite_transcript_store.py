@@ -485,6 +485,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         snapshot because their connection cannot be independently reopened.
         Non-WAL files are also copied before scoring so slow decoding cannot
         retain a source read transaction that prevents writers from committing.
+        This copies the full database once per non-WAL search. If temporary
+        storage is full, a stable source read transaction preserves search
+        availability but can delay DELETE-mode writers until scoring completes.
         """
         from contextlib import closing
 
@@ -503,6 +506,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             # exclude stronger hits or fill up with one conversation lineage.
             # Stream payloads rather than materializing all transcript JSON.
             import sqlite3
+            import errno
             from tempfile import TemporaryDirectory
 
             temporary = None
@@ -523,12 +527,27 @@ class SqliteTranscriptStore(DefaultSessionStore):
                     try:
                         temporary = TemporaryDirectory(prefix="praison-search-")
                         snapshot = sqlite3.connect(os.path.join(temporary.name, "snapshot.db"))
-                        # Bounded backup steps release source read locks
-                        # between page batches; score a disk copy so large
-                        # non-WAL files do not require an in-memory duplicate.
-                        source.backup(snapshot, pages=128)
+                        # One complete step prevents repeated peer commits from
+                        # restarting incremental copies. Decoding starts after
+                        # the source read lock has been released.
+                        source.backup(snapshot, pages=-1)
+                    except (sqlite3.Error, OSError) as exc:
+                        full = (
+                            getattr(exc, "sqlite_errorcode", None) == sqlite3.SQLITE_FULL
+                            or isinstance(exc, OSError) and exc.errno == errno.ENOSPC
+                        )
+                        if not full:
+                            raise
+                        if snapshot is not source:
+                            snapshot.close()
+                        # Keep the independently opened source connection for
+                        # a consistent streaming read without another copy.
+                        snapshot = source
+                        source = None
+                        logger.warning("Search snapshot storage is full; reading the source transaction instead")
                     finally:
-                        source.close()
+                        if source is not None:
+                            source.close()
                 snapshot.execute("BEGIN")
                 cursor = snapshot.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
                 while True:

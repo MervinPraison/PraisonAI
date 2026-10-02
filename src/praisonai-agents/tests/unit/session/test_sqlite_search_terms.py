@@ -157,3 +157,74 @@ def test_score_and_lineage_selection_precede_result_limit(tmp_path, sqlite_store
     assert "independent" in [hit.session_id for hit in expected]
     assert [hit.session_id for hit in actual] == [hit.session_id for hit in expected]
     assert [hit.score for hit in actual] == [hit.score for hit in expected]
+
+
+def test_nonwal_backup_completes_despite_writes_between_backup_steps(sqlite_store, monkeypatch):
+    import sqlite3
+    from praisonaiagents.storage import sqlite as sqlite_factory
+
+    store = sqlite_store
+    assert store.add_message("reference", "user", "alpha beta " + "x" * 1_000_000)
+    store._conn.execute("PRAGMA journal_mode=DELETE")
+    connect = sqlite_factory.connect
+    callbacks = []
+
+    class BusySource(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            def progress(status, remaining, total):
+                callbacks.append(remaining)
+                if remaining:
+                    store._conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (str(len(callbacks)), "reference"))
+                    if len(callbacks) >= 4:
+                        raise RuntimeError("backup repeatedly restarted after committed peer writes")
+            return super().backup(target, progress=progress, **kwargs)
+
+    def delete_journal(*args, **kwargs):
+        conn = connect(*args, factory=BusySource, **kwargs)
+        conn.execute("PRAGMA journal_mode=DELETE")
+        return conn
+
+    monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
+    assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
+    assert callbacks[-1] == 0
+
+
+@pytest.mark.parametrize("failure", ["temporary_directory", "sqlite_full"])
+def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlite_store, monkeypatch, failure):
+    import errno
+    import sqlite3
+    import tempfile
+    from praisonaiagents.storage import sqlite as sqlite_factory
+
+    store = sqlite_store
+    assert store.add_message("reference", "user", "alpha beta")
+    store._conn.execute("PRAGMA journal_mode=DELETE")
+    connect = sqlite_factory.connect
+
+    class FullSource(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            # Produce the actual native FULL error without filling the host disk.
+            probe = sqlite3.connect(":memory:")
+            try:
+                probe.execute("CREATE TABLE full (data BLOB)")
+                probe.execute("PRAGMA max_page_count=2")
+                probe.execute("INSERT INTO full VALUES (zeroblob(100000))")
+            finally:
+                probe.close()
+
+    def delete_journal(*args, **kwargs):
+        conn = connect(*args, factory=FullSource if failure == "sqlite_full" else sqlite3.Connection, **kwargs)
+        conn.execute("PRAGMA journal_mode=DELETE")
+        return conn
+
+    def no_space(*args, **kwargs):
+        raise OSError(errno.ENOSPC, "temporary volume full")
+
+    monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
+    if failure == "temporary_directory":
+        monkeypatch.setattr(tempfile, "TemporaryDirectory", no_space)
+    assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
+    # The source read transaction must close after fallback scoring, so it
+    # cannot leave a rollback-journal reader blocking later commits.
+    store._conn.execute("PRAGMA busy_timeout=50")
+    assert store.add_message("after-search", "user", "writer resumed")
