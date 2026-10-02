@@ -764,6 +764,50 @@ class MemoryMixin:
         except Exception as e:
             logging.debug(f"Auto-memory extraction failed: {e}")
 
+    def _persist_memory_turn(self, user_message: str, assistant_response: str):
+        """Persist a raw conversation turn to the memory store.
+
+        Called after each response when ``_memory_instance`` is set but
+        ``auto_memory`` extraction is off. Stores the turn to short-term memory
+        so a later Agent sharing the same store (e.g. ``memory={"user_id": uid}``)
+        recalls it via ``get_memory_context()``. Best-effort: never raises.
+
+        Async-safe: a memory store write is blocking file/DB I/O. When this runs
+        inside a live event loop (the async ``achat``/``astart`` after-agent path),
+        the write is offloaded to a worker thread so it never stalls the loop
+        (AGENTS.md §4.5). On the sync path (no running loop) it writes inline.
+        """
+        memory = getattr(self, "_memory_instance", None)
+        if memory is None or not assistant_response:
+            return
+        store = getattr(memory, "store_short_term", None) or getattr(memory, "add_short_term", None)
+        if store is None:
+            return
+        text = f"User: {user_message}\nAssistant: {assistant_response}"
+        metadata = {"agent_id": getattr(self, "agent_id", getattr(self, "name", None))}
+
+        def _do_store():
+            try:
+                store(text, metadata=metadata)
+            except Exception as e:
+                logging.debug(f"Memory turn persistence failed: {e}")
+
+        try:
+            import asyncio
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop (sync chat/run/start path): write inline.
+            _do_store()
+            return
+        # Inside a live loop: offload the blocking write so it cannot stall the
+        # event loop. Fire-and-forget — persistence is best-effort.
+        try:
+            import asyncio
+            asyncio.get_running_loop().run_in_executor(None, _do_store)
+        except Exception as e:
+            logging.debug(f"Memory turn persistence scheduling failed: {e}")
+            _do_store()
+
     def _process_auto_learning(self):
         """Process auto-learning extraction after agent response.
         

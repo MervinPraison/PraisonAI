@@ -69,6 +69,17 @@ class FileBackend:
         # Sanitize key for filesystem
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         return self.storage_dir / f"{safe_key}{self.suffix}"
+
+    def _path_to_key(self, file_path: Path) -> Optional[str]:
+        """Recognize records using the full configured suffix."""
+        if not file_path.is_file():
+            return None
+        if self.suffix:
+            if file_path.name.endswith(self.suffix):
+                return file_path.name[:-len(self.suffix)]
+            return None
+        # Preserve the existing no-extension selection for an empty suffix.
+        return file_path.name if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
@@ -84,11 +95,11 @@ class FileBackend:
                     delete=False,
                     suffix=".tmp"
                 ) as f:
+                    temp_path = f.name
                     if self.pretty:
                         json.dump(data, f, indent=2, default=str, ensure_ascii=False)
                     else:
                         json.dump(data, f, default=str, ensure_ascii=False)
-                    temp_path = f.name
                 
                 os.replace(temp_path, file_path)
             except Exception as e:
@@ -110,7 +121,7 @@ class FileBackend:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
             logger.warning(f"Failed to load {key}: {e}")
             return None
     
@@ -133,8 +144,8 @@ class FileBackend:
         keys = []
         
         for file_path in self.storage_dir.iterdir():
-            if file_path.is_file() and file_path.suffix == self.suffix:
-                key = file_path.stem
+            key = self._path_to_key(file_path)
+            if key is not None:
                 if not prefix or key.startswith(prefix):
                     keys.append(key)
         
@@ -149,7 +160,7 @@ class FileBackend:
         count = 0
         with self._lock:
             for file_path in self.storage_dir.iterdir():
-                if file_path.is_file() and file_path.suffix == self.suffix:
+                if self._path_to_key(file_path) is not None:
                     try:
                         file_path.unlink()
                         count += 1
@@ -191,13 +202,21 @@ class SQLiteBackend:
         if not isinstance(table_name, str) or not _re.match(r'^[a-zA-Z0-9_]+$', table_name):
             raise ValueError("table_name must contain only alphanumeric characters and underscores")
         self.table_name = table_name
+        # Quote identifiers so validated names that are SQL keywords or start
+        # with a digit (e.g. "select", "9table") are valid in all statements.
+        self._quoted_table = f'"{table_name}"'
+        self._quoted_index = f'"idx_{table_name}_key"'
         self._local = threading.local()
         
         # Ensure directory exists
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         
         if auto_create:
-            self._create_table()
+            try:
+                self._create_table()
+            except Exception:
+                self.close()
+                raise
     
     def _get_conn(self):
         """Get thread-local connection."""
@@ -220,7 +239,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.table_name} (
+            CREATE TABLE IF NOT EXISTS {self._quoted_table} (
                 key TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 created_at REAL DEFAULT (strftime('%s', 'now')),
@@ -230,8 +249,8 @@ class SQLiteBackend:
         
         # Index for prefix queries
         cur.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_key 
-            ON {self.table_name}(key)
+            CREATE INDEX IF NOT EXISTS {self._quoted_index} 
+            ON {self._quoted_table}(key)
         """)
         
         conn.commit()
@@ -244,7 +263,7 @@ class SQLiteBackend:
         json_data = json.dumps(data, default=str, ensure_ascii=False)
         
         cur.execute(f"""
-            INSERT INTO {self.table_name} (key, data, updated_at)
+            INSERT INTO {self._quoted_table} (key, data, updated_at)
             VALUES (?, ?, strftime('%s', 'now'))
             ON CONFLICT(key) DO UPDATE SET
                 data = excluded.data,
@@ -259,7 +278,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT data FROM {self.table_name} WHERE key = ?
+            SELECT data FROM {self._quoted_table} WHERE key = ?
         """, (key,))
         
         row = cur.fetchone()
@@ -276,7 +295,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            DELETE FROM {self.table_name} WHERE key = ?
+            DELETE FROM {self._quoted_table} WHERE key = ?
         """, (key,))
         
         deleted = cur.rowcount > 0
@@ -290,13 +309,13 @@ class SQLiteBackend:
         
         if prefix:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM {self._quoted_table}
                 WHERE key LIKE ?
                 ORDER BY key
             """, (f"{prefix}%",))
         else:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM {self._quoted_table}
                 ORDER BY key
             """)
         
@@ -308,7 +327,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT 1 FROM {self.table_name} WHERE key = ? LIMIT 1
+            SELECT 1 FROM {self._quoted_table} WHERE key = ? LIMIT 1
         """, (key,))
         
         return cur.fetchone() is not None
@@ -318,10 +337,10 @@ class SQLiteBackend:
         conn = self._get_conn()
         cur = conn.cursor()
         
-        cur.execute(f"SELECT COUNT(*) as count FROM {self.table_name}")
+        cur.execute(f"SELECT COUNT(*) as count FROM {self._quoted_table}")
         count = cur.fetchone()["count"]
         
-        cur.execute(f"DELETE FROM {self.table_name}")
+        cur.execute(f"DELETE FROM {self._quoted_table}")
         conn.commit()
         
         return count

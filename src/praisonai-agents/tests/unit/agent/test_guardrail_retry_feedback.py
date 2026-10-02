@@ -270,9 +270,11 @@ class TestAlwaysFailingValidatorIsBounded:
         except _CallCap as exc:
             pytest.fail(str(exc))
 
-        # chat() reports guardrail exhaustion by returning None after rolling
-        # back history; the reason is on the agent for the caller to read.
-        assert result is None
+        # chat() reports guardrail exhaustion with a safe, non-empty fallback
+        # string after rolling back history - never None (issue #5596) and
+        # never the rejected answer. The reason is also on the agent to read.
+        assert isinstance(result, str) and result.strip()
+        assert "10001" not in result
         assert agent.guardrail_retry_count == 2, \
             f"must retry exactly max_guardrail_retries times, got {agent.guardrail_retry_count}"
         assert t.calls == 1 + 2, f"1 initial call + 2 retries, got {t.calls}"
@@ -300,7 +302,8 @@ class TestAlwaysFailingValidatorIsBounded:
     def test_max_retries_zero_never_retries(self):
         agent, t = _agent(["10001", "SW1A 1AA"], rejects_first_answer, max_retries=0)
         result = agent.chat("what is the postcode?", stream=False)
-        assert result is None
+        assert isinstance(result, str) and result.strip()
+        assert "10001" not in result
         assert t.calls == 1, f"max_guardrail_retries=0 must not call the model again (got {t.calls})"
         assert agent.guardrail_retry_count == 0
 
