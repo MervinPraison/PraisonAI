@@ -6448,8 +6448,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         truncation reason (``content_filtered | refused | length_truncated``)
         when the last completion was blocked, so a blocked/refused/truncated turn
         is surfaced as an explicit terminal reason instead of a silent empty
-        ``completed``. Only updates when the reason is still ``"completed"`` so a
-        prior ``max_steps`` (sticky truncation) is never downgraded. Absent or
+        ``completed``. A known Responses incomplete reason also replaces an
+        earlier refusal delta so tool continuation cannot clear that outcome.
+        Other prior terminal reasons, including ``max_steps``, remain sticky. Absent or
         unrecognised finish reasons are a no-op — zero overhead on success.
         """
         try:
@@ -6479,8 +6480,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if finish_reason is None and not refusal:
                 return
             from ..agent.run_outcome import classify_finish_reason
-            reason = classify_finish_reason(finish_reason, refusal)
-            if reason is not None and self._last_stop_reason == "completed":
+            responses_incomplete = not choices and finish_reason is not None
+            reason = classify_finish_reason(finish_reason, None if responses_incomplete else refusal)
+            if reason is not None and (
+                self._last_stop_reason == "completed"
+                or (responses_incomplete and self._last_stop_reason == "refused")
+            ):
                 self._last_stop_reason = reason
         except Exception:
             # Never let outcome classification break the response path.

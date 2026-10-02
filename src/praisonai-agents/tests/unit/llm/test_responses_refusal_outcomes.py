@@ -87,10 +87,15 @@ async def test_public_responses_refusal_signal(entry, shape, profile, monkeypatc
 
 
 @pytest.mark.parametrize('reason', ['max_steps', 'cancelled'])
-def test_refusal_does_not_downgrade_existing_terminal_reason(reason):
+@pytest.mark.parametrize('incomplete_reason', [None, 'max_output_tokens', 'content_filter'])
+def test_refusal_does_not_downgrade_existing_terminal_reason(reason, incomplete_reason):
     llm = LLM(model='gpt-4o-mini')
     llm._last_stop_reason = reason
-    llm._extract_from_responses_output(output_response('sdk', 'refusal'))
+    response = output_response('sdk', 'refusal')
+    if incomplete_reason:
+        response.status = 'incomplete'
+        response.incomplete_details = SimpleNamespace(reason=incomplete_reason)
+    llm._extract_from_responses_output(response)
     assert llm._last_stop_reason == reason
 
 
@@ -147,7 +152,8 @@ async def test_following_normal_turn_clears_refusal(mode):
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('shape', ['sdk', 'dict'])
 @pytest.mark.parametrize('final_profile', ['normal', 'refusal'])
-async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape, final_profile, monkeypatch):
+@pytest.mark.parametrize('incomplete_reason', [None, 'max_output_tokens', 'content_filter', 'unknown'])
+async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape, final_profile, incomplete_reason, monkeypatch):
     import litellm
 
     llm = LLM(model='gpt-4o-mini')
@@ -156,6 +162,12 @@ async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape
     tool_item = SimpleNamespace(**tool) if shape == 'sdk' else tool
     first = output_response(shape, 'refusal')
     first.output.append(tool_item)
+    if incomplete_reason:
+        first.status = 'incomplete'
+        first.incomplete_details = SimpleNamespace(reason=incomplete_reason)
+        if shape == 'dict':
+            first = {'output': first.output, 'status': first.status,
+                     'incomplete_details': {'reason': incomplete_reason}}
     final = output_response(shape, final_profile)
     responses = iter([first, final])
     requests = []
@@ -178,7 +190,8 @@ async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape
             result.append({'type': 'response.output_text.delta', 'delta': 'answer'})
         if response is first:
             result.append({'type': 'response.output_item.done', 'output_index': 1, 'item': tool_item})
-        result.append({'type': 'response.completed', 'response': response})
+        event_type = 'response.incomplete' if response is first and incomplete_reason else 'response.completed'
+        result.append({'type': event_type, 'response': response})
         return [SimpleNamespace(**event) for event in result] if shape == 'sdk' else result
 
     def stream_response(**kwargs):
@@ -207,4 +220,5 @@ async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape
     assert dispatched == [('lookup', {})]
     assert len(requests) == 2
     assert any(item.get('type') == 'function_call_output' for item in requests[1]['input'])
-    assert llm._last_stop_reason == ('completed' if final_profile == 'normal' else 'refused')
+    expected_reason = {'max_output_tokens': 'length_truncated', 'content_filter': 'content_filtered'}.get(incomplete_reason)
+    assert llm._last_stop_reason == (expected_reason or ('completed' if final_profile == 'normal' else 'refused'))
