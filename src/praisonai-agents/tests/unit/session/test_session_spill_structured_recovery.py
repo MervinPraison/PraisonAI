@@ -27,6 +27,21 @@ def test_structured_content_recovers_once(tmp_path, monkeypatch, existing):
     assert store.get_chat_history("s") == history
 
 
+def test_distinct_scalar_types_are_not_deduplicated(tmp_path, monkeypatch):
+    store = DefaultSessionStore(session_dir=str(tmp_path / "sessions"))
+    monkeypatch.setattr(store, "_spill_dir", lambda: str(tmp_path / "spill"))
+    existing = [{"type": "flag", "value": True}]
+    spilled = [{"type": "flag", "value": 1}]
+    assert store.add_message("s", "user", existing)
+    msg = SessionMessage(role="user", content=spilled, timestamp=store.get_session("s").messages[0].timestamp)
+    spill = store._spill("s", [msg])
+    assert spill is not None
+    history = store.get_chat_history("s")
+    assert {"role": "user", "content": existing} in history
+    assert {"role": "user", "content": spilled} in history
+    assert not Path(spill).exists()
+
+
 def test_invalid_utf8_spill_does_not_block_valid_neighbor(tmp_path, monkeypatch):
     store = DefaultSessionStore(session_dir=str(tmp_path / "sessions"))
     directory = tmp_path / "spill"

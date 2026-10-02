@@ -1160,7 +1160,10 @@ class DefaultSessionStore:
                 return ("list", tuple(_freeze(item) for item in value))
             if isinstance(value, dict):
                 return ("dict", frozenset((key, _freeze(item)) for key, item in value.items()))
-            return value
+            # Tag scalars with their type so JSON ``true``/``1``/``1.0`` stay
+            # distinct (Python treats True == 1 == 1.0 with equal hashes),
+            # preventing distinct messages from collapsing during dedup.
+            return (type(value).__name__, value)
 
         def _key(message: SessionMessage) -> tuple:
             return tuple(_freeze(value) for value in (
