@@ -262,8 +262,8 @@ class BaseJSONStore:
                 delete=False,
                 suffix=".tmp"
             ) as f:
-                json.dump(self._data, f, indent=2, default=str, ensure_ascii=False)
                 temp_path = f.name
+                json.dump(self._data, f, indent=2, default=str, ensure_ascii=False)
             
             # Atomic rename
             if self.use_file_lock:
