@@ -295,7 +295,28 @@ class AutoMemory:
         Returns:
             List of extracted memories
         """
-        return self._process_interaction(user_message, assistant_response, store)
+        result = self._process_interaction(user_message, assistant_response, store)
+        if not store:
+            from copy import deepcopy
+            return deepcopy(result)
+        return result
+
+    def _make_pending_room(self) -> None:
+        """Retry the oldest pending write before refusing a new interaction.
+
+        Caller holds the processing lock. Successful partial offsets are kept
+        on failure, and no pending interaction is evicted to admit new work.
+        """
+        if len(self._pending_memories) < _MAX_PENDING_INTERACTIONS:
+            return
+        pending_hash = next(iter(self._pending_memories))
+        try:
+            self._store_memories(self._pending_memories[pending_hash], pending_hash)
+        except Exception as exc:
+            raise RuntimeError("AutoMemory pending interaction limit reached; pending retry failed") from exc
+        self._processed_hashes.add(pending_hash)
+        self._pending_memories.pop(pending_hash)
+        self._stored_offsets.pop(pending_hash, None)
 
     def _process_interaction(
         self, user_message: str, assistant_response: Optional[str], store: bool
@@ -316,7 +337,7 @@ class AutoMemory:
                 return []
             memories = self._pending_memories.get(text_hash)
             if store and memories is None and len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
-                raise RuntimeError("AutoMemory pending interaction limit reached; retry pending writes first")
+                self._make_pending_room()
 
         if memories is None:
             # Quick filter
@@ -334,7 +355,7 @@ class AutoMemory:
                 if pending is not None:
                     memories = pending
                 elif len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
-                    raise RuntimeError("AutoMemory pending interaction limit reached; retry pending writes first")
+                    self._make_pending_room()
                 self._pending_memories[text_hash] = memories
                 self._store_memories(memories, text_hash)
                 # Keep partial progress on failure; do not evict it to admit

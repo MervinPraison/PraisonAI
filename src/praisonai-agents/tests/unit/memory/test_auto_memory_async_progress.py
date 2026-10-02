@@ -90,9 +90,12 @@ async def test_async_after_hook_keeps_loop_live_during_storage(tmp_path, monkeyp
     with ThreadPoolExecutor(max_workers=1) as pool:
         first = pool.submit(host._auto_memory_instance.process_interaction, "I prefer examples.")
         assert entered.wait(5)
-        timer = Timer(0.5, release.set)
+        timer = Timer(5, release.set)  # Deadlock safeguard, not progress ordering.
         timer.start()
-        handle = asyncio.get_running_loop().call_later(0.05, lambda: beats.append(not release.is_set()))
+        def progress():
+            beats.append(not release.is_set())
+            release.set()
+        handle = asyncio.get_running_loop().call_later(0.05, progress)
         try:
             assert await host._atrigger_after_agent_hook("I prefer diagrams.", "reply", 0) == "reply"
             await asyncio.sleep(0)
@@ -100,6 +103,7 @@ async def test_async_after_hook_keeps_loop_live_during_storage(tmp_path, monkeyp
         finally:
             handle.cancel()
             release.set()
+            timer.cancel()
             timer.join(5)
         first.result(timeout=5)
     assert host._memory_instance.get_stats()["long_term_count"] == 2
@@ -129,7 +133,47 @@ def test_pending_outage_has_backpressure_without_evicting_partial_retry(tmp_path
         auto.process_interaction("I prefer detailed answers.")
     assert len(auto._pending_memories) == 2
     monkeypatch.setattr(memory, "add_long_term", original)
-    assert auto.process_interaction(partial)
     assert auto.process_interaction("I prefer detailed answers.")
+    assert auto.process_interaction(partial) == []
     contents = [item.content for item in memory.get_long_term()]
     assert contents.count("examples") == contents.count("diagrams") == 1
+
+
+def test_first_overlapping_agent_calls_share_one_wrapper(tmp_path, monkeypatch):
+    from praisonaiagents.agent.memory_mixin import MemoryMixin
+    from praisonaiagents.memory import auto_memory as module
+
+    class Host(MemoryMixin):
+        _auto_memory = True
+        verbose = False
+
+    host = Host()
+    host._memory_instance = FileMemory(user_id="first-use", base_path=tmp_path)
+    entered, release, second_started = Event(), Event(), Event()
+    constructed = []
+
+    def construct(*args, **kwargs):
+        constructed.append(1)
+        if len(constructed) == 1:
+            entered.set()
+            assert release.wait(5)
+        return AutoMemory(*args, **kwargs)
+
+    monkeypatch.setattr(module, "AutoMemory", construct)
+    def second_call():
+        second_started.set()
+        host._process_auto_memory("I prefer examples.", "reply")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(host._process_auto_memory, "I prefer examples.", "reply")
+        try:
+            assert entered.wait(2)
+            second = pool.submit(second_call)
+            assert second_started.wait(2)
+            # The first constructor stays paused until both calls have started.
+        finally:
+            release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert len(constructed) == 1
+    assert FileMemory(user_id="first-use", base_path=tmp_path).get_stats()["long_term_count"] == 1
