@@ -4669,13 +4669,17 @@ CONCISE SUMMARY:"""
             # Parse and execute the included workflow
             from .yaml_parser import YAMLWorkflowParser
             parser = YAMLWorkflowParser(tool_registry=tool_registry)
-            included_workflow = parser.parse_file(str(recipe_yaml))
+            # Match parse_file's decoding policy, but read only once: the cache
+            # namespace must describe the same snapshot that the parser saw.
+            with open(recipe_yaml, 'r') as recipe_file:
+                recipe_content = recipe_file.read()
+            included_workflow = parser.parse_string(recipe_content)
             parent_cache = getattr(self, "_step_cache", None)
             if parent_cache is not None:
                 from .step_cache import _ScopedStepCache
                 included_workflow._step_cache = _ScopedStepCache(
                     parent_cache,
-                    f"{recipe_yaml.resolve()}:{recipe_yaml.read_text(encoding='utf-8')}"
+                    f"{recipe_yaml.resolve()}:{recipe_content}"
                 )
             
             # Merge parent variables into included workflow
