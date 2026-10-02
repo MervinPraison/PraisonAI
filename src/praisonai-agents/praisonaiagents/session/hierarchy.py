@@ -134,7 +134,12 @@ class ExtendedSessionData(SessionData):
         for snapshot in self.snapshots:
             saved = snapshot._header_dict()
             required = {"messages", "archived_messages", "last_compaction"}
-            if snapshot.transcript is not None and required <= snapshot.transcript.keys():
+            if (snapshot.transcript is not None and required <= snapshot.transcript.keys()
+                    and all(isinstance(snapshot.transcript[name], list)
+                            and all(isinstance(item, dict) for item in snapshot.transcript[name])
+                            for name in ("messages", "archived_messages"))
+                    and (snapshot.transcript["last_compaction"] is None
+                         or isinstance(snapshot.transcript["last_compaction"], dict))):
                 refs = {}
                 for name, value in snapshot.transcript.items():
                     if name in ("messages", "archived_messages") and isinstance(value, list):
@@ -185,12 +190,22 @@ class ExtendedSessionData(SessionData):
                     for name, ref in raw["transcript_refs"].items():
                         if not isinstance(ref, dict):
                             raise ValueError("invalid snapshot reference")
+                        if name in ("messages", "archived_messages") and (
+                                set(ref) != {"items"} or not isinstance(ref["items"], list)):
+                            raise ValueError("invalid snapshot message references")
+                        if name == "last_compaction" and set(ref) != {"value"}:
+                            raise ValueError("invalid snapshot checkpoint reference")
                         if set(ref) == {"items"} and isinstance(ref["items"], list):
                             transcript[name] = [clone_record(records[key]) for key in ref["items"]]
                         elif set(ref) == {"value"}:
                             transcript[name] = clone_record(records[ref["value"]])
                         else:
                             raise ValueError("invalid snapshot reference")
+                        if name in ("messages", "archived_messages") and not all(
+                                isinstance(item, dict) for item in transcript[name]):
+                            raise ValueError("invalid snapshot message record")
+                        if name == "last_compaction" and transcript[name] is not None and not isinstance(transcript[name], dict):
+                            raise ValueError("invalid snapshot checkpoint record")
                 except (KeyError, TypeError) as exc:
                     raise ValueError("missing snapshot record") from exc
                 snapshot = SessionSnapshot.from_dict({

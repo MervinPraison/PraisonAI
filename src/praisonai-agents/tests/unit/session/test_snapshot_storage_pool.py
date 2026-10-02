@@ -119,3 +119,30 @@ def test_incomplete_pool_cannot_replace_live_history(tmp_path, missing):
     assert path.read_bytes() == before
     assert store.add_message("s", "user", "must not overwrite") is False
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("damage", ["message_descriptor", "archive_descriptor", "message_record", "checkpoint_record"])
+def test_wrong_reference_types_cannot_replace_live_history(tmp_path, damage):
+    store = HierarchicalSessionStore(session_dir=str(tmp_path), retention="keep_all")
+    assert store.add_message("s", "user", "first")
+    snapshot_id = store.create_snapshot("s")
+    assert store.add_message("s", "user", "later")
+    path = tmp_path / "s.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    records = record["snapshot_storage"]["records"]
+    refs = record["snapshots"][0]["transcript_refs"]
+    if damage.endswith("descriptor"):
+        records["damaged"] = []
+        field = "messages" if damage == "message_descriptor" else "archived_messages"
+        refs[field] = {"value": "damaged"}
+    elif damage == "message_record":
+        records[refs["messages"]["items"][0]] = "not a message"
+    else:
+        records[refs["last_compaction"]["value"]] = []
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="snapshot"):
+        ExtendedSessionData.from_dict(record)
+    assert store.revert_to_snapshot("s", snapshot_id) is False
+    assert store.add_message("s", "user", "must not overwrite") is False
+    assert path.read_bytes() == before
