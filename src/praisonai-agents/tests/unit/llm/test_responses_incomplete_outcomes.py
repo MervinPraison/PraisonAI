@@ -9,6 +9,12 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('entry', ['llm_sync', 'llm_async', 'llm_stream', 'llm_astream', 'client_sync', 'client_async'])
 @pytest.mark.parametrize('shape', ['sdk', 'dict'])
@@ -22,10 +28,12 @@ async def test_public_incomplete_responses(entry, shape, status, reason, expecte
     response = SimpleNamespace(
         status=status, incomplete_details=details if shape == 'sdk' else details.model_dump(),
         output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'partial'}]}],
-        usage=SimpleNamespace(input_tokens=3, output_tokens=2, total_tokens=5),
+        usage=(
+            SimpleNamespace(input_tokens=3, output_tokens=2, total_tokens=5)
+            if shape == 'sdk' else {'input_tokens': 3, 'output_tokens': 2, 'total_tokens': 5}
+        ),
     )
     requests = []
-    tracked = []
 
     def respond(**kwargs):
         requests.append(kwargs)
@@ -35,13 +43,13 @@ async def test_public_incomplete_responses(entry, shape, status, reason, expecte
         return respond(**kwargs)
 
     if entry.startswith('llm'):
+        import litellm
+
         llm = LLM(model='gpt-4o-mini')
-        llm._call_responses_api = respond
-        llm._call_responses_api_async = arespond
-        monkeypatch.setattr(llm, '_track_token_usage', lambda result, model: tracked.append(result))
+        monkeypatch.setattr('praisonaiagents.llm.llm.check_model_request', lambda *args: None)
+        monkeypatch.setattr(litellm, 'responses', respond)
+        monkeypatch.setattr(litellm, 'aresponses', arespond)
         if entry in ('llm_stream', 'llm_astream'):
-            import litellm
-            monkeypatch.setattr('praisonaiagents.llm.llm.check_model_request', lambda *args: None)
             events = [
                 {'type': 'response.output_text.delta', 'delta': 'partial'},
                 {'type': 'response.' + status, 'response': response},
@@ -68,8 +76,11 @@ async def test_public_incomplete_responses(entry, shape, status, reason, expecte
         answer = await llm.get_response_async('question', **kwargs) if entry in ('llm_async', 'llm_astream') else llm.get_response('question', **kwargs)
         assert answer == 'partial'
         assert llm._last_stop_reason == expected_outcome
-        if entry in ('llm_stream', 'llm_astream'):
-            assert response in tracked
+        for metrics in (llm.last_token_metrics, llm.session_token_metrics):
+            assert metrics is not None
+            assert metrics.input_tokens == 3
+            assert metrics.output_tokens == 2
+            assert metrics.total_tokens == 5
     else:
         client = OpenAIClient(api_key='sk-test-not-real')
         client._sync_client = SimpleNamespace(responses=SimpleNamespace(create=respond))
@@ -78,6 +89,8 @@ async def test_public_incomplete_responses(entry, shape, status, reason, expecte
         answer = client.create_completion(messages) if entry == 'client_sync' else await client.acreate_completion(messages)
         assert answer.choices[0].message.content == 'partial'
         assert answer.choices[0].finish_reason == expected_finish
+        assert answer.usage.prompt_tokens == 3
+        assert answer.usage.completion_tokens == 2
         assert answer.usage.total_tokens == 5
     assert len(requests) == 1
 

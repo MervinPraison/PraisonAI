@@ -953,10 +953,13 @@ class OpenAIClient:
         raw_usage = getattr(response, 'usage', None)
         usage = None
         if raw_usage:
+            def usage_value(name):
+                return raw_usage.get(name, 0) if isinstance(raw_usage, dict) else getattr(raw_usage, name, 0)
+
             usage = CompletionUsage(
-                prompt_tokens=getattr(raw_usage, 'input_tokens', 0),
-                completion_tokens=getattr(raw_usage, 'output_tokens', 0),
-                total_tokens=getattr(raw_usage, 'total_tokens', 0),
+                prompt_tokens=usage_value('input_tokens'),
+                completion_tokens=usage_value('output_tokens'),
+                total_tokens=usage_value('total_tokens'),
             )
 
         message = ChatCompletionMessage(
