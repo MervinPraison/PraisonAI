@@ -21,7 +21,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 59 | 19076 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 8 | 3969 |
+| ✅ Approval | 1 | 8 | 4028 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3941 |
 | ✅ Autonomy | 3 | 7 | 2805 |
@@ -59,7 +59,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1289 |
 | ✅ Parallel Execution | 3 | 2 | 528 |
 | ✅ Planning | 6 | 7 | 1827 |
-| ✅ Plugins | 8 | 5 | 4108 |
+| ✅ Plugins | 8 | 5 | 4112 |
 | ✅ Prompts | 2 | 9 | 2043 |
 | ✅ Providers | 1 | 58 | 8751 |
 | ✅ Query | 1 | 2 | 736 |
