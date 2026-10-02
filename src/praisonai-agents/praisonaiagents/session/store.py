@@ -525,7 +525,9 @@ class _SessionMirrorWriter:
         delay = 0.05
         for attempt in range(1, self._max_retries + 1):
             try:
-                self._mirror.append(session_id, records)
+                # A sink may mutate its input before failing. Keep the queued
+                # snapshot unchanged so each retry receives the same record.
+                self._mirror.append(session_id, copy.deepcopy(records))
                 return
             except Exception as e:  # pragma: no cover - defensive; mirror is external
                 if attempt >= self._max_retries:
@@ -1354,7 +1356,9 @@ class DefaultSessionStore:
             return
         records = []
         for m in messages:
-            record = m.to_dict()
+            # The background sink must not share nested values with callers
+            # or the local session cache while it waits or processes a record.
+            record = copy.deepcopy(m.to_dict())
             record.setdefault(
                 "id", f"{session_id}:{record.get('timestamp', time.time())}"
             )
