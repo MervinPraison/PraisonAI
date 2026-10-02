@@ -2075,7 +2075,15 @@ class DefaultSessionStore:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (UnicodeDecodeError, json.JSONDecodeError, IOError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                # Read-only path: never quarantine or rewrite during search.
+                # Log so an unreadable transcript is observable rather than a
+                # silent miss, then keep scoring the remaining valid sessions.
+                logger.debug(
+                    "Skipping unreadable session file %s during search: %s",
+                    filepath,
+                    exc,
+                )
                 continue
 
             messages = self._searchable_messages(data)
