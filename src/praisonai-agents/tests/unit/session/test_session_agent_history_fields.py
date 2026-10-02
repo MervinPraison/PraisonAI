@@ -86,6 +86,7 @@ def test_restored_extensions_do_not_reach_responses_input(tmp_path, monkeypatch,
         params = client._build_responses_input(resumed, model="gpt-4o")
     else:
         llm = object.__new__(LLM)
+        llm.temperature = None
         llm.max_tokens = None
         llm.top_p = None
         llm.base_url = None
