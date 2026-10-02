@@ -1622,6 +1622,27 @@ class DefaultSessionStore:
             session_id, _apply, error_label="update session metadata"
         )
 
+    def merge_session_metadata_map(
+        self, session_id: str, key: str, updates: Dict[str, Any],
+        *, defaults: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Merge nested metadata entries using the freshest map under FileLock.
+
+        Defaults fill missing entries; persisted entries win over defaults,
+        and the supplied updates win over both.
+        """
+        def _apply(session: SessionData) -> None:
+            merged = dict(defaults or {})
+            current = session.metadata.get(key)
+            if isinstance(current, dict):
+                merged.update(current)
+            merged.update(updates)
+            session.metadata[key] = merged
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="merge session metadata map"
+        )
+
     def rename_session(self, session_id: str, title: str) -> bool:
         """Give a session a human-readable title (Issue #3737).
 
