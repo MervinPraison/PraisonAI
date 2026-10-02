@@ -2306,7 +2306,7 @@ class DefaultSessionStore:
                 out.append(data)
         return out
 
-    def _save_imported_session(self, session: SessionData) -> bool:
+    def _save_imported_session(self, session: SessionData, *, overwrite: bool = True) -> bool:
         """Persist a restored session verbatim (no retention/window applied).
 
         Mirrors ``_save_session`` (timestamp + atomic, file-locked write) but
@@ -2317,6 +2317,10 @@ class DefaultSessionStore:
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         with FileLock(filepath, self.lock_timeout):
+            # The initial import check can race with a peer creating this file.
+            # Check again inside the same lock that protects the replacement.
+            if not overwrite and os.path.exists(filepath):
+                raise FileExistsError(filepath)
             if not self._atomic_write_json(filepath, session.to_dict()):
                 logger.error(f"Failed to save imported session {session.session_id}")
                 return False
@@ -2416,7 +2420,7 @@ class DefaultSessionStore:
                 # Persist the imported record verbatim: an import is a restore,
                 # so the destination's retention/active_window must not truncate
                 # or compact a valid larger export before it lands on disk.
-                if not self._save_imported_session(session):
+                if not self._save_imported_session(session, overwrite=overwrite):
                     report.skipped.append(
                         {"session_id": session_id, "reason": "write failed"}
                     )
@@ -2424,6 +2428,10 @@ class DefaultSessionStore:
                 with self._lock:
                     self._cache[session_id] = session
                 report.imported += 1
+            except FileExistsError:
+                report.skipped.append(
+                    {"session_id": session_id, "reason": "already exists (use overwrite)"}
+                )
             except Exception as e:  # pragma: no cover - defensive; one bad record
                 report.skipped.append(
                     {"session_id": session_id, "reason": f"import error: {e}"}
