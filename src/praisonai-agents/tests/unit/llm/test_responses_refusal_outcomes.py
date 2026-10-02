@@ -343,3 +343,36 @@ def test_shared_llm_keeps_each_threads_responses_outcome(profile, expected_reaso
         assert normal_task.result(timeout=15) == ('answer', 'completed')
     # Observers outside either request retain the latest completed result.
     assert llm._last_stop_reason == 'completed'
+
+
+@pytest.mark.parametrize("first_profile, first_reason", [
+    ("refusal", "refused"),
+    ("max_output_tokens", "length_truncated"),
+    ("content_filter", "content_filtered"),
+])
+@pytest.mark.parametrize("second_profile, second_reason", [
+    ("normal", "completed"),
+    ("refusal", "refused"),
+])
+def test_later_async_turn_replaces_a_sync_contexts_last_outcome(first_profile, first_reason, second_profile, second_reason):
+    import asyncio
+
+    llm = LLM(model='gpt-4o-mini')
+    first = output_response('sdk', 'refusal')
+    if first_profile != "refusal":
+        first.status = 'incomplete'
+        first.incomplete_details = SimpleNamespace(reason=first_profile)
+
+    def respond(**kwargs):
+        return first
+
+    async def arespond(**kwargs):
+        return output_response('sdk', second_profile)
+
+    llm._call_responses_api = respond
+    llm._call_responses_api_async = arespond
+    assert llm.get_response('first', stream=False, verbose=False) == ''
+    assert llm._last_stop_reason == first_reason
+    answer = asyncio.run(llm.get_response_async('second', stream=False, verbose=False))
+    assert answer == ('answer' if second_profile == "normal" else '')
+    assert llm._last_stop_reason == second_reason
