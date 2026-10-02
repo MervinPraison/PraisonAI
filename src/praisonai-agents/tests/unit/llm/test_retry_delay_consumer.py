@@ -88,3 +88,37 @@ async def test_async_retry_waits_for_exponent_hint():
     assert await llm._call_with_retry_async(completion) == 'done'
     assert waits == [100]
     assert calls == 2
+
+
+def test_negative_retry_cap_never_reaches_sync_sleep():
+    from praisonaiagents.llm.rate_limiter import RateLimiter
+
+    limiter = RateLimiter(max_retry_delay=-1)
+    waits = []
+    limiter._sleep = waits.append
+    llm = LLM(model="fake")
+    llm._rate_limiter = limiter
+    delay = llm._parse_retry_delay("rate limit: retry after 5 seconds")
+    limiter.wait_for_retry(delay)
+    assert delay == 0
+    assert waits == [0]
+    decision = llm.resolve_failover_decision(
+        Exception("rate limit: retry after 5 seconds"),
+        {"attempt": 1, "max_retries": 3, "side_effecting": False},
+    )
+    assert decision.backoff_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_negative_retry_cap_never_reaches_async_sleep():
+    from praisonaiagents.llm.rate_limiter import RateLimiter
+
+    limiter = RateLimiter(max_retry_delay=-1)
+    waits = []
+
+    async def sleep(delay):
+        waits.append(delay)
+
+    limiter._async_sleep = sleep
+    await limiter.wait_for_retry_async(5)
+    assert waits == [0]
