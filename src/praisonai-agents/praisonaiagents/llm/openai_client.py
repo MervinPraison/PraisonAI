@@ -781,7 +781,9 @@ class OpenAIClient:
                         "output": msg.get("content", ""),
                     })
                 else:
-                    item = dict(msg)
+                    # Persisted history may carry local metadata/provider fields.
+                    # Responses message items accept role/content, not that record.
+                    item = {"role": role}
                     item["content"] = self._build_responses_content(
                         msg.get("content", "")
                     )
