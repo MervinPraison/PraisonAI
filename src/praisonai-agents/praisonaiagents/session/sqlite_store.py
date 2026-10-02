@@ -560,7 +560,7 @@ class SqliteSessionStore(DefaultSessionStore):
 
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError, OSError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError):
                 continue
 
             messages = self._searchable_messages(data)
