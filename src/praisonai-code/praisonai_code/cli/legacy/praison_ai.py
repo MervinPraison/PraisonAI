@@ -1405,16 +1405,27 @@ class PraisonAI:
                         or os.path.exists(first)
                     )
                 )
-                if is_yaml_target:
+                if is_yaml_target and os.environ.get("PRAISONAI_IN_MODERN_RUN"):
+                    # We are already *inside* a modern ``run`` invocation
+                    # (``commands/run.py`` delegated the YAML to this legacy
+                    # executor). Re-dispatching to ``run_app`` would re-enter the
+                    # same Typer app and recurse forever ("maximum recursion depth
+                    # exceeded", issue #5597). Execute the YAML directly instead:
+                    # set it as the agent file and fall through to the normal
+                    # legacy execution path below.
+                    self.agent_file = first
+                    args.command = None
+                elif is_yaml_target:
                     # Modern engine (``commands/run.py`` run_main); the first
                     # arg is passed as the Typer ``target`` (YAML file/prompt).
                     from ..commands.run import app as run_app
                     run_app(unknown_args)
                     sys.exit(0)
-                # Run command - async jobs API for long-running tasks
-                from ..features.jobs import handle_run_command
-                handle_run_command(unknown_args, verbose=getattr(args, 'verbose', False))
-                sys.exit(0)
+                else:
+                    # Run command - async jobs API for long-running tasks
+                    from ..features.jobs import handle_run_command
+                    handle_run_command(unknown_args, verbose=getattr(args, 'verbose', False))
+                    sys.exit(0)
             
             elif args.command == 'managed':
                 # Managed agents — delegate to Typer app

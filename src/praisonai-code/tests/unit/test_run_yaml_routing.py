@@ -132,5 +132,71 @@ def test_run_submit_wins_over_same_named_path(monkeypatch, tmp_path):
     assert code == 0
 
 
+def test_modern_run_delegation_does_not_reenter_run_app(monkeypatch, tmp_path):
+    """Issue #5597: ``python -m praisonai <file>.yaml`` must not recurse.
+
+    The modern Typer ``run`` command delegates YAML execution to the legacy
+    ``PraisonAI`` class. That class re-parses ``sys.argv`` (``run <file>.yaml``)
+    and, before this fix, dispatched the ``run`` command straight back into the
+    modern ``run_app`` — which calls the legacy executor again, looping forever
+    until ``maximum recursion depth exceeded``.
+
+    With the ``PRAISONAI_IN_MODERN_RUN`` re-entrancy sentinel set (as the modern
+    runner does while delegating), the legacy ``run`` branch must execute the
+    YAML directly instead of bouncing back to ``run_app``.
+    """
+    pa = _load_module()
+    _require_wrapper_argparse()
+
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+    monkeypatch.chdir(tmp_path)
+
+    calls = {"run_app": None, "jobs": None}
+    ran = {"direct": False}
+
+    import praisonai_code.cli.commands.run as run_mod
+    import praisonai_code.cli.features.jobs as jobs_mod
+
+    def fake_run_app(args=None, *a, **k):
+        calls["run_app"] = list(args) if args is not None else []
+
+    def fake_handle_run_command(unknown_args, *a, **k):
+        calls["jobs"] = list(unknown_args)
+
+    # Stub the agents generator so the direct YAML execution path is observed
+    # without spinning up a real team / LLM call.
+    class _FakeGenerator:
+        def __init__(self, *a, **k):
+            ran["direct"] = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def generate_crew_and_kickoff(self):
+            return "READY"
+
+    monkeypatch.setattr(run_mod, "app", fake_run_app)
+    monkeypatch.setattr(jobs_mod, "handle_run_command", fake_handle_run_command)
+    monkeypatch.setattr(pa, "_get_agents_generator", lambda: _FakeGenerator)
+    monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", "1")
+
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["praisonai", "run", str(yaml_path)])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    result = pa.PraisonAI(agent_file=str(yaml_path)).main()
+
+    # No re-entry into the modern runner (which caused the infinite recursion),
+    # no mis-routing to jobs, and the YAML was executed directly instead.
+    assert calls["run_app"] is None
+    assert calls["jobs"] is None
+    assert ran["direct"] is True
+    assert result == "READY"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
