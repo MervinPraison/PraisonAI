@@ -542,3 +542,46 @@ def test_upgrade_backfill_does_not_rebuild_successful_sessions_on_retry(make_sto
     assert conn.execute("SELECT COUNT(*) FROM backfill_writes WHERE session_id = 'healthy'").fetchone() == (1,)
     assert conn.execute("SELECT COUNT(*) FROM backfill_writes WHERE session_id = 'unavailable'").fetchone() == (1,)
     assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION
+
+
+@pytest.mark.parametrize("failure", ["file_lock", "sql_refresh"])
+@pytest.mark.parametrize("peer_kind", [DefaultSessionStore, SqliteSessionStore])
+def test_upgrade_retry_reindexes_a_peer_changed_transcript(make_store, failure, peer_kind):
+    destination = make_store(SqliteSessionStore, lock_timeout=0.02)
+    plain = DefaultSessionStore(session_dir=destination.session_dir)
+    assert plain.add_message("healthy", "user", "old otter")
+    assert plain.set_gateway_info("healthy", gateway_session_id="old-route", agent_id="old-agent")
+    assert plain.add_message("unavailable", "user", "blocked pelican")
+    conn = destination._connect()
+    destination._set_index_content_version(conn, destination.INDEX_CONTENT_VERSION - 1)
+    lock = FileLock(plain._get_session_path("unavailable"))
+    if failure == "file_lock":
+        lock.acquire()
+    else:
+        conn.execute("CREATE TRIGGER fail_backfill BEFORE INSERT ON session_meta "
+                     "WHEN NEW.session_id = 'unavailable' "
+                     "BEGIN SELECT RAISE(FAIL, 'unavailable transcript'); END")
+    try:
+        assert [hit.session_id for hit in destination.search("otter")] == ["healthy"]
+        assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION - 1
+        kwargs = {"db_path": destination.db_path} if peer_kind is SqliteSessionStore else {}
+        peer = peer_kind(session_dir=destination.session_dir, **kwargs)
+        try:
+            assert peer.set_chat_history("healthy", [{"role": "user", "content": "newer narwhal"}])
+            assert peer.set_gateway_info("healthy", gateway_session_id="new-route", agent_id="new-agent")
+        finally:
+            peer_conn = getattr(peer, "_conn", None)
+            if peer_conn is not None:
+                peer_conn.close()
+    finally:
+        if failure == "file_lock":
+            lock.release()
+        else:
+            conn.execute("DROP TRIGGER fail_backfill")
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["healthy"]
+    assert destination.search("otter") == []
+    assert destination.get_by_gateway_session("old-route") is None
+    assert destination.get_by_gateway_session("new-route").session_id == "healthy"
+    assert destination.list_sessions_by_gateway_agent("old-agent") == []
+    assert destination.list_sessions_by_gateway_agent("new-agent") == ["healthy"]
+    assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION

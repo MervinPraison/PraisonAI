@@ -79,7 +79,7 @@ class SqliteSessionStore(DefaultSessionStore):
         self._fts_available = False
         self._db_ready = False
         self._backfilled = False
-        self._backfill_upgraded_ids = set()
+        self._backfill_upgraded_files = {}
 
     # ── index lifecycle ───────────────────────────────────────────────
 
@@ -354,7 +354,8 @@ class SqliteSessionStore(DefaultSessionStore):
         after each session's next write. The new version is then persisted so
         subsequent startups fall back to the cheap skip behaviour. Completed
         upgrades are retained in memory across failed passes; retries skip
-        those sessions while their complete index projection still exists.
+        those sessions only while their complete index projection and locked
+        transcript generation still match.
         """
         try:
             filenames = os.listdir(self.session_dir)
@@ -367,10 +368,9 @@ class SqliteSessionStore(DefaultSessionStore):
         with self._db_lock:
             stale = self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
         indexed = self._indexed_ids()
-        # Remember successful upgrades within this store's incomplete pass.
-        # The global version stays old until every transcript succeeds, but
-        # a single unavailable file must not repeatedly rebuild healthy rows.
-        already = indexed & self._backfill_upgraded_ids if stale else indexed
+        # A completed row alone cannot prove that a JSON-only peer has not
+        # replaced its transcript between upgrade attempts.
+        already = indexed if not stale else set()
         complete = True
         for filename in filenames:
             if not filename.endswith(".json"):
@@ -381,6 +381,12 @@ class SqliteSessionStore(DefaultSessionStore):
             try:
                 filepath = self._get_session_path(sid)
                 with FileLock(filepath, self.lock_timeout):
+                    identity = self._session_file_identity(filepath)
+                    if (
+                        stale and sid in indexed and identity is not None
+                        and self._backfill_upgraded_files.get(sid) == identity
+                    ):
+                        continue
                     # Match import's file -> database order and keep a peer
                     # replacement from making the just-read projection stale.
                     session = self._load_session_from_disk(sid, filepath)
@@ -388,7 +394,8 @@ class SqliteSessionStore(DefaultSessionStore):
                     with self._lock:
                         self._cache[sid] = session
                     if self._index_session(session):
-                        self._backfill_upgraded_ids.add(sid)
+                        if stale:
+                            self._backfill_upgraded_files[sid] = identity
                     else:
                         complete = False
             except Exception:
@@ -396,6 +403,7 @@ class SqliteSessionStore(DefaultSessionStore):
         if complete:
             with self._db_lock:
                 self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
+            self._backfill_upgraded_files.clear()
         return complete
 
     # ── write path: keep the index in sync ────────────────────────────
