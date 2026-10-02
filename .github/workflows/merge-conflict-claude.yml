@@ -126,9 +126,12 @@ jobs:
                   });
                   core.info(`Removed ${LABEL} from PR #${prNumber}`);
                 } catch (err) {
-                  // Fork PRs may return 403 when the token cannot mutate labels on the issue.
-                  if (err.status === 403 || err.status === 404) {
-                    core.info(`Skip remove ${LABEL} on PR #${prNumber}: ${err.status}`);
+                  // Fork PRs may return 403/404 when the token cannot mutate labels on the head repo's issue.
+                  // For upstream PRs a 403/404 is a genuine failure that must surface, otherwise the
+                  // merge-blocking label stays in place while the check reports success.
+                  const isFork = headRepo && headRepo !== baseRepo;
+                  if (isFork && (err.status === 403 || err.status === 404)) {
+                    core.info(`Skip remove ${LABEL} on fork PR #${prNumber}: ${err.status}`);
                   } else {
                     throw err;
                   }
