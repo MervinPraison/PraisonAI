@@ -41,8 +41,27 @@ class MCPToolRunner(threading.Thread):
         self.start()
         
     def run(self):
-        """Main thread function that processes MCP requests."""
-        asyncio.run(self._run_async())
+        """Main thread function that processes MCP requests.
+
+        On Windows the stdio transport must spawn a child process (e.g. ``npx``)
+        and talk to it over pipes. A non-main thread gets a ``SelectorEventLoop``
+        by default there, which does not support subprocesses and fails with an
+        opaque ``fileno`` error during init (issue #5598). Use a dedicated
+        ``ProactorEventLoop`` on Windows so subprocess stdio works; other
+        platforms keep the standard ``asyncio.run`` behaviour.
+        """
+        if platform.system() == 'Windows':
+            loop = asyncio.ProactorEventLoop()
+            try:
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._run_async())
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+        else:
+            asyncio.run(self._run_async())
         
     async def _run_async(self):
         """Async entry point for MCP operations."""
