@@ -960,7 +960,7 @@ class OpenAIClient:
                 ))
 
         # Build usage
-        raw_usage = getattr(response, 'usage', None)
+        raw_usage = response.get('usage') if isinstance(response, dict) else getattr(response, 'usage', None)
         usage = None
         if raw_usage:
             def usage_value(name):

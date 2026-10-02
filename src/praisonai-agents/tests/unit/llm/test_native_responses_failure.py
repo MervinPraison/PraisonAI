@@ -23,7 +23,10 @@ async def test_native_responses_failure_and_compatibility_fallback(mode, shape, 
         'status': 'failed' if profile in ('failed', 'missing_error') else 'completed',
         'error': error if shape == 'sdk' or error is None else error.model_dump(),
         'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}],
+        'usage': {'input_tokens': 3, 'output_tokens': 2, 'total_tokens': 5},
     }
+    if shape == 'sdk':
+        fields['usage'] = SimpleNamespace(**fields['usage'])
     raw = SimpleNamespace(**fields) if shape == 'sdk' else fields
 
     def respond(**kwargs):
@@ -82,3 +85,8 @@ async def test_native_responses_failure_and_compatibility_fallback(mode, shape, 
         result = await invoke()
         assert result.choices[0].message.content == ('fallback' if profile == 'unsupported' else 'answer')
         assert calls == (['responses', 'chat'] if profile == 'unsupported' else ['responses'])
+        if profile == 'completed':
+            assert result.usage is not None
+            assert result.usage.prompt_tokens == 3
+            assert result.usage.completion_tokens == 2
+            assert result.usage.total_tokens == 5
