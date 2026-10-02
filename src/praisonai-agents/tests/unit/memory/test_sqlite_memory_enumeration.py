@@ -83,3 +83,17 @@ def test_null_user_is_distinct_from_literal_none_user(tmp_path, tier):
         assert [item['id'] for item in search('', user_id='None')] == [wanted]
     finally:
         adapter.close_connections()
+
+
+@pytest.mark.parametrize("tier", ["short_term", "long_term"])
+@pytest.mark.parametrize("user_id", [0, False, ""])
+def test_falsey_supplied_user_id_still_filters_before_limit(tmp_path, tier, user_id):
+    adapter = SqliteMemoryAdapter(short_db=str(tmp_path / 'short.db'), long_db=str(tmp_path / 'long.db'))
+    try:
+        write = getattr(adapter, f"store_{tier}")
+        search = getattr(adapter, f"search_{tier}")
+        write("other", metadata={"user_id": "other"})
+        wanted = write("wanted", metadata={"user_id": user_id})
+        assert [item["id"] for item in search("", user_id=user_id, limit=1)] == [wanted]
+    finally:
+        adapter.close_connections()
