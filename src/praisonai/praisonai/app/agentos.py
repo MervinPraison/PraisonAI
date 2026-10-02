@@ -128,22 +128,8 @@ class AgentOS:
 
         launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
         if launch_token:
-            from starlette.middleware.base import BaseHTTPMiddleware
-            from starlette.responses import JSONResponse
-
-            expected = launch_token
-
-            class _AgentOSAuthMiddleware(BaseHTTPMiddleware):
-                async def dispatch(self, request, call_next):
-                    if request.url.path in ("/health", "/"):
-                        return await call_next(request)
-                    auth = request.headers.get("Authorization", "")
-                    token = auth[7:] if auth.startswith("Bearer ") else request.headers.get("X-API-Key", "")
-                    if token != expected:
-                        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-                    return await call_next(request)
-
-            app.add_middleware(_AgentOSAuthMiddleware)
+            from .._api_auth import build_api_key_middleware
+            app.add_middleware(build_api_key_middleware(launch_token, {"/health", "/"}))
         
         return app
     

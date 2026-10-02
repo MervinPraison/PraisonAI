@@ -132,5 +132,186 @@ def test_run_submit_wins_over_same_named_path(monkeypatch, tmp_path):
     assert code == 0
 
 
+def test_modern_run_delegation_does_not_reenter_run_app(monkeypatch, tmp_path):
+    """Issue #5597: ``python -m praisonai <file>.yaml`` must not recurse.
+
+    The modern Typer ``run`` command delegates YAML execution to the legacy
+    ``PraisonAI`` class. That class re-parses ``sys.argv`` (``run <file>.yaml``)
+    and, before this fix, dispatched the ``run`` command straight back into the
+    modern ``run_app`` — which calls the legacy executor again, looping forever
+    until ``maximum recursion depth exceeded``.
+
+    With the ``PRAISONAI_IN_MODERN_RUN`` re-entrancy sentinel set (as the modern
+    runner does while delegating), the legacy ``run`` branch must execute the
+    YAML directly instead of bouncing back to ``run_app``.
+    """
+    pa = _load_module()
+    _require_wrapper_argparse()
+
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+    monkeypatch.chdir(tmp_path)
+
+    calls = {"run_app": None, "jobs": None}
+    ran = {"direct": False}
+
+    import praisonai_code.cli.commands.run as run_mod
+    import praisonai_code.cli.features.jobs as jobs_mod
+
+    def fake_run_app(args=None, *a, **k):
+        calls["run_app"] = list(args) if args is not None else []
+
+    def fake_handle_run_command(unknown_args, *a, **k):
+        calls["jobs"] = list(unknown_args)
+
+    # Stub the agents generator so the direct YAML execution path is observed
+    # without spinning up a real team / LLM call.
+    class _FakeGenerator:
+        def __init__(self, *a, **k):
+            ran["direct"] = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def generate_crew_and_kickoff(self):
+            return "READY"
+
+    monkeypatch.setattr(run_mod, "app", fake_run_app)
+    monkeypatch.setattr(jobs_mod, "handle_run_command", fake_handle_run_command)
+    monkeypatch.setattr(pa, "_get_agents_generator", lambda: _FakeGenerator)
+    monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", "1")
+
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["praisonai", "run", str(yaml_path)])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    result = pa.PraisonAI(agent_file=str(yaml_path)).main()
+
+    # No re-entry into the modern runner (which caused the infinite recursion),
+    # no mis-routing to jobs, and the YAML was executed directly instead.
+    assert calls["run_app"] is None
+    assert calls["jobs"] is None
+    assert ran["direct"] is True
+    assert result == "READY"
+
+
+def test_modern_run_delegation_preserves_resolved_agent_file(monkeypatch, tmp_path):
+    """Greptile #5606: the delegated legacy ``run`` branch must keep the
+    constructor-provided (resolved, possibly absolute) ``agent_file`` instead of
+    overwriting it with the relative ``sys.argv`` token.
+
+    For ``run <file>.yaml --worktree`` the modern runner resolves the target to
+    an absolute path *before* chdir'ing into the isolated worktree, then passes
+    that path to ``PraisonAI(agent_file=...)``. If the legacy branch replaced it
+    with the relative CLI arg, an untracked/ignored YAML (absent from the fresh
+    worktree) would fail to load. This asserts the resolved path survives.
+    """
+    pa = _load_module()
+    _require_wrapper_argparse()
+
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+    resolved = str(yaml_path)  # absolute path, as the worktree runner passes
+
+    seen = {"agent_file": None}
+
+    class _FakeGenerator:
+        def __init__(self, agent_file, *a, **k):
+            seen["agent_file"] = agent_file
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def generate_crew_and_kickoff(self):
+            return "READY"
+
+    monkeypatch.setattr(pa, "_get_agents_generator", lambda: _FakeGenerator)
+    monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", "1")
+
+    import sys as _sys
+
+    # sys.argv carries the *relative* CLI token; a bare "agents.yaml" that is not
+    # present in the (simulated) new cwd. The resolved absolute path handed to the
+    # constructor must win.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_sys, "argv", ["praisonai", "run", "agents.yaml"])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    result = pa.PraisonAI(agent_file=resolved).main()
+
+    assert seen["agent_file"] == resolved
+    assert result == "READY"
+
+
+def _run_from_file_with_broken_import(monkeypatch, tmp_path):
+    """Drive ``_run_from_file`` with the ``PraisonAI`` import forced to fail.
+
+    Returns ``exc_info.value.code`` so callers can assert the deliberate
+    ``typer.Exit(1)`` propagates instead of an ``UnboundLocalError`` leaking from
+    the ``finally`` sentinel restore.
+    """
+    import typer
+    import praisonai_code.cli.commands.run as run_mod
+
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+
+    # Force the guarded ``from praisonai_code.cli.main import PraisonAI`` to raise
+    # before ``_prev_in_run`` would historically have been assigned.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _boom(name, *args, **kwargs):
+        if name == "praisonai_code.cli.main":
+            raise ImportError("boom: simulated main import failure")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        run_mod._run_from_file(str(yaml_path))
+    return exc_info.value.exit_code
+
+
+def test_run_from_file_import_failure_exits_one_no_prior_sentinel(
+    monkeypatch, tmp_path
+):
+    """Issue #5632: a failed ``PraisonAI`` import must surface ``typer.Exit(1)``
+    (not ``UnboundLocalError`` from the ``finally`` sentinel restore), and must
+    leave an *absent* sentinel absent."""
+    monkeypatch.delenv("PRAISONAI_IN_MODERN_RUN", raising=False)
+
+    import os
+
+    code = _run_from_file_with_broken_import(monkeypatch, tmp_path)
+
+    assert code == 1
+    # The previously-absent sentinel is restored to absent, not left set to "1".
+    assert "PRAISONAI_IN_MODERN_RUN" not in os.environ
+
+
+def test_run_from_file_import_failure_exits_one_preserves_sentinel(
+    monkeypatch, tmp_path
+):
+    """Issue #5632: when a sentinel already exists, a failed ``PraisonAI`` import
+    must still exit 1 and leave the prior sentinel value unchanged."""
+    monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", "preexisting")
+
+    import os
+
+    code = _run_from_file_with_broken_import(monkeypatch, tmp_path)
+
+    assert code == 1
+    # The existing sentinel is restored to its original value, not overwritten.
+    assert os.environ.get("PRAISONAI_IN_MODERN_RUN") == "preexisting"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

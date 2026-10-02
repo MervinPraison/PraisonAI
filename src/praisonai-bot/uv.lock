@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1428,7 +1428,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-bot"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1510,7 +1510,7 @@ provides-extras = ["gateway", "bot", "bot-whatsapp-web", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.9"
+version = "1.7.10"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1543,6 +1543,7 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
+    { name = "mcp", marker = "extra == 'parallel-search'", specifier = ">=1.30.0,<2" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.4.0" },
@@ -1581,7 +1582,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["sandbox", "mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
+provides-extras = ["sandbox", "mcp", "parallel-search", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "primp"
