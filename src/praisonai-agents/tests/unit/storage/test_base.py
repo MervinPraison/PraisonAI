@@ -287,6 +287,71 @@ class TestBaseJSONStore:
             assert store._data == {"items": [], "version": 1}
 
 
+class TestInvalidUtf8Recovery:
+    """Regression tests for invalid-UTF-8 recovery (Issue #5577)."""
+
+    def test_load_recovers_from_invalid_utf8_unlocked(self):
+        """Invalid UTF-8 bytes recover to defaults without a rewrite."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "test.json"
+            store_path.write_bytes(b"\xff\xfe\xfa")
+
+            store = BaseJSONStore(store_path, use_file_lock=False)
+            assert store.load() == {}
+            # Original bytes preserved on disk (no corruption rewrite on load).
+            assert store_path.read_bytes() == b"\xff\xfe\xfa"
+
+    def test_load_recovers_from_invalid_utf8_locked(self):
+        """Invalid UTF-8 recovers with file locking enabled too."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "test.json"
+            store_path.write_bytes(b"\xff")
+
+            store = BaseJSONStore(store_path, use_file_lock=True)
+            assert store.load() == {}
+            assert store_path.read_bytes() == b"\xff"
+
+    def test_file_backend_recovers_from_invalid_utf8(self):
+        """FileBackend.load() returns None (not raise) on invalid UTF-8."""
+        from praisonaiagents.storage.backends import FileBackend
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backend = FileBackend(storage_dir=Path(tmpdir))
+            key = "session"
+            (Path(tmpdir) / f"{key}.json").write_bytes(b"\xff")
+
+            assert backend.load(key) is None
+
+    def test_store_with_file_backend_recovers_from_invalid_utf8(self):
+        """BaseJSONStore over a FileBackend recovers to defaults on bad bytes."""
+        from praisonaiagents.storage.backends import FileBackend
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "session.json"
+            backend = FileBackend(storage_dir=Path(tmpdir))
+            (Path(tmpdir) / "session.json").write_bytes(b"\xff")
+
+            store = BaseJSONStore(store_path, backend=backend)
+            assert store.load() == {}
+
+    def test_async_load_recovers_from_invalid_utf8(self):
+        """AsyncBaseJSONStore.load_async() recovers from invalid UTF-8."""
+        import asyncio
+        import pytest
+
+        pytest.importorskip("aiofiles")
+        from praisonaiagents.storage.base import AsyncBaseJSONStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "test.json"
+            store_path.write_bytes(b"\xff")
+
+            store = AsyncBaseJSONStore(store_path)
+            result = asyncio.run(store.load_async())
+            assert result == {}
+            assert store_path.read_bytes() == b"\xff"
+
+
 class TestListJsonSessions:
     """Tests for list_json_sessions utility."""
     
