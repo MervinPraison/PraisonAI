@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
 
-from .store import DefaultSessionStore, SessionData
+from .store import DefaultSessionStore, FileLock, SessionData
 
 logger = get_logger(__name__)
 
@@ -368,6 +368,27 @@ class SqliteSessionStore(DefaultSessionStore):
         ok = super()._save_session(session)
         if ok:
             self._index_session(session)
+        return ok
+
+    def _save_imported_session(self, session: SessionData) -> bool:
+        """Refresh recall and routing after a verbatim portable restore."""
+        ok = super()._save_imported_session(session)
+        if ok:
+            try:
+                filepath = self._get_session_path(session.session_id)
+                with FileLock(filepath, self.lock_timeout):
+                    # Read-only cache fallback is unsafe after an overwrite:
+                    # it can restore routing fields removed by the import.
+                    fresh = self._load_session_from_disk(session.session_id, filepath)
+                    self._reingest_spill(session.session_id, fresh)
+                with self._lock:
+                    self._cache[session.session_id] = fresh
+                self._index_session(fresh)
+            except Exception as exc:
+                # The JSON write succeeded, but the old index is no longer a
+                # trustworthy view. Fail closed until a later refresh/rebuild.
+                self._deindex_session(session.session_id)
+                logger.debug("Post-import index refresh failed for %s: %s", session.session_id, exc)
         return ok
 
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
