@@ -1720,17 +1720,27 @@ class TestCompactedHistoryRecall:
     def test_sqlite_invalid_utf8_candidate_does_not_abort_search(self):
         """An indexed candidate whose transcript is invalid UTF-8 must be
         skipped during candidate loading, not raise ``UnicodeDecodeError``
-        (Issue #5556). Exercises both the FTS5 and LIKE candidate branches."""
+        (Issue #5556). Deterministically exercises both the FTS5 and the LIKE
+        fallback candidate branches: ``force_like`` patches ``_init_schema`` to
+        report FTS5 unavailable so the LIKE path is covered even on a SQLite
+        build that ships FTS5."""
         from praisonaiagents.session.sqlite_store import SqliteSessionStore
 
-        for db_path in (":memory:", None):
+        for force_like in (False, True):
             with tempfile.TemporaryDirectory() as tmpdir:
-                kwargs = {"session_dir": tmpdir, "active_window": 4}
-                if db_path is not None:
-                    kwargs["db_path"] = db_path
-                store = SqliteSessionStore(**kwargs)
+                store = SqliteSessionStore(session_dir=tmpdir, active_window=4)
+                if force_like:
+                    original_init = store._init_schema
+
+                    def _like_only(conn, _orig=original_init):
+                        _orig(conn)
+                        return False
+
+                    store._init_schema = _like_only
                 store.add_user_message("good", "the deploy token is XZ99-SECRETVALUE")
                 store.add_user_message("bad", "the deploy token is XZ99-SECRETVALUE")
+                # Confirm we are really exercising the intended candidate branch.
+                assert store._fts_available is (not force_like)
                 # Warm the index so both ids are indexed candidates.
                 store.search("XZ99-SECRETVALUE")
                 # Corrupt one candidate's transcript on disk.
