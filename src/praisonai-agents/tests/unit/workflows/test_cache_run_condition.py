@@ -130,3 +130,36 @@ def test_terminal_hook_failure_does_not_change_skip_or_cache_result(allowed):
     result = flow.run("same", verbose=False)
     assert bool(result["steps"]) == allowed
     assert completions == [("conditional", "done" if allowed else "")]
+
+
+@pytest.mark.parametrize("field", ["variables", "input", "previous_result"])
+def test_hook_prepared_handler_inputs_change_cache_key(field):
+    value = {"current": "first"}
+    calls = []
+    def prepare(name, context):
+        if field == "variables":
+            context.variables["prepared"] = value["current"]
+        else:
+            setattr(context, field, value["current"])
+    def handler(context):
+        result = context.variables["prepared"] if field == "variables" else getattr(context, field)
+        calls.append(result)
+        return result
+    flow = AgentFlow(steps=[Task(name="prepared", handler=handler, should_run=lambda ctx: True)], cache=True,
+                     hooks={"on_step_start": prepare})
+    assert flow.run("same", verbose=False)["output"] == "first"
+    value["current"] = "second"
+    assert flow.run("same", verbose=False)["output"] == "second"
+    assert flow.run("same", verbose=False)["output"] == "second"
+    assert calls == ["first", "second"]
+
+
+def test_completion_result_distinguishes_skip_from_empty_handler_output():
+    enabled = {"value": False}
+    outcomes = []
+    flow = AgentFlow(steps=[Task(name="empty", handler=lambda ctx: "", should_run=lambda ctx: enabled["value"])],
+                     hooks={"on_step_complete": lambda name, result: outcomes.append((result.output, result.skipped))})
+    flow.run("same", verbose=False)
+    enabled["value"] = True
+    flow.run("same", verbose=False)
+    assert outcomes == [("", True), ("", False)]
