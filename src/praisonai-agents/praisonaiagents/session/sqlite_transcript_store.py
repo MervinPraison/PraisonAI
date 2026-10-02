@@ -520,8 +520,23 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 )
             try:
                 if self.db_path == ":memory:":
+                    import time
+
+                    def allow_writes(status, remaining, total):
+                        if remaining <= 0:
+                            return
+                        # SQLite releases its native locks after each step.
+                        # Writes through this same source connection update the
+                        # backup rather than restarting it. Keep native calls
+                        # serialized, but let queued store operations run here.
+                        self._db_lock.release()
+                        try:
+                            time.sleep(0)
+                        finally:
+                            self._db_lock.acquire()
+
                     with self._db_lock:
-                        conn.backup(snapshot)
+                        conn.backup(snapshot, pages=128, progress=allow_writes)
                 elif snapshot.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
                     source = snapshot
                     try:
