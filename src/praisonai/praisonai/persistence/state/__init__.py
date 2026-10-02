@@ -12,10 +12,11 @@ Supported backends:
 
 __all__ = [
     "StateStore",
+    "AsyncStateStore",
 ]
 
 def __getattr__(name: str):
-    if name == "StateStore":
-        from .base import StateStore
-        return StateStore
+    if name in ("StateStore", "AsyncStateStore"):
+        from .base import StateStore, AsyncStateStore
+        return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

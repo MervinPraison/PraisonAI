@@ -187,6 +187,12 @@ export interface ObservabilityToolInfo {
   name: ObservabilityToolName;
   package?: string;
   envKey: string;
+  /**
+   * Additional environment variables that also satisfy this tool's credential
+   * requirement (e.g. a vendor's legacy key name). Any one being set counts as
+   * configured for readiness checks.
+   */
+  altEnvKeys?: string[];
   description: string;
   /**
    * Whether traces actually reach this tool's backend. False means the adapter
@@ -220,10 +226,11 @@ export const OBSERVABILITY_TOOLS: Record<ObservabilityToolName, ObservabilityToo
   langsmith: {
     name: 'langsmith',
     package: 'langsmith',
-    envKey: 'LANGCHAIN_API_KEY',
+    envKey: 'LANGSMITH_API_KEY',
+    altEnvKeys: ['LANGCHAIN_API_KEY'],
     description: 'LangSmith by LangChain',
-    delivers: false,
-    features: { traces: true, spans: true, events: true, errors: true, metrics: false, export: false },
+    delivers: true,
+    features: { traces: true, spans: true, events: true, errors: true, metrics: false, export: true },
     docsUrl: 'https://docs.smith.langchain.com'
   },
   langwatch: {
@@ -377,5 +384,7 @@ export function listObservabilityTools(): ObservabilityToolInfo[] {
 export function hasObservabilityToolEnvVar(name: ObservabilityToolName): boolean {
   const info = OBSERVABILITY_TOOLS[name];
   if (!info || !info.envKey) return true; // Built-in tools don't need env vars
-  return !!process.env[info.envKey];
+  if (process.env[info.envKey]) return true;
+  // A vendor's legacy/alternate key name also counts as configured.
+  return (info.altEnvKeys || []).some(key => !!process.env[key]);
 }
