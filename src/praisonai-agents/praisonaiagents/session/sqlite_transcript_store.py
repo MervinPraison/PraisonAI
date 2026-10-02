@@ -318,12 +318,25 @@ class SqliteTranscriptStore(DefaultSessionStore):
         lineage = self._lineage_key(session.to_dict())
         if not lineage:
             return []
-        return [
-            data for data in self._all_rows()
-            if isinstance(data, dict)
-            and data.get("session_id") != exclude
-            and self._lineage_key(data) == lineage
-        ]
+
+        def record_lineage(raw):
+            # Preserve the writer's Python JSON semantics (including NaN)
+            # and the shared lineage precedence, without retaining other rows.
+            try:
+                data = json.loads(raw)
+                return self._lineage_key(data) if isinstance(data, dict) else None
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                return None
+
+        conn = self._connect()
+        with self._db_lock:
+            conn.create_function("portable_session_lineage", 1, record_lineage)
+            rows = conn.execute(
+                "SELECT data FROM sessions WHERE session_id != ? "
+                "AND portable_session_lineage(data) = ? ORDER BY updated_at DESC",
+                (exclude, lineage),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
 
     def _modify_session_locked(
         self,

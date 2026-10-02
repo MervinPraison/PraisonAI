@@ -1,6 +1,7 @@
 """Portable session operations use the SQLite transcript persistence backend."""
 
 import json
+import tracemalloc
 
 import pytest
 
@@ -155,3 +156,24 @@ def test_import_does_not_clobber_peer_created_after_initial_check(stores, monkey
         assert target._cache["reference"].messages[0].content == "imported"
     else:
         assert report.skipped[0]["reason"] == "already exists (use overwrite)"
+
+
+def test_lineage_export_does_not_materialize_unrelated_transcripts(stores):
+    store = stores("source")
+    for sid in ("root", "continuation"):
+        assert store.add_message(sid, "user", sid)
+        assert store.update_session_metadata(sid, lineage_id="shared")
+    for index in range(24):
+        sid = f"unrelated-{index}"
+        assert store.add_message(sid, "user", "x" * 256_000)
+        assert store.update_session_metadata(sid, lineage_id="other", value=float("nan"))
+    tracemalloc.start()
+    try:
+        payload = store.export_session("continuation")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert {record["session_id"] for record in payload["sessions"]} == {"root", "continuation"}
+    # The unrelated transcripts total over 6 MB. A single-record parse can
+    # allocate its input and decoded content, but must not retain all rows.
+    assert peak < 2_000_000
