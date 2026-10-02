@@ -191,6 +191,7 @@ class BaseJSONStore:
         self._lock = threading.Lock()
         self._data: Dict[str, Any] = {}
         self._backend = backend
+        self._read_failed = False
         
         if backend is None:
             # File-based storage (default)
@@ -236,7 +237,9 @@ class BaseJSONStore:
             else:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     self._data = json.load(f)
+            self._read_failed = False
         except (UnicodeDecodeError, json.JSONDecodeError, IOError) as e:
+            self._read_failed = not isinstance(e, FileNotFoundError)
             logger.warning(f"Failed to load {self.storage_path}: {e}")
             self._data = self._default_data()
     
@@ -250,6 +253,13 @@ class BaseJSONStore:
                 raise
             return
         
+        # Defaults from a failed read must not replace their unreadable source.
+        # A successful reload or explicit deletion permits writes again.
+        if self._read_failed:
+            if self.storage_path.exists():
+                raise OSError(f"Refusing to overwrite unreadable record: {self.storage_path}")
+            self._read_failed = False
+
         try:
             dir_path = self.storage_path.parent
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -334,6 +344,7 @@ class BaseJSONStore:
                 if self.storage_path.exists():
                     self.storage_path.unlink()
                     self._data = self._default_data()
+                    self._read_failed = False
                     return True
                 return False
             except Exception as e:
@@ -484,6 +495,7 @@ class AsyncBaseJSONStore:
         self.storage_path = Path(storage_path)
         self._backend = backend
         self._data: Dict[str, Any] = {}
+        self._read_failed = False
         self._async_lock: Optional[Any] = None  # Lazy init asyncio.Lock
         self._async_lock_init: threading.Lock = threading.Lock()  # Thread-safe initialization
         
@@ -524,7 +536,12 @@ class AsyncBaseJSONStore:
                     async with aiofiles.open(self.storage_path, "r", encoding="utf-8") as f:
                         content = await f.read()
                         self._data = json.loads(content)
-                except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+                    self._read_failed = False
+                except FileNotFoundError:
+                    self._read_failed = False
+                    self._data = self._default_data()
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._read_failed = True
                     self._data = self._default_data()
             
             return self._data.copy()
@@ -541,6 +558,10 @@ class AsyncBaseJSONStore:
                 else:
                     self._backend.save(self._storage_key, self._data)
             else:
+                if self._read_failed:
+                    if self.storage_path.exists():
+                        raise OSError(f"Refusing to overwrite unreadable record: {self.storage_path}")
+                    self._read_failed = False
                 # File-based async write. Serialise to a string FIRST, write it
                 # to a temp file, then os.replace it into place so a crash/kill
                 # mid-write cannot truncate the previous good file (writing
@@ -591,6 +612,7 @@ class AsyncBaseJSONStore:
             if self.storage_path.exists():
                 self.storage_path.unlink()
                 self._data = self._default_data()
+                self._read_failed = False
                 return True
             return False
 

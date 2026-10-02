@@ -1,6 +1,7 @@
 """Base stores keep malformed-input fallback consistent for undecodable bytes."""
 
 import asyncio
+import builtins
 import importlib
 import sys
 import types
@@ -101,5 +102,83 @@ def test_valid_unicode_and_missing_file_keep_existing_behavior(tmp_path, flavor,
     else:
         store = DefaultStore(path, use_file_lock=flavor == "locked")
         assert store.load() == {"items": []}
+        store.save(expected)
+        assert store.load() == expected
+
+
+@pytest.mark.parametrize("use_file_lock", [True, False])
+def test_io_error_fallback_cannot_overwrite_source_until_successful_reload(tmp_path, monkeypatch, use_file_lock):
+    path = tmp_path / "store.json"
+    payload = b'{"items":["original"]}'
+    path.write_bytes(payload)
+    real_open = builtins.open
+
+    def fail_source_read(file, mode="r", *args, **kwargs):
+        if file == path and mode == "r":
+            raise PermissionError("read temporarily denied")
+        return real_open(file, mode, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "open", fail_source_read)
+        store = DefaultStore(path, use_file_lock=use_file_lock)
+    with pytest.raises(OSError, match="unreadable"):
+        store.save({"items": ["new"]})
+    assert path.read_bytes() == payload
+    assert store.load() == {"items": ["original"]}
+    store.save({"items": ["new"]})
+    assert store.load() == {"items": ["new"]}
+
+
+@pytest.mark.parametrize("flavor", ["locked", "unlocked", "async"])
+@pytest.mark.parametrize("payload", [b"\xff", b"{invalid"])
+def test_save_after_default_fallback_preserves_unreadable_source(tmp_path, flavor, payload, ensure_aiofiles):
+    path = tmp_path / "store.json"
+    path.write_bytes(payload)
+    if flavor == "async":
+        store = AsyncDefaultStore(path)
+
+        async def attempt_save():
+            assert await store.load_async() == {"items": []}
+            with pytest.raises(OSError, match="unreadable"):
+                await store.save_async({"items": ["new"]})
+
+        asyncio.run(attempt_save())
+    else:
+        store = DefaultStore(path, use_file_lock=flavor == "locked")
+        with pytest.raises(OSError, match="unreadable"):
+            store.save({"items": ["new"]})
+        with pytest.raises(OSError, match="unreadable"):
+            store.clear()
+    assert path.read_bytes() == payload
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("flavor", ["locked", "unlocked", "async"])
+@pytest.mark.parametrize("recovery", ["reload", "delete"])
+def test_unreadable_source_can_be_repaired_or_explicitly_deleted(tmp_path, flavor, recovery, ensure_aiofiles):
+    path = tmp_path / "store.json"
+    path.write_bytes(b"\xff")
+    expected = {"items": ["updated"]}
+    if flavor == "async":
+        store = AsyncDefaultStore(path)
+
+        async def recover():
+            await store.load_async()
+            if recovery == "reload":
+                path.write_text('{"items":["repaired"]}', encoding="utf-8")
+                assert await store.load_async() == {"items": ["repaired"]}
+            else:
+                assert await store.delete_async()
+            await store.save_async(expected)
+            assert await store.load_async() == expected
+
+        asyncio.run(recover())
+    else:
+        store = DefaultStore(path, use_file_lock=flavor == "locked")
+        if recovery == "reload":
+            path.write_text('{"items":["repaired"]}', encoding="utf-8")
+            assert store.load() == {"items": ["repaired"]}
+        else:
+            assert store.delete()
         store.save(expected)
         assert store.load() == expected
