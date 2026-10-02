@@ -100,3 +100,22 @@ def test_invalid_pool_preserves_durable_record_on_write(tmp_path, damage):
     before = path.read_bytes()
     assert store.add_message("s", "user", "must not replace the record") is False
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("missing", ["messages", "archived_messages", "last_compaction"])
+def test_incomplete_pool_cannot_replace_live_history(tmp_path, missing):
+    store = HierarchicalSessionStore(session_dir=str(tmp_path), retention="keep_all")
+    assert store.add_message("s", "user", "first")
+    snapshot_id = store.create_snapshot("s")
+    assert store.add_message("s", "user", "later")
+    path = tmp_path / "s.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    del record["snapshots"][0]["transcript_refs"][missing]
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="incomplete snapshot"):
+        ExtendedSessionData.from_dict(record)
+    assert store.revert_to_snapshot("s", snapshot_id) is False
+    assert path.read_bytes() == before
+    assert store.add_message("s", "user", "must not overwrite") is False
+    assert path.read_bytes() == before

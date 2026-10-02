@@ -133,7 +133,8 @@ class ExtendedSessionData(SessionData):
         snapshots = []
         for snapshot in self.snapshots:
             saved = snapshot._header_dict()
-            if snapshot.transcript is not None:
+            required = {"messages", "archived_messages", "last_compaction"}
+            if snapshot.transcript is not None and required <= snapshot.transcript.keys():
                 refs = {}
                 for name, value in snapshot.transcript.items():
                     if name in ("messages", "archived_messages") and isinstance(value, list):
@@ -145,6 +146,10 @@ class ExtendedSessionData(SessionData):
                 # must reject this record instead of restoring a stale index.
                 saved["invalidated"] = True
                 saved["transcript_invalidated"] = snapshot.invalidated
+            elif snapshot.transcript is not None:
+                # Preserve legacy inline shapes rather than encoding an
+                # incomplete transcript as a valid pooled snapshot.
+                saved["transcript"] = copy.deepcopy(snapshot.transcript)
             snapshots.append(saved)
         data["snapshots"] = snapshots
         if any("transcript_refs" in snapshot for snapshot in snapshots):
@@ -164,6 +169,8 @@ class ExtendedSessionData(SessionData):
                         or "transcript" in raw):
                     raise ValueError("invalid snapshot storage")
                 records = storage["records"]
+                if not {"messages", "archived_messages", "last_compaction"} <= raw["transcript_refs"].keys():
+                    raise ValueError("incomplete snapshot transcript references")
                 transcript = {}
 
                 def clone_record(value):
