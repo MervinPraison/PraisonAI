@@ -6,8 +6,13 @@ Compares agent instantiation times across popular AI agent frameworks.
 
 Usage:
     python benchmarks/simple_benchmark.py
+    python benchmarks/simple_benchmark.py --skip-crewai --json
+    python benchmarks/simple_benchmark.py --json --fail-over-threshold
 """
 
+import json
+import os
+import sys
 import time
 from typing import Literal
 import argparse
@@ -15,6 +20,14 @@ import argparse
 
 ITERATIONS = 100
 WARMUP = 10
+
+THRESHOLDS_PATH = os.path.join(os.path.dirname(__file__), 'thresholds.json')
+
+
+def load_thresholds(path: str = THRESHOLDS_PATH) -> dict:
+    """Load benchmark thresholds from thresholds.json."""
+    with open(path) as f:
+        return json.load(f)
 
 
 def sample_tool(city: Literal['nyc', 'sf']):
@@ -36,18 +49,23 @@ def measure_instantiation(create_fn, iterations=ITERATIONS, warmup=WARMUP):
     return sum(times) / len(times)
 
 
-def run_benchmark():
+def run_benchmark(skip_crewai: bool = False, quiet: bool = False):
     """Run the benchmark across all available frameworks (without tools)."""
     results = {}
-    
-    print('=' * 60)
-    print('PraisonAI Agents - Performance Benchmark')
-    print('=' * 60)
-    print(f'\nIterations: {ITERATIONS}')
-    print('Metric: Agent instantiation time (microseconds)\n')
+
+    def log(msg: str = ''):
+        if not quiet:
+            print(msg)
+
+    log('=' * 60)
+    log('PraisonAI Agents - Performance Benchmark')
+    log('=' * 60)
+    log(f'\nIterations: {ITERATIONS}')
+    log(f'Warmup: {WARMUP}')
+    log('Metric: Agent instantiation time (microseconds)\n')
     
     # PraisonAI (without tools)
-    print("Testing PraisonAI...")
+    log("Testing PraisonAI...")
     from praisonaiagents import Agent as PraisonAgent
     
     results['PraisonAI'] = measure_instantiation(
@@ -59,7 +77,7 @@ def run_benchmark():
     )
     
     # Other frameworks for comparison
-    print("Testing other frameworks...")
+    log("Testing other frameworks...")
     
     try:
         from agno.agent import Agent as AgnoAgent
@@ -102,41 +120,44 @@ def run_benchmark():
     except ImportError:
         pass
     
-    try:
-        from crewai.agent import Agent as CrewAgent
-        from crewai.tools import tool as crewai_tool
-        
-        @crewai_tool("Weather Tool")
-        def get_weather_crew(city: Literal['nyc', 'sf']):
-            """Get weather info."""
-            return 'sunny' if city == 'sf' else 'cloudy'
-        
-        results['CrewAI'] = measure_instantiation(
-            lambda: CrewAgent(
-                role='Weather Agent',
-                goal='Provide weather info',
-                backstory='A weather expert',
-                tools=[get_weather_crew],
-                verbose=False
+    if skip_crewai:
+        log("Skipping CrewAI (--skip-crewai): optional framework import can hang on some platforms.")
+    else:
+        try:
+            from crewai.agent import Agent as CrewAgent
+            from crewai.tools import tool as crewai_tool
+
+            @crewai_tool("Weather Tool")
+            def get_weather_crew(city: Literal['nyc', 'sf']):
+                """Get weather info."""
+                return 'sunny' if city == 'sf' else 'cloudy'
+
+            results['CrewAI'] = measure_instantiation(
+                lambda: CrewAgent(
+                    role='Weather Agent',
+                    goal='Provide weather info',
+                    backstory='A weather expert',
+                    tools=[get_weather_crew],
+                    verbose=False
+                )
             )
-        )
-    except ImportError:
-        pass
+        except ImportError:
+            pass
     
     # Print results
-    print('\n' + '=' * 60)
-    print('RESULTS')
-    print('=' * 60)
+    log('\n' + '=' * 60)
+    log('RESULTS')
+    log('=' * 60)
     
     baseline = results.get('PraisonAI', 1)
-    print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Relative':<10}")
-    print('-' * 50)
+    log(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Relative':<10}")
+    log('-' * 50)
     
     for name, avg in sorted(results.items(), key=lambda x: x[1]):
         ratio = avg / baseline
-        print(f'{name:<25} {avg:<15.2f} {ratio:.2f}x')
+        log(f'{name:<25} {avg:<15.2f} {ratio:.2f}x')
     
-    print('\n' + '=' * 60)
+    log('\n' + '=' * 60)
     return results
 
 
@@ -242,14 +263,41 @@ def update_readme(readme_path: str, table_rows: list):
         print(f'README.md updated: {readme_path}')
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description='PraisonAI Agents - Performance Benchmark')
     parser.add_argument('--save', action='store_true', help='Save results to file')
+    parser.add_argument('--skip-crewai', action='store_true',
+                        help='Skip the optional CrewAI benchmark (its import can hang on some platforms)')
+    parser.add_argument('--json', action='store_true',
+                        help='Emit results as JSON to stdout (for CI baselines/artifacts)')
+    parser.add_argument('--fail-over-threshold', action='store_true',
+                        help='Exit non-zero if PraisonAI instantiation exceeds the budget in thresholds.json')
     args = parser.parse_args()
-    
-    results = run_benchmark()
-    
+
+    results = run_benchmark(skip_crewai=args.skip_crewai, quiet=args.json)
+
     if args.save:
         save_results(results)
-    else:
+    elif not args.json:
         print('\nResults not saved (use --save flag to save results to file)')
+
+    exit_code = 0
+    if args.fail_over_threshold:
+        thresholds = load_thresholds()
+        max_us = thresholds['praisonai_instantiation_us_max']
+        actual_us = results.get('PraisonAI')
+        if actual_us is not None and actual_us > max_us:
+            print(
+                f"ERROR: PraisonAI instantiation {actual_us:.2f} us > threshold {max_us} us",
+                file=sys.stderr,
+            )
+            exit_code = 1
+
+    if args.json:
+        print(json.dumps({'results': results, 'iterations': ITERATIONS, 'warmup': WARMUP}))
+
+    return exit_code
+
+
+if __name__ == '__main__':
+    sys.exit(main())
