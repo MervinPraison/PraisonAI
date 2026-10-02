@@ -764,6 +764,28 @@ class MemoryMixin:
         except Exception as e:
             logging.debug(f"Auto-memory extraction failed: {e}")
 
+    def _persist_memory_turn(self, user_message: str, assistant_response: str):
+        """Persist a raw conversation turn to the memory store.
+
+        Called after each response when ``_memory_instance`` is set but
+        ``auto_memory`` extraction is off. Stores the turn to short-term memory
+        so a later Agent sharing the same store (e.g. ``memory={"user_id": uid}``)
+        recalls it via ``get_memory_context()``. Best-effort: never raises.
+        """
+        memory = getattr(self, "_memory_instance", None)
+        if memory is None or not assistant_response:
+            return
+        store = getattr(memory, "store_short_term", None) or getattr(memory, "add_short_term", None)
+        if store is None:
+            return
+        try:
+            store(
+                f"User: {user_message}\nAssistant: {assistant_response}",
+                metadata={"agent_id": getattr(self, "agent_id", getattr(self, "name", None))},
+            )
+        except Exception as e:
+            logging.debug(f"Memory turn persistence failed: {e}")
+
     def _process_auto_learning(self):
         """Process auto-learning extraction after agent response.
         
