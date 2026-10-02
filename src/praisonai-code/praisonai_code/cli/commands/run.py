@@ -1898,6 +1898,8 @@ def _run_from_file(
     output = get_output_controller()
     
     # Note: Credential check already done in run_main() entry point
+    import os as _os_guard
+    _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
     
     try:
         # Use existing PraisonAI class
@@ -1909,8 +1911,6 @@ def _run_from_file(
         # delegation loops forever ("maximum recursion depth exceeded"). Setting
         # this sentinel tells the legacy ``run`` branch we are already inside a
         # modern run so it executes the YAML directly instead of bouncing back.
-        import os as _os_guard
-        _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
         _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
 
         praison = PraisonAI(
