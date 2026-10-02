@@ -470,6 +470,29 @@ class SqliteSessionStore(DefaultSessionStore):
         return " OR ".join('"%s"' % t for t in terms)
 
     @contextmanager
+    def _search_id_connection(self, conn):
+        """Keep WAL candidate enumeration off the writer connection."""
+        import sqlite3
+        from pathlib import Path
+
+        with self._db_lock:
+            journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        if self.db_path != ":memory:" and journal.lower() == "wal":
+            reader = sqlite3.connect(
+                Path(self.db_path).resolve().as_uri() + "?mode=ro",
+                uri=True, isolation_level=None,
+            )
+            try:
+                yield reader
+            finally:
+                reader.close()
+        else:
+            # Non-WAL stores retain the shared lock only for ID enumeration,
+            # never for transcript reads or corruption callbacks.
+            with self._db_lock:
+                yield conn
+
+    @contextmanager
     def _search_candidate_ids(self, conn, query: str):
         """Spool matching IDs in fixed batches; close SQL before file I/O.
 
@@ -481,16 +504,16 @@ class SqliteSessionStore(DefaultSessionStore):
         import tempfile
 
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as spool:
-            with self._db_lock:
+            with self._search_id_connection(conn) as reader:
                 if self._fts_available:
-                    cursor = conn.execute(
+                    cursor = reader.execute(
                         "SELECT session_id FROM session_fts WHERE session_fts "
                         "MATCH ? ORDER BY bm25(session_fts), session_id",
                         (self._to_fts_query(query),),
                     )
                 else:
                     like = "%" + query.replace("%", "").replace("_", "") + "%"
-                    cursor = conn.execute(
+                    cursor = reader.execute(
                         "SELECT session_id FROM session_fts WHERE content LIKE ? "
                         "ORDER BY session_id", (like,),
                     )

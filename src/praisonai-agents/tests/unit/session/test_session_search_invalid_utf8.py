@@ -6,6 +6,70 @@ from praisonaiagents.session import SqliteSessionStore
 from praisonaiagents.session.store import DefaultSessionStore
 
 
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_wal_writer_can_finish_while_matching_ids_are_spooled(tmp_path, monkeypatch, backend):
+    import tempfile
+    import threading
+
+    store = SqliteSessionStore(session_dir=str(tmp_path))
+    threads = []
+    completed = []
+    failures = []
+    try:
+        assert store.add_message("first", "user", "needle")
+        assert store.add_message("other", "user", "needle")
+        store._ensure_backfilled()
+        if backend == "like":
+            store._fts_available = False
+        original = tempfile.TemporaryFile
+
+        class Spool:
+            def __init__(self, *args, **kwargs):
+                self.handle = original(*args, **kwargs)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.handle.close()
+
+            def __iter__(self):
+                return iter(self.handle)
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def write(self, content):
+                if not threads:
+                    done = threading.Event()
+
+                    def write_index():
+                        try:
+                            store._deindex_session("other")
+                        except Exception as exc:
+                            failures.append(exc)
+                        finally:
+                            done.set()
+
+                    thread = threading.Thread(target=write_index)
+                    threads.append(thread)
+                    thread.start()
+                    completed.append(done.wait(2))
+                return self.handle.write(content)
+
+        monkeypatch.setattr(tempfile, "TemporaryFile", Spool)
+        hits = store.search("needle")
+        for thread in threads:
+            thread.join(3)
+        assert completed == [True]
+        assert not failures
+        assert {hit.session_id for hit in hits} == {"first", "other"}
+    finally:
+        for thread in threads:
+            thread.join(3)
+        store._conn.close()
+
+
 @pytest.mark.parametrize("backend", ["json", "fts", "like"])
 def test_search_skips_invalid_utf8_candidate(tmp_path, backend):
     store = (
