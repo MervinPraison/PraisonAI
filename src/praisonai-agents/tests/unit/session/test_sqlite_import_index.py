@@ -148,9 +148,40 @@ def test_post_import_refresh_failure_does_not_report_durable_write_failure(make_
     def unavailable(*args):
         raise OSError("injected index refresh read failure")
 
-    monkeypatch.setattr(destination, "_read_session_fresh", unavailable)
+    monkeypatch.setattr(destination, "_load_session_from_disk", unavailable)
     report = destination.import_sessions(source.export_all())
     assert report.imported == 1
     assert report.skipped == []
     reader = DefaultSessionStore(session_dir=destination.session_dir)
     assert reader.get_session("session").messages[0].content == "durable imported note"
+
+
+def test_post_import_read_failure_does_not_restore_old_routes(make_store, monkeypatch):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "narwhal replacement")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "pelican original")
+    assert destination.set_gateway_info("session", gateway_session_id="old-gateway", agent_id="old-agent")
+    assert destination.get_by_gateway_session("old-gateway").session_id == "session"
+    assert destination.search("pelican")
+    original = destination._load_session_from_disk
+
+    def unavailable(*args):
+        raise OSError("injected post-save read failure")
+
+    monkeypatch.setattr(destination, "_load_session_from_disk", unavailable)
+    report = destination.import_sessions(source.export_all(), overwrite=True)
+    assert report.imported == 1
+    assert report.skipped == []
+    assert destination.get_by_gateway_session("old-gateway") is None
+    assert destination.list_sessions_by_gateway_agent("old-agent") == []
+    monkeypatch.setattr(destination, "_load_session_from_disk", original)
+    destination.invalidate_cache()
+    saved = destination.get_session("session")
+    assert saved.gateway_session_id is None
+    assert saved.agent_id is None
+    assert saved.messages[0].content == "narwhal replacement"
+    assert destination.search("narwhal") == []
+    assert destination.add_message("session", "user", "later update")
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
+    assert destination.get_by_gateway_session("old-gateway") is None
