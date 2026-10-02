@@ -4558,7 +4558,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return self._guardrail_blocked_message(e)
+                                            return self._guardrail_blocked_message(guard_e)
                                     continue
                         
                         # This should never be reached due to the returns above
