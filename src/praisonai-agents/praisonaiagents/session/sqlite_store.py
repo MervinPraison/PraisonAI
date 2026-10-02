@@ -425,7 +425,7 @@ class SqliteSessionStore(DefaultSessionStore):
 
     # ── read path: bounded index lookup + anchored hits ───────────────
 
-    def _candidate_ids(self, query: str, limit: int, *, offset: int = 0) -> Optional[List[str]]:
+    def _candidate_ids(self, query: str, limit: int) -> Optional[List[str]]:
         """Return matching session_ids via the index, or None to fall back."""
         conn = self._connect()
         if conn is None:
@@ -443,15 +443,15 @@ class SqliteSessionStore(DefaultSessionStore):
                     match = self._to_fts_query(query)
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE session_fts "
-                        "MATCH ? ORDER BY bm25(session_fts), session_id LIMIT ? OFFSET ?",
-                        (match, fetch, offset),
+                        "MATCH ? ORDER BY bm25(session_fts), session_id LIMIT ?",
+                        (match, fetch),
                     ).fetchall()
                 else:
                     like = "%" + query.replace("%", "").replace("_", "") + "%"
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE content LIKE ? "
-                        "ORDER BY session_id LIMIT ? OFFSET ?",
-                        (like, fetch, offset),
+                        "ORDER BY session_id LIMIT ?",
+                        (like, fetch),
                     ).fetchall()
         except Exception as exc:
             logger.debug("Index query failed (%s); falling back to scan.", exc)
@@ -467,6 +467,51 @@ class SqliteSessionStore(DefaultSessionStore):
         if not terms:
             return '""'
         return " OR ".join('"%s"' % t for t in terms)
+
+    def _read_search_candidates(self, query: str, limit: int):
+        """Read a bounded set of usable transcripts from one index snapshot."""
+        import json
+
+        conn = self._connect()
+        if conn is None:
+            return None
+        self._ensure_backfilled()
+        allowance = max(limit * 5, limit, 1)
+        candidates = []
+        try:
+            with self._db_lock:
+                if self._fts_available:
+                    cursor = conn.execute(
+                        "SELECT session_id FROM session_fts WHERE session_fts "
+                        "MATCH ? ORDER BY bm25(session_fts), session_id",
+                        (self._to_fts_query(query),),
+                    )
+                else:
+                    like = "%" + query.replace("%", "").replace("_", "") + "%"
+                    cursor = conn.execute(
+                        "SELECT session_id FROM session_fts WHERE content LIKE ? "
+                        "ORDER BY session_id", (like,),
+                    )
+                try:
+                    while len(candidates) < allowance:
+                        row = cursor.fetchone()
+                        if row is None:
+                            break
+                        sid = row[0]
+                        filepath = self._get_session_path(sid)
+                        try:
+                            with open(filepath, "r", encoding="utf-8") as handle:
+                                data = json.load(handle)
+                        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+                            self._report_unreadable_session(sid, filepath, exc)
+                            continue
+                        candidates.append((sid, data))
+                finally:
+                    cursor.close()
+        except Exception as exc:
+            logger.debug("Index query failed (%s); falling back to scan.", exc)
+            return None
+        return candidates
 
     # ── gateway/agent routing: indexed key → session lookup ───────────
 
@@ -543,38 +588,17 @@ class SqliteSessionStore(DefaultSessionStore):
         if not query:
             return []
 
-        candidate_ids = self._candidate_ids(query, limit)
-        if candidate_ids is None:
+        candidates = self._read_search_candidates(query, limit)
+        if candidates is None:
             return super().search(query, limit=limit, window=window)
-        if not candidate_ids:
+        if not candidates:
             return []
-
-        # Invalid/missing transcripts must not consume the entire candidate
-        # allowance. Read every matching index page before final scoring and
-        # lineage deduplication, using stable ordering for page boundaries.
-        page_size = max(limit * 5, limit)
-        page = candidate_ids
-        while page_size > 0 and len(page) == page_size:
-            page = self._candidate_ids(query, limit, offset=len(candidate_ids))
-            if page is None:
-                return super().search(query, limit=limit, window=window)
-            candidate_ids.extend(page)
 
         needle = query.lower()
         terms = [t for t in needle.split() if t]
         hits: List[tuple] = []
 
-        for sid in candidate_ids:
-            filepath = self._get_session_path(sid)
-            try:
-                import json
-
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
-                self._report_unreadable_session(sid, filepath, exc)
-                continue
-
+        for sid, data in candidates:
             messages = self._searchable_messages(data)
             if not messages:
                 continue

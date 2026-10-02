@@ -77,6 +77,87 @@ def test_search_reports_corruption_without_moving_file(tmp_path, monkeypatch, ca
             conn.close()
 
 
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_broad_query_stops_loading_after_readable_allowance(tmp_path, monkeypatch, backend):
+    import builtins
+
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    try:
+        for index in range(60):
+            assert store.add_message(f"s{index:02}", "user", "needle")
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        opened = []
+        original = builtins.open
+
+        def tracked(path, *args, **kwargs):
+            if str(path).endswith(".json"):
+                opened.append(str(path))
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", tracked)
+        assert len(store.search("needle", limit=5)) == 5
+        assert len(opened) == 25
+    finally:
+        store._conn.close()
+
+
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, backend):
+    store = SqliteSessionStore(session_dir=str(tmp_path))
+    peer = SqliteSessionStore(session_dir=str(tmp_path))
+    try:
+        for index in range(25):
+            assert store.add_message(f"bad{index:02}", "user", "needle")
+        assert store.add_message("valid", "user", "needle " + "filler " * 100)
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        peer_conn = peer._connect()
+        for index in range(25):
+            (tmp_path / f"bad{index:02}.json").write_bytes(b"\xff\xfe")
+        conn = store._conn
+        changed = []
+
+        def change_index():
+            if not changed:
+                peer_conn.execute("DELETE FROM session_fts WHERE session_id = ?", ("bad00",))
+                changed.append(True)
+
+        class Cursor:
+            def __init__(self, cursor):
+                self.cursor = cursor
+
+            def fetchall(self):
+                rows = self.cursor.fetchall()
+                change_index()
+                return rows
+
+            def fetchone(self):
+                row = self.cursor.fetchone()
+                change_index()
+                return row
+
+            def close(self):
+                self.cursor.close()
+
+        class Connection:
+            def execute(self, sql, params=()):
+                return Cursor(conn.execute(sql, params))
+
+            def close(self):
+                conn.close()
+
+        store._conn = Connection()
+        assert [hit.session_id for hit in store.search("needle")] == ["valid"]
+        assert changed
+    finally:
+        for current in (store, peer):
+            if current._conn is not None:
+                current._conn.close()
+
+
 @pytest.mark.parametrize("operation", ["list", "agent", "gateway", "gateway_agent", "export_all", "lineage"])
 def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
     import praisonaiagents.session.store as module
