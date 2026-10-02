@@ -522,15 +522,7 @@ def is_replay_unsafe(error: Exception) -> bool:
     existing auto-retry behaviour is preserved unless a post-dispatch signal is
     present. Callers should only block the retry when the turn is side-effecting.
     """
-    # 1. Exception type (walk the MRO to catch provider subclasses) — most stable.
-    for cls in type(error).__mro__:
-        name = cls.__name__.lower()
-        if name in _REPLAY_SAFE_EXCEPTION_NAMES:
-            return False
-        if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
-            return True
-
-    # 2. A failure the message explicitly places during the TLS handshake is
+    # 1. A failure the message explicitly places during the TLS handshake is
     # pre-dispatch — the request bytes were never sent, so a reset/timeout at
     # that point is safe to replay even though the text also mentions "reset"
     # or "timeout". This check wins over the generic read/reset signals below.
@@ -541,6 +533,15 @@ def is_replay_unsafe(error: Exception) -> bool:
         error_text,
     ):
         return False
+
+    # 2. Exception type (walk the MRO to catch provider subclasses). Typed
+    # reset/read errors remain unsafe unless explicitly scoped to handshake.
+    for cls in type(error).__mro__:
+        name = cls.__name__.lower()
+        if name in _REPLAY_SAFE_EXCEPTION_NAMES:
+            return False
+        if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
+            return True
 
     # 3. Explicit read/reset signals win over transport labels or a message
     # mentioning an earlier connection attempt. SSLError itself is not proof
