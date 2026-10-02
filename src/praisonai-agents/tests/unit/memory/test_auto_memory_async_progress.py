@@ -11,6 +11,62 @@ from praisonaiagents.memory.auto_memory import AutoMemory
 from praisonaiagents.memory.file_memory import FileMemory
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", ["Acknowledged ORANGE-PANDA.", ""])
+async def test_async_after_hook_persists_raw_turn_for_later_agent(tmp_path, response):
+    from praisonaiagents import Agent
+
+    memory = FileMemory(user_id="raw-turn", base_path=tmp_path)
+    agent = Agent(name="Writer", instructions="Remember conversations.", memory=memory)
+    assert not agent._auto_memory
+    assert await agent._atrigger_after_agent_hook("My codename is ORANGE-PANDA.", response, 0) == response
+    reader = Agent(
+        name="Reader", instructions="Recall conversations.",
+        memory=FileMemory(user_id="raw-turn", base_path=tmp_path),
+    )
+    assert memory.get_stats()["short_term_count"] == int(bool(response))
+    assert ("ORANGE-PANDA" in reader.get_memory_context(query="What is my codename?")) == bool(response)
+
+
+@pytest.mark.asyncio
+async def test_async_raw_turn_storage_keeps_loop_live(tmp_path, monkeypatch):
+    from praisonaiagents import Agent
+
+    memory = FileMemory(user_id="raw-progress", base_path=tmp_path)
+    agent = Agent(name="Writer", instructions="Remember conversations.", memory=memory)
+    entered, release = Event(), Event()
+    original = memory.add_short_term
+
+    def blocked_add(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(memory, "add_short_term", blocked_add)
+    beats = []
+
+    def progress():
+        if entered.is_set():
+            beats.append(not release.is_set())
+            release.set()
+        else:
+            asyncio.get_running_loop().call_later(0.01, progress)
+
+    timer = Timer(5, release.set)
+    timer.start()
+    handle = asyncio.get_running_loop().call_later(0.01, progress)
+    try:
+        assert await agent._atrigger_after_agent_hook("My codename is BLUE-FOX.", "Noted.", 0) == "Noted."
+        assert entered.is_set()
+        assert beats == [True]
+        assert memory.get_stats()["short_term_count"] == 1
+    finally:
+        handle.cancel()
+        release.set()
+        timer.cancel()
+        timer.join(5)
+
+
 def test_slow_extraction_allows_other_interaction(tmp_path, monkeypatch):
     memory = FileMemory(user_id="extract", base_path=tmp_path)
     auto = AutoMemory(memory)
