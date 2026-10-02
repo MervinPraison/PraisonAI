@@ -75,7 +75,8 @@ class SqliteSessionStore(DefaultSessionStore):
             db_path = os.path.expanduser(db_path)
         self.db_path = db_path
         self._db_lock = threading.RLock()
-        self._backfill_lock = threading.Lock()
+        self._backfill_lock = threading.RLock()
+        self._backfill_running = False
         self._conn = None
         self._fts_available = False
         self._db_ready = False
@@ -310,10 +311,17 @@ class SqliteSessionStore(DefaultSessionStore):
         if self._backfilled:
             return
         with self._backfill_lock:
-            if self._backfilled:
+            if self._backfilled or self._backfill_running:
                 return
-            self._reindex_all()
-            self._backfilled = True
+            # A persistence hook may query this same store during backfill.
+            # That query uses the index built so far; other threads still wait
+            # for the complete pass without holding the database lock.
+            self._backfill_running = True
+            try:
+                self._reindex_all()
+                self._backfilled = True
+            finally:
+                self._backfill_running = False
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.

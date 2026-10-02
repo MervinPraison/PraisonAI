@@ -76,3 +76,47 @@ def test_stale_refresh_indexes_recreated_session_generation(store):
     assert conn.execute("SELECT content FROM session_fts WHERE session_id = ?", ("busy",)).fetchone()[0] == "new narwhal"
     assert conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", ("busy",)).fetchone() == ("new-route", "new-agent")
     assert conn.execute("SELECT updated_at FROM session_meta WHERE session_id = ?", ("busy",)).fetchone()[0] == replacement.updated_at
+
+
+def test_corruption_callback_can_query_during_backfill(store, monkeypatch):
+    from pathlib import Path
+
+    Path(store._get_session_path("broken")).write_text("{invalid", encoding="utf-8")
+    store._backfilled = False
+    callbacks, failures = [], []
+
+    def on_corruption(*args):
+        callbacks.append(store.get_by_gateway_session("other-gateway").session_id)
+        assert [hit.session_id for hit in store.search("narwhal")] == ["other"]
+
+    monkeypatch.setattr(store, "_fire_corruption_hook", on_corruption)
+
+    def backfill():
+        try:
+            store._ensure_backfilled()
+        except BaseException as exc:
+            failures.append(exc)
+
+    worker = threading.Thread(target=backfill, daemon=True)
+    worker.start()
+    worker.join(2)
+    assert not worker.is_alive(), "corruption callback deadlocked during backfill"
+    assert failures == []
+    assert callbacks == ["other"]
+    assert store._backfilled
+
+
+def test_failed_backfill_can_retry(store, monkeypatch):
+    store._backfilled = False
+    original = store._reindex_all
+
+    def fail():
+        raise RuntimeError("backfill failed")
+
+    monkeypatch.setattr(store, "_reindex_all", fail)
+    with pytest.raises(RuntimeError, match="backfill failed"):
+        store._ensure_backfilled()
+    assert not store._backfilled
+    monkeypatch.setattr(store, "_reindex_all", original)
+    store._ensure_backfilled()
+    assert store._backfilled
