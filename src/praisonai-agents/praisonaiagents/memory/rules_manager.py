@@ -444,6 +444,7 @@ class RulesManager:
     def _load_all_rules(self):
         """Load rules from all sources including git root and additional directories."""
         self._rules = {}
+        self._explicit_rule_keys = set()
         
         # Find git root for monorepo support
         git_root = self._find_git_root()
@@ -577,7 +578,9 @@ class RulesManager:
                 )
                 for key in duplicates:
                     del self._rules[key]
+                    self._explicit_rule_keys.discard(key)
                 self._rules[storage_key] = rule
+                self._explicit_rule_keys.add(storage_key)
                 added += 1
         self._log(f"Added {added} extra rule file(s) from '{path}'")
         return added
@@ -624,18 +627,17 @@ class RulesManager:
     
     def get_rule_by_name(self, name: str) -> Optional[Rule]:
         """Get a rule by name (for manual @mention invocation)."""
+        # Registration precedence is independent of the retained deletion scope.
+        for key, rule in reversed(list(self._rules.items())):
+            if key in self._explicit_rule_keys and rule.name == name:
+                return rule
+
         # Check all scopes
         for scope in ["subdir", "workspace", "global"]:
             key = f"{scope}:{name}"
             if key in self._rules:
                 return self._rules[key]
         
-        # For ambiguous explicit names, the latest registration retains the
-        # existing name-lookup precedence; all distinct files remain in context.
-        for key, rule in reversed(list(self._rules.items())):
-            if key.startswith("extra:") and rule.name == name:
-                return rule
-
         # Also check without scope prefix
         for rule in self._rules.values():
             if rule.name == name:

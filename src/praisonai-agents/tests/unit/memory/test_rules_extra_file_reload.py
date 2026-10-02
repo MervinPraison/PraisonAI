@@ -72,6 +72,33 @@ def test_latest_registration_keeps_named_lookup_precedence_after_reload(manager)
         assert len(manager._extra_rule_files) == 2
 
 
+@pytest.mark.parametrize("scope", ["workspace", "global", "subdir"])
+def test_latest_registration_wins_over_registered_discovered_scope(manager, monkeypatch, scope):
+    if scope == "subdir":
+        directory = manager.workspace_path / "child"
+        path = directory / manager.RULES_DIR_NAME / "custom.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("Discovered instruction", encoding="utf-8")
+        monkeypatch.chdir(directory)
+        manager.reload()
+        discovered = manager.get_rule_by_name("custom")
+    else:
+        discovered = manager.create_rule("custom", "Discovered instruction", scope=scope)
+    explicit = manager.workspace_path / "instructions" / "custom.md"
+    explicit.parent.mkdir()
+    explicit.write_text("Latest explicit instruction", encoding="utf-8")
+    assert manager.add_rule_file(discovered.file_path) == 1
+    assert manager.add_rule_file(str(explicit)) == 1
+    for _ in range(2):
+        assert manager.get_rule_by_name("custom").content == "Latest explicit instruction"
+        context = manager.build_rules_context()
+        assert "Discovered instruction" in context
+        assert "Latest explicit instruction" in context
+        # Keeping discovery keys must preserve the public deletion scope.
+        assert f"{scope}:custom" in manager._rules
+        manager.reload()
+
+
 @pytest.mark.parametrize("source", ["root", "workspace"])
 def test_registered_auto_discovered_file_is_in_context_once(manager, source):
     path = manager.workspace_path / "AGENTS.md" if source == "root" else manager.workspace_path / manager.RULES_DIR_NAME / "custom.md"
