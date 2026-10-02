@@ -46,8 +46,19 @@ def test_run_uses_proactor_loop_on_windows(monkeypatch):
 
     monkeypatch.setattr(asyncio, "run", _boom)
 
+    # The Windows branch installs its own loop as the current loop and closes
+    # it; capture and restore the pytest thread's prior loop state so later
+    # tests do not inherit a closed current loop (order-independent).
+    try:
+        previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:
+        previous_loop = None
+
     fake = _FakeRunner()
-    MCPToolRunner.run(fake)
+    try:
+        MCPToolRunner.run(fake)
+    finally:
+        asyncio.set_event_loop(previous_loop)
 
     assert fake.ran is True
     assert "loop" in created

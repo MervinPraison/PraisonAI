@@ -56,10 +56,21 @@ class MCPToolRunner(threading.Thread):
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self._run_async())
             finally:
+                # Mirror asyncio.run()'s graceful teardown so outstanding async
+                # generators and the default executor are finalized before the
+                # loop is closed (the subprocess transport relies on this).
                 try:
-                    loop.close()
+                    loop.run_until_complete(loop.shutdown_asyncgens())
                 except Exception:
                     pass
+                try:
+                    loop.run_until_complete(loop.shutdown_default_executor())
+                except Exception:
+                    pass
+                try:
+                    loop.close()
+                finally:
+                    asyncio.set_event_loop(None)
         else:
             asyncio.run(self._run_async())
         
