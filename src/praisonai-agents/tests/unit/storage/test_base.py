@@ -9,6 +9,7 @@ import os
 import tempfile
 from pathlib import Path
 from datetime import datetime
+from unittest.mock import patch
 
 from praisonaiagents.storage.base import (
     BaseJSONStore,
@@ -338,6 +339,66 @@ class TestListJsonSessions:
             
             assert len(sessions) == 1
             assert sessions[0].item_count == 3
+
+    def test_list_json_sessions_non_ascii_legacy_locale(self):
+        """Regression (#5585): JSON item count must decode UTF-8 regardless of
+        the platform default locale.
+
+        BaseJSONStore writes UTF-8 with ensure_ascii=False, so a valid session
+        containing a multibyte character such as U+4E01 must still be counted.
+        Under a legacy default encoding (e.g. cp1252) an implicit-encoding read
+        would raise UnicodeDecodeError, be swallowed, and report item_count=0.
+        """
+        import builtins
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            path = tmpdir / "session_cjk.json"
+            path.write_text(
+                json.dumps({"messages": ["\u4e01", "hello"]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            real_open = builtins.open
+
+            def strict_open(file, mode="r", *args, **kwargs):
+                if "b" not in mode and kwargs.get("encoding") is None:
+                    kwargs["encoding"] = "cp1252"
+                return real_open(file, mode, *args, **kwargs)
+
+            with patch("builtins.open", side_effect=strict_open):
+                sessions = list_json_sessions(tmpdir)
+
+            assert len(sessions) == 1
+            assert sessions[0].item_count == 2
+
+    def test_list_jsonl_sessions_non_ascii_legacy_locale(self):
+        """Regression (#5585): JSONL line count must decode UTF-8 regardless of
+        the platform default locale."""
+        import builtins
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            path = tmpdir / "trace_cjk.jsonl"
+            path.write_text(
+                '{"event": "\u4e01"}\n{"event": "second"}\n',
+                encoding="utf-8",
+            )
+
+            real_open = builtins.open
+
+            def strict_open(file, mode="r", *args, **kwargs):
+                if "b" not in mode and kwargs.get("encoding") is None:
+                    kwargs["encoding"] = "cp1252"
+                return real_open(file, mode, *args, **kwargs)
+
+            with patch("builtins.open", side_effect=strict_open):
+                sessions = list_json_sessions(tmpdir, suffix=".jsonl")
+
+            assert len(sessions) == 1
+            assert sessions[0].item_count == 2
 
 
 class TestCleanupOldSessions:
