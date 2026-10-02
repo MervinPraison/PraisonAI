@@ -110,7 +110,7 @@ class FileBackend:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
             logger.warning(f"Failed to load {key}: {e}")
             return None
     

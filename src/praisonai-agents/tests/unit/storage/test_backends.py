@@ -33,7 +33,24 @@ class TestFileBackend:
         
         loaded = backend.load("test_key")
         assert loaded == data
-    
+
+    def test_file_backend_load_invalid_utf8_returns_none(self, tmp_path):
+        """Undecodable bytes should warn and return None, not raise (Issue #5566)."""
+        backend = FileBackend(storage_dir=str(tmp_path))
+
+        for raw in (b"\xff", b"\xe4\xb8", b"\xed\xa0\x80"):
+            backend.save("bad", {"message": "original"})
+            file_path = Path(tmp_path) / "bad.json"
+            file_path.write_bytes(raw)
+
+            assert backend.load("bad") is None
+            # Original bytes are preserved (load is non-destructive)
+            assert file_path.read_bytes() == raw
+
+        # Valid neighboring keys still load
+        backend.save("good", {"key": "value"})
+        assert backend.load("good") == {"key": "value"}
+
     def test_file_backend_exists(self, tmp_path):
         """Test exists check."""
         backend = FileBackend(storage_dir=str(tmp_path))
