@@ -13,14 +13,17 @@ from praisonaiagents.llm.openai_client import OpenAIClient
 @pytest.mark.parametrize('mode', ['sync', 'async'])
 @pytest.mark.parametrize('shape', ['sdk', 'dict'])
 @pytest.mark.parametrize('profile', ['failed', 'missing_error', 'completed', 'unsupported'])
-async def test_native_responses_failure_and_compatibility_fallback(mode, shape, profile):
+async def test_native_responses_failure_and_compatibility_fallback(mode, shape, profile, monkeypatch):
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
     calls = []
     error = ResponseError(code='server_error', message='Provider failed.') if profile == 'failed' else None
-    raw = SimpleNamespace(
-        status='failed' if profile in ('failed', 'missing_error') else 'completed',
-        error=error if shape == 'sdk' or error is None else error.model_dump(),
-        output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}],
-    )
+    fields = {
+        'status': 'failed' if profile in ('failed', 'missing_error') else 'completed',
+        'error': error if shape == 'sdk' or error is None else error.model_dump(),
+        'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}],
+    }
+    raw = SimpleNamespace(**fields) if shape == 'sdk' else fields
 
     def respond(**kwargs):
         calls.append('responses')

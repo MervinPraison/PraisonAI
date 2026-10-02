@@ -925,7 +925,7 @@ class OpenAIClient:
         response_text = ""
         tool_calls_list: List[ToolCall] = []
 
-        output_items = getattr(response, 'output', None) or []
+        output_items = (response.get('output') if isinstance(response, dict) else getattr(response, 'output', None)) or []
         for item in output_items:
             item_type = getattr(item, "type", "") if not isinstance(item, dict) else item.get("type", "")
 

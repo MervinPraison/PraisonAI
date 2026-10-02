@@ -7190,7 +7190,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         tool_calls: List[Dict[str, Any]] = []
         reasoning_content = None
 
-        output_items = getattr(response, 'output', None) or []
+        output_items = (response.get('output') if isinstance(response, dict) else getattr(response, 'output', None)) or []
         for item in output_items:
             # Handle both dict and object access
             if isinstance(item, dict):

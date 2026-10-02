@@ -14,11 +14,13 @@ from praisonaiagents.llm.llm import LLM, LLMResponseError
 @pytest.mark.parametrize('profile', ['failed', 'missing_error', 'completed'])
 async def test_public_responses_failure(entry, shape, profile, monkeypatch):
     error = ResponseError(code='server_error', message='Provider failed.') if profile == 'failed' else None
-    response = SimpleNamespace(
-        status='completed' if profile == 'completed' else 'failed',
-        error=error if shape == 'sdk' or error is None else error.model_dump(),
-        output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'partial'}]}],
-    )
+    status = 'completed' if profile == 'completed' else 'failed'
+    fields = {
+        'status': status,
+        'error': error if shape == 'sdk' or error is None else error.model_dump(),
+        'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'partial'}]}],
+    }
+    response = SimpleNamespace(**fields) if shape == 'sdk' else fields
     llm = LLM(model='gpt-4o-mini')
     requests = []
 
@@ -36,7 +38,7 @@ async def test_public_responses_failure(entry, shape, profile, monkeypatch):
         monkeypatch.setattr('praisonaiagents.llm.llm.check_model_request', lambda *args: None)
         events = [
             {'type': 'response.output_text.delta', 'delta': 'partial'},
-            {'type': 'response.' + response.status, 'response': response},
+            {'type': 'response.' + status, 'response': response},
         ]
         if shape == 'sdk':
             events = [SimpleNamespace(**event) for event in events]
