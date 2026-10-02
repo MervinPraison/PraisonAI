@@ -217,8 +217,10 @@ class ComputeManagedAgent:
             config.image = self._image
         # Start the shared bridge before registering our exit callback. atexit
         # is LIFO: instance teardown must finish before the bridge shuts down.
-        from praisonai._async_bridge import current_bridge
-        current_bridge().get()
+        # A backend may outlive a scoped bridge. Cleanup belongs to the
+        # process-owned bridge, independent of the finalizer's ContextVars.
+        from praisonai._async_bridge import _BG as release_bridge
+        release_bridge.get()
         info = await provider.provision(config)
         self._instance = getattr(info, "instance_id", info)
 
@@ -239,7 +241,7 @@ class ComputeManagedAgent:
                 if claimed:
                     return
                 claimed = True
-                future = _release(provider, instance_id, place)
+                future = _release(provider, instance_id, place, bridge=release_bridge)
                 if future is not None:
                     pending_release.append(future)
             if future is None:
@@ -258,7 +260,7 @@ class ComputeManagedAgent:
                 if not claimed:
                     claimed = True
                     finalizer.detach()
-                    future = _release(provider, instance_id, place)
+                    future = _release(provider, instance_id, place, bridge=release_bridge)
                     if future is not None:
                         pending_release.append(future)
                 else:
@@ -312,7 +314,7 @@ class ComputeManagedAgent:
 
 
 
-def _release(provider, instance_id: str, place: str):
+def _release(provider, instance_id: str, place: str, *, bridge=None):
     """Reclaim an instance whose backend is gone.
 
     Registered with weakref.finalize, so it runs when the backend is collected
@@ -334,9 +336,10 @@ def _release(provider, instance_id: str, place: str):
 
     shutdown = _shutdown()
     try:
-        from praisonai._async_bridge import current_bridge
-
-        fut = current_bridge().submit(shutdown)
+        if bridge is None:
+            from praisonai._async_bridge import current_bridge
+            bridge = current_bridge()
+        fut = bridge.submit(shutdown)
     except Exception as exc:  # pragma: no cover - bridge poisoned / interpreter exit
         shutdown.close()
         logger.warning(

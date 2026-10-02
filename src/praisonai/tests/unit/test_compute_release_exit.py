@@ -12,7 +12,7 @@ CHILD = r'''
 import asyncio
 from pathlib import Path
 import sys
-from praisonai._async_bridge import current_bridge
+from praisonai._async_bridge import current_bridge, scoped_bridge
 from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
@@ -34,7 +34,17 @@ class Provider:
 
 backend = ComputeManagedAgent("docker")
 backend._provider = Provider()
-asyncio.run(backend._ensure())
+if mode == "scoped":
+    with scoped_bridge():
+        asyncio.run(backend._ensure())
+    # Cleanup must use an already-running process-owned bridge after the
+    # scope-owned bridge closes. Model hosts that forbid late thread startup.
+    import threading
+    def forbid_late_thread_start(self):
+        raise RuntimeError("late thread startup is forbidden")
+    threading.Thread.start = forbid_late_thread_start
+else:
+    asyncio.run(backend._ensure())
 if mode == "explicit":
     asyncio.run(backend.ashutdown())
 elif mode == "gc":
@@ -91,7 +101,7 @@ def _child(tmp_path, mode):
     return marker, result
 
 
-@pytest.mark.parametrize("mode", ["warm", "cold", "explicit", "gc", "race"])
+@pytest.mark.parametrize("mode", ["warm", "cold", "explicit", "gc", "race", "scoped"])
 def test_exit_reclaims_instance_once(tmp_path, mode):
     marker, result = _child(tmp_path, mode)
     assert marker.exists(), result.stderr
