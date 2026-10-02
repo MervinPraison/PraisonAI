@@ -15,6 +15,7 @@ def test_wal_reader_retains_session_during_or_after_failed_index_refresh(tmp_pat
     resume = threading.Event()
     worker = None
     reader = None
+    outcomes = []
     try:
         assert store.add_message("session", "user", "needle old")
         conn = store._conn
@@ -34,7 +35,7 @@ def test_wal_reader_retains_session_during_or_after_failed_index_refresh(tmp_pat
                 return result
 
         monkeypatch.setattr(store, "_connect", lambda: PausedConnection())
-        worker = threading.Thread(target=store._index_session, args=(session,))
+        worker = threading.Thread(target=lambda: outcomes.append(store._index_session(session)))
         worker.start()
         assert deleted.wait(5)
         # This is a second real connection, outside the store's Python lock.
@@ -45,6 +46,7 @@ def test_wal_reader_retains_session_during_or_after_failed_index_refresh(tmp_pat
         after = reader.execute("SELECT content FROM session_fts WHERE session_id = ?", ("session",)).fetchall()
         assert during == [("needle old",)]
         assert after == [("needle old" if failure else "needle new",)]
+        assert outcomes == [not failure]
         assert not conn.in_transaction
     finally:
         resume.set()

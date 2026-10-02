@@ -231,11 +231,11 @@ class SqliteSessionStore(DefaultSessionStore):
                 parts.append(str(content))
         return "\n".join(parts)
 
-    def _index_session(self, session: SessionData) -> None:
-        """Insert/replace a session's content in the index (best-effort)."""
+    def _index_session(self, session: SessionData) -> bool:
+        """Refresh the index best-effort, reporting whether it succeeded."""
         conn = self._connect()
         if conn is None:
-            return
+            return False
         content = self._flatten(session)
         sid = session.session_id
         gateway_session_id = getattr(session, "gateway_session_id", None)
@@ -272,6 +272,8 @@ class SqliteSessionStore(DefaultSessionStore):
                     conn.execute("RELEASE praisonai_index_refresh")
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
+            return False
+        return True
 
     def _deindex_session(self, session_id: str) -> None:
         conn = self._connect()
