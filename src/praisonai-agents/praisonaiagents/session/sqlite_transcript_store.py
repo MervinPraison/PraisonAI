@@ -479,9 +479,10 @@ class SqliteTranscriptStore(DefaultSessionStore):
         per-session scoring, bookends, automated-demotion and lineage-dedup are
         then reused verbatim so results are identical in shape. Scanning spans
         the shared archived-plus-active projection so compacted history stays
-        recallable (Issue #5031). SQLite access is serialized in bounded batches;
-        decoded scoring does not hold the connection lock. Concurrent writes
-        are allowed, so results do not promise an atomic database snapshot.
+        recallable (Issue #5031). A dedicated read snapshot keeps membership and
+        ordering stable across batches without holding the writer's connection
+        lock during decoded scoring. In-memory stores use a temporary database
+        snapshot because their connection cannot be independently reopened.
         """
         from contextlib import closing
 
@@ -499,20 +500,30 @@ class SqliteTranscriptStore(DefaultSessionStore):
             # Score decoded messages from every row: a recency-first cap can
             # exclude stronger hits or fill up with one conversation lineage.
             # Stream payloads rather than materializing all transcript JSON.
-            with self._db_lock:
-                cursor = conn.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
+            import sqlite3
+            if self.db_path == ":memory:":
+                snapshot = sqlite3.connect(":memory:")
+            else:
+                from ..storage.sqlite import connect as _sqlite_connect
+                snapshot = _sqlite_connect(
+                    self.db_path, isolation_level=None,
+                    busy_timeout_ms=int(self.lock_timeout * 1000),
+                )
             try:
-                while True:
+                if self.db_path == ":memory:":
                     with self._db_lock:
-                        batch = cursor.fetchmany(128)
+                        conn.backup(snapshot)
+                snapshot.execute("BEGIN")
+                cursor = snapshot.execute("SELECT data FROM sessions ORDER BY updated_at DESC")
+                while True:
+                    batch = cursor.fetchmany(128)
                     if not batch:
                         break
-                    # Decoding and scoring can be expensive. Protect SQLite
-                    # calls, but let other operations run between batches.
+                    # The independent read view cannot be reordered by writes
+                    # on the store connection while this batch is scored.
                     yield from batch
             finally:
-                with self._db_lock:
-                    cursor.close()
+                snapshot.close()
 
         hits: List[tuple] = []
         with closing(records()) as rows:
