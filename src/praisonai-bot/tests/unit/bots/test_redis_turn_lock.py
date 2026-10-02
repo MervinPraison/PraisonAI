@@ -197,7 +197,7 @@ async def test_redis_turn_lock_renews_lease_during_long_turn(monkeypatch):
         first = redis.store[redis_key]
 
         async def wait_for_renewals():
-            while len(redis.eval_calls) < 12:
+            while len(redis.eval_calls) < 12 or now[0] <= 3 * lock._ttl:
                 await asyncio.sleep(0)
 
         await asyncio.wait_for(wait_for_renewals(), timeout=5)
