@@ -307,6 +307,8 @@ class RulesManager:
             for end in range(1, len(lines)):
                 if lines[end].rstrip("\r\n \t") != "---":
                     continue
+                # Invalid metadata retains text for explicit use, not automatic selection.
+                frontmatter = {"activation": "manual"}
                 try:
                     yaml_content = "".join(lines[1:end])
                     loader = yaml.SafeLoader(yaml_content)

@@ -149,3 +149,35 @@ def test_merged_yaml_metadata_retains_decimal_priority_and_pattern_spelling(mana
     assert rule.priority == 10
     assert rule.globs == ["010"]
     assert manager.get_active_rules(file_path="010") == [rule]
+
+
+@pytest.mark.parametrize("metadata", [
+    "activation: manual\npriority: true",
+    "activation: glob\nglobs: [target.py]\npriority: true",
+    "activation: manual\nglobs: wrong",
+    "activation: glob\nglobs: wrong",
+    "activation: manual\ndescription: 2026-02-30",
+    "activation: manual\ndescription: [",
+    "- item",
+    "false",
+])
+@pytest.mark.parametrize("scope", ["workspace", "global", "root"])
+def test_invalid_frontmatter_stays_available_without_automatic_activation(manager, metadata, scope):
+    if scope == "root":
+        path = manager.workspace_path / "AGENTS.md"
+        name = "agents"
+    else:
+        directory = manager.global_rules_path if scope == "global" else manager.workspace_path / manager.RULES_DIR_NAME
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "reference.md"
+        name = "reference"
+    source = f"---\n{metadata}\n---\nRestricted instructions"
+    path.write_text(source, encoding="utf-8")
+    manager.reload()
+    rule = manager.get_rule_by_name(name)
+    assert rule.content == source
+    assert rule.activation == "manual"
+    assert manager.get_active_rules() == []
+    assert manager.get_active_rules(file_path="target.py") == []
+    assert manager.build_rules_context() == ""
+    assert "Restricted instructions" in manager.build_rules_context(include_manual=[name])
