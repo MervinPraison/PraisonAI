@@ -147,8 +147,6 @@ def test_save_after_default_fallback_preserves_unreadable_source(tmp_path, flavo
         store = DefaultStore(path, use_file_lock=flavor == "locked")
         with pytest.raises(OSError, match="unreadable"):
             store.save({"items": ["new"]})
-        with pytest.raises(OSError, match="unreadable"):
-            store.clear()
     assert path.read_bytes() == payload
     assert not list(tmp_path.glob("*.tmp"))
 

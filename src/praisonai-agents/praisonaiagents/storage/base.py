@@ -254,7 +254,7 @@ class BaseJSONStore:
             return
         
         # Defaults from a failed read must not replace their unreadable source.
-        # A successful reload or explicit deletion permits writes again.
+        # A successful reload or explicit reset/deletion permits writes again.
         if self._read_failed:
             if self.storage_path.exists():
                 raise OSError(f"Refusing to overwrite unreadable record: {self.storage_path}")
@@ -322,9 +322,18 @@ class BaseJSONStore:
     
     def clear(self) -> None:
         """Clear all stored data."""
+        self._reset(self._default_data())
+
+    def _reset(self, data: Dict[str, Any]) -> None:
+        """Atomically replace data for an explicit clear, restoring guards on failure."""
         with self._lock:
-            self._data = self._default_data()
-            self._save()
+            previous_data, previous_failed = self._data, self._read_failed
+            self._data, self._read_failed = data, False
+            try:
+                self._save()
+            except BaseException:
+                self._data, self._read_failed = previous_data, previous_failed
+                raise
     
     def delete(self) -> bool:
         """
