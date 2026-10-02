@@ -84,11 +84,11 @@ class FileBackend:
                     delete=False,
                     suffix=".tmp"
                 ) as f:
+                    temp_path = f.name
                     if self.pretty:
                         json.dump(data, f, indent=2, default=str, ensure_ascii=False)
                     else:
                         json.dump(data, f, default=str, ensure_ascii=False)
-                    temp_path = f.name
                 
                 os.replace(temp_path, file_path)
             except Exception as e:
