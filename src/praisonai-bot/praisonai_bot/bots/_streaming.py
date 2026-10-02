@@ -105,6 +105,78 @@ def resolve_activity_category(tool_name: Optional[str]) -> str:
     return "default"
 
 
+# Separator between the reply body and the runtime footer line. A blank line
+# then an em-dash keeps the footer visually distinct without markup that could
+# break on a given platform.
+_FOOTER_SEP = "\n\n— "
+
+
+def build_footer_line(
+    model: Optional[str] = None,
+    served_model: Optional[str] = None,
+    context_pct: Optional[float] = None,
+    latency_s: Optional[float] = None,
+) -> str:
+    """Build a privacy-safe, per-reply runtime footer line.
+
+    Renders only the fields that are available, e.g. ``gpt-4o · 38% ctx · 4.2s``.
+    A missing field is omitted rather than shown as a placeholder, so a partial
+    footer is always well-formed. Only the model name, context-window fill
+    percentage and turn latency are surfaced — never tool args, URLs, paths or
+    message content. Returns ``""`` when no field is available.
+
+    Args:
+        model: Configured model id (e.g. ``"gpt-4o"``).
+        served_model: Deployment that actually served the turn, shown as
+            ``model (served: X)`` when it differs from ``model`` (failover /
+            routing visibility).
+        context_pct: Session context-window fill, 0–100.
+        latency_s: Turn latency in seconds.
+
+    Returns:
+        A single footer line (without the leading separator) or ``""``.
+    """
+    parts: list = []
+
+    if model:
+        model_str = str(model).strip()
+        if model_str:
+            served = str(served_model).strip() if served_model else ""
+            if served and served != model_str:
+                parts.append(f"{model_str} (served: {served})")
+            else:
+                parts.append(model_str)
+
+    if context_pct is not None:
+        try:
+            pct = float(context_pct)
+            if pct == pct and pct not in (float("inf"), float("-inf")):
+                parts.append(f"{int(round(pct))}% ctx")
+        except (TypeError, ValueError):
+            pass
+
+    if latency_s is not None:
+        try:
+            secs = float(latency_s)
+            if secs == secs and secs >= 0 and secs not in (float("inf"), float("-inf")):
+                parts.append(f"{secs:.1f}s")
+        except (TypeError, ValueError):
+            pass
+
+    return " · ".join(parts)
+
+
+def append_footer(reply: str, footer_line: str) -> str:
+    """Append a footer line to a final reply, separated by a blank line.
+
+    Returns ``reply`` unchanged when ``footer_line`` is empty. Only ever used on
+    the final reply — never on partial/streamed frames.
+    """
+    if not footer_line:
+        return reply
+    return f"{reply}{_FOOTER_SEP}{footer_line}"
+
+
 def strip_reasoning_tags(text: str) -> str:
     """Remove ``<think>``/``<reasoning>`` spans from streamed content.
 
