@@ -45,6 +45,12 @@ from ._commands import (
 )
 from ._failure import failure_reply_text
 from ._session import BotSessionManager
+from ._streaming import (
+    StreamingConfig,
+    StreamingMode,
+    DraftStreamer,
+    build_streaming_config,
+)
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
@@ -102,7 +108,12 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         
         # Initialize allow_silence from config
         self._allow_silence = getattr(self.config, 'allow_silence', False)
-        
+
+        # Initialize streaming config based on BotConfig (shared with Telegram /
+        # Slack so ``streaming.mode: draft|auto`` is honoured identically across
+        # channels that support in-place edits — Issue #5415).
+        self._streaming_config = build_streaming_config(self.config)
+
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._client = None
@@ -139,6 +150,15 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
     
+    def configure_streaming(self, config: StreamingConfig) -> None:
+        """Configure streaming reply mode.
+
+        Args:
+            config: Streaming configuration. Set mode=StreamingMode.OFF to disable.
+        """
+        self._streaming_config = config
+        logger.debug("DiscordBot: streaming configured, mode=%s", config.mode)
+
     @property
     def is_running(self) -> bool:
         return self._is_running
@@ -474,20 +494,95 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     
                     async def _send_agent_response():
                         text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
+                        channel_id = str(message.channel.id)
+
+                        # Streaming path: progressively edit a placeholder in
+                        # place using the shared DraftStreamer, mirroring Telegram
+                        # (Issue #5415). Only engaged when streaming is configured.
+                        streaming_enabled = (
+                            self._streaming_config is not None
+                            and self._streaming_config.mode != StreamingMode.OFF
+                        )
+                        if streaming_enabled:
+                            streamer = DraftStreamer(
+                                adapter=self,
+                                channel_id=channel_id,
+                                config=self._streaming_config,
+                                platform="discord",
+                            )
+                            placeholder_message_id = await streamer.start()
+                            try:
+                                response = await self._session.chat(
+                                    self._agent, user_id, text_to_send,
+                                    chat_id=channel_id,
+                                    user_name=str(getattr(message.author, "name", "")),
+                                    message_id=str(message.id),
+                                    account=getattr(self.config, "account", "default"),
+                                    stream_callback=streamer.on_event,
+                                )
+                                send_result = self.fire_message_sending(
+                                    channel_id, str(response),
+                                )
+                                if send_result["cancel"]:
+                                    try:
+                                        await self.delete_message(
+                                            channel_id, placeholder_message_id
+                                        )
+                                    except Exception:
+                                        pass
+                                    return
+                                final_content = send_result["content"]
+                                # A streamed answer longer than Discord's hard
+                                # cap cannot be delivered by editing the single
+                                # placeholder (both the edit and the send
+                                # fallback 400 on >2000 chars), which would drop
+                                # the whole reply. Fall back to the chunked
+                                # reply path so long answers are split and keep
+                                # the reply reference (Greptile #3 / #5).
+                                _cap = min(self.config.max_message_length, 2000)
+                                if len(final_content) > _cap:
+                                    try:
+                                        await self.delete_message(
+                                            channel_id, placeholder_message_id
+                                        )
+                                    except Exception:
+                                        pass
+                                    await self._send_long_message(
+                                        message.channel, final_content,
+                                        reference=message,
+                                    )
+                                else:
+                                    await streamer.finalize(final_content)
+                                self.fire_message_sent(channel_id, final_content)
+                            except Exception:
+                                try:
+                                    await self.delete_message(
+                                        channel_id, placeholder_message_id
+                                    )
+                                except Exception:
+                                    pass
+                                raise
+                            if ack_ctx:
+                                await self._ack.done(
+                                    ack_ctx, react_fn=_discord_react,
+                                    unreact_fn=_discord_unreact,
+                                )
+                            return
+
                         response = await self._session.chat(
                             self._agent, user_id, text_to_send,
-                            chat_id=str(message.channel.id),
+                            chat_id=channel_id,
                             user_name=str(getattr(message.author, "name", "")),
                             message_id=str(message.id),
                             account=getattr(self.config, "account", "default"),
                         )
                         send_result = self.fire_message_sending(
-                            str(message.channel.id), str(response),
+                            channel_id, str(response),
                         )
                         if send_result["cancel"]:
                             return
                         await self._send_long_message(message.channel, send_result["content"], reference=message)
-                        self.fire_message_sent(str(message.channel.id), send_result["content"])
+                        self.fire_message_sent(channel_id, send_result["content"])
                         # Done reaction - show completion
                         if ack_ctx:
                             await self._ack.done(ack_ctx, react_fn=_discord_react, unreact_fn=_discord_unreact)

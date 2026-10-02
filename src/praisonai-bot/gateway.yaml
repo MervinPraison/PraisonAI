@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/src/praisonai-bot/praisonai_bot/bots/gateway.schema.json
 gateway:
   host: 127.0.0.1
   port: 8765

@@ -293,6 +293,9 @@ class BotHandler:
         agent_config = validated_config.agent
         if agent_config:
             agent_config_dict = agent_config.model_dump()
+            # Resolve an unset/"auto" model to the detected provider's default
+            # (Issue #5609) so a non-OpenAI operator is not handed gpt-4o-mini.
+            agent_config_dict["model"] = agent_config.resolved_model()
         else:
             agent_config_dict = {}
             
