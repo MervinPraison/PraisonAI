@@ -75,6 +75,7 @@ class SqliteSessionStore(DefaultSessionStore):
             db_path = os.path.expanduser(db_path)
         self.db_path = db_path
         self._db_lock = threading.RLock()
+        self._backfill_lock = threading.Lock()
         self._conn = None
         self._fts_available = False
         self._db_ready = False
@@ -236,18 +237,19 @@ class SqliteSessionStore(DefaultSessionStore):
         conn = self._connect()
         if conn is None:
             return False
-        content = self._flatten(session)
         sid = session.session_id
-        gateway_session_id = getattr(session, "gateway_session_id", None)
-        agent_id = getattr(session, "agent_id", None)
         try:
-            # Keep lock ordering consistent with backfill: database, then file.
-            # A refresh may carry a snapshot read before a concurrent deletion.
+            # Never hold the database lock while waiting for a session file.
+            # Reload under the file lock: the supplied generation may be stale.
             filepath = self._get_session_path(sid)
-            with self._db_lock, FileLock(filepath, self.lock_timeout):
+            with FileLock(filepath, self.lock_timeout), self._db_lock:
                 if not os.path.exists(filepath):
                     self._deindex_session(sid)
                     return True
+                current = self._load_session_from_disk(sid, filepath)
+                content = self._flatten(current)
+                gateway_session_id = getattr(current, "gateway_session_id", None)
+                agent_id = getattr(current, "agent_id", None)
                 # A separate WAL reader must see the old or new index record,
                 # never the autocommitted gap between DELETE and INSERT.
                 conn.execute("SAVEPOINT praisonai_index_refresh")
@@ -260,7 +262,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     conn.execute(
                         "INSERT OR REPLACE INTO session_meta (session_id, updated_at) "
                         "VALUES (?, ?)",
-                        (sid, session.updated_at),
+                        (sid, current.updated_at),
                     )
                     # Keep the gateway/agent routing index in sync so inbound
                     # routing is an indexed lookup, not a full-directory scan.
@@ -307,11 +309,11 @@ class SqliteSessionStore(DefaultSessionStore):
         """
         if self._backfilled:
             return
-        with self._db_lock:
+        with self._backfill_lock:
             if self._backfilled:
                 return
-            self._backfilled = True
             self._reindex_all()
+            self._backfilled = True
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.
@@ -451,7 +453,7 @@ class SqliteSessionStore(DefaultSessionStore):
     def delete_session(self, session_id: str) -> bool:
         try:
             filepath = self._get_session_path(session_id)
-            with self._db_lock, FileLock(filepath, self.lock_timeout):
+            with FileLock(filepath, self.lock_timeout), self._db_lock:
                 ok = super().delete_session(session_id)
                 if ok:
                     self._deindex_session(session_id)
