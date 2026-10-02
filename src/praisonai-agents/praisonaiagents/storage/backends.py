@@ -337,10 +337,8 @@ class SQLiteBackend:
         conn = self._get_conn()
         cur = conn.cursor()
         
-        cur.execute(f"SELECT COUNT(*) as count FROM {self._quoted_table}")
-        count = cur.fetchone()["count"]
-        
         cur.execute(f"DELETE FROM {self._quoted_table}")
+        count = cur.rowcount
         conn.commit()
         
         return count
