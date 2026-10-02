@@ -370,9 +370,9 @@ class SqliteSessionStore(DefaultSessionStore):
             self._index_session(session)
         return ok
 
-    def _save_imported_session(self, session: SessionData) -> bool:
+    def _save_imported_session(self, session: SessionData, *, overwrite: bool = True) -> bool:
         """Refresh recall and routing after a verbatim portable restore."""
-        ok = super()._save_imported_session(session)
+        ok = super()._save_imported_session(session, overwrite=overwrite)
         if ok:
             try:
                 filepath = self._get_session_path(session.session_id)
