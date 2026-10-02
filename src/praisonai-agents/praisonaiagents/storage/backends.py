@@ -197,7 +197,11 @@ class SQLiteBackend:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         
         if auto_create:
-            self._create_table()
+            try:
+                self._create_table()
+            except Exception:
+                self.close()
+                raise
     
     def _get_conn(self):
         """Get thread-local connection."""
