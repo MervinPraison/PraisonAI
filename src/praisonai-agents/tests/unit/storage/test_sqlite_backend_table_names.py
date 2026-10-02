@@ -39,3 +39,10 @@ def test_accepted_table_name_supports_crud_and_reopen(tmp_path, name):
         backend.close()
         if neighbor is not None:
             neighbor.close()
+
+
+@pytest.mark.parametrize("name", ["table\n", "tab\nle", "\ntable", "select ", " select", "ta ble"])
+def test_rejects_whitespace_in_table_name(tmp_path, name):
+    path = str(tmp_path / "store.db")
+    with pytest.raises(ValueError):
+        SQLiteBackend(db_path=path, table_name=name)

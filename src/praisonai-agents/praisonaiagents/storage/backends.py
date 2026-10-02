@@ -188,7 +188,7 @@ class SQLiteBackend:
         """
         self.db_path = os.path.expanduser(db_path) if db_path else str(get_storage_path())
         import re as _re
-        if not isinstance(table_name, str) or not _re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        if not isinstance(table_name, str) or not _re.match(r'^[a-zA-Z0-9_]+\Z', table_name):
             raise ValueError("table_name must contain only alphanumeric characters and underscores")
         self.table_name = table_name
         self._local = threading.local()
