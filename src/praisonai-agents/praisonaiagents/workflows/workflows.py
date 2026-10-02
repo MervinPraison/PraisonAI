@@ -1654,7 +1654,12 @@ class AgentFlow:
             _cache_key = None
             if _step_cache is not None:
                 from .step_cache import make_step_key
-                _cache_key = make_step_key(step, context.previous_result, context.input, context.variables)
+                if step.handler:
+                    _cache_key = make_step_key(step, context.previous_result, context.input, context.variables)
+                else:
+                    # Agent prompts and attachments consume workflow inputs,
+                    # not the handler context prepared by lifecycle hooks.
+                    _cache_key = make_step_key(step, previous_output, input, all_variables)
                 _cached = _step_cache.get(_cache_key)
                 if _cached is not None:
                     if verbose:

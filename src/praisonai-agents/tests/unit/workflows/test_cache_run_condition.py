@@ -163,3 +163,19 @@ def test_completion_result_distinguishes_skip_from_empty_handler_output():
     enabled["value"] = True
     flow.run("same", verbose=False)
     assert outcomes == [("", True), ("", False)]
+
+
+def test_agent_cache_uses_actual_prompt_variables_after_hook_clears_context():
+    from types import SimpleNamespace
+
+    prompts = []
+    agent = SimpleNamespace(name="echo", chat=lambda prompt, **kwargs: prompts.append(prompt) or prompt)
+    step = Task(name="agent", agent=agent, action="{{token}}")
+    flow = AgentFlow(steps=[step], cache=True,
+                     hooks={"on_step_start": lambda name, ctx: ctx.variables.clear()})
+    flow.variables["token"] = "first"
+    assert flow.run("same", verbose=False)["output"] == "first"
+    flow.variables["token"] = "second"
+    assert flow.run("same", verbose=False)["output"] == "second"
+    assert flow.run("same", verbose=False)["output"] == "second"
+    assert prompts == ["first", "second"]
