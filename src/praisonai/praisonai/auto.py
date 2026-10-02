@@ -16,6 +16,7 @@ import json
 import re
 import asyncio
 import threading
+import warnings
 from praisonai._logging import get_logger
 
 # Type variable for Pydantic models - will be bound at runtime
@@ -1046,7 +1047,9 @@ class AutoGenerator(BaseAutoGenerator):
                 generate → run round-trip agrees on defaults.
             config_list: Optional LLM configuration
             pattern: Workflow pattern (sequential, parallel, routing, orchestrator-workers, evaluator-optimizer)
-            single_agent: If True, generate a single agent instead of a team
+            single_agent: Deprecated and inert. Single-agent generation is not
+                implemented; a team structure is always generated. Passing a
+                truthy value emits a ``DeprecationWarning``.
         
         Note: autogen framework is different from this AutoGenerator class.
         """
@@ -1077,6 +1080,12 @@ class AutoGenerator(BaseAutoGenerator):
         # Authoritative framework name comes from the resolved adapter.
         self.framework = adapter.name
         self.pattern = pattern
+        if single_agent:
+            warnings.warn(
+                "single_agent generation is not implemented; a team structure "
+                "is generated instead. This parameter is deprecated and inert.",
+                DeprecationWarning, stacklevel=2,
+            )
         self.single_agent = single_agent
     
 
@@ -1638,7 +1647,9 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
                 the generate → run round-trip agrees on defaults. The adapter
                 is validated here rather than deferring the failure to a later
                 ``praisonai run`` invocation.
-            single_agent: If True, generate a single agent workflow
+            single_agent: Deprecated and inert. Single-agent workflow generation
+                is not implemented; a workflow structure is always generated.
+                Passing a truthy value emits a ``DeprecationWarning``.
             workspace: Optional workspace root; when set, ``workflow_file`` is
                 contained to it to reject path traversal (see BaseAutoGenerator).
         """
@@ -1657,6 +1668,13 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         self.topic = topic
         self.workflow_file = self._safe_join(workflow_file)
         self.framework = adapter.name
+        if single_agent:
+            warnings.warn(
+                "single_agent generation is not implemented; a workflow "
+                "structure is generated instead. This parameter is deprecated "
+                "and inert.",
+                DeprecationWarning, stacklevel=2,
+            )
         self.single_agent = single_agent
     
     def recommend_pattern_llm(self, topic: Optional[str] = None) -> Any:
