@@ -2,6 +2,7 @@
 
 from praisonaiagents import Task
 from praisonaiagents.workflows.workflows import AgentFlow
+import pytest
 
 
 def test_cached_step_rechecks_gate_without_rerunning_handler():
@@ -71,3 +72,61 @@ def test_start_callback_prepares_context_before_cached_gate():
     assert flow.run("same", verbose=False)["steps"] == []
     assert calls == ["run"]
     assert starts == [True, True, False]
+
+
+@pytest.mark.parametrize("cache", [False, True])
+def test_start_and_complete_hooks_pair_with_current_status(cache):
+    enabled = {"value": True}
+    events = []
+    calls = []
+    step = Task(
+        name="conditional", should_run=lambda ctx: ctx.variables["allowed"],
+        handler=lambda ctx: calls.append("run") or "done",
+    )
+
+    def on_start(name, ctx):
+        events.append(("start", flow.step_statuses.get(name), step.status))
+        ctx.variables["allowed"] = enabled["value"]
+
+    def on_complete(name, result):
+        events.append(("complete", flow.step_statuses[name], step.status, result.output))
+
+    flow = AgentFlow(steps=[step], cache=cache, hooks={
+        "on_step_start": on_start, "on_step_complete": on_complete,
+    })
+    for allowed in [True, True, False, True]:
+        enabled["value"] = allowed
+        result = flow.run("same", verbose=False)
+        assert bool(result["steps"]) == allowed
+
+    assert events == [
+        ("start", "running", "running"),
+        ("complete", "completed", "completed", "done"),
+        ("start", "running", "running"),
+        ("complete", "completed", "completed", "done"),
+        ("start", "running", "running"),
+        ("complete", "skipped", "skipped", ""),
+        ("start", "running", "running"),
+        ("complete", "completed", "completed", "done"),
+    ]
+    assert calls == (["run"] if cache else ["run"] * 3)
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_terminal_hook_failure_does_not_change_skip_or_cache_result(allowed):
+    enabled = {"value": True}
+    completions = []
+    def on_complete(name, result):
+        completions.append((name, result.output))
+        raise RuntimeError("observer failed")
+
+    flow = AgentFlow(steps=[Task(
+        name="conditional", should_run=lambda ctx: enabled["value"],
+        handler=lambda ctx: "done",
+    )], cache=True, hooks={"on_step_complete": on_complete})
+    flow.run("same", verbose=False)
+    completions.clear()
+    enabled["value"] = allowed
+    result = flow.run("same", verbose=False)
+    assert bool(result["steps"]) == allowed
+    assert completions == [("conditional", "done" if allowed else "")]
