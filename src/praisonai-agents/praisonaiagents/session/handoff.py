@@ -59,17 +59,22 @@ def _progress_section(checkpoint: Optional[Dict[str, Any]]) -> List[str]:
     if not isinstance(checkpoint, dict):
         return []
     completed = checkpoint.get("completed_steps")
-    total = checkpoint.get("total_steps") or checkpoint.get("step_count")
-    last = checkpoint.get("last_step") or checkpoint.get("current_step")
-    if completed is None and last is None:
-        return []
-    if total:
-        head = f"PROGRESS: {completed or 0} of {total} workflow steps done"
-    else:
-        head = f"PROGRESS: {completed or 0} workflow steps done"
-    if last:
-        head += f"; last completed: {last}"
-    return [head]
+    total = checkpoint.get("total_steps")
+    if total is None:
+        total = checkpoint.get("step_count")
+    last = checkpoint.get("last_step")
+    current = checkpoint.get("current_step")
+    parts: List[str] = []
+    if completed is not None:
+        if total is not None:
+            parts.append(f"{completed} of {total} workflow steps done")
+        else:
+            parts.append(f"{completed} workflow steps done")
+    if last is not None and last != "":
+        parts.append(f"last completed: {last}")
+    if current is not None and current != "":
+        parts.append(f"current step: {current}")
+    return ["PROGRESS: " + "; ".join(parts)] if parts else []
 
 
 def _recent_actions(recap_text: str) -> List[str]:
