@@ -9,6 +9,13 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    """Fake Responses clients must not inherit a configured chat endpoint."""
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('entry', ['llm_sync', 'llm_async', 'client_sync', 'client_async'])
 @pytest.mark.parametrize('contents,expected', [
