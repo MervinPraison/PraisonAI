@@ -1002,14 +1002,6 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "idle_timeout"
         
-        # Format errors
-        if any(indicator in error_str for indicator in [
-            "validation error", "invalid format", "parse error",
-            "parsing error", "decode error", "malformed",
-            "invalid json", "schema error"
-        ]):
-            return "format_error"
-        
         # Default fallback
         return "unknown"
     
@@ -2038,98 +2030,6 @@ Respond with ONLY a valid JSON tool call in this format:
                     param_strs.append(f"{pname}{req}: {ptype}")
                 schemas.append(f"- {name}({', '.join(param_strs)})")
         return '\n'.join(schemas) if schemas else "None"
-
-    def _param_accepts_string(self, function_name, param_name, tools) -> bool:
-        """True when a tool declares this parameter as accepting a string.
-
-        Used to decide whether an argument whose value matches a previous tool's
-        name is a legitimate string or a weak model's way of referring to that
-        tool's result. A declared string parameter is left alone.
-        """
-        try:
-            for tool in tools or []:
-                fn = tool.get("function") if isinstance(tool, dict) else None
-                if not fn or fn.get("name") != function_name:
-                    continue
-                spec = (fn.get("parameters") or {}).get("properties", {}).get(param_name)
-                if not isinstance(spec, dict):
-                    return False
-                return self._schema_accepts_string(spec)
-        except Exception:  # noqa: BLE001 -- never break a tool call on a schema read
-            return False
-        return False
-
-    def _schema_accepts_string(self, spec) -> bool:
-        """True when a JSON-Schema fragment can accept a string value.
-
-        Handles the shapes this repo's own generator emits: a bare
-        ``{"type": "string"}``, a list type ``{"type": ["string", "null"]}``,
-        and the ``anyOf``/``oneOf``/``allOf`` unions produced for ``Optional[str]``
-        and ``Union`` parameters (``tools/schema.py``). Without the union case an
-        ``Optional[str]`` argument was still treated as a result reference and
-        silently overwritten.
-        """
-        if not isinstance(spec, dict):
-            return False
-        declared = spec.get("type")
-        if isinstance(declared, list):
-            if "string" in declared:
-                return True
-        elif declared == "string":
-            return True
-        # enum without an explicit type is string-typed in JSON Schema practice
-        if declared is None and isinstance(spec.get("enum"), list):
-            if any(isinstance(v, str) for v in spec["enum"]):
-                return True
-        for key in ("anyOf", "oneOf", "allOf"):
-            members = spec.get(key)
-            if isinstance(members, list) and any(
-                    self._schema_accepts_string(m) for m in members):
-                return True
-        return False
-
-    def _force_tool_usage_message(self, response_text, tool_calls, formatted_tools,
-                                  iteration_count):
-        """The nudge to send when a model ignored tools it should have used.
-
-        Returns the message content, or None when no nudge is warranted. Shared
-        so every response path applies the same policy -- this lived inline in
-        get_response only, so an agent that was awaited instead of called
-        silently lost a setting it had accepted.
-        """
-        if not self._should_force_tool_usage(
-                response_text, tool_calls, formatted_tools, iteration_count):
-            return None
-        tool_names = self._get_tool_names_for_prompt(formatted_tools)
-        logging.debug(
-            f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
-        return self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
-
-    def _tool_repair_message(self, tool_calls, formatted_tools):
-        """The correction to send when a model produced an invalid tool call.
-
-        Returns the message content and charges the repair budget, or None when
-        the calls are valid or the budget is spent. Shared for the same reason
-        as _force_tool_usage_message.
-        """
-        repair_attempt_count = getattr(self, '_current_repair_count', 0)
-        max_tool_repairs = getattr(self, 'max_tool_repairs', 0)
-        if not (tool_calls and max_tool_repairs > 0
-                and repair_attempt_count < max_tool_repairs):
-            return None
-        validation_errors = [e for e in
-                             (self._validate_tool_call(tc, formatted_tools) for tc in tool_calls)
-                             if e]
-        if not validation_errors:
-            return None
-        error_msg = "; ".join(validation_errors)
-        tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
-        logging.debug(
-            f"[OLLAMA_RELIABILITY] Tool call repair attempt "
-            f"{repair_attempt_count + 1}/{max_tool_repairs}: {error_msg}")
-        self._current_repair_count = repair_attempt_count + 1
-        return self.TOOL_CALL_REPAIR_PROMPT.format(
-            error=error_msg, tool_schemas=tool_schemas)
 
     def _should_force_tool_usage(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> bool:
         """
@@ -6565,6 +6465,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     finish_reason = getattr(choice, "finish_reason", None)
                     msg = getattr(choice, "message", None)
                     refusal = getattr(msg, "refusal", None) if msg is not None else None
+            if not choices:
+                from .openai_client import OpenAIClient
+                finish_reason = OpenAIClient._responses_incomplete_finish_reason(response)
             if finish_reason is None and not refusal:
                 return
             from ..agent.run_outcome import classify_finish_reason
@@ -7128,7 +7031,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # (input_text / input_image); local image paths become
                     # data URLs. Plain-string content is passed through.
                     from .openai_client import OpenAIClient
-                    item = dict(msg)
+                    # Do not forward persisted metadata/provider extensions as
+                    # Responses message properties.
+                    item = {"role": role}
                     item["content"] = OpenAIClient._build_responses_content(
                         msg.get("content", "")
                     )
@@ -7256,6 +7161,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
+    def _raise_responses_failure(self, error) -> None:
+        """Surface a failed Responses request without accepting partial output."""
+        code = error.get("code") if isinstance(error, dict) else getattr(error, "code", None)
+        message = error.get("message") if isinstance(error, dict) else getattr(error, "message", None)
+        if self._last_stop_reason == "completed":
+            self._last_stop_reason = "error"
+        label = f"Responses API failed ({code})" if code else "Responses API failed"
+        raise LLMResponseError(f"{label}: {message or 'Provider returned a failed response.'}")
+
     def _extract_from_responses_output(self, response) -> tuple:
         """
         Parse a ``ResponsesAPIResponse`` into the same (text, tool_calls,
@@ -7267,11 +7181,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Unlike Chat Completions, text and tool calls are *always* separate
         items, so ``content`` is never null when text is present.
         """
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status == "failed":
+            error = response.get("error") if isinstance(response, dict) else getattr(response, "error", None)
+            self._raise_responses_failure(error)
+        self._record_finish_reason(response)
         response_text = ""
         tool_calls: List[Dict[str, Any]] = []
         reasoning_content = None
 
-        output_items = getattr(response, 'output', None) or []
+        output_items = (response.get('output') if isinstance(response, dict) else getattr(response, 'output', None)) or []
         for item in output_items:
             # Handle both dict and object access
             if isinstance(item, dict):
@@ -7329,6 +7248,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return response_text, tool_calls if tool_calls else None, reasoning_content
 
+    @staticmethod
+    def _close_responses_stream(stream) -> None:
+        """Close a stream or its LiteLLM transport without masking its error."""
+        try:
+            close = getattr(stream, "close", None)
+            if not callable(close):
+                close = getattr(getattr(stream, "response", None), "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            logging.debug("Responses stream cleanup failed", exc_info=True)
+
+    @staticmethod
+    async def _aclose_responses_stream(stream) -> None:
+        """Await transport cleanup on completion, failure or cancellation."""
+        try:
+            target = stream
+            close = getattr(target, "aclose", None) or getattr(target, "close", None)
+            if not callable(close):
+                target = getattr(stream, "response", None)
+                close = getattr(target, "aclose", None) or getattr(target, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+        except Exception:
+            logging.debug("Responses stream cleanup failed", exc_info=True)
+
     def _stream_responses_api(
         self,
         params: Dict[str, Any],
@@ -7360,95 +7307,108 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
 
-        for event in litellm.responses(**params):
-            # Access event type — handle both object and dict
-            if isinstance(event, dict):
-                evt_type = event.get("type", "")
-            else:
-                evt_type = getattr(event, "type", "")
-
-            # ── Completed — capture the final response for usage accounting ──
-            if evt_type == "response.completed":
-                _final_response = (event.get("response") if isinstance(event, dict)
-                                   else getattr(event, "response", None))
-
-            # ── Text delta ──────────────────────────────────────────
-            if evt_type == "response.output_text.delta":
-                delta_text = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                response_text += delta_text
-                if _emit and delta_text:
-                    stream_callback(StreamEvent(
-                        type=StreamEventType.DELTA_TEXT,
-                        timestamp=time.perf_counter(),
-                        content=delta_text,
-                        is_reasoning=False,
-                    ))
-
-            # ── Reasoning delta ─────────────────────────────────────
-            elif evt_type == "response.reasoning_summary_text.delta":
-                delta_text = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                if _emit and delta_text:
-                    stream_callback(StreamEvent(
-                        type=StreamEventType.DELTA_TEXT,
-                        timestamp=time.perf_counter(),
-                        content=delta_text,
-                        is_reasoning=True,
-                    ))
-
-            # ── Function call arguments delta ───────────────────────
-            elif evt_type == "response.function_call_arguments.delta":
-                idx = (event.get("output_index", 0) if isinstance(event, dict)
-                       else getattr(event, "output_index", 0))
-                delta_args = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                if idx not in _pending_tools:
-                    item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
-                               else getattr(event, "item_id", f"tool_{idx}"))
-                    _pending_tools[idx] = {
-                        "id": item_id,
-                        "name": "",
-                        "arguments": "",
-                    }
-                _pending_tools[idx]["arguments"] += delta_args
-
-            # ── Output item done — finalise tool call metadata ──────
-            elif evt_type == "response.output_item.done":
+        response_stream = litellm.responses(**params)
+        try:
+            for event in response_stream:
+                # Access event type — handle both object and dict
                 if isinstance(event, dict):
-                    item = event.get("item", {})
-                    idx = event.get("output_index", 0)
+                    evt_type = event.get("type", "")
                 else:
-                    item = getattr(event, "item", None) or {}
-                    idx = getattr(event, "output_index", 0)
+                    evt_type = getattr(event, "type", "")
 
-                if isinstance(item, dict):
-                    i_type = item.get("type", "")
-                else:
-                    i_type = getattr(item, "type", "")
+                if evt_type == "response.failed":
+                    failed_response = event.get("response") if isinstance(event, dict) else getattr(event, "response", None)
+                    error = failed_response.get("error") if isinstance(failed_response, dict) else getattr(failed_response, "error", None)
+                    self._raise_responses_failure(error)
+                if evt_type == "error":
+                    self._raise_responses_failure(event)
 
-                if i_type == "function_call":
-                    if isinstance(item, dict):
-                        call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
-                        fn_name = item.get("name", "")
-                        fn_args = item.get("arguments", "")
-                    else:
-                        call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
-                        fn_name = getattr(item, "name", "")
-                        fn_args = getattr(item, "arguments", "")
+                # ── Completed — capture the final response for usage accounting ──
+                if evt_type in ("response.completed", "response.incomplete"):
+                    _final_response = (event.get("response") if isinstance(event, dict)
+                                       else getattr(event, "response", None))
+                    self._record_finish_reason(_final_response)
 
-                    if idx in _pending_tools:
-                        _pending_tools[idx]["id"] = call_id
-                        _pending_tools[idx]["name"] = fn_name
-                        # Prefer the accumulated delta args if available, else use final
-                        if not _pending_tools[idx]["arguments"]:
-                            _pending_tools[idx]["arguments"] = fn_args
-                    else:
+                # ── Text delta ──────────────────────────────────────────
+                if evt_type == "response.output_text.delta":
+                    delta_text = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    response_text += delta_text
+                    if _emit and delta_text:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=delta_text,
+                            is_reasoning=False,
+                        ))
+
+                # ── Reasoning delta ─────────────────────────────────────
+                elif evt_type == "response.reasoning_summary_text.delta":
+                    delta_text = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    if _emit and delta_text:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=delta_text,
+                            is_reasoning=True,
+                        ))
+
+                # ── Function call arguments delta ───────────────────────
+                elif evt_type == "response.function_call_arguments.delta":
+                    idx = (event.get("output_index", 0) if isinstance(event, dict)
+                           else getattr(event, "output_index", 0))
+                    delta_args = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    if idx not in _pending_tools:
+                        item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
+                                   else getattr(event, "item_id", f"tool_{idx}"))
                         _pending_tools[idx] = {
-                            "id": call_id,
-                            "name": fn_name,
-                            "arguments": fn_args,
+                            "id": item_id,
+                            "name": "",
+                            "arguments": "",
                         }
+                    _pending_tools[idx]["arguments"] += delta_args
+
+                # ── Output item done — finalise tool call metadata ──────
+                elif evt_type == "response.output_item.done":
+                    if isinstance(event, dict):
+                        item = event.get("item", {})
+                        idx = event.get("output_index", 0)
+                    else:
+                        item = getattr(event, "item", None) or {}
+                        idx = getattr(event, "output_index", 0)
+
+                    if isinstance(item, dict):
+                        i_type = item.get("type", "")
+                    else:
+                        i_type = getattr(item, "type", "")
+
+                    if i_type == "function_call":
+                        if isinstance(item, dict):
+                            call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
+                            fn_name = item.get("name", "")
+                            fn_args = item.get("arguments", "")
+                        else:
+                            call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
+                            fn_name = getattr(item, "name", "")
+                            fn_args = getattr(item, "arguments", "")
+
+                        if idx in _pending_tools:
+                            _pending_tools[idx]["id"] = call_id
+                            _pending_tools[idx]["name"] = fn_name
+                            # Prefer the accumulated delta args if available, else use final
+                            if not _pending_tools[idx]["arguments"]:
+                                _pending_tools[idx]["arguments"] = fn_args
+                        else:
+                            _pending_tools[idx] = {
+                                "id": call_id,
+                                "name": fn_name,
+                                "arguments": fn_args,
+                            }
+
+        finally:
+            self._close_responses_stream(response_stream)
 
         # ── Build tool_calls list in output_index order ─────────────
         tool_calls: List[Dict[str, Any]] = []
@@ -7491,80 +7451,93 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
 
-        async for event in await litellm.aresponses(**params):
-            if isinstance(event, dict):
-                evt_type = event.get("type", "")
-            else:
-                evt_type = getattr(event, "type", "")
-
-            if evt_type == "response.completed":
-                _final_response = (event.get("response") if isinstance(event, dict)
-                                   else getattr(event, "response", None))
-
-            if evt_type == "response.output_text.delta":
-                delta_text = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                response_text += delta_text
-                if _emit and delta_text:
-                    stream_callback(StreamEvent(
-                        type=StreamEventType.DELTA_TEXT,
-                        timestamp=time.perf_counter(),
-                        content=delta_text,
-                        is_reasoning=False,
-                    ))
-
-            elif evt_type == "response.reasoning_summary_text.delta":
-                delta_text = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                if _emit and delta_text:
-                    stream_callback(StreamEvent(
-                        type=StreamEventType.DELTA_TEXT,
-                        timestamp=time.perf_counter(),
-                        content=delta_text,
-                        is_reasoning=True,
-                    ))
-
-            elif evt_type == "response.function_call_arguments.delta":
-                idx = (event.get("output_index", 0) if isinstance(event, dict)
-                       else getattr(event, "output_index", 0))
-                delta_args = (event.get("delta", "") if isinstance(event, dict)
-                              else getattr(event, "delta", ""))
-                if idx not in _pending_tools:
-                    item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
-                               else getattr(event, "item_id", f"tool_{idx}"))
-                    _pending_tools[idx] = {"id": item_id, "name": "", "arguments": ""}
-                _pending_tools[idx]["arguments"] += delta_args
-
-            elif evt_type == "response.output_item.done":
+        response_stream = await litellm.aresponses(**params)
+        try:
+            async for event in response_stream:
                 if isinstance(event, dict):
-                    item = event.get("item", {})
-                    idx = event.get("output_index", 0)
+                    evt_type = event.get("type", "")
                 else:
-                    item = getattr(event, "item", None) or {}
-                    idx = getattr(event, "output_index", 0)
+                    evt_type = getattr(event, "type", "")
 
-                if isinstance(item, dict):
-                    i_type = item.get("type", "")
-                else:
-                    i_type = getattr(item, "type", "")
+                if evt_type == "response.failed":
+                    failed_response = event.get("response") if isinstance(event, dict) else getattr(event, "response", None)
+                    error = failed_response.get("error") if isinstance(failed_response, dict) else getattr(failed_response, "error", None)
+                    self._raise_responses_failure(error)
+                if evt_type == "error":
+                    self._raise_responses_failure(event)
 
-                if i_type == "function_call":
+                if evt_type in ("response.completed", "response.incomplete"):
+                    _final_response = (event.get("response") if isinstance(event, dict)
+                                       else getattr(event, "response", None))
+                    self._record_finish_reason(_final_response)
+
+                if evt_type == "response.output_text.delta":
+                    delta_text = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    response_text += delta_text
+                    if _emit and delta_text:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=delta_text,
+                            is_reasoning=False,
+                        ))
+
+                elif evt_type == "response.reasoning_summary_text.delta":
+                    delta_text = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    if _emit and delta_text:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=delta_text,
+                            is_reasoning=True,
+                        ))
+
+                elif evt_type == "response.function_call_arguments.delta":
+                    idx = (event.get("output_index", 0) if isinstance(event, dict)
+                           else getattr(event, "output_index", 0))
+                    delta_args = (event.get("delta", "") if isinstance(event, dict)
+                                  else getattr(event, "delta", ""))
+                    if idx not in _pending_tools:
+                        item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
+                                   else getattr(event, "item_id", f"tool_{idx}"))
+                        _pending_tools[idx] = {"id": item_id, "name": "", "arguments": ""}
+                    _pending_tools[idx]["arguments"] += delta_args
+
+                elif evt_type == "response.output_item.done":
+                    if isinstance(event, dict):
+                        item = event.get("item", {})
+                        idx = event.get("output_index", 0)
+                    else:
+                        item = getattr(event, "item", None) or {}
+                        idx = getattr(event, "output_index", 0)
+
                     if isinstance(item, dict):
-                        call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
-                        fn_name = item.get("name", "")
-                        fn_args = item.get("arguments", "")
+                        i_type = item.get("type", "")
                     else:
-                        call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
-                        fn_name = getattr(item, "name", "")
-                        fn_args = getattr(item, "arguments", "")
+                        i_type = getattr(item, "type", "")
 
-                    if idx in _pending_tools:
-                        _pending_tools[idx]["id"] = call_id
-                        _pending_tools[idx]["name"] = fn_name
-                        if not _pending_tools[idx]["arguments"]:
-                            _pending_tools[idx]["arguments"] = fn_args
-                    else:
-                        _pending_tools[idx] = {"id": call_id, "name": fn_name, "arguments": fn_args}
+                    if i_type == "function_call":
+                        if isinstance(item, dict):
+                            call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
+                            fn_name = item.get("name", "")
+                            fn_args = item.get("arguments", "")
+                        else:
+                            call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
+                            fn_name = getattr(item, "name", "")
+                            fn_args = getattr(item, "arguments", "")
+
+                        if idx in _pending_tools:
+                            _pending_tools[idx]["id"] = call_id
+                            _pending_tools[idx]["name"] = fn_name
+                            if not _pending_tools[idx]["arguments"]:
+                                _pending_tools[idx]["arguments"] = fn_args
+                        else:
+                            _pending_tools[idx] = {"id": call_id, "name": fn_name, "arguments": fn_args}
+
+        finally:
+            await self._aclose_responses_stream(response_stream)
 
         tool_calls: List[Dict[str, Any]] = []
         for idx in sorted(_pending_tools.keys()):

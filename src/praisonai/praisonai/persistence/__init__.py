@@ -22,8 +22,10 @@ __all__ = [
     "ConversationSession",
     "ConversationMessage",
     "KnowledgeStore",
+    "AsyncKnowledgeStore",
     "KnowledgeDocument",
     "StateStore",
+    "AsyncStateStore",
     # Orchestrator
     "PersistenceOrchestrator",
     # Factory functions
@@ -48,13 +50,13 @@ def __getattr__(name: str):
         from .conversation.base import ConversationStore, ConversationSession, ConversationMessage
         return locals()[name]
     
-    if name in ("KnowledgeStore", "KnowledgeDocument"):
-        from .knowledge.base import KnowledgeStore, KnowledgeDocument
+    if name in ("KnowledgeStore", "AsyncKnowledgeStore", "KnowledgeDocument"):
+        from .knowledge.base import KnowledgeStore, AsyncKnowledgeStore, KnowledgeDocument
         return locals()[name]
     
-    if name == "StateStore":
-        from .state.base import StateStore
-        return StateStore
+    if name in ("StateStore", "AsyncStateStore"):
+        from .state.base import StateStore, AsyncStateStore
+        return locals()[name]
     
     if name == "PersistenceOrchestrator":
         from .orchestrator import PersistenceOrchestrator

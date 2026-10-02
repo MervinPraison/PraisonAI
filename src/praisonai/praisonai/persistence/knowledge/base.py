@@ -174,3 +174,108 @@ class KnowledgeStore(ABC):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+
+class AsyncKnowledgeStore(ABC):
+    """
+    Abstract base class for async vector/knowledge persistence.
+
+    Async sibling of :class:`KnowledgeStore`, matching the
+    :class:`~praisonai.persistence.conversation.base.AsyncConversationStore`
+    parity so third-party async vector backends have a formal interface to
+    subclass instead of implementing the sync ABC behind ``run_sync`` shims.
+    Async stores should implement this instead of ``KnowledgeStore`` when they
+    are natively async.
+    """
+
+    @abstractmethod
+    async def create_collection(
+        self,
+        name: str,
+        dimension: int,
+        distance: str = "cosine",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Create a new collection/index for vectors."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_collection(self, name: str) -> bool:
+        """Delete a collection and all its documents."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def collection_exists(self, name: str) -> bool:
+        """Check if a collection exists."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def list_collections(self) -> List[str]:
+        """List all collections."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def insert(
+        self,
+        collection: str,
+        documents: List[KnowledgeDocument],
+    ) -> List[str]:
+        """Insert documents into a collection. Returns list of IDs."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def upsert(
+        self,
+        collection: str,
+        documents: List[KnowledgeDocument],
+    ) -> List[str]:
+        """Insert or update documents. Returns list of IDs."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def search(
+        self,
+        collection: str,
+        query_embedding: List[float],
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+        score_threshold: Optional[float] = None,
+    ) -> List[KnowledgeDocument]:
+        """Search for similar documents by embedding."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get(
+        self,
+        collection: str,
+        ids: List[str],
+    ) -> List[KnowledgeDocument]:
+        """Get documents by IDs."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete(
+        self,
+        collection: str,
+        ids: Optional[List[str]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Delete documents by IDs or filters. Returns count deleted."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def count(self, collection: str) -> int:
+        """Count documents in a collection."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the store and release resources."""
+        raise NotImplementedError
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return False
