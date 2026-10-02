@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 class SessionSnapshot:
     """A transcript snapshot; old records may contain only a message index.
 
-    Captured transcripts add storage proportional to the snapshot history.
+    Durable records pool repeated transcript entries; portable exports inline them.
     Legacy records cannot recover history already discarded before upgrading.
     """
     
@@ -39,7 +39,7 @@ class SessionSnapshot:
     transcript: Optional[Dict[str, Any]] = None
     invalidated: bool = False
     
-    def to_dict(self) -> Dict[str, Any]:
+    def _header_dict(self) -> Dict[str, Any]:
         data = {
             "id": self.id,
             "session_id": self.session_id,
@@ -48,10 +48,14 @@ class SessionSnapshot:
             "label": self.label,
             "metadata": self.metadata,
         }
-        if self.transcript is not None:
-            data["transcript"] = copy.deepcopy(self.transcript)
         if self.invalidated:
             data["invalidated"] = True
+        return data
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = self._header_dict()
+        if self.transcript is not None:
+            data["transcript"] = copy.deepcopy(self.transcript)
         return data
     
     @classmethod
@@ -89,14 +93,100 @@ class ExtendedSessionData(SessionData):
             "title": self.title,
         })
         return d
+
+    def _to_storage_dict(self) -> Dict[str, Any]:
+        """Pool snapshot records in the atomic session file, not portable exports."""
+        data = super().to_dict()
+        data.update({
+            "parent_id": self.parent_id,
+            "forked_from_message_id": self.forked_from_message_id,
+            "children_ids": self.children_ids,
+            "is_shared": self.is_shared,
+            "title": self.title,
+        })
+        records = {}
+        record_ids = {}
+
+        def intern(value):
+            # Most transcript records contain text plus scalar fields and empty
+            # metadata. Reuse hashes of their immutable strings rather than
+            # re-encoding every archived text for every snapshot on each write.
+            if isinstance(value, dict) and all(
+                item is None or isinstance(item, (str, bool, int, float))
+                or isinstance(item, (dict, list)) and not item
+                for item in value.values()
+            ):
+                identity = ("flat", tuple(
+                    (name, type(item), None if isinstance(item, (dict, list)) else item)
+                    for name, item in value.items()
+                ))
+            else:
+                identity = ("json", json.dumps(value, ensure_ascii=False,
+                                               separators=(",", ":")))
+            key = record_ids.get(identity)
+            if key is None:
+                key = str(len(records))
+                record_ids[identity] = key
+                records[key] = copy.deepcopy(value)
+            return key
+
+        snapshots = []
+        for snapshot in self.snapshots:
+            saved = snapshot._header_dict()
+            if snapshot.transcript is not None:
+                refs = {}
+                for name, value in snapshot.transcript.items():
+                    if name in ("messages", "archived_messages") and isinstance(value, list):
+                        refs[name] = {"items": [intern(item) for item in value]}
+                    else:
+                        refs[name] = {"value": intern(value)}
+                saved["transcript_refs"] = refs
+            snapshots.append(saved)
+        data["snapshots"] = snapshots
+        if any("transcript_refs" in snapshot for snapshot in snapshots):
+            data["snapshot_storage"] = {"version": 1, "records": records}
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExtendedSessionData":
         base = SessionData.from_dict(data)
-        snapshots = [
-            SessionSnapshot.from_dict(s)
-            for s in data.get("snapshots", [])
-        ]
+        snapshots = []
+        for raw in data.get("snapshots", []):
+            if "transcript_refs" in raw:
+                storage = data.get("snapshot_storage")
+                if (not isinstance(storage, dict) or storage.get("version") != 1
+                        or not isinstance(storage.get("records"), dict)
+                        or not isinstance(raw["transcript_refs"], dict)
+                        or "transcript" in raw):
+                    raise ValueError("invalid snapshot storage")
+                records = storage["records"]
+                transcript = {}
+
+                def clone_record(value):
+                    # JSON object keys/scalars are immutable. Copy mutable
+                    # fields without traversing every archived text again.
+                    if isinstance(value, dict):
+                        return {key: copy.deepcopy(item) if isinstance(item, (dict, list)) else item
+                                for key, item in value.items()}
+                    return copy.deepcopy(value)
+
+                try:
+                    for name, ref in raw["transcript_refs"].items():
+                        if not isinstance(ref, dict):
+                            raise ValueError("invalid snapshot reference")
+                        if set(ref) == {"items"} and isinstance(ref["items"], list):
+                            transcript[name] = [clone_record(records[key]) for key in ref["items"]]
+                        elif set(ref) == {"value"}:
+                            transcript[name] = clone_record(records[ref["value"]])
+                        else:
+                            raise ValueError("invalid snapshot reference")
+                except (KeyError, TypeError) as exc:
+                    raise ValueError("missing snapshot record") from exc
+                snapshot = SessionSnapshot.from_dict(raw)
+                snapshot.transcript = transcript
+            else:
+                snapshot = SessionSnapshot.from_dict(raw)
+            snapshots.append(snapshot)
         return cls(
             **{descriptor.name: getattr(base, descriptor.name) for descriptor in fields(SessionData)},
             parent_id=data.get("parent_id"),
@@ -194,6 +284,21 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 f"refusing to overwrite existing data: {e}"
             )
             raise
+        except ValueError as e:
+            # Unsupported/damaged references must not turn into a fresh record
+            # or a legacy positional snapshot that restores unrelated history.
+            raise OSError("invalid snapshot storage; preserving session") from e
+
+    def _session_to_storage(self, session: SessionData) -> Dict[str, Any]:
+        if isinstance(session, ExtendedSessionData):
+            return session._to_storage_dict()
+        return super()._session_to_storage(session)
+
+    def _dump_session_json(self, data: Any, stream) -> None:
+        if isinstance(data, dict) and "snapshot_storage" in data:
+            json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
+        else:
+            super()._dump_session_json(data, stream)
 
     def _modify_session_locked(
         self,
@@ -217,7 +322,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
             session.updated_at = datetime.now(timezone.utc).isoformat()
             if apply_retention:
                 self._enforce_window(session)
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 logger.error("Failed to %s %s", error_label, session_id)
                 return False
             self._cache_written_session(session, filepath)
@@ -364,7 +469,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
                     delete=False,
                     suffix=".tmp"
                 ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+                    self._dump_session_json(self._session_to_storage(session), f)
                     temp_path = f.name
                 
                 os.replace(temp_path, filepath)

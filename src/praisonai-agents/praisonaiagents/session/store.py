@@ -985,6 +985,10 @@ class DefaultSessionStore:
             logger.warning("Skipping unreadable session file %s: %s", filepath, error)
             self._fire_corruption_hook(session_id, str(error), None)
 
+    def _dump_session_json(self, data: Any, stream) -> None:
+        """Write durable JSON; subclasses can format private storage records."""
+        json.dump(data, stream, indent=2, ensure_ascii=False)
+
     def _atomic_write_json(self, filepath: str, data: Any) -> bool:
         """Atomically write JSON data to disk (temp file + os.replace)."""
         temp_path = None
@@ -999,7 +1003,7 @@ class DefaultSessionStore:
                 suffix=".tmp",
             ) as f:
                 temp_path = f.name
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                self._dump_session_json(data, f)
 
             os.replace(temp_path, filepath)
             return True
@@ -1207,7 +1211,7 @@ class DefaultSessionStore:
             # expose an oversized transcript that stays inconsistent until a
             # later mutation happens to compact it.
             self._enforce_window(session)
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 # Could not fold the salvage back in durably — leave the spill
                 # files in place so a later load can retry.
                 return
@@ -1244,7 +1248,7 @@ class DefaultSessionStore:
             if apply_retention:
                 self._enforce_window(session)
 
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 logger.error(f"Failed to {error_label} {session_id}")
                 return False
 
@@ -1253,6 +1257,10 @@ class DefaultSessionStore:
 
             return True
     
+    def _session_to_storage(self, session: SessionData) -> Dict[str, Any]:
+        """Serialize a durable record; subclasses may retain portable exports."""
+        return session.to_dict()
+
     def _save_session(self, session: SessionData) -> bool:
         """Save session to disk with atomic write."""
         filepath = self._get_session_path(session.session_id)
@@ -1262,7 +1270,7 @@ class DefaultSessionStore:
         self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 logger.error(f"Failed to save session {session.session_id}")
                 return False
             return True
@@ -1329,7 +1337,7 @@ class DefaultSessionStore:
             self._enforce_window(session)
             
             # Write atomically
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 logger.error(f"Failed to save session {session_id}")
                 # Issue #3597: durable write failed (disk-full / corruption).
                 # Spill just this turn to a fallback file and fire the
@@ -2352,7 +2360,7 @@ class DefaultSessionStore:
             # Check again inside the same lock that protects the replacement.
             if not overwrite and os.path.exists(filepath):
                 raise FileExistsError(filepath)
-            if not self._atomic_write_json(filepath, session.to_dict()):
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
                 logger.error(f"Failed to save imported session {session.session_id}")
                 return False
             return True
