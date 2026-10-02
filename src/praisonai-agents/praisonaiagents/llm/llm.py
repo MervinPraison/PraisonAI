@@ -542,7 +542,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Structured stop reason for the last tool-execution loop:
         # "completed" | "max_steps" | "error". Lets callers distinguish a finished
         # task from one truncated by the step budget (see ExecutionConfig.max_steps).
-        self._last_stop_reason = "completed"
+        self._last_stop_reason_var = contextvars.ContextVar("last_stop_reason", default=None)
+        self._last_stop_reason_fallback = "completed"
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         # Optional Agent-supplied thread-safe append for deferred re-injection.
@@ -6537,6 +6538,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return None
     
     @property
+    def _last_stop_reason(self) -> str:
+        """Terminal outcome in the calling task or thread.
+
+        Shared LLM instances must not mix one request's provider refusal or
+        incomplete outcome with a concurrent caller's completion/reset. Public
+        response entry points reset this task-local value for each new turn.
+        Outside a response's context, retain the historical latest-result view.
+        """
+        var = getattr(self, "_last_stop_reason_var", None)
+        reason = var.get() if var is not None else None
+        return reason if reason is not None else getattr(
+            self, "_last_stop_reason_fallback", "completed"
+        )
+
+    @_last_stop_reason.setter
+    def _last_stop_reason(self, reason: str) -> None:
+        """Record an outcome without changing concurrent callers' state."""
+        var = getattr(self, "_last_stop_reason_var", None)
+        if var is None:
+            var = contextvars.ContextVar("last_stop_reason", default=None)
+            self._last_stop_reason_var = var
+        var.set(reason)
+        self._last_stop_reason_fallback = reason
+
+    @property
     def current_agent_name(self) -> Optional[str]:
         """Task-local name of the agent currently driving this LLM.
 
@@ -6585,7 +6611,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self.current_agent_id = agent_id
 
     def __deepcopy__(self, memo):
-        """Deep-copy the LLM while giving the clone fresh attribution ContextVars.
+        """Deep-copy the LLM with fresh attribution and outcome ContextVars.
 
         ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
         not copyable/pickleable, so ``Agent.__deepcopy__`` (which recursively
@@ -6603,6 +6629,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 clone.__dict__[key] = contextvars.ContextVar(
                     "current_agent_name", default=None
                 )
+                continue
+            if key == "_last_stop_reason_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "last_stop_reason", default=None
+                )
+                continue
+            if key == "_last_stop_reason_fallback":
+                clone.__dict__[key] = "completed"
                 continue
             if key == "_current_agent_id_var":
                 clone.__dict__[key] = contextvars.ContextVar(
