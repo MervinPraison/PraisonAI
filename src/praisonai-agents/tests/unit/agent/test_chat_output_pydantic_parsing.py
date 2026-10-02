@@ -7,7 +7,7 @@ import os
 import pytest
 from types import SimpleNamespace
 from pydantic import BaseModel
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-needed")
 
@@ -94,3 +94,82 @@ class TestChatReturnsModel:
         ):
             with pytest.raises(ValidationError):
                 agent.chat("Capital of France.", output_pydantic=Pair)
+
+    def test_openai_path_validation_error_rolls_back_history(self):
+        """A failed structured turn must not leave the rejected response in history."""
+        agent = _make_agent()
+        before = len(agent.chat_history)
+        with patch.object(
+            agent,
+            "_chat_completion",
+            return_value=_fake_response("The capital of France is Paris."),
+        ):
+            with pytest.raises(ValidationError):
+                agent.chat("Capital of France.", output_pydantic=Pair)
+        assert len(agent.chat_history) == before
+
+    def test_callback_receives_text_not_model(self):
+        """Display callback keeps receiving the validated string, not the model."""
+        agent = _make_agent()
+        seen = {}
+
+        def _capture(prompt, response, *args, **kwargs):
+            seen["response"] = response
+
+        with patch.object(
+            agent,
+            "_chat_completion",
+            return_value=_fake_response('{"city": "Paris", "country": "France"}'),
+        ), patch.object(agent, "_execute_callback_and_display", _capture):
+            out = agent.chat("Capital of France.", output_pydantic=Pair)
+        assert isinstance(out, Pair)
+        assert isinstance(seen["response"], str)
+        assert "Paris" in seen["response"]
+
+
+class TestAChatReturnsModel:
+    def test_async_openai_path_returns_model(self):
+        import asyncio
+
+        agent = _make_agent()
+        with patch.object(
+            agent,
+            "_achat_completion_with_retry",
+            new=AsyncMock(
+                return_value=_fake_response('{"city": "Paris", "country": "France"}')
+            ),
+        ):
+            out = asyncio.run(agent.achat("Capital of France.", output_pydantic=Pair))
+        assert isinstance(out, Pair)
+        assert out.city == "Paris"
+        assert out.country == "France"
+
+    def test_async_openai_path_prose_raises(self):
+        import asyncio
+
+        agent = _make_agent()
+        with patch.object(
+            agent,
+            "_achat_completion_with_retry",
+            new=AsyncMock(
+                return_value=_fake_response("The capital of France is Paris.")
+            ),
+        ):
+            with pytest.raises(ValidationError):
+                asyncio.run(agent.achat("Capital of France.", output_pydantic=Pair))
+
+    def test_async_validation_error_rolls_back_history(self):
+        import asyncio
+
+        agent = _make_agent()
+        before = len(agent.chat_history)
+        with patch.object(
+            agent,
+            "_achat_completion_with_retry",
+            new=AsyncMock(
+                return_value=_fake_response("The capital of France is Paris.")
+            ),
+        ):
+            with pytest.raises(ValidationError):
+                asyncio.run(agent.achat("Capital of France.", output_pydantic=Pair))
+        assert len(agent.chat_history) == before

@@ -3210,6 +3210,13 @@ Your Goal: {self.goal}"""
                 durable_context.finalize("failed")
                 self.execution.resume_run_id = None
             raise
+        except ValidationError:
+            # Structured-output coercion failed loud: mark the durable run
+            # failed so it is not treated as interrupted work on resume.
+            if durable_context is not None:
+                durable_context.finalize("failed")
+                self.execution.resume_run_id = None
+            raise
         except InterruptedError:
             if durable_context is not None:
                 durable_context.finalize("cancelled")
@@ -3567,12 +3574,18 @@ Your Goal: {self.goal}"""
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
-                    # Parse into the requested structured model (fails loud on bad content)
-                    if output_json or output_pydantic:
-                        validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
-                    # Execute callback and display after validation
+                    # Execute callback and display with the validated text so
+                    # string-consuming callbacks keep working, then coerce the
+                    # structured return value (rolling back history on failure).
                     self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                    return self._trigger_after_agent_hook(prompt, validated_response, start_time)
+                    structured_output = validated_response
+                    if output_json or output_pydantic:
+                        try:
+                            structured_output = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                        except ValidationError:
+                            self._rollback_chat_history_to(chat_history_length)
+                            raise
+                    return self._trigger_after_agent_hook(prompt, structured_output, start_time)
                 except (ToolExecutionError, ValidationError):
                     raise
                 except Exception as e:
@@ -3701,11 +3714,15 @@ Your Goal: {self.goal}"""
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return None
-                            # Parse into the requested structured model (fails loud on bad content)
-                            validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
-                            # Execute callback after validation
+                            # Execute callback with validated text, then coerce
+                            # the structured return value (rolling back on failure).
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                            return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
+                            try:
+                                structured_output = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                            except ValidationError:
+                                self._rollback_chat_history_to(chat_history_length)
+                                raise
+                            return self._trigger_after_agent_hook(original_prompt, structured_output, start_time)
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
@@ -4050,6 +4067,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 await durable_context.afinalize("failed")
                 self.execution.resume_run_id = None
             raise
+        except ValidationError:
+            # Structured-output coercion failed loud: mark the durable run
+            # failed so it is not treated as interrupted work on resume.
+            if durable_context is not None:
+                await durable_context.afinalize("failed")
+                self.execution.resume_run_id = None
+            raise
         except (InterruptedError, asyncio.CancelledError):
             if durable_context is not None:
                 await durable_context.afinalize("cancelled")
@@ -4292,12 +4316,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
-                    # Parse into the requested structured model (fails loud on bad content)
-                    if output_json or output_pydantic:
-                        validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
-                    # Execute callback after validation
+                    # Execute callback with validated text, then coerce the
+                    # structured return value (rolling back on failure).
                     self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                    return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
+                    structured_output = validated_response
+                    if output_json or output_pydantic:
+                        try:
+                            structured_output = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                        except ValidationError:
+                            self._rollback_chat_history_to(chat_history_length)
+                            raise
+                    return await self._atrigger_after_agent_hook(prompt, structured_output, start_time)
                 except (ToolExecutionError, ValidationError):
                     raise
                 except Exception as e:
@@ -4440,11 +4469,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return None
-                            # Parse into the requested structured model (fails loud on bad content)
-                            validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
-                            # Execute callback after validation
+                            # Execute callback with validated text, then coerce
+                            # the structured return value (rolling back on failure).
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
+                            try:
+                                structured_output = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                            except ValidationError:
+                                self._rollback_chat_history_to(chat_history_length)
+                                raise
+                            return await self._atrigger_after_agent_hook(original_prompt, structured_output, start_time)
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
