@@ -20,6 +20,10 @@ app = typer.Typer(help="Run agents")
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
+# Set while a modern ``run <file>.yaml`` is delegating to the legacy
+# ``PraisonAI`` executor. The legacy ``run`` dispatch branch reads it to avoid
+# re-invoking this same Typer ``run`` app (which would recurse infinitely).
+_IN_MODERN_RUN_ENV = "PRAISONAI_IN_MODERN_RUN"
 DEFAULT_MAX_TOKENS = 16000
 
 
@@ -1898,7 +1902,17 @@ def _run_from_file(
     try:
         # Use existing PraisonAI class
         from praisonai_code.cli.main import PraisonAI
-        
+
+        # Re-entrancy guard: the legacy ``PraisonAI.main()`` re-parses ``sys.argv``
+        # and, when it sees ``run <file>.yaml``, dispatches back into *this* modern
+        # Typer ``run`` app. Since we reach here from that same app, an unguarded
+        # delegation loops forever ("maximum recursion depth exceeded"). Setting
+        # this sentinel tells the legacy ``run`` branch we are already inside a
+        # modern run so it executes the YAML directly instead of bouncing back.
+        import os as _os_guard
+        _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
+        _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
+
         praison = PraisonAI(
             agent_file=file_path,
             framework=framework or "praisonai",
@@ -2012,6 +2026,14 @@ def _run_from_file(
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
+    finally:
+        # Restore the re-entrancy sentinel so suppression never leaks into a
+        # later in-process invocation (embedded/notebook/test reuse).
+        import os as _os_guard
+        if _prev_in_run is None:
+            _os_guard.environ.pop(_IN_MODERN_RUN_ENV, None)
+        else:
+            _os_guard.environ[_IN_MODERN_RUN_ENV] = _prev_in_run
 
 
 def _run_prompt(
