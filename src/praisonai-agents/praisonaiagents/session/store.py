@@ -2267,12 +2267,9 @@ class DefaultSessionStore:
         return {"version": self.PORTABLE_VERSION, "sessions": sessions}
 
     def export_all(self) -> Dict[str, Any]:
-        """Export every stored session to a portable, versioned payload."""
+        """Export every stored session; raise OSError for an incomplete backup."""
         sessions: List[Dict[str, Any]] = []
-        try:
-            filenames = os.listdir(self.session_dir)
-        except (IOError, OSError):
-            filenames = []
+        filenames = os.listdir(self.session_dir)
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
@@ -2282,7 +2279,7 @@ class DefaultSessionStore:
                     sessions.append(json.load(f))
             except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
                 self._report_unreadable_session(filename[:-5], filepath, exc)
-                continue
+                raise OSError(f"Incomplete session export: cannot read {filename}") from exc
         return {"version": self.PORTABLE_VERSION, "sessions": sessions}
 
     def _collect_lineage(
@@ -2294,15 +2291,13 @@ class DefaultSessionStore:
         (``lineage_id`` / ``root_session_id`` / ``thread_id``) so a compacted /
         rotated continuation exports alongside its logical session. Returns the
         raw session dicts (already portable). Empty when no lineage is known.
+        Raises OSError when an unreadable record makes lineage coverage unknown.
         """
         lineage = self._lineage_key(session.to_dict())
         if not lineage:
             return []
         out: List[Dict[str, Any]] = []
-        try:
-            filenames = os.listdir(self.session_dir)
-        except (IOError, OSError):
-            return []
+        filenames = os.listdir(self.session_dir)
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
@@ -2312,7 +2307,7 @@ class DefaultSessionStore:
                     data = json.load(f)
             except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
                 self._report_unreadable_session(filename[:-5], filepath, exc)
-                continue
+                raise OSError(f"Incomplete session export: cannot read {filename}") from exc
             if data.get("session_id") == exclude:
                 continue
             if self._lineage_key(data) == lineage:

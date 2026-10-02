@@ -266,7 +266,7 @@ def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, monkeypa
                 current._conn.close()
 
 
-@pytest.mark.parametrize("operation", ["list", "agent", "gateway", "gateway_agent", "export_all", "lineage"])
+@pytest.mark.parametrize("operation", ["list", "agent", "gateway", "gateway_agent"])
 def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
     import praisonaiagents.session.store as module
 
@@ -289,11 +289,22 @@ def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
         assert store.get_by_gateway_session("gateway").session_id == "valid"
     elif operation == "gateway_agent":
         assert store.list_sessions_by_gateway_agent("agent") == ["valid"]
-    else:
-        exported = store.export_all() if operation == "export_all" else store.export_session("valid")
-        assert [row["session_id"] for row in exported["sessions"]] == ["valid"]
-        assert exported["sessions"][0]["messages"][0]["content"] == "durable history"
     assert bad.read_bytes() == payload
+
+
+@pytest.mark.parametrize("operation", ["export_all", "lineage"])
+@pytest.mark.parametrize("payload", [b"\xff\xfe", b"{invalid"])
+def test_export_refuses_to_report_incomplete_backup(tmp_path, operation, payload):
+    store = DefaultSessionStore(session_dir=str(tmp_path))
+    assert store.add_message("valid", "user", "durable history")
+    assert store.update_session_metadata("valid", lineage_id="thread")
+    bad = tmp_path / "bad.json"
+    bad.write_bytes(payload)
+    export = store.export_all if operation == "export_all" else lambda: store.export_session("valid")
+    with pytest.raises(OSError, match="Incomplete session export"):
+        export()
+    assert bad.read_bytes() == payload
+    assert store.get_chat_history("valid")[0]["content"] == "durable history"
 
 
 @pytest.mark.parametrize("backend", ["fts", "like"])

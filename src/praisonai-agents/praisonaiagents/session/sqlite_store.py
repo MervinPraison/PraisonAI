@@ -242,29 +242,34 @@ class SqliteSessionStore(DefaultSessionStore):
         agent_id = getattr(session, "agent_id", None)
         try:
             with self._db_lock:
-                conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
-                conn.execute(
-                    "INSERT INTO session_fts (session_id, content) VALUES (?, ?)",
-                    (sid, content),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_meta (session_id, updated_at) "
-                    "VALUES (?, ?)",
-                    (sid, session.updated_at),
-                )
-                # Keep the gateway/agent routing index in sync so inbound
-                # routing is an indexed lookup, not a full-directory scan.
-                if gateway_session_id or agent_id:
+                # A separate WAL reader must see the old or new index record,
+                # never the autocommitted gap between DELETE and INSERT.
+                conn.execute("SAVEPOINT praisonai_index_refresh")
+                try:
+                    conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
                     conn.execute(
-                        "INSERT OR REPLACE INTO session_route "
-                        "(session_id, gateway_session_id, agent_id) "
-                        "VALUES (?, ?, ?)",
-                        (sid, gateway_session_id, agent_id),
+                        "INSERT INTO session_fts (session_id, content) VALUES (?, ?)",
+                        (sid, content),
                     )
-                else:
                     conn.execute(
-                        "DELETE FROM session_route WHERE session_id = ?", (sid,)
+                        "INSERT OR REPLACE INTO session_meta (session_id, updated_at) "
+                        "VALUES (?, ?)",
+                        (sid, session.updated_at),
                     )
+                    if gateway_session_id or agent_id:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO session_route "
+                            "(session_id, gateway_session_id, agent_id) "
+                            "VALUES (?, ?, ?)",
+                            (sid, gateway_session_id, agent_id),
+                        )
+                    else:
+                        conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
+                except BaseException:
+                    conn.execute("ROLLBACK TO praisonai_index_refresh")
+                    raise
+                finally:
+                    conn.execute("RELEASE praisonai_index_refresh")
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
 
