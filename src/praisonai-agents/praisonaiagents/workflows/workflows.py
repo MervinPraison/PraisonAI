@@ -1613,6 +1613,12 @@ class AgentFlow:
                 variables=all_variables.copy()
             )
 
+            # Start a step attempt before notifying lifecycle observers. The
+            # attempt may finish as skipped or from cache without a handler call.
+            if hasattr(step, 'status'):
+                step.status = "running"
+            self.step_statuses[step.name] = "running"
+
             # Preserve the preparation hook before the gate: it may populate
             # context variables used by should_run, including on cached runs.
             if self.on_step_start:
@@ -1630,6 +1636,11 @@ class AgentFlow:
                         if hasattr(step, 'status'):
                             step.status = "skipped"
                         self.step_statuses[step.name] = "skipped"
+                        if self.on_step_complete:
+                            try:
+                                self.on_step_complete(step.name, StepResult(output="", skipped=True))
+                            except Exception as e:
+                                logger.error(f"on_step_complete callback failed: {e}")
                         i += 1
                         continue
                 except Exception as e:
@@ -1662,16 +1673,18 @@ class AgentFlow:
                         step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    if self.on_step_complete:
+                        try:
+                            self.on_step_complete(
+                                step.name, StepResult(output=previous_output or ""),
+                            )
+                        except Exception as e:
+                            logger.error(f"on_step_complete callback failed: {e}")
                     if _cached.get("stop"):
                         break
                     i += 1
                     continue
             
-            # Mark actual execution only after the condition and cache lookup.
-            if hasattr(step, 'status'):
-                step.status = "running"
-            self.step_statuses[step.name] = "running"
-
             # Gap 3c: Check for cross-step handoff cycles
             self._check_handoff_cycle(step)
             
