@@ -69,7 +69,17 @@ def test_frontmatter_delimiters_allow_trailing_whitespace(tmp_path, opening, clo
         assert doc.content == "Body"
 
 
-@pytest.mark.parametrize("source", ["---\ndescription: [\n---\nBody", "---\nunfinished"])
+@pytest.mark.parametrize("source", [
+    "---\ndescription: [\n---\nBody",
+    "---\nunfinished",
+    "---\n- item\n---\nBody",
+    "---\nhello\n---\nBody",
+    "---\nfalse\n---\nBody",
+    "---\n0\n---\nBody",
+    "---\n[]\n---\nBody",
+    "---\ntrue\n---\nBody",
+    "---\n42\n---\nBody",
+])
 def test_invalid_or_unclosed_frontmatter_preserves_original_text(tmp_path, source):
     manager = DocsManager(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))
     docs_dir = tmp_path / manager.DOCS_DIR_NAME
@@ -77,3 +87,15 @@ def test_invalid_or_unclosed_frontmatter_preserves_original_text(tmp_path, sourc
     (docs_dir / "reference.md").write_text(source, encoding="utf-8")
     manager.reload()
     assert manager.get_doc("reference").content == source
+
+
+@pytest.mark.parametrize("metadata", ["", "{}", "null"])
+def test_empty_frontmatter_keeps_existing_body_behavior(tmp_path, metadata):
+    manager = DocsManager(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))
+    docs_dir = tmp_path / manager.DOCS_DIR_NAME
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "reference.md").write_text(
+        f"---\n{metadata}\n---\nBody", encoding="utf-8"
+    )
+    manager.reload()
+    assert manager.get_doc("reference").content == "Body"

@@ -134,8 +134,12 @@ class DocsManager:
                     continue
                 try:
                     import yaml
-                    frontmatter = yaml.safe_load("".join(lines[1:end])) or {}
-                    remaining = "".join(lines[end + 1:]).strip()
+                    parsed = yaml.safe_load("".join(lines[1:end]))
+                    if parsed is None:
+                        parsed = {}
+                    if isinstance(parsed, dict):
+                        frontmatter = parsed
+                        remaining = "".join(lines[end + 1:]).strip()
                 except Exception:
                     # If YAML parsing fails, use content as-is
                     pass
