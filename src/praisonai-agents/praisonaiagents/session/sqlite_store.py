@@ -469,7 +469,12 @@ class SqliteSessionStore(DefaultSessionStore):
         return " OR ".join('"%s"' % t for t in terms)
 
     def _read_search_candidates(self, query: str, limit: int):
-        """Read a bounded set of usable transcripts from one index snapshot."""
+        """Read usable lineages from a stable snapshot of matching IDs.
+
+        Only the ID query holds the shared connection lock. Transcript reads
+        and corruption callbacks run after the cursor has been closed. IDs are
+        materialized, but transcript loading stops at the lineage allowance.
+        """
         import json
 
         conn = self._connect()
@@ -478,6 +483,7 @@ class SqliteSessionStore(DefaultSessionStore):
         self._ensure_backfilled()
         allowance = max(limit * 5, limit, 1)
         candidates = []
+        lineages = set()
         try:
             with self._db_lock:
                 if self._fts_available:
@@ -493,24 +499,26 @@ class SqliteSessionStore(DefaultSessionStore):
                         "ORDER BY session_id", (like,),
                     )
                 try:
-                    while len(candidates) < allowance:
-                        row = cursor.fetchone()
-                        if row is None:
-                            break
-                        sid = row[0]
-                        filepath = self._get_session_path(sid)
-                        try:
-                            with open(filepath, "r", encoding="utf-8") as handle:
-                                data = json.load(handle)
-                        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
-                            self._report_unreadable_session(sid, filepath, exc)
-                            continue
-                        candidates.append((sid, data))
+                    rows = cursor.fetchall()
                 finally:
                     cursor.close()
         except Exception as exc:
             logger.debug("Index query failed (%s); falling back to scan.", exc)
             return None
+        for row in rows:
+            sid = row[0]
+            filepath = self._get_session_path(sid)
+            try:
+                with open(filepath, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+            except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+                self._report_unreadable_session(sid, filepath, exc)
+                continue
+            candidates.append((sid, data))
+            lineage = self._lineage_key(data)
+            lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
+            if len(lineages) >= allowance:
+                break
         return candidates
 
     # ── gateway/agent routing: indexed key → session lookup ───────────

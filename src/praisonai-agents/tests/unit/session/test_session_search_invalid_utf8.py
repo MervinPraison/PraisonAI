@@ -186,3 +186,83 @@ def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
         assert [row["session_id"] for row in exported["sessions"]] == ["valid"]
         assert exported["sessions"][0]["messages"][0]["content"] == "durable history"
     assert bad.read_bytes() == payload
+
+
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_continuations_do_not_hide_another_lineage(tmp_path, backend):
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    try:
+        for index in range(25):
+            sid = f"continuation{index:02}"
+            assert store.add_message(sid, "user", "needle")
+            assert store.update_session_metadata(sid, lineage_id="conversation")
+        assert store.add_message("other", "user", "needle " + "filler " * 100)
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        assert "other" not in store._candidate_ids("needle", 5)
+        hits = store.search("needle", limit=5)
+        assert len(hits) == 2
+        assert "other" in {hit.session_id for hit in hits}
+    finally:
+        store._conn.close()
+
+
+@pytest.mark.parametrize("backend", ["fts", "like"])
+@pytest.mark.parametrize("pause", ["file", "hook"])
+def test_index_writer_can_finish_during_transcript_work(tmp_path, monkeypatch, backend, pause):
+    import builtins
+    import threading
+
+    store = SqliteSessionStore(session_dir=str(tmp_path))
+    threads = []
+    completed_during_pause = []
+    failures = []
+    try:
+        assert store.add_message("first", "user", "needle")
+        assert store.add_message("other", "user", "needle " + "filler " * 100)
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+
+        def pause_for_writer():
+            if threads:
+                return
+            done = threading.Event()
+
+            def write():
+                try:
+                    store._deindex_session("other")
+                except Exception as exc:
+                    failures.append(exc)
+                finally:
+                    done.set()
+
+            thread = threading.Thread(target=write)
+            threads.append(thread)
+            thread.start()
+            completed_during_pause.append(done.wait(2))
+
+        if pause == "file":
+            original = builtins.open
+
+            def opened(path, *args, **kwargs):
+                if str(path).endswith("first.json"):
+                    pause_for_writer()
+                return original(path, *args, **kwargs)
+
+            monkeypatch.setattr(builtins, "open", opened)
+        else:
+            (tmp_path / "first.json").write_bytes(b"\xff\xfe")
+            monkeypatch.setattr(store, "_fire_corruption_hook", lambda *args: pause_for_writer())
+
+        hits = store.search("needle")
+        for thread in threads:
+            thread.join(3)
+        assert completed_during_pause == [True]
+        assert not failures
+        assert "other" in {hit.session_id for hit in hits}
+    finally:
+        for thread in threads:
+            thread.join(3)
+        store._conn.close()
