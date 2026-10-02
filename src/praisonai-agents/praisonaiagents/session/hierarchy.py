@@ -141,6 +141,10 @@ class ExtendedSessionData(SessionData):
                     else:
                         refs[name] = {"value": intern(value)}
                 saved["transcript_refs"] = refs
+                # Readers that only understand positional/inline snapshots
+                # must reject this record instead of restoring a stale index.
+                saved["invalidated"] = True
+                saved["transcript_invalidated"] = snapshot.invalidated
             snapshots.append(saved)
         data["snapshots"] = snapshots
         if any("transcript_refs" in snapshot for snapshot in snapshots):
@@ -182,7 +186,9 @@ class ExtendedSessionData(SessionData):
                             raise ValueError("invalid snapshot reference")
                 except (KeyError, TypeError) as exc:
                     raise ValueError("missing snapshot record") from exc
-                snapshot = SessionSnapshot.from_dict(raw)
+                snapshot = SessionSnapshot.from_dict({
+                    **raw, "invalidated": raw.get("transcript_invalidated", False),
+                })
                 snapshot.transcript = transcript
             else:
                 snapshot = SessionSnapshot.from_dict(raw)

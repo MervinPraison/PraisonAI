@@ -51,6 +51,19 @@ def test_ordinary_write_does_not_expand_portable_snapshot_dicts(tmp_path, monkey
     assert store.revert_to_snapshot("s", snapshot_id)
 
 
+def test_positional_reader_rejects_pooled_snapshot_without_losing_real_flag(tmp_path):
+    store = HierarchicalSessionStore(session_dir=str(tmp_path), retention="keep_all")
+    assert store.add_message("s", "user", "first")
+    snapshot_id = store.create_snapshot("s")
+    record = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    legacy_view = SessionSnapshot.from_dict(record["snapshots"][0])
+    assert legacy_view.transcript is None
+    assert legacy_view.invalidated is True
+    assert store.revert_to_snapshot("s", snapshot_id)
+    record["snapshots"][0]["transcript_invalidated"] = True
+    assert ExtendedSessionData.from_dict(record).snapshots[0].invalidated is True
+
+
 def test_legacy_transcripts_upgrade_and_pooled_values_remain_independent(tmp_path):
     transcript = {"messages": [{"role": "user", "content": [{"text": "old"}], "timestamp": 1}],
                   "archived_messages": [], "last_compaction": None}
