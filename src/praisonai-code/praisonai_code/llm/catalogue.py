@@ -305,19 +305,21 @@ def provider_for_model(model: str) -> Optional[str]:
     ):
         if prefix and m.startswith(prefix):
             return provider
+    # An explicitly-prefixed discovered (Python-registered / entry-point)
+    # provider — ``myprovider/model`` — resolves to its id BEFORE the bare-name
+    # fallbacks below. Otherwise a custom prefix that merely starts with a
+    # built-in name (``gptlike/…``, ``geminity/…``) would be misattributed to
+    # OpenAI/Gemini and have the wrong credential env-var checked.
+    if "/" in m:
+        prefix = m.split("/", 1)[0]
+        if prefix in discovered_providers():
+            return prefix
     if m.startswith("claude"):
         return "anthropic"
     if m.startswith("gemini"):
         return "gemini"
     if m.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
-    # A discovered (Python-registered / entry-point) provider addressed as
-    # ``myprovider/model`` resolves to its id so YAML/CLI model strings route
-    # through the same credential path as built-ins.
-    if "/" in m:
-        prefix = m.split("/", 1)[0]
-        if prefix in discovered_providers():
-            return prefix
     return None
 
 

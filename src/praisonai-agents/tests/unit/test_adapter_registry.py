@@ -417,3 +417,38 @@ class TestProviderRegistryAccessor:
         # Must not raise and must be safe to call repeatedly.
         load_provider_entry_points()
         load_provider_entry_points()
+
+    def test_detect_provider_routes_registered_prefix(self):
+        """A registered custom provider prefix must route through
+        ``LLM._detect_provider`` to its own adapter, not fall back to "openai".
+
+        Exercises the actual runtime routing path (the agent calls
+        ``_detect_provider`` with the model string) rather than only the direct
+        ``get_provider_adapter`` lookup. Constructed without a full ``LLM`` so the
+        test does not require litellm; ``_detect_provider`` only reads ``model``.
+        """
+        import types
+        from praisonaiagents.llm.adapters import (
+            add_provider_adapter,
+            DefaultAdapter,
+        )
+        from praisonaiagents.llm.llm import LLM
+
+        class CustomAdapter(DefaultAdapter):
+            pass
+
+        add_provider_adapter("customroute5607", CustomAdapter())
+
+        def detect(model):
+            stub = types.SimpleNamespace(model=model, base_url=None, api_base=None)
+            stub._is_ollama_provider = lambda: LLM._is_ollama_provider(stub)
+            return LLM._detect_provider(stub)
+
+        # Registered custom prefix routes to itself.
+        assert detect("customroute5607/model") == "customroute5607"
+        # Built-ins are unchanged.
+        assert detect("gpt-4o") == "openai"
+        assert detect("anthropic/claude-3") == "anthropic"
+        assert detect("ollama/llama3") == "ollama"
+        # An unregistered prefix still falls back to openai.
+        assert detect("totallyunknown5607/model") == "openai"
