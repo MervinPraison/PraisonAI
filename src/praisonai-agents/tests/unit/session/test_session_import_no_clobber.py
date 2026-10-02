@@ -1,4 +1,4 @@
-"""Default imports must not overwrite a session created after the first check."""
+"""Imports must not overwrite a session created after the first check."""
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -6,13 +6,15 @@ from threading import Event
 import pytest
 
 from praisonaiagents.session.store import DefaultSessionStore
+from praisonaiagents.session.sqlite_store import SqliteSessionStore
 
 
+@pytest.mark.parametrize("kind", [DefaultSessionStore, SqliteSessionStore])
 @pytest.mark.parametrize("overwrite", [False, True])
-def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, overwrite):
+def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, kind, overwrite):
     directory = str(tmp_path / "sessions")
-    importer = DefaultSessionStore(session_dir=directory)
-    peer = DefaultSessionStore(session_dir=directory)
+    stores = [kind(session_dir=directory), kind(session_dir=directory)]
+    importer, peer = stores
     ready, completed = Event(), Event()
     original = importer._save_imported_session
 
@@ -35,18 +37,25 @@ def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch
         finally:
             completed.set()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        future = pool.submit(create_peer)
-        report = importer.import_sessions(payload, overwrite=overwrite)
-        future.result(timeout=15)
-    fresh = DefaultSessionStore(session_dir=directory)
-    if overwrite:
-        assert report.imported == 1
-        assert not report.skipped
-        assert fresh.get_chat_history("shared") == [{"role": "user", "content": "imported"}]
-    else:
-        assert report.imported == 0
-        assert report.skipped == [{
-            "session_id": "shared", "reason": "already exists (use overwrite)",
-        }]
-        assert fresh.get_chat_history("shared") == [{"role": "user", "content": "peer-created"}]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future = pool.submit(create_peer)
+            report = importer.import_sessions(payload, overwrite=overwrite)
+            future.result(timeout=15)
+        fresh = kind(session_dir=directory)
+        stores.append(fresh)
+        if overwrite:
+            assert report.imported == 1
+            assert not report.skipped
+            assert fresh.get_chat_history("shared") == [{"role": "user", "content": "imported"}]
+        else:
+            assert report.imported == 0
+            assert report.skipped == [{
+                "session_id": "shared", "reason": "already exists (use overwrite)",
+            }]
+            assert fresh.get_chat_history("shared") == [{"role": "user", "content": "peer-created"}]
+    finally:
+        for store in stores:
+            conn = getattr(store, "_conn", None)
+            if conn is not None:
+                conn.close()
