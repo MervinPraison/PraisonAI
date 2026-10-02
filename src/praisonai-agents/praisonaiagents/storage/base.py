@@ -236,7 +236,7 @@ class BaseJSONStore:
             else:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     self._data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (UnicodeDecodeError, json.JSONDecodeError, IOError) as e:
             logger.warning(f"Failed to load {self.storage_path}: {e}")
             self._data = self._default_data()
     
@@ -524,7 +524,7 @@ class AsyncBaseJSONStore:
                     async with aiofiles.open(self.storage_path, "r", encoding="utf-8") as f:
                         content = await f.read()
                         self._data = json.loads(content)
-                except (FileNotFoundError, json.JSONDecodeError):
+                except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
                     self._data = self._default_data()
             
             return self._data.copy()
