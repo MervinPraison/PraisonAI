@@ -391,6 +391,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     # Cleanup must describe the generation actually refreshed,
                     # including a peer write that followed the durable import.
                     session._import_file_identity = self._session_file_identity(filepath)
+                    session._import_index_session = fresh
                     with self._lock:
                         self._cache[session.session_id] = fresh
                     if not self._index_session(fresh):
@@ -416,8 +417,27 @@ class SqliteSessionStore(DefaultSessionStore):
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     if self._session_file_identity(self._get_session_path(session.session_id)) == identity:
-                        for table in ("session_fts", "session_meta", "session_route"):
-                            conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session.session_id,))
+                        expected = getattr(session, "_import_index_session", session)
+                        sid = session.session_id
+                        content = conn.execute("SELECT content FROM session_fts WHERE session_id = ?", (sid,)).fetchall()
+                        metadata = conn.execute("SELECT updated_at FROM session_meta WHERE session_id = ?", (sid,)).fetchall()
+                        routes = conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", (sid,)).fetchall()
+                        expected_routes = (
+                            [(expected.gateway_session_id, expected.agent_id)]
+                            if expected.gateway_session_id or expected.agent_id else []
+                        )
+                        # A peer may have successfully indexed this same file
+                        # generation after our failed update. Preserve a complete
+                        # matching projection; file identity alone cannot tell
+                        # whether those index rows are already current.
+                        current = (
+                            content == [(self._flatten(expected),)]
+                            and metadata == [(expected.updated_at,)]
+                            and routes == expected_routes
+                        )
+                        if not current:
+                            for table in ("session_fts", "session_meta", "session_route"):
+                                conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (sid,))
                     conn.execute("COMMIT")
                 except BaseException:
                     conn.execute("ROLLBACK")

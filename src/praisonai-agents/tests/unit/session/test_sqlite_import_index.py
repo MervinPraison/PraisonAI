@@ -298,3 +298,51 @@ def test_failed_path_stat_does_not_preserve_stale_import_routes(make_store, monk
         for table in ("session_fts", "session_meta", "session_route"):
             assert destination._conn.execute(f"SELECT session_id FROM {table} WHERE session_id = ?", ("session",)).fetchall() == []
     assert destination.get_session("session").messages[0].content == "new imported content"
+
+
+@pytest.mark.parametrize("descriptor_identity", [False, True])
+def test_failed_refresh_keeps_peer_index_of_same_file_generation(make_store, monkeypatch, descriptor_identity):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "imported pelican")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old otter")
+    peer = SqliteSessionStore(session_dir=destination.session_dir, db_path=destination.db_path)
+    original_save = DefaultSessionStore._save_imported_session
+    original_index = destination._index_session
+    original_identity = destination._session_file_identity
+
+    def save_then_peer_write(store, session, **kwargs):
+        saved = original_save(store, session, **kwargs)
+        assert peer.set_chat_history("session", [{"role": "user", "content": "newer narwhal"}])
+        assert peer.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+        return saved
+
+    def failed_index_then_peer_indexes_same_generation(fresh):
+        conn = destination._connect()
+        conn.execute("CREATE TRIGGER fail_once BEFORE INSERT ON session_meta "
+                     "BEGIN SELECT RAISE(FAIL, 'injected index failure'); END")
+        failed = original_index(fresh)
+        conn.execute("DROP TRIGGER fail_once")
+        assert failed is False
+        assert peer._index_session(fresh)
+        return failed
+
+    def identity_using_descriptor(filepath):
+        def unavailable(*args, **kwargs):
+            raise OSError("path stat temporarily unavailable")
+        with monkeypatch.context() as path_failure:
+            path_failure.setattr(os, "stat", unavailable)
+            return original_identity(filepath)
+
+    monkeypatch.setattr(DefaultSessionStore, "_save_imported_session", save_then_peer_write)
+    monkeypatch.setattr(destination, "_index_session", failed_index_then_peer_indexes_same_generation)
+    if descriptor_identity:
+        monkeypatch.setattr(destination, "_session_file_identity", identity_using_descriptor)
+    try:
+        assert destination.import_sessions(source.export_all(), overwrite=True).imported == 1
+        conn = destination._connect()
+        assert conn.execute("SELECT content FROM session_fts WHERE session_id = ?", ("session",)).fetchall() == [("newer narwhal",)]
+        assert conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", ("session",)).fetchall() == [("new-route", "new-agent")]
+    finally:
+        if peer._conn is not None:
+            peer._conn.close()
