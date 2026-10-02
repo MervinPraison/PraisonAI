@@ -91,7 +91,7 @@ def test_memory_clear_calls_reset_all(fake_memory, memory_tools):
     assert fake_memory["reset"] == 1
 
 
-@pytest.mark.parametrize("user_id,expected", [(None, 2000), ("even", 1000), ("absent", 0)])
+@pytest.mark.parametrize("user_id,expected", [(None, 2000), ("even", 1000), ("old-user", 2), ("absent", 0)])
 def test_sqlite_show_bounds_fetches_without_capping_full_enumeration(tmp_path, monkeypatch, memory_tools, user_id, expected):
     import praisonaiagents.memory as module
 
@@ -104,7 +104,7 @@ def test_sqlite_show_bounds_fetches_without_capping_full_enumeration(tmp_path, m
         for tier in ("short", "long"):
             for index in range(1001):
                 getattr(memory, f"store_{tier}_term")(
-                    f"{tier} entry {index}", metadata={"user_id": "even" if index % 2 == 0 else "odd"},
+                    f"{tier} entry {index}", metadata={"user_id": "old-user" if index == 0 else "even" if index % 2 == 0 else "odd"},
                 )
         # Distinct valid timestamps make the displayed latest-1000 window
         # deterministic; SQLite's second-resolution default can tie here.

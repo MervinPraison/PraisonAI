@@ -34,7 +34,7 @@ def register_memory_tools() -> None:
                 # is a separate API and must not load the whole store here.
                 data = []
                 for tier in ("short", "long"):
-                    for record in getattr(adapter, f"search_{tier}_term")("", limit=1000):
+                    for record in getattr(adapter, f"search_{tier}_term")("", limit=1000, user_id=user_id):
                         data.append({
                             **record, "memory_type": f"{tier}_term", "type": f"{tier}_term",
                         })

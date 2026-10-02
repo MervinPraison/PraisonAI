@@ -143,10 +143,13 @@ class SqliteMemoryAdapter:
     ) -> List[Dict[str, Any]]:
         """Search short-term memory."""
         conn = self._get_stm_conn()
+        user_id = kwargs.get("user_id")
+        user_filter = " AND CAST(json_extract(metadata, '$.user_id') AS TEXT) = ?" if user_id else ""
+        params = (f"%{query}%", str(user_id), limit) if user_id else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM short_term_memory "
-            "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit)
+            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+            params
         )
         
         results = []
@@ -184,10 +187,13 @@ class SqliteMemoryAdapter:
     ) -> List[Dict[str, Any]]:
         """Search long-term memory."""
         conn = self._get_ltm_conn()
+        user_id = kwargs.get("user_id")
+        user_filter = " AND CAST(json_extract(metadata, '$.user_id') AS TEXT) = ?" if user_id else ""
+        params = (f"%{query}%", str(user_id), limit) if user_id else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM long_term_memory "
-            "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit)
+            "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
+            params
         )
         
         results = []
