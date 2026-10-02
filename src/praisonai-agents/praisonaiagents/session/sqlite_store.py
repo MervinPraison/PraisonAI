@@ -243,6 +243,7 @@ class SqliteSessionStore(DefaultSessionStore):
             with self._db_lock:
                 # A separate WAL reader must see the old or new index record,
                 # never the autocommitted gap between DELETE and INSERT.
+                owns_transaction = not conn.in_transaction
                 conn.execute("SAVEPOINT praisonai_index_refresh")
                 try:
                     conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
@@ -264,11 +265,17 @@ class SqliteSessionStore(DefaultSessionStore):
                         )
                     else:
                         conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
-                except BaseException:
-                    conn.execute("ROLLBACK TO praisonai_index_refresh")
-                    raise
-                finally:
                     conn.execute("RELEASE praisonai_index_refresh")
+                except BaseException:
+                    if conn.in_transaction:
+                        if owns_transaction:
+                            # A failed outermost RELEASE leaves the transaction
+                            # active, including its uncommitted writes and locks.
+                            conn.execute("ROLLBACK")
+                        else:
+                            conn.execute("ROLLBACK TO praisonai_index_refresh")
+                            conn.execute("RELEASE praisonai_index_refresh")
+                    raise
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
             return False

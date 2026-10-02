@@ -3,6 +3,7 @@
 import pytest
 import threading
 import os
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
@@ -385,3 +386,58 @@ def test_failed_refresh_compares_index_to_replacement_peer_file(make_store, monk
         conn = getattr(peer, "_conn", None)
         if conn is not None:
             conn.close()
+
+
+@pytest.mark.parametrize("body_failure", [False, True])
+def test_failed_index_commit_releases_transaction_and_preserves_old_views(make_store, body_failure):
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old otter")
+    assert destination.set_gateway_info("session", gateway_session_id="old-route", agent_id="old-agent")
+    conn = destination._connect()
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("PRAGMA busy_timeout=10")
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "new narwhal")
+    assert source.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+    replacement = source.get_session("session")
+    if body_failure:
+        conn.execute("CREATE TRIGGER fail_metadata BEFORE INSERT ON session_meta "
+                     "BEGIN SELECT RAISE(FAIL, 'injected body failure'); END")
+    reader = sqlite3.connect(destination.db_path, isolation_level=None)
+    try:
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT content FROM session_fts WHERE session_id = 'session'").fetchone() == ("old otter",)
+        assert destination._index_session(replacement) is False
+        assert not conn.in_transaction, "failed refresh leaked its outer write transaction"
+    finally:
+        reader.close()
+    if body_failure:
+        conn.execute("DROP TRIGGER fail_metadata")
+    assert conn.execute("SELECT content FROM session_fts WHERE session_id = 'session'").fetchone() == ("old otter",)
+    assert conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = 'session'").fetchone() == ("old-route", "old-agent")
+    # A later refresh must commit independently and become visible to peers.
+    assert destination._index_session(replacement)
+    peer = sqlite3.connect(destination.db_path, isolation_level=None)
+    try:
+        assert peer.execute("SELECT content FROM session_fts WHERE session_id = 'session'").fetchone() == ("new narwhal",)
+        assert peer.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = 'session'").fetchone() == ("new-route", "new-agent")
+        peer.execute("BEGIN IMMEDIATE")
+        peer.execute("ROLLBACK")
+    finally:
+        peer.close()
+
+
+def test_failed_nested_index_refresh_preserves_callers_transaction(make_store):
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old otter")
+    conn = destination._connect()
+    conn.execute("CREATE TRIGGER fail_metadata BEFORE INSERT ON session_meta "
+                 "WHEN NEW.session_id = 'session' "
+                 "BEGIN SELECT RAISE(FAIL, 'injected body failure'); END")
+    conn.execute("BEGIN")
+    conn.execute("INSERT INTO session_meta VALUES ('unrelated', 'caller-pending')")
+    assert destination._index_session(destination.get_session("session")) is False
+    assert conn.in_transaction
+    assert conn.execute("SELECT updated_at FROM session_meta WHERE session_id = 'unrelated'").fetchone() == ("caller-pending",)
+    assert conn.execute("SELECT content FROM session_fts WHERE session_id = 'session'").fetchone() == ("old otter",)
+    conn.execute("COMMIT")
