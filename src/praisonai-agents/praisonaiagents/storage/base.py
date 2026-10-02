@@ -343,7 +343,7 @@ class BaseJSONStore:
 def list_json_sessions(
     storage_dir: Path,
     suffix: str = ".json",
-    limit: int = 50,
+    limit: Optional[int] = 50,
 ) -> List[BaseSessionInfo]:
     """
     List all sessions in a directory.
@@ -353,7 +353,7 @@ def list_json_sessions(
     Args:
         storage_dir: Directory to search
         suffix: File suffix to filter by
-        limit: Maximum number of sessions to return
+        limit: Maximum number of sessions to return, or None for all sessions
         
     Returns:
         List of BaseSessionInfo, sorted by modification time (newest first)
@@ -424,7 +424,7 @@ def cleanup_old_sessions(
     now = datetime.now()
     
     # Get all sessions sorted by age (oldest first)
-    sessions = list_json_sessions(storage_dir, suffix, limit=10000)
+    sessions = list_json_sessions(storage_dir, suffix, limit=None)
     sessions.sort(key=lambda s: s.modified_at)
     
     # Delete old sessions
