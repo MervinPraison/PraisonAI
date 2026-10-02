@@ -219,7 +219,7 @@ class BaseJSONStore:
         """
         return {}
     
-    def _load(self) -> None:
+    def _load(self, *, strict: bool = False) -> None:
         """Load data from storage file or backend."""
         if self._backend is not None:
             loaded = self._backend.load(self._storage_key)
@@ -240,8 +240,16 @@ class BaseJSONStore:
             self._read_failed = False
         except (UnicodeDecodeError, json.JSONDecodeError, IOError) as e:
             self._read_failed = not isinstance(e, FileNotFoundError)
+            if strict and not isinstance(e, FileNotFoundError):
+                raise
             logger.warning(f"Failed to load {self.storage_path}: {e}")
             self._data = self._default_data()
+
+    def _load_strict(self) -> Dict[str, Any]:
+        """Load for runtime mutations; preserve failed-read errors and cache."""
+        with self._lock:
+            self._load(strict=True)
+            return self._data.copy()
     
     def _save(self) -> None:
         """Save data to storage file or backend with atomic write."""

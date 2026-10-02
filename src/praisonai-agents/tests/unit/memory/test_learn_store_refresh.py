@@ -1,6 +1,9 @@
 """Sequential operations sharing a learning file must preserve peer writes."""
 
 import pytest
+import builtins
+import json
+from pathlib import Path
 
 from praisonaiagents.memory.learn.stores import InsightStore
 
@@ -138,3 +141,71 @@ def test_malformed_record_is_not_treated_as_backend_outage(tmp_path, operation, 
         else:
             store.list_all()
     assert backend.saves == saves_before
+
+
+@pytest.mark.parametrize("operation", ["search", "list_all", "update", "delete"])
+@pytest.mark.parametrize("failure", ["io", "json", "utf8"])
+def test_file_refresh_failure_preserves_cache_and_source(tmp_path, monkeypatch, operation, failure):
+    path = tmp_path / "insights.json"
+    store = InsightStore(store_path=str(path))
+    target = store.add("cached target")
+    store.reset_updated()
+    real_open = builtins.open
+    if failure == "io":
+        def denied(file, mode="r", *args, **kwargs):
+            if Path(file) == path and mode == "r":
+                raise PermissionError("injected read outage")
+            return real_open(file, mode, *args, **kwargs)
+        monkeypatch.setattr(builtins, "open", denied)
+        expected_error = PermissionError
+    else:
+        path.write_bytes(b"{invalid" if failure == "json" else b"\xff")
+        expected_error = json.JSONDecodeError if failure == "json" else UnicodeDecodeError
+    before = path.read_bytes()
+    if operation in ("search", "list_all"):
+        results = store.search("target") if operation == "search" else store.list_all()
+        assert [entry.id for entry in results] == [target.id]
+        assert results[0].use_count == 0
+        assert results[0].last_used is None
+    else:
+        with pytest.raises(expected_error):
+            if operation == "update":
+                store.update(target.id, "replacement")
+            else:
+                store.delete(target.id)
+    assert store.get(target.id).content == "cached target"
+    assert not store.was_updated
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["search", "list_all"])
+def test_partial_deserialization_failure_preserves_all_cached_entries(tmp_path, operation):
+    backend = UnavailableBackend()
+    store = InsightStore(store_path=str(tmp_path / "insights.json"), backend=backend)
+    target = store.add("cached target")
+    backend.data = {target.id: target.to_dict(), "broken": {"id": "broken"}}
+    with pytest.raises(KeyError, match="content"):
+        if operation == "search":
+            store.search("target")
+        else:
+            store.list_all()
+    assert store.get(target.id) is target
+
+
+def test_missing_runtime_file_initializes_fresh_store(tmp_path):
+    path = tmp_path / "insights.json"
+    store = InsightStore(store_path=str(path))
+    original = store.add("original")
+    path.unlink()
+    assert store.list_all() == []
+    assert store.get(original.id) is None
+    replacement = store.add("replacement")
+    assert InsightStore(store_path=str(path)).get(replacement.id).content == "replacement"
+
+
+def test_invalid_json_initialization_keeps_existing_default_behavior(tmp_path):
+    path = tmp_path / "insights.json"
+    path.write_bytes(b"{invalid")
+    store = InsightStore(store_path=str(path))
+    assert store.get("missing") is None
+    assert path.read_bytes() == b"{invalid"
