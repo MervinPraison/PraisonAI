@@ -262,8 +262,8 @@ class BaseJSONStore:
                 delete=False,
                 suffix=".tmp"
             ) as f:
-                json.dump(self._data, f, indent=2, default=str, ensure_ascii=False)
                 temp_path = f.name
+                json.dump(self._data, f, indent=2, default=str, ensure_ascii=False)
             
             # Atomic rename
             if self.use_file_lock:
@@ -343,7 +343,7 @@ class BaseJSONStore:
 def list_json_sessions(
     storage_dir: Path,
     suffix: str = ".json",
-    limit: int = 50,
+    limit: Optional[int] = 50,
 ) -> List[BaseSessionInfo]:
     """
     List all sessions in a directory.
@@ -353,7 +353,7 @@ def list_json_sessions(
     Args:
         storage_dir: Directory to search
         suffix: File suffix to filter by
-        limit: Maximum number of sessions to return
+        limit: Maximum number of sessions to return, or None for all sessions
         
     Returns:
         List of BaseSessionInfo, sorted by modification time (newest first)
@@ -370,7 +370,7 @@ def list_json_sessions(
                 # Try to get item count from file
                 if suffix == ".json":
                     try:
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             # Common patterns for item count
                             if "iterations" in data:
@@ -383,7 +383,7 @@ def list_json_sessions(
                         pass
                 elif suffix == ".jsonl":
                     try:
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             info.item_count = sum(1 for _ in f)
                     except Exception:
                         pass
@@ -424,7 +424,7 @@ def cleanup_old_sessions(
     now = datetime.now()
     
     # Get all sessions sorted by age (oldest first)
-    sessions = list_json_sessions(storage_dir, suffix, limit=10000)
+    sessions = list_json_sessions(storage_dir, suffix, limit=None)
     sessions.sort(key=lambda s: s.modified_at)
     
     # Delete old sessions

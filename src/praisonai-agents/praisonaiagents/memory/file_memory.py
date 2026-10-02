@@ -266,11 +266,12 @@ class FileMemory:
             return True
         except (IOError, OSError) as e:
             self._log(f"Error writing {filepath}: {e}", logging.ERROR)
+            return False
+        finally:
             try:
                 tmp_path.unlink()
             except OSError:
                 pass
-            return False
 
     def commit_memory_batch(
         self,

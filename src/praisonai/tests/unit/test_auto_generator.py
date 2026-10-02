@@ -707,6 +707,50 @@ class TestSingleAgentOption:
             )
             assert generator.single_agent == True
 
+    def test_auto_generator_single_agent_true_warns(self):
+        """AutoGenerator emits a DeprecationWarning when single_agent is truthy."""
+        import warnings
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            with pytest.warns(DeprecationWarning, match="deprecated and inert"):
+                AutoGenerator(
+                    topic="Write a haiku",
+                    framework="praisonai",
+                    single_agent=True,
+                )
+
+    def test_auto_generator_single_agent_false_no_warning(self):
+        """AutoGenerator does not warn when single_agent is left False."""
+        import warnings
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                generator = AutoGenerator(
+                    topic="Write a haiku",
+                    framework="praisonai",
+                )
+                assert generator.single_agent is False
+
+    def test_workflow_generator_single_agent_true_warns(self):
+        """WorkflowAutoGenerator emits a DeprecationWarning when single_agent is truthy."""
+        import warnings
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            with pytest.warns(DeprecationWarning, match="deprecated and inert"):
+                WorkflowAutoGenerator(
+                    topic="Write a haiku",
+                    single_agent=True,
+                )
+
+    def test_workflow_generator_single_agent_false_no_warning(self):
+        """WorkflowAutoGenerator does not warn when single_agent is left False."""
+        import warnings
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                generator = WorkflowAutoGenerator(
+                    topic="Write a haiku",
+                )
+                assert generator.single_agent is False
+
 
 # =============================================================================
 # TODO 3: LLM-Based Pattern Recommendation Tests
