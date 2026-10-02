@@ -63,12 +63,26 @@ def test_older_strong_match_survives_newer_partial_matches(tmp_path, sqlite_stor
     assert [hit.score for hit in actual] == [hit.score for hit in expected]
 
 
-def test_search_scoring_does_not_block_session_operations(sqlite_store, monkeypatch):
+@pytest.mark.parametrize("journal_mode", ["WAL", "DELETE"])
+def test_search_scoring_does_not_block_session_operations(sqlite_store, monkeypatch, journal_mode):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
     store = sqlite_store
     assert store.add_message("reference", "user", "alpha beta")
+    if journal_mode == "DELETE":
+        from praisonaiagents.storage import sqlite as sqlite_factory
+
+        store._conn.execute("PRAGMA journal_mode=DELETE")
+        store._conn.execute("PRAGMA busy_timeout=50")
+        connect = sqlite_factory.connect
+
+        def delete_journal(*args, **kwargs):
+            conn = connect(*args, **kwargs)
+            conn.execute("PRAGMA journal_mode=DELETE")
+            return conn
+
+        monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
     scoring = Event()
     release = Event()
     original = store._searchable_messages
