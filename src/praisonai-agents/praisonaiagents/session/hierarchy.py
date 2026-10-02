@@ -210,18 +210,40 @@ class HierarchicalSessionStore(DefaultSessionStore):
         error_label: str = "modify session",
     ) -> bool:
         """Locked read-modify-write preserving extended session fields."""
-        result = super()._modify_session_locked(
-            session_id, mutator, error_label=error_label
-        )
-        if result:
-            with self._lock:
-                cached = self._cache.get(session_id)
-                if isinstance(cached, ExtendedSessionData):
-                    self._extended_cache[session_id] = cached
-        return result
+        filepath = self._get_session_path(session_id)
+        with FileLock(filepath, self.lock_timeout):
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                logger.error("Failed to %s %s: could not read existing session", error_label, session_id)
+                return False
+            mutator(session)
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            self._enforce_window(session)
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error("Failed to %s %s", error_label, session_id)
+                return False
+            self._cache_written_session(session, filepath)
+            return True
 
-    def _is_cache_valid(self, session_id: str) -> bool:
-        """Validate the parsed cache against current bytes under the file lock."""
+    def _cache_written_session(self, session: ExtendedSessionData, filepath: str) -> None:
+        """Bind the written object to exact bytes while the caller holds FileLock."""
+        try:
+            with open(filepath, "rb") as f:
+                fingerprint = hashlib.sha256(f.read()).digest()
+        except OSError:
+            # The write succeeded; unavailable validation bytes only disable reuse.
+            fingerprint = None
+        with self._lock:
+            self._cache[session.session_id] = session
+            self._extended_cache[session.session_id] = session
+            if fingerprint is None:
+                self._cache_fingerprints.pop(session.session_id, None)
+            else:
+                self._cache_fingerprints[session.session_id] = (session, fingerprint)
+
+    def _is_cache_valid(self, session_id: str) -> Optional[bool]:
+        """Validate cached bytes; None means a transient validation failure."""
         with self._lock:
             if session_id not in self._extended_cache:
                 return False
@@ -237,8 +259,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
                         and cached[0] is self._extended_cache.get(session_id)
                         and cached[1] == fingerprint
                     )
-        except (OSError, IOError):
+        except FileNotFoundError:
             return False
+        except OSError:
+            return None
     
     def _read_session_fresh(self, session_id: str) -> ExtendedSessionData:
         """Reload from disk and keep _cache and _extended_cache in sync."""
@@ -292,7 +316,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
         """Reuse parsed extended data only when its source bytes are unchanged."""
         # Force reload bypasses cache validation
-        if force_reload or not self._is_cache_valid(session_id):
+        if force_reload:
+            return self._read_session_fresh(session_id)
+        valid = self._is_cache_valid(session_id)
+        if valid is False:
             return self._read_session_fresh(session_id)
         
         # Invalidation may have raced with the content check.
@@ -328,9 +355,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 
                 os.replace(temp_path, filepath)
                 
-                with self._lock:
-                    self._extended_cache[session.session_id] = session
-                    self._cache_fingerprints.pop(session.session_id, None)
+                self._cache_written_session(session, filepath)
                 
                 return True
             except (IOError, OSError) as e:
