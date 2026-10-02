@@ -273,6 +273,25 @@ class StreamingConfig:
         )
 
 
+def build_streaming_config(config: Any) -> Optional["StreamingConfig"]:
+    """Derive a :class:`StreamingConfig` from a ``BotConfig``.
+
+    Shared by every channel adapter (Telegram, Discord, Slack, …) so a
+    configured ``streaming`` flag is wired to the same ``DraftStreamer`` engine
+    identically everywhere, instead of each adapter re-deriving (or silently
+    ignoring) the knob. Returns ``None`` when streaming is off so the caller's
+    non-streaming path is unchanged.
+    """
+    if not getattr(config, "streaming", False):
+        return None
+    interval_ms = getattr(config, "stream_edit_interval_ms", 700) or 700
+    return StreamingConfig(
+        mode=StreamingMode.DRAFT,
+        min_interval=interval_ms / 1000.0,
+        min_delta=50,
+    )
+
+
 class BotAdapter(Protocol):
     """Protocol for bot adapters that support message editing."""
     
