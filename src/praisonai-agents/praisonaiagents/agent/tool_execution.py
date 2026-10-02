@@ -152,6 +152,17 @@ class BackoffPolicy:
 MULTIMODAL_IMAGE_BYTE_LIMIT = 5_000_000
 
 
+def _memory_prompt_text(prompt: Any) -> str:
+    """Match text-only conversation history without retaining attachment parts."""
+    if isinstance(prompt, list):
+        return next((
+            part["text"] for part in prompt
+            if isinstance(part, dict) and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        ), "")
+    return prompt if isinstance(prompt, str) else str(prompt)
+
+
 def _content_part_to_data_uri(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convert a structured content part into an OpenAI-style message part.
 
@@ -1950,7 +1961,7 @@ class ToolExecutionMixin:
         """
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
         if response and process_auto_memory:
-            prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+            prompt_str = _memory_prompt_text(prompt)
             if getattr(self, "_auto_memory", False):
                 self._process_auto_memory(prompt_str, str(response))
             else:
@@ -2058,10 +2069,11 @@ class ToolExecutionMixin:
             await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
 
         if response and getattr(self, '_memory_instance', None):
+            prompt_str = _memory_prompt_text(prompt)
             if getattr(self, '_auto_memory', False):
-                await asyncio.to_thread(self._process_auto_memory, str(prompt), str(response))
+                await asyncio.to_thread(self._process_auto_memory, prompt_str, str(response))
             else:
-                await asyncio.to_thread(self._persist_memory_turn, str(prompt), str(response))
+                await asyncio.to_thread(self._persist_memory_turn, prompt_str, str(response))
         self._after_agent_side_effects(prompt, response, process_auto_memory=False)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).

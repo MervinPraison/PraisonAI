@@ -12,6 +12,28 @@ from praisonaiagents.memory.file_memory import FileMemory
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("async_hook", [False, True])
+@pytest.mark.parametrize("text", ["My codename is ORANGE-PANDA.", None])
+async def test_multimodal_after_hook_persists_only_history_text(tmp_path, async_hook, text):
+    from praisonaiagents import Agent
+
+    memory = FileMemory(user_id="text-only", base_path=tmp_path)
+    agent = Agent(name="Writer", instructions="Remember conversations.", memory=memory)
+    prompt = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,ATTACHMENT_SENTINEL"}}]
+    if text is not None:
+        prompt.append({"type": "text", "text": text})
+    if async_hook:
+        await agent._atrigger_after_agent_hook(prompt, "Noted.", 0)
+    else:
+        # Exercise the synchronous hook without a running event loop.
+        await asyncio.to_thread(agent._trigger_after_agent_hook, prompt, "Noted.", 0)
+    entries = FileMemory(user_id="text-only", base_path=tmp_path).get_short_term()
+    assert len(entries) == 1
+    assert entries[0].content == f"User: {text or ''}\nAssistant: Noted."
+    assert "ATTACHMENT_SENTINEL" not in entries[0].content
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("response", ["Acknowledged ORANGE-PANDA.", ""])
 async def test_async_after_hook_persists_raw_turn_for_later_agent(tmp_path, response):
     from praisonaiagents import Agent
