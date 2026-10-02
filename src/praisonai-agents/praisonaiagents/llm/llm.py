@@ -8,6 +8,8 @@ import re
 import inspect
 import asyncio
 import threading
+from contextlib import contextmanager
+from functools import wraps
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -43,6 +45,22 @@ _TOOL_ARGUMENTS_PARSE_FAILED = object()
 # process-global lists shared by every LLM instance. Guard the read-modify-write
 # in ``_setup_event_tracking`` so concurrent instances don't corrupt them.
 _EVENT_TRACKING_LOCK = threading.Lock()
+
+
+def _request_stop_reason(method):
+    """Keep nested response calls from replacing their caller's outcome."""
+    if inspect.iscoroutinefunction(method):
+        @wraps(method)
+        async def async_call(self, *args, **kwargs):
+            with self._stop_reason_scope():
+                return await method(self, *args, **kwargs)
+        return async_call
+
+    @wraps(method)
+    def sync_call(self, *args, **kwargs):
+        with self._stop_reason_scope():
+            return method(self, *args, **kwargs)
+    return sync_call
 
 
 def _ollama_tool_result_is_successful(tool_result: Any) -> bool:
@@ -543,6 +561,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # "completed" | "max_steps" | "error". Lets callers distinguish a finished
         # task from one truncated by the step budget (see ExecutionConfig.max_steps).
         self._last_stop_reason_var = contextvars.ContextVar("last_stop_reason", default=None)
+        self._stop_reason_active_var = contextvars.ContextVar("stop_reason_active", default=None)
         self._last_stop_reason_fallback = (None, "completed")
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
@@ -2947,6 +2966,7 @@ Respond with ONLY a valid JSON tool call in this format:
             logging.debug(f"In-loop context management skipped: {e}")
             return messages
 
+    @_request_stop_reason
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -5189,6 +5209,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Other errors are generally not recoverable
         return False
 
+    @_request_stop_reason
     async def get_response_async(
         self,
         prompt: Union[str, List[Dict]],
@@ -6546,6 +6567,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             task = None
         return threading.get_ident(), id(task) if task is not None else None
 
+    @contextmanager
+    def _stop_reason_scope(self):
+        """Restore an active parent's binding when a nested call returns."""
+        owner = self._stop_reason_context()
+        active = self._stop_reason_active_var
+        nested = active.get() == owner
+        active_token = active.set(owner)
+        reason = self._last_stop_reason_var
+        reason_token = reason.set((owner, "completed"))
+        try:
+            yield
+        finally:
+            result = reason.get()
+            reason.reset(reason_token)
+            active.reset(active_token)
+            if nested:
+                self._last_stop_reason_fallback = reason.get()
+            else:
+                reason.set(result)
+                self._last_stop_reason_fallback = result
+
     @property
     def _last_stop_reason(self) -> str:
         """Terminal outcome in the calling task or thread.
@@ -6562,6 +6604,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         )
         if binding is None or binding[0] != owner:
             return latest_reason
+        active = getattr(self, "_stop_reason_active_var", None)
+        if active is not None and active.get() == owner:
+            return binding[1]
         if (
             owner[1] is None and latest_owner is not None
             and latest_owner[0] == owner[0] and latest_owner[1] is not None
@@ -6651,6 +6696,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if key == "_last_stop_reason_var":
                 clone.__dict__[key] = contextvars.ContextVar(
                     "last_stop_reason", default=None
+                )
+                continue
+            if key == "_stop_reason_active_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "stop_reason_active", default=None
                 )
                 continue
             if key == "_last_stop_reason_fallback":

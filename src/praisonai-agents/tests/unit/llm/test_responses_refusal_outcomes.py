@@ -376,3 +376,106 @@ def test_later_async_turn_replaces_a_sync_contexts_last_outcome(first_profile, f
     answer = asyncio.run(llm.get_response_async('second', stream=False, verbose=False))
     assert answer == ('answer' if second_profile == "normal" else '')
     assert llm._last_stop_reason == second_reason
+
+
+@pytest.mark.parametrize('outer_mode', ['sync', 'async'])
+@pytest.mark.parametrize('inner_mode', ['sync', 'async'])
+@pytest.mark.parametrize('outer_profile, expected_reason', [
+    ('normal', 'completed'),
+    ('max_output_tokens', 'length_truncated'),
+    ('content_filter', 'content_filtered'),
+])
+@pytest.mark.parametrize('inner_profile', ['normal', 'refusal'])
+@pytest.mark.parametrize('stream', [False, True])
+def test_nested_tool_request_preserves_the_outer_responses_outcome(
+    outer_mode, inner_mode, outer_profile, expected_reason, inner_profile,
+    stream, monkeypatch,
+):
+    import asyncio
+    import litellm
+
+    llm = LLM(model='gpt-4o-mini')
+    first = output_response('sdk', 'normal')
+    first.output = []
+    first.output.append(SimpleNamespace(
+        type='function_call', id='fc_nested', call_id='call_nested',
+        name='lookup', arguments='{}',
+    ))
+    if outer_profile != 'normal':
+        first.status = 'incomplete'
+        first.incomplete_details = SimpleNamespace(reason=outer_profile)
+    outer_responses = iter([first, output_response('sdk', 'normal')])
+    in_tool = False
+    inner_answers = []
+
+    def respond(**kwargs):
+        if in_tool:
+            return output_response('sdk', inner_profile)
+        return next(outer_responses)
+
+    async def arespond(**kwargs):
+        return respond(**kwargs)
+
+    def stream_response(**kwargs):
+        response = respond(**kwargs)
+        events = []
+        if response is first:
+            events.append({'type': 'response.output_item.done',
+                           'output_index': 0, 'item': first.output[0]})
+        else:
+            events.append({'type': 'response.output_text.delta', 'delta': 'answer'})
+        events.append({'type': 'response.incomplete' if response is first
+                       and outer_profile != 'normal' else 'response.completed',
+                       'response': response})
+        return iter(events)
+
+    async def astream_response(**kwargs):
+        async def iterate():
+            for event in stream_response(**kwargs):
+                yield event
+        return iterate()
+
+    def execute(name, arguments, *args, **kwargs):
+        nonlocal in_tool
+        assert name == 'lookup'
+        in_tool = True
+        try:
+            if inner_mode == 'async':
+                answer = asyncio.run(llm.get_response_async(
+                    'inner', stream=False, verbose=False))
+            else:
+                answer = llm.get_response('inner', stream=False, verbose=False)
+            inner_answers.append(answer)
+        finally:
+            in_tool = False
+        return 'lookup result'
+
+    async def aexecute(name, arguments, **kwargs):
+        nonlocal in_tool
+        assert name == 'lookup'
+        in_tool = True
+        try:
+            if inner_mode == 'async':
+                answer = await llm.get_response_async(
+                    'inner', stream=False, verbose=False)
+            else:
+                answer = llm.get_response('inner', stream=False, verbose=False)
+            inner_answers.append(answer)
+        finally:
+            in_tool = False
+        return 'lookup result'
+
+    llm._call_responses_api = respond
+    llm._call_responses_api_async = arespond
+    monkeypatch.setattr('praisonaiagents.llm.llm.check_model_request', lambda *args: None)
+    monkeypatch.setattr(litellm, 'responses', stream_response)
+    monkeypatch.setattr(litellm, 'aresponses', astream_response)
+    if outer_mode == 'async':
+        answer = asyncio.run(llm.get_response_async(
+            'outer', stream=stream, verbose=False, execute_tool_fn=aexecute))
+    else:
+        answer = llm.get_response(
+            'outer', stream=stream, verbose=False, execute_tool_fn=execute)
+    assert answer == 'answer'
+    assert inner_answers == ['answer' if inner_profile == 'normal' else '']
+    assert llm._last_stop_reason == expected_reason
