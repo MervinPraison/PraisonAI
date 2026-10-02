@@ -503,6 +503,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
             # exclude stronger hits or fill up with one conversation lineage.
             # Stream payloads rather than materializing all transcript JSON.
             import sqlite3
+            from tempfile import TemporaryDirectory
+
+            temporary = None
             if self.db_path == ":memory:":
                 snapshot = sqlite3.connect(":memory:")
             else:
@@ -517,10 +520,12 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         conn.backup(snapshot)
                 elif snapshot.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
                     source = snapshot
-                    snapshot = sqlite3.connect(":memory:")
                     try:
+                        temporary = TemporaryDirectory(prefix="praison-search-")
+                        snapshot = sqlite3.connect(os.path.join(temporary.name, "snapshot.db"))
                         # Bounded backup steps release source read locks
-                        # between page batches; scoring uses only the copy.
+                        # between page batches; score a disk copy so large
+                        # non-WAL files do not require an in-memory duplicate.
                         source.backup(snapshot, pages=128)
                     finally:
                         source.close()
@@ -535,6 +540,8 @@ class SqliteTranscriptStore(DefaultSessionStore):
                     yield from batch
             finally:
                 snapshot.close()
+                if temporary is not None:
+                    temporary.cleanup()
 
         hits: List[tuple] = []
         with closing(records()) as rows:
