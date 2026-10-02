@@ -11,6 +11,8 @@ Tests cover:
 import threading
 from pathlib import Path
 
+import pytest
+
 from praisonaiagents.storage.backends import FileBackend, SQLiteBackend, get_backend
 from praisonaiagents.storage.protocols import StorageBackendProtocol
 
@@ -114,6 +116,26 @@ class TestFileBackend:
         """Test FileBackend implements StorageBackendProtocol."""
         backend = FileBackend(storage_dir=str(tmp_path))
         assert isinstance(backend, StorageBackendProtocol)
+
+    @pytest.mark.parametrize("pretty", [True, False])
+    def test_file_backend_save_cleans_tmp_on_serialization_error(self, tmp_path, pretty):
+        """Serialization failures must not leave partial .tmp staging files."""
+        backend = FileBackend(storage_dir=str(tmp_path), pretty=pretty)
+        backend.save("good", {"value": 1})
+
+        circular = {}
+        circular["self"] = circular
+        with pytest.raises(ValueError):
+            backend.save("circular", circular)
+
+        with pytest.raises(TypeError):
+            backend.save("tuple_key", {("a", "b"): 1})
+
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert tmp_files == []
+        assert backend.load("good") == {"value": 1}
+        assert not backend.exists("circular")
+        assert not backend.exists("tuple_key")
 
 
 class TestSQLiteBackend:
