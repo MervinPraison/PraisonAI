@@ -793,6 +793,8 @@ class OpenAIClient:
                     item["content"] = self._build_responses_content(
                         msg.get("content", "")
                     )
+                    if role == "assistant" and "phase" in msg:
+                        item["phase"] = msg["phase"]
                     input_items.append(item)
 
         if instructions:

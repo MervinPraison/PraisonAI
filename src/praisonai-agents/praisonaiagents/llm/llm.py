@@ -7151,6 +7151,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     item["content"] = OpenAIClient._build_responses_content(
                         msg.get("content", "")
                     )
+                    if role == "assistant" and "phase" in msg:
+                        item["phase"] = msg["phase"]
                     input_items.append(item)
 
         if instructions:
