@@ -7028,7 +7028,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # (input_text / input_image); local image paths become
                     # data URLs. Plain-string content is passed through.
                     from .openai_client import OpenAIClient
-                    item = dict(msg)
+                    # Do not forward persisted metadata/provider extensions as
+                    # Responses message properties.
+                    item = {"role": role}
                     item["content"] = OpenAIClient._build_responses_content(
                         msg.get("content", "")
                     )

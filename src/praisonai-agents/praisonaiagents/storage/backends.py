@@ -69,6 +69,17 @@ class FileBackend:
         # Sanitize key for filesystem
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         return self.storage_dir / f"{safe_key}{self.suffix}"
+
+    def _path_to_key(self, file_path: Path) -> Optional[str]:
+        """Recognize records using the full configured suffix."""
+        if not file_path.is_file():
+            return None
+        if self.suffix:
+            if file_path.name.endswith(self.suffix):
+                return file_path.name[:-len(self.suffix)]
+            return None
+        # Preserve the existing no-extension selection for an empty suffix.
+        return file_path.name if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
@@ -110,7 +121,7 @@ class FileBackend:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
             logger.warning(f"Failed to load {key}: {e}")
             return None
     
@@ -133,8 +144,8 @@ class FileBackend:
         keys = []
         
         for file_path in self.storage_dir.iterdir():
-            if file_path.is_file() and file_path.suffix == self.suffix:
-                key = file_path.stem
+            key = self._path_to_key(file_path)
+            if key is not None:
                 if not prefix or key.startswith(prefix):
                     keys.append(key)
         
@@ -149,7 +160,7 @@ class FileBackend:
         count = 0
         with self._lock:
             for file_path in self.storage_dir.iterdir():
-                if file_path.is_file() and file_path.suffix == self.suffix:
+                if self._path_to_key(file_path) is not None:
                     try:
                         file_path.unlink()
                         count += 1
@@ -201,7 +212,11 @@ class SQLiteBackend:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         
         if auto_create:
-            self._create_table()
+            try:
+                self._create_table()
+            except Exception:
+                self.close()
+                raise
     
     def _get_conn(self):
         """Get thread-local connection."""

@@ -158,7 +158,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         if not session_dir or not os.path.isdir(session_dir):
             return
         try:
-            filenames = [f for f in os.listdir(session_dir) if f.endswith(".json")]
+            filenames = sorted(
+                f for f in os.listdir(session_dir) if f.endswith(".json")
+            )
         except OSError:
             return
         if not filenames:
@@ -175,7 +177,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (OSError, json.JSONDecodeError, TypeError):
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
                 continue
             if not isinstance(data, dict):
                 continue
