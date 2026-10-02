@@ -126,5 +126,8 @@ class InMemoryAdapter:
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         with self._lock:
-            # Return defensive copy to prevent external mutation of internal state
-            return deepcopy(self._data)
+            # Entries are owned on insertion and never mutated afterward.
+            # Keep their membership snapshot under lock, then copy nested data
+            # without blocking stores, deletes, or eviction.
+            snapshot = list(self._data)
+        return deepcopy(snapshot)

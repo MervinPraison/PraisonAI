@@ -1,6 +1,10 @@
 """Caller edits must not rewrite previously stored in-memory records."""
 
 import pytest
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import praisonaiagents.memory.adapters.in_memory_adapter as adapter_module
 
 from praisonaiagents.memory.adapters.in_memory_adapter import InMemoryAdapter
 
@@ -49,3 +53,31 @@ def test_metadata_defaults_and_search_limits_remain_unchanged(tier, metadata):
     assert [record['id'] for record in search('matching')] == expected_ids[:5]
     assert [record['id'] for record in search('matching', limit=2)] == expected_ids[:2]
     assert all(record['metadata'] == metadata for record in adapter.get_all_memories())
+
+
+def test_enumeration_copy_allows_concurrent_eviction_and_preserves_snapshot(monkeypatch):
+    """A slow nested copy must not keep writers behind the collection lock."""
+    adapter = InMemoryAdapter(max_size=1)
+    original_id = adapter.store_short_term('original', {'nested': ['original']})
+    copying = threading.Event()
+    resume = threading.Event()
+    real_copy = adapter_module.deepcopy
+
+    def paused_copy(value):
+        if isinstance(value, list):
+            copying.set()
+            assert resume.wait(5)
+        return real_copy(value)
+
+    monkeypatch.setattr(adapter_module, 'deepcopy', paused_copy)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        read = executor.submit(adapter.get_all_memories)
+        try:
+            assert copying.wait(2)
+            new_id = executor.submit(adapter.store_long_term, 'new', {'nested': ['new']}).result(timeout=1)
+        finally:
+            resume.set()
+        snapshot = read.result(timeout=5)
+    assert snapshot == [{'id': original_id, 'text': 'original', 'type': 'short', 'metadata': {'nested': ['original']}}]
+    snapshot[0]['metadata']['nested'].append('caller edit')
+    assert adapter.get_all_memories() == [{'id': new_id, 'text': 'new', 'type': 'long', 'metadata': {'nested': ['new']}}]
