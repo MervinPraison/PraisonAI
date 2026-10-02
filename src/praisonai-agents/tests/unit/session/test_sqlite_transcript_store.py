@@ -204,6 +204,40 @@ class TestSqliteTranscriptStore:
             {"role": "user", "content": "legacy transcript"}
         ]
 
+    def test_migration_skips_invalid_utf8_legacy_file(self, tmp_dir):
+        """A legacy file with invalid UTF-8 bytes is skipped (not fatal), and
+        valid transcripts still migrate; the bad bytes are preserved."""
+        legacy = DefaultSessionStore(session_dir=tmp_dir)
+        legacy.add_message("old", "user", "legacy transcript")
+
+        bad_path = os.path.join(tmp_dir, "invalid.json")
+        with open(bad_path, "wb") as handle:
+            handle.write(b"\xff\xfe")
+
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        assert store.session_exists("old")
+        assert store.get_chat_history("old") == [
+            {"role": "user", "content": "legacy transcript"}
+        ]
+
+        with open(bad_path, "rb") as handle:
+            assert handle.read() == b"\xff\xfe"
+
+    def test_migration_continues_after_invalid_utf8_ordered_first(self, tmp_dir):
+        """A bad file sorted before valid ones must not abort later migrations."""
+        legacy = DefaultSessionStore(session_dir=tmp_dir)
+        legacy.add_message("zeta", "user", "valid transcript")
+
+        bad_path = os.path.join(tmp_dir, "aaa_invalid.json")
+        with open(bad_path, "wb") as handle:
+            handle.write(b"\xff\xfe")
+
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        assert store.session_exists("zeta")
+        assert store.get_chat_history("zeta") == [
+            {"role": "user", "content": "valid transcript"}
+        ]
+
 
 class TestTranscriptArchivedRecall:
     """Issue #5031: transcript store must recall compacted (archived) turns."""

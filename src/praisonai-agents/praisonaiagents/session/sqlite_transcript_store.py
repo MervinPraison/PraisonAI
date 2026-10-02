@@ -175,7 +175,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (OSError, json.JSONDecodeError, TypeError):
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
                 continue
             if not isinstance(data, dict):
                 continue
