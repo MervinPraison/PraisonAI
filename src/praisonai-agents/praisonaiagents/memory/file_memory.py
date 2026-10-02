@@ -24,6 +24,7 @@ import hashlib
 import logging
 from praisonaiagents._logging import get_logger
 import threading
+import weakref
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -37,6 +38,20 @@ else:
     _HAS_FCNTL = False
 
 logger = get_logger(__name__)
+
+_store_locks = weakref.WeakValueDictionary()
+_store_locks_guard = threading.Lock()
+
+
+def _shared_store_lock(path):
+    """Share in-process transactions for instances targeting the same store."""
+    key = os.path.normcase(str(path.resolve()))
+    with _store_locks_guard:
+        lock = _store_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _store_locks[key] = lock
+        return lock
 
 
 @dataclass
@@ -171,7 +186,7 @@ class FileMemory:
         self.config = self._load_config(config)
         
         # Initialize thread-safe memory stores with lock for in-memory data protection
-        self._lock = threading.RLock()  # Reentrant lock for nested operations
+        self._lock = _shared_store_lock(self.user_path)
         self._short_term: List[MemoryItem] = []
         self._long_term: List[MemoryItem] = []
         self._entities: Dict[str, EntityItem] = {}
@@ -1062,6 +1077,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             for i, item in enumerate(self._short_term):
                 if item.id == memory_id:
                     del self._short_term[i]
@@ -1513,6 +1532,10 @@ class FileMemory:
         """
         # Check length and gather content under lock
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             if len(self._short_term) <= max_items:
                 return ""  # No compression needed
             
