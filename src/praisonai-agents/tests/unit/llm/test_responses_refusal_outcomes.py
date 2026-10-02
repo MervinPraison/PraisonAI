@@ -133,3 +133,71 @@ async def test_following_normal_turn_clears_refusal(mode):
         answer = llm.get_response('question', **kwargs) if mode == 'sync' else await llm.get_response_async('question', **kwargs)
         assert answer == expected_text
         assert llm._last_stop_reason == expected_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['sync', 'async'])
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('shape', ['sdk', 'dict'])
+@pytest.mark.parametrize('final_profile', ['normal', 'refusal'])
+async def test_tool_continuation_uses_final_response_refusal(mode, stream, shape, final_profile, monkeypatch):
+    import litellm
+
+    llm = LLM(model='gpt-4o-mini')
+    tool = {'type': 'function_call', 'id': 'fc_test', 'call_id': 'call_test',
+            'name': 'lookup', 'arguments': '{}'}
+    tool_item = SimpleNamespace(**tool) if shape == 'sdk' else tool
+    first = output_response(shape, 'refusal')
+    first.output.append(tool_item)
+    final = output_response(shape, final_profile)
+    responses = iter([first, final])
+    requests = []
+    dispatched = []
+    monkeypatch.setattr('praisonaiagents.llm.llm.check_model_request', lambda *args: None)
+
+    def respond(**kwargs):
+        requests.append(kwargs)
+        return next(responses)
+
+    async def arespond(**kwargs):
+        return respond(**kwargs)
+
+    def events(**kwargs):
+        response = respond(**kwargs)
+        result = []
+        if response is first or final_profile == 'refusal':
+            result.append({'type': 'response.refusal.delta', 'delta': 'Cannot comply.'})
+        else:
+            result.append({'type': 'response.output_text.delta', 'delta': 'answer'})
+        if response is first:
+            result.append({'type': 'response.output_item.done', 'output_index': 1, 'item': tool_item})
+        result.append({'type': 'response.completed', 'response': response})
+        return [SimpleNamespace(**event) for event in result] if shape == 'sdk' else result
+
+    def stream_response(**kwargs):
+        return iter(events(**kwargs))
+
+    async def astream_response(**kwargs):
+        batch = events(**kwargs)
+
+        async def iterate():
+            for event in batch:
+                yield event
+
+        return iterate()
+
+    def execute(name, arguments, *args, **kwargs):
+        dispatched.append((name, arguments))
+        return 'lookup result'
+
+    llm._call_responses_api = respond
+    llm._call_responses_api_async = arespond
+    monkeypatch.setattr(litellm, 'responses', stream_response)
+    monkeypatch.setattr(litellm, 'aresponses', astream_response)
+    kwargs = dict(stream=stream, verbose=False, execute_tool_fn=execute)
+    answer = llm.get_response('question', **kwargs) if mode == 'sync' else await llm.get_response_async('question', **kwargs)
+    assert answer == ('answer' if final_profile == 'normal' else '')
+    assert dispatched == [('lookup', {})]
+    assert len(requests) == 2
+    assert any(item.get('type') == 'function_call_output' for item in requests[1]['input'])
+    assert llm._last_stop_reason == ('completed' if final_profile == 'normal' else 'refused')

@@ -3153,6 +3153,11 @@ Respond with ONLY a valid JSON tool call in this format:
                     # OpenAI models use the Responses API which returns text
                     # and tool calls as separate output items — no content:null.
                     if self._supports_responses_api():
+                        # A refusal belongs to one provider response. If that
+                        # response also requested tools, classify the follow-up
+                        # independently without clearing stronger loop outcomes.
+                        if iteration_count > 0 and self._last_stop_reason == "refused":
+                            self._last_stop_reason = "completed"
                         responses_params = self._build_responses_params(
                             messages=messages,
                             tools=formatted_tools,
@@ -5384,6 +5389,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # ── Responses API path (async) ──────────────────────────
                 if self._supports_responses_api():
+                    if iteration_count > 0 and self._last_stop_reason == "refused":
+                        self._last_stop_reason = "completed"
                     responses_params = self._build_responses_params(
                         messages=messages,
                         tools=formatted_tools,
