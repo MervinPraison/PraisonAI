@@ -131,6 +131,9 @@ class TestFileBackend:
         with pytest.raises(TypeError):
             backend.save("tuple_key", {("a", "b"): 1})
 
+        with pytest.raises((ValueError, TypeError)):
+            backend.save("good", circular)
+
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == []
         assert backend.load("good") == {"value": 1}
