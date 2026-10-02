@@ -111,8 +111,8 @@ def test_write_between_import_save_and_index_keeps_newer_content(make_store, mon
     resume = threading.Event()
     original = DefaultSessionStore._save_imported_session
 
-    def delayed_save(store, session):
-        result = original(store, session)
+    def delayed_save(store, session, **kwargs):
+        result = original(store, session, **kwargs)
         saved.set()
         assert resume.wait(5), "concurrent writer did not finish"
         return result

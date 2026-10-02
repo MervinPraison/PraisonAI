@@ -6,12 +6,14 @@ from threading import Event
 import pytest
 
 from praisonaiagents.session.store import DefaultSessionStore
+from praisonaiagents.session.sqlite_store import SqliteSessionStore
 
 
 @pytest.mark.parametrize("overwrite", [False, True])
-def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, overwrite):
+@pytest.mark.parametrize("kind", [DefaultSessionStore, SqliteSessionStore])
+def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, overwrite, kind):
     directory = str(tmp_path / "sessions")
-    importer = DefaultSessionStore(session_dir=directory)
+    importer = kind(session_dir=directory, **({"db_path": ":memory:"} if kind is SqliteSessionStore else {}))
     peer = DefaultSessionStore(session_dir=directory)
     ready, completed = Event(), Event()
     original = importer._save_imported_session
@@ -50,3 +52,5 @@ def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch
             "session_id": "shared", "reason": "already exists (use overwrite)",
         }]
         assert fresh.get_chat_history("shared") == [{"role": "user", "content": "peer-created"}]
+    if kind is SqliteSessionStore and importer._conn is not None:
+        importer._conn.close()
