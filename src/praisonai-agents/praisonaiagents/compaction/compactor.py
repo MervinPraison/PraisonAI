@@ -337,19 +337,28 @@ class ContextCompactor:
             compacted = self._prune(processed_messages)
         elif self.strategy == CompactionStrategy.LLM_SUMMARIZE:
             if self.llm_summarize_fn:
-                # For sync calls with LLM function, we need to run async
-                try:
-                    # Check if we're already in an async context
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # If in async context, fallback to naive summarization
-                        compacted = self._summarize(processed_messages)
-                    except RuntimeError:
-                        # No running loop, safe to create one
-                        compacted = asyncio.run(self._llm_summarize_async(processed_messages, focus_topic))
-                except Exception:
-                    # Fallback to naive summarization if async fails
+                # For sync calls with an LLM function we must drive the async
+                # summarizer. Inside a running loop we deliberately fall back to
+                # naive summarization rather than block the loop on a nested run;
+                # outside one we route through the shared bridge so contextvars
+                # propagate and errors surface unchanged.
+                from ..utils.async_bridge import is_async_context
+
+                if is_async_context():
                     compacted = self._summarize(processed_messages)
+                else:
+                    try:
+                        from ..utils.async_bridge import (
+                            run_coroutine_from_any_context,
+                        )
+
+                        compacted = run_coroutine_from_any_context(
+                            self._llm_summarize_async(processed_messages, focus_topic),
+                            timeout=None,
+                        )
+                    except Exception:
+                        # Fallback to naive summarization if async fails
+                        compacted = self._summarize(processed_messages)
             else:
                 compacted = self._llm_summarize(processed_messages, focus_topic)
         else:

@@ -544,12 +544,12 @@ Respond with ONLY a valid JSON tool call in this format:
         # task from one truncated by the step budget (see ExecutionConfig.max_steps).
         self._last_stop_reason = "completed"
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
-        self.chat_history = []
         # Optional Agent-supplied thread-safe append for deferred re-injection.
-        # When an Agent owns this LLM it wires its own history append here so a
-        # background-resolved defer(...) result lands on the list follow-up
-        # turns actually replay (the LLM's own chat_history has no readers in
-        # that case). Left None for standalone LLM usage.
+        # When an Agent owns this LLM it wires its own locked, bounded history
+        # append here so a background-resolved defer(...) result replays on a
+        # follow-up turn. The LLM layer itself is stateless w.r.t. conversation
+        # history (it has no readers of its own list), so no list is kept here.
+        # Left None for standalone LLM usage.
         self._agent_history_append = None
         self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
@@ -2491,11 +2491,10 @@ Respond with ONLY a valid JSON tool call in this format:
             def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
                 # Best-effort: this closure is invoked from a background worker
                 # thread. When driven by an Agent, follow-up turns replay the
-                # Agent's own history (passed as a parameter into
-                # _build_messages), not this LLM's ``chat_history`` — so we
-                # append via the Agent's thread-safe callback when one has been
-                # wired, and fall back to the LLM's own list only for standalone
-                # LLM usage.
+                # Agent's own locked, bounded history (passed as a parameter into
+                # _build_messages) via the thread-safe callback wired here. For
+                # standalone LLM usage no history is kept, so this is a no-op —
+                # the LLM layer is stateless w.r.t. conversation history.
                 message = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -2504,8 +2503,6 @@ Respond with ONLY a valid JSON tool call in this format:
                 history_append = getattr(self, "_agent_history_append", None)
                 if history_append is not None:
                     history_append(message)
-                else:
-                    self.chat_history.append(message)
 
             # Atomic: only register when not already pending, so a gateway that
             # registered its own resolver for this handle first is never
@@ -4401,9 +4398,6 @@ Respond with ONLY a valid JSON tool call in this format:
             
             # Handle output formatting
             if output_json or output_pydantic:
-                self.chat_history.append({"role": "user", "content": original_prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
-                
                 if verbose and not interaction_displayed:
                     _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
@@ -6155,8 +6149,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # Handle output formatting
             if output_json or output_pydantic:
-                self.chat_history.append({"role": "user", "content": original_prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
                 if verbose and not interaction_displayed:
                     _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
