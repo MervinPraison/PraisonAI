@@ -404,10 +404,10 @@ class SqliteSessionStore(DefaultSessionStore):
         return ok
 
     def _invalidate_import_index(self, session: SessionData) -> None:
-        """Clear a failed import's index only while its file generation is current."""
+        """Clear a failed import index unless it matches the current transcript."""
         identity = getattr(session, "_import_file_identity", None)
         conn = self._connect()
-        if identity is None or conn is None:
+        if conn is None:
             return
         try:
             with self._db_lock:
@@ -416,8 +416,21 @@ class SqliteSessionStore(DefaultSessionStore):
                 # a peer already indexed has a different atomic file identity.
                 conn.execute("BEGIN IMMEDIATE")
                 try:
-                    if self._session_file_identity(self._get_session_path(session.session_id)) == identity:
+                    filepath = self._get_session_path(session.session_id)
+                    current_identity = self._session_file_identity(filepath)
+                    expected = None
+                    if identity is not None and current_identity == identity:
                         expected = getattr(session, "_import_index_session", session)
+                    elif current_identity is not None:
+                        # A JSON-only peer may replace the file without updating
+                        # SQLite. Read without FileLock while holding the DB
+                        # transaction; never quarantine or mutate that file.
+                        import json
+                        with open(filepath, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                        if self._session_file_identity(filepath) == current_identity:
+                            expected = SessionData.from_dict(data)
+                    if expected is not None:
                         sid = session.session_id
                         content = conn.execute("SELECT content FROM session_fts WHERE session_id = ?", (sid,)).fetchall()
                         metadata = conn.execute("SELECT updated_at FROM session_meta WHERE session_id = ?", (sid,)).fetchall()
@@ -436,8 +449,9 @@ class SqliteSessionStore(DefaultSessionStore):
                             and routes == expected_routes
                         )
                         if not current:
-                            for table in ("session_fts", "session_meta", "session_route"):
-                                conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (sid,))
+                            conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
+                            conn.execute("DELETE FROM session_meta WHERE session_id = ?", (sid,))
+                            conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
                     conn.execute("COMMIT")
                 except BaseException:
                     conn.execute("ROLLBACK")

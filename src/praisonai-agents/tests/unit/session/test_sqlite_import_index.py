@@ -346,3 +346,42 @@ def test_failed_refresh_keeps_peer_index_of_same_file_generation(make_store, mon
     finally:
         if peer._conn is not None:
             peer._conn.close()
+
+
+@pytest.mark.parametrize("peer_kind", [DefaultSessionStore, SqliteSessionStore])
+def test_failed_refresh_compares_index_to_replacement_peer_file(make_store, monkeypatch, peer_kind):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "imported pelican")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old otter")
+    assert destination.set_gateway_info("session", gateway_session_id="old-route", agent_id="old-agent")
+    kwargs = {"db_path": destination.db_path} if peer_kind is SqliteSessionStore else {}
+    peer = peer_kind(session_dir=destination.session_dir, **kwargs)
+    invalidate = destination._invalidate_import_index
+
+    def unavailable(*args):
+        raise OSError("post-import read unavailable")
+
+    def replace_then_invalidate(session):
+        # The failed refresh has released FileLock. A JSON-only peer cannot
+        # refresh SQLite, whereas an indexed peer can publish a correct view.
+        assert peer.set_chat_history("session", [{"role": "user", "content": "newer narwhal"}])
+        assert peer.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+        invalidate(session)
+
+    monkeypatch.setattr(destination, "_load_session_from_disk", unavailable)
+    monkeypatch.setattr(destination, "_invalidate_import_index", replace_then_invalidate)
+    try:
+        assert destination.import_sessions(source.export_all(), overwrite=True).imported == 1
+        conn = destination._connect()
+        if peer_kind is DefaultSessionStore:
+            for table in ("session_fts", "session_meta", "session_route"):
+                assert conn.execute(f"SELECT session_id FROM {table} WHERE session_id = ?", ("session",)).fetchall() == []
+        else:
+            assert conn.execute("SELECT content FROM session_fts WHERE session_id = ?", ("session",)).fetchall() == [("newer narwhal",)]
+            assert conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", ("session",)).fetchall() == [("new-route", "new-agent")]
+        assert DefaultSessionStore(session_dir=destination.session_dir).get_chat_history("session") == [{"role": "user", "content": "newer narwhal"}]
+    finally:
+        conn = getattr(peer, "_conn", None)
+        if conn is not None:
+            conn.close()
