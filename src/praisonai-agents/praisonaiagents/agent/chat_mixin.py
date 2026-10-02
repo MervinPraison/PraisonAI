@@ -12,7 +12,7 @@ import time
 import json
 import logging
 from praisonaiagents._logging import get_logger
-from ..errors import BudgetExceededError, ToolExecutionError
+from ..errors import BudgetExceededError, ToolExecutionError, ValidationError
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -3093,7 +3093,7 @@ Your Goal: {self.goal}"""
             )
         return rendered
 
-    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Union[str, Any, None]:
         """
         Chat with the agent.
         
@@ -3562,22 +3562,25 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=processed_history)
-                        # Execute callback and display after validation
-                        self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                        return self._trigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
-                except ToolExecutionError:
+                    # Parse into the requested structured model (fails loud on bad content)
+                    if output_json or output_pydantic:
+                        validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                    # Execute callback and display after validation
+                    self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                    return self._trigger_after_agent_hook(prompt, validated_response, start_time)
+                except (ToolExecutionError, ValidationError):
                     raise
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     return None
-            except ToolExecutionError:
+            except (ToolExecutionError, ValidationError):
                 raise
             except Exception as e:
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
@@ -3685,7 +3688,7 @@ Your Goal: {self.goal}"""
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
+                            # Add to chat history and return parsed structured output
                             # User message already added before LLM call via _build_messages
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
                             # Persist assistant message to DB
@@ -3693,14 +3696,16 @@ Your Goal: {self.goal}"""
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
-                                # Execute callback after validation
-                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return None
+                            # Parse into the requested structured model (fails loud on bad content)
+                            validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                            # Execute callback after validation
+                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                            return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
@@ -3857,7 +3862,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
-            except ToolExecutionError:
+            except (ToolExecutionError, ValidationError):
                 raise
             except Exception as e:
                 # Catch any exceptions that escape the while loop
@@ -3875,6 +3880,60 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         from ..main import clean_triple_backticks
 
         return clean_triple_backticks(output)
+
+    def _coerce_structured_output(self, response_text, output_json=None, output_pydantic=None):
+        """Parse an LLM string response into the requested structured model.
+
+        Returns a validated ``output_pydantic`` instance (or a parsed dict when
+        only ``output_json`` was requested). Raises ``ValueError`` when the
+        content cannot be parsed so the SDK fails loud instead of silently
+        returning prose for a typed request. If no schema was requested the
+        original ``response_text`` is returned unchanged.
+        """
+        schema_model = output_pydantic or output_json
+        if not schema_model or not isinstance(response_text, str):
+            return response_text
+
+        cleaned = response_text
+        try:
+            cleaned = self.clean_json_output(response_text)
+        except Exception:
+            cleaned = response_text
+
+        if output_pydantic and hasattr(output_pydantic, "model_validate_json"):
+            try:
+                return output_pydantic.model_validate_json(response_text)
+            except Exception:
+                try:
+                    return output_pydantic.model_validate_json(cleaned)
+                except Exception:
+                    pass
+
+        try:
+            parsed = json.loads(cleaned)
+        except Exception as exc:
+            schema_name = getattr(schema_model, "__name__", str(schema_model))
+            raise ValidationError(
+                f"Agent {self.name}: structured output ({schema_name}) was requested "
+                f"but the model returned unparseable content: {response_text[:200]!r}",
+                agent_id=self.name,
+            ) from exc
+
+        if output_pydantic:
+            try:
+                if hasattr(output_pydantic, "model_validate"):
+                    return output_pydantic.model_validate(parsed)
+                return output_pydantic(**parsed)
+            except Exception as exc:
+                schema_name = getattr(output_pydantic, "__name__", str(output_pydantic))
+                raise ValidationError(
+                    f"Agent {self.name}: structured output ({schema_name}) was requested "
+                    f"but the model returned content that failed validation: "
+                    f"{response_text[:200]!r}",
+                    agent_id=self.name,
+                ) from exc
+
+        return parsed
 
     async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
         """Async version of chat method with self-reflection support.
@@ -4228,15 +4287,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
-                        # Execute callback after validation
-                        self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                        return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
-                except ToolExecutionError:
+                    # Parse into the requested structured model (fails loud on bad content)
+                    if output_json or output_pydantic:
+                        validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                    # Execute callback after validation
+                    self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                    return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
+                except (ToolExecutionError, ValidationError):
                     raise
                 except Exception as e:
                     # Rollback chat history if LLM call fails
@@ -4363,7 +4425,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
+                            # Add to chat history and return parsed structured output
                             # User message already added before LLM call via _build_messages
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
                             # Persist assistant message to DB (offloaded to a
@@ -4373,14 +4435,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
-                                # Execute callback after validation
-                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return None
+                            # Parse into the requested structured model (fails loud on bad content)
+                            validated_response = self._coerce_structured_output(validated_response, output_json, output_pydantic)
+                            # Execute callback after validation
+                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
@@ -4723,7 +4787,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
                             return None
-                except ToolExecutionError:
+                except (ToolExecutionError, ValidationError):
                     raise
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
@@ -4735,7 +4799,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # and achat()'s own guardrail handler).
                     self._rollback_chat_history_to(chat_history_length)
                     return None
-        except ToolExecutionError:
+        except (ToolExecutionError, ValidationError):
             raise
         except Exception as e:
             _get_display_functions()['display_error'](f"Error in achat: {e}")
