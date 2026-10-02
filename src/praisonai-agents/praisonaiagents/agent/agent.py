@@ -7126,6 +7126,21 @@ Answer:"""
         """The most recent rejection message a guardrail sent back to the model."""
         return getattr(self, "_last_guardrail_error", None)
 
+    def _guardrail_blocked_message(self, error=None):
+        """Safe, user-facing string returned when output guardrail blocks a run.
+
+        A blocked response must never surface the rejected (potentially unsafe)
+        model text, but it must also never be ``None`` - callers expect a
+        ``str`` and would otherwise crash on ``.strip()`` (issue #5596). The
+        guardrail's own reason is appended when available so the block stays
+        auditable.
+        """
+        reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
+        message = "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
+        if reason:
+            message = f"{message} Reason: {reason}"
+        return message
+
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.
         

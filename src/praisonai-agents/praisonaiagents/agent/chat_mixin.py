@@ -3569,7 +3569,7 @@ Your Goal: {self.goal}"""
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
-                        return None
+                        return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:
@@ -3700,7 +3700,7 @@ Your Goal: {self.goal}"""
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
@@ -3721,7 +3721,7 @@ Your Goal: {self.goal}"""
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
@@ -3732,7 +3732,7 @@ Your Goal: {self.goal}"""
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
@@ -3800,7 +3800,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     self._end_run(None, "error", {"error": str(e)})
-                                    return None
+                                    return self._guardrail_blocked_message(e)
 
                             # Check if we've hit max reflections
                             if reflection_count >= self.max_reflect - 1:
@@ -3818,7 +3818,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             
                             # If not satisfactory and not at max reflections, continue with regeneration
                             logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
@@ -4235,7 +4235,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
-                        return None
+                        return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:
@@ -4380,7 +4380,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
@@ -4403,7 +4403,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             else:
                                 # Apply guardrail to regular response content
                                 try:
@@ -4415,7 +4415,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                         
                         # If self-reflection is enabled, implement reflection logic
                         if self.self_reflect:
@@ -4455,7 +4455,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     _areflection_kwargs = {}
                                     if temperature is not None:
@@ -4489,7 +4489,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     # Check if we've hit max reflections
                                     if reflection_count >= self.max_reflect - 1:
@@ -4508,7 +4508,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     # Regenerate response based on reflection
                                     regenerate_messages = reflection_messages + [
@@ -4558,7 +4558,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     continue
                         
                         # This should never be reached due to the returns above
@@ -4722,7 +4722,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
-                            return None
+                            return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:
