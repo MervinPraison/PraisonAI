@@ -82,10 +82,22 @@ class ToolCancelledError(Exception):
     """Raised when a tool call is aborted via the cancel token."""
 
 
-# Upper bound on concurrently-orphaned (timed-out) tool workers. Each slot is
-# held until its worker thread actually exits, so a genuinely hung tool keeps
-# one slot occupied; once the cap is reached we fail fast instead of spawning
-# unbounded threads that would otherwise accumulate on a long-running server.
+class ToolCapacityError(Exception):
+    """Raised when too many tool workers are already orphaned (timed out).
+
+    This is distinct from :class:`ToolTimeoutError`: the new call never ran
+    because the process is already saturated with abandoned workers, rather than
+    the tool itself exceeding its deadline. Surfacing it separately lets the
+    model and operators distinguish worker exhaustion from a genuinely slow tool.
+    """
+
+
+# Upper bound on concurrently-orphaned (timed-out) tool workers — i.e. workers
+# whose tool blew past its deadline and is still running after we abandoned it.
+# A healthy call that finishes within its timeout never counts against this cap;
+# only a worker that is still alive at expiry holds a slot, and it is released
+# the moment that worker finally exits. This bounds the accumulation of hung
+# threads on a long-running server without penalising concurrent healthy calls.
 _TIMEOUT_POOL_MAX = 32
 _timeout_slots = threading.BoundedSemaphore(_TIMEOUT_POOL_MAX)
 
@@ -95,17 +107,25 @@ def _run_with_timeout(fn: Callable[[], Any], timeout_s: float) -> Any:
 
     Unlike a ``ThreadPoolExecutor`` (whose workers are non-daemon and are joined
     at interpreter exit), this uses a daemon thread so a hung tool never blocks
-    process exit. A bounded semaphore caps the number of simultaneously
-    orphaned workers; the slot is released only when the worker truly exits, so
-    the cap reflects genuinely live threads and we refuse to start another once
-    saturated.
+    process exit.
+
+    Concurrency is *not* capped for healthy calls: any number of timed tools may
+    run at once as long as they finish within their deadline. The bounded
+    semaphore only caps workers that have been *abandoned* — i.e. are still
+    running past the timeout. A slot is charged lazily at expiry (not up front),
+    and only when the worker is still alive; it is released when that worker
+    finally exits. If the orphaned-worker cap is already saturated we raise
+    :class:`ToolCapacityError` so the caller can report exhaustion distinctly
+    from a per-tool timeout.
     """
-    if not _timeout_slots.acquire(blocking=False):
-        raise ToolTimeoutError(
-            "too many hung tool workers; refusing to start another"
-        )
     box: Dict[str, Any] = {}
     done = threading.Event()
+    # ``state`` transitions exactly once, under ``lock``, to either "completed"
+    # (worker finished first) or "charged" (timeout path claimed an orphan slot).
+    # Whichever side wins the transition owns releasing any slot, so a slot is
+    # never double-released nor leaked when the worker and the deadline race.
+    lock = threading.Lock()
+    state = {"value": None}
 
     def _target() -> None:
         try:
@@ -113,12 +133,36 @@ def _run_with_timeout(fn: Callable[[], Any], timeout_s: float) -> Any:
         except BaseException as e:  # noqa: BLE001 — propagated to caller below
             box["error"] = e
         finally:
-            done.set()
+            with lock:
+                if state["value"] is None:
+                    state["value"] = "completed"
+                    done.set()
+                    return
+                # Timeout path already charged an orphan slot for this worker;
+                # release it now that the worker has finally exited.
+                done.set()
             _timeout_slots.release()
 
     threading.Thread(target=_target, daemon=True, name="tool-timeout").start()
     if not done.wait(timeout_s):
-        raise ToolTimeoutError("tool timed out")
+        # Deadline elapsed. Decide, under the lock, whether the worker is still
+        # running (abandon it, charging an orphan slot) or has just finished.
+        with lock:
+            if state["value"] is None:
+                # Worker still running: charge an orphan slot. If the pool is
+                # saturated with hung workers, surface capacity exhaustion as a
+                # distinct error rather than abandoning yet another thread.
+                if not _timeout_slots.acquire(blocking=False):
+                    raise ToolCapacityError(
+                        "too many hung tool workers; refusing to abandon another"
+                    )
+                state["value"] = "charged"
+                timed_out = True
+            else:
+                # Worker finished in the tiny window after wait() returned.
+                timed_out = False
+        if timed_out:
+            raise ToolTimeoutError("tool timed out")
     if "error" in box:
         raise box["error"]
     return box["result"]
@@ -312,6 +356,22 @@ def run_single_tool_call(
         return _run_with_timeout(
             lambda: worker(tool_call, execute_tool_fn, on_progress),
             timeout_s,
+        )
+    except ToolCapacityError as cap_err:
+        # Distinct from a timeout: the tool never ran because the process is
+        # already saturated with abandoned (hung) workers. Report it separately
+        # so the model/operator can tell exhaustion from a slow tool.
+        logger.error(
+            f"Tool '{tool_call.function_name}' refused: {cap_err}"
+        )
+        return ToolResult(
+            function_name=tool_call.function_name,
+            arguments=tool_call.arguments,
+            result={"error": "capacity", "tool": tool_call.function_name},
+            tool_call_id=tool_call.tool_call_id,
+            is_ollama=tool_call.is_ollama,
+            error=cap_err,
+            error_kind="capacity",
         )
     except ToolTimeoutError:
         logger.error(
