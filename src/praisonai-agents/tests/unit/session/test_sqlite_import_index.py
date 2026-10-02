@@ -2,6 +2,7 @@
 
 import pytest
 import threading
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
@@ -195,7 +196,8 @@ def test_post_import_read_failure_does_not_restore_old_routes(make_store, monkey
 
 
 @pytest.mark.parametrize("existing_index", [False, True])
-def test_failed_import_refresh_preserves_new_peer_index(make_store, monkeypatch, existing_index):
+@pytest.mark.parametrize("stat_failure", [False, True])
+def test_failed_import_refresh_preserves_new_peer_index(make_store, monkeypatch, existing_index, stat_failure):
     source = make_store(DefaultSessionStore)
     assert source.add_message("session", "user", "imported pelican")
     destination = make_store(SqliteSessionStore)
@@ -204,11 +206,19 @@ def test_failed_import_refresh_preserves_new_peer_index(make_store, monkeypatch,
     destination.search("pelican")
     peer = SqliteSessionStore(session_dir=destination.session_dir, db_path=destination.db_path)
     original = DefaultSessionStore._save_imported_session
+    original_stat = os.stat
+
+    def unavailable_stat(path, *args, **kwargs):
+        if os.fspath(path) == destination._get_session_path("session"):
+            raise OSError("path stat temporarily unavailable")
+        return original_stat(path, *args, **kwargs)
 
     def save_then_peer_write(store, session, **kwargs):
         saved = original(store, session, **kwargs)
         assert peer.set_chat_history("session", [{"role": "user", "content": "newer narwhal"}])
         assert peer.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+        if stat_failure:
+            monkeypatch.setattr(os, "stat", unavailable_stat)
         return saved
 
     def unavailable(*args):
@@ -259,3 +269,32 @@ def test_post_import_sql_failure_invalidates_all_old_index_views(make_store, mon
     conn.execute("DROP TRIGGER fail_import_metadata")
     assert destination.add_message("session", "user", "recovered update")
     assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
+
+
+def test_failed_path_stat_does_not_preserve_stale_import_routes(make_store, monkeypatch):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "new imported content")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old indexed content")
+    assert destination.set_gateway_info("session", gateway_session_id="old-route", agent_id="old-agent")
+    assert destination.search("old")
+    filepath = destination._get_session_path("session")
+    original_stat = os.stat
+
+    def unavailable_stat(path, *args, **kwargs):
+        if os.fspath(path) == filepath:
+            raise OSError("path stat temporarily unavailable")
+        return original_stat(path, *args, **kwargs)
+
+    def unavailable_read(*args):
+        raise OSError("post-import read temporarily unavailable")
+
+    with monkeypatch.context() as failures:
+        failures.setattr(os, "stat", unavailable_stat)
+        failures.setattr(destination, "_load_session_from_disk", unavailable_read)
+        report = destination.import_sessions(source.export_all(), overwrite=True)
+        assert report.imported == 1
+        assert report.skipped == []
+        for table in ("session_fts", "session_meta", "session_route"):
+            assert destination._conn.execute(f"SELECT session_id FROM {table} WHERE session_id = ?", ("session",)).fetchall() == []
+    assert destination.get_session("session").messages[0].content == "new imported content"

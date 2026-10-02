@@ -2357,9 +2357,15 @@ class DefaultSessionStore:
         """Identify an atomic file generation without depending on wall-clock ordering."""
         try:
             stat = os.stat(filepath)
-            return stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size
         except OSError:
-            return None
+            # A path metadata failure need not make the atomic generation
+            # unknowable: an opened descriptor can still identify that file.
+            try:
+                with open(filepath, "rb") as current:
+                    stat = os.fstat(current.fileno())
+            except OSError:
+                return None
+        return stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size
 
     def import_sessions(
         self,
