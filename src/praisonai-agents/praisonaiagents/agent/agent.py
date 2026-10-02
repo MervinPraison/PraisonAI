@@ -7,10 +7,7 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import contextlib
 import threading
-import concurrent.futures
-import random
-import re
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable
 from collections import OrderedDict
 import inspect
 
@@ -7125,6 +7122,25 @@ Answer:"""
     def last_guardrail_error(self):
         """The most recent rejection message a guardrail sent back to the model."""
         return getattr(self, "_last_guardrail_error", None)
+
+    def _guardrail_blocked_message(self, error=None):
+        """Fixed, user-facing string returned when an output guardrail blocks a run.
+
+        A blocked response must never surface the rejected (potentially unsafe)
+        model text, but it must also never be ``None`` - callers expect a
+        ``str`` and would otherwise crash on ``.strip()`` (issue #5596, FR-001).
+
+        The returned string is intentionally **fixed** and carries no diagnostic
+        detail: a guardrail's own rejection reason (especially an LLM validator's
+        free-text) can echo the blocked output, so appending it would leak the
+        very content the guardrail rejected. The reason is logged instead, where
+        it stays auditable without reaching the caller. The rejection is also
+        exposed programmatically via :attr:`last_guardrail_error`.
+        """
+        reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
+        if reason:
+            logging.info(f"Agent {self.name}: guardrail block reason: {reason}")
+        return "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
 
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.

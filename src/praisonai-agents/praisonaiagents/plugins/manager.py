@@ -1361,3 +1361,15 @@ def get_plugin_manager() -> PluginManager:
     if _default_manager is None:
         _default_manager = PluginManager()
     return _default_manager
+
+
+def has_registered_plugins() -> bool:
+    """Return whether the global manager has any plugins registered.
+
+    Cheap, allocation-free fast path for the hot Agent-init merge calls: when
+    the singleton has not been created or holds no plugins (the common case),
+    callers can skip constructing/scanning the manager entirely. Does NOT
+    create the singleton as a side effect.
+    """
+    manager = _default_manager
+    return manager is not None and bool(manager._plugins)
