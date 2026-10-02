@@ -220,7 +220,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.table_name} (
+            CREATE TABLE IF NOT EXISTS "{self.table_name}" (
                 key TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 created_at REAL DEFAULT (strftime('%s', 'now')),
@@ -230,8 +230,8 @@ class SQLiteBackend:
         
         # Index for prefix queries
         cur.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_key 
-            ON {self.table_name}(key)
+            CREATE INDEX IF NOT EXISTS "idx_{self.table_name}_key"
+            ON "{self.table_name}"(key)
         """)
         
         conn.commit()
@@ -244,7 +244,7 @@ class SQLiteBackend:
         json_data = json.dumps(data, default=str, ensure_ascii=False)
         
         cur.execute(f"""
-            INSERT INTO {self.table_name} (key, data, updated_at)
+            INSERT INTO "{self.table_name}" (key, data, updated_at)
             VALUES (?, ?, strftime('%s', 'now'))
             ON CONFLICT(key) DO UPDATE SET
                 data = excluded.data,
@@ -259,7 +259,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT data FROM {self.table_name} WHERE key = ?
+            SELECT data FROM "{self.table_name}" WHERE key = ?
         """, (key,))
         
         row = cur.fetchone()
@@ -276,7 +276,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            DELETE FROM {self.table_name} WHERE key = ?
+            DELETE FROM "{self.table_name}" WHERE key = ?
         """, (key,))
         
         deleted = cur.rowcount > 0
@@ -290,13 +290,13 @@ class SQLiteBackend:
         
         if prefix:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM "{self.table_name}"
                 WHERE key LIKE ?
                 ORDER BY key
             """, (f"{prefix}%",))
         else:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM "{self.table_name}"
                 ORDER BY key
             """)
         
@@ -308,7 +308,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT 1 FROM {self.table_name} WHERE key = ? LIMIT 1
+            SELECT 1 FROM "{self.table_name}" WHERE key = ? LIMIT 1
         """, (key,))
         
         return cur.fetchone() is not None
@@ -318,10 +318,10 @@ class SQLiteBackend:
         conn = self._get_conn()
         cur = conn.cursor()
         
-        cur.execute(f"SELECT COUNT(*) as count FROM {self.table_name}")
+        cur.execute(f'SELECT COUNT(*) as count FROM "{self.table_name}"')
         count = cur.fetchone()["count"]
         
-        cur.execute(f"DELETE FROM {self.table_name}")
+        cur.execute(f'DELETE FROM "{self.table_name}"')
         conn.commit()
         
         return count
