@@ -4342,6 +4342,7 @@ CONCISE SUMMARY:"""
             
             # Load tools from the recipe's tools.py if present (opt-in only)
             tool_registry = {}
+            tools_snapshot = None
             tools_py = recipe_path / "tools.py"
             if tools_py.exists():
                 try:
@@ -4356,7 +4357,10 @@ CONCISE SUMMARY:"""
                         import importlib.util
                         spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
                         recipe_module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(recipe_module)
+                        # Execute and cache the same source snapshot, bypassing stale pyc files.
+                        tools_content = tools_py.read_bytes()
+                        exec(compile(tools_content, str(tools_py), "exec"), recipe_module.__dict__)
+                        tools_snapshot = (str(tools_py.resolve()), tools_content)
                     else:
                         logger.warning(
                             "Skipping included recipe tools.py: set PRAISONAI_ALLOW_LOCAL_TOOLS "
@@ -4402,7 +4406,7 @@ CONCISE SUMMARY:"""
                 from .step_cache import _ScopedStepCache
                 included_workflow._step_cache = _ScopedStepCache(
                     parent_cache,
-                    f"{recipe_yaml.resolve()}:{recipe_content}"
+                    f"{recipe_yaml.resolve()}:{recipe_content}:{tools_snapshot!r}"
                 )
             
             # Merge parent variables into included workflow

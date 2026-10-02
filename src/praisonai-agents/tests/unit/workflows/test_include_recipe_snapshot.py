@@ -66,3 +66,32 @@ def test_include_preserves_parser_default_codec_with_cache(tmp_path, monkeypatch
     assert flow.run("same", verbose=False)["output"] == "café"
     assert flow.run("same", verbose=False)["output"] == "café"
     assert calls == (["café"] if cache else ["café", "café"])
+
+
+def test_tool_edit_invalidates_include_cache_without_yaml_edit(tmp_path, monkeypatch):
+    import os
+
+    definition = tmp_path / "workflow.yaml"
+    definition.write_text(_definition("produce"), encoding="utf-8")
+    tools = tmp_path / "tools.py"
+    tools.write_text("def produce(ctx):\n    return \"old\"\n", encoding="utf-8")
+    before = tools.stat()
+    original = YAMLWorkflowParser.parse_string
+    calls = []
+
+    def parse_string(parser, text, *args, **kwargs):
+        flow = original(parser, text, *args, **kwargs)
+        tool = parser.tool_registry["produce"]
+        flow.steps[0].handler = lambda ctx: calls.append(tool(ctx)) or calls[-1]
+        return flow
+
+    monkeypatch.setattr(YAMLWorkflowParser, "parse_string", parse_string)
+    monkeypatch.setitem(sys.modules, "agent_recipes", None)
+    monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+    flow = AgentFlow(steps=[Parallel(steps=[Include(recipe=str(tmp_path))])], cache=True)
+    assert flow.run("same", verbose=False)["output"] == "old"
+    tools.write_text("def produce(ctx):\n    return \"new\"\n", encoding="utf-8")
+    os.utime(tools, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert flow.run("same", verbose=False)["output"] == "new"
+    assert flow.run("same", verbose=False)["output"] == "new"
+    assert calls == ["old", "new"]
