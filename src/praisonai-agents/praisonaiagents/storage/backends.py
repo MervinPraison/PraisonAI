@@ -191,6 +191,10 @@ class SQLiteBackend:
         if not isinstance(table_name, str) or not _re.match(r'^[a-zA-Z0-9_]+$', table_name):
             raise ValueError("table_name must contain only alphanumeric characters and underscores")
         self.table_name = table_name
+        # Quote identifiers so validated names that are SQL keywords or start
+        # with a digit (e.g. "select", "9table") are valid in all statements.
+        self._quoted_table = f'"{table_name}"'
+        self._quoted_index = f'"idx_{table_name}_key"'
         self._local = threading.local()
         
         # Ensure directory exists
@@ -220,7 +224,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.table_name} (
+            CREATE TABLE IF NOT EXISTS {self._quoted_table} (
                 key TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 created_at REAL DEFAULT (strftime('%s', 'now')),
@@ -230,8 +234,8 @@ class SQLiteBackend:
         
         # Index for prefix queries
         cur.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_key 
-            ON {self.table_name}(key)
+            CREATE INDEX IF NOT EXISTS {self._quoted_index} 
+            ON {self._quoted_table}(key)
         """)
         
         conn.commit()
@@ -244,7 +248,7 @@ class SQLiteBackend:
         json_data = json.dumps(data, default=str, ensure_ascii=False)
         
         cur.execute(f"""
-            INSERT INTO {self.table_name} (key, data, updated_at)
+            INSERT INTO {self._quoted_table} (key, data, updated_at)
             VALUES (?, ?, strftime('%s', 'now'))
             ON CONFLICT(key) DO UPDATE SET
                 data = excluded.data,
@@ -259,7 +263,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT data FROM {self.table_name} WHERE key = ?
+            SELECT data FROM {self._quoted_table} WHERE key = ?
         """, (key,))
         
         row = cur.fetchone()
@@ -276,7 +280,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            DELETE FROM {self.table_name} WHERE key = ?
+            DELETE FROM {self._quoted_table} WHERE key = ?
         """, (key,))
         
         deleted = cur.rowcount > 0
@@ -290,13 +294,13 @@ class SQLiteBackend:
         
         if prefix:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM {self._quoted_table}
                 WHERE key LIKE ?
                 ORDER BY key
             """, (f"{prefix}%",))
         else:
             cur.execute(f"""
-                SELECT key FROM {self.table_name}
+                SELECT key FROM {self._quoted_table}
                 ORDER BY key
             """)
         
@@ -308,7 +312,7 @@ class SQLiteBackend:
         cur = conn.cursor()
         
         cur.execute(f"""
-            SELECT 1 FROM {self.table_name} WHERE key = ? LIMIT 1
+            SELECT 1 FROM {self._quoted_table} WHERE key = ? LIMIT 1
         """, (key,))
         
         return cur.fetchone() is not None
@@ -318,10 +322,10 @@ class SQLiteBackend:
         conn = self._get_conn()
         cur = conn.cursor()
         
-        cur.execute(f"SELECT COUNT(*) as count FROM {self.table_name}")
+        cur.execute(f"SELECT COUNT(*) as count FROM {self._quoted_table}")
         count = cur.fetchone()["count"]
         
-        cur.execute(f"DELETE FROM {self.table_name}")
+        cur.execute(f"DELETE FROM {self._quoted_table}")
         conn.commit()
         
         return count
