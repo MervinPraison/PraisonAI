@@ -129,6 +129,13 @@ def test_write_between_import_save_and_index_keeps_newer_content(make_store, mon
             finally:
                 resume.set()
             assert importing.result(timeout=5).imported == 1
+        assert destination._cache["session"].messages[0].content == "narwhal newer turn"
+        with monkeypatch.context() as fallback:
+            def unavailable(*args):
+                raise OSError("temporary read failure")
+
+            fallback.setattr(destination, "_load_session_from_disk", unavailable)
+            assert destination._read_session_fresh("session").messages[0].content == "narwhal newer turn"
         destination.invalidate_cache()
         assert destination.get_session("session").messages[0].content == "narwhal newer turn"
         assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]

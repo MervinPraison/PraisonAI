@@ -2345,6 +2345,10 @@ class DefaultSessionStore:
             if not self._atomic_write_json(filepath, session.to_dict()):
                 logger.error(f"Failed to save imported session {session.session_id}")
                 return False
+            # Persistence hooks own their cache value; a subclass may refresh
+            # it from a newer durable generation before returning to import.
+            with self._lock:
+                self._cache[session.session_id] = session
             return True
 
     def import_sessions(
@@ -2446,8 +2450,6 @@ class DefaultSessionStore:
                         {"session_id": session_id, "reason": "write failed"}
                     )
                     continue
-                with self._lock:
-                    self._cache[session_id] = session
                 report.imported += 1
             except FileExistsError:
                 report.skipped.append(
