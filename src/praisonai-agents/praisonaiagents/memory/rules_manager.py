@@ -613,7 +613,7 @@ class RulesManager:
     def get_rule_by_name(self, name: str) -> Optional[Rule]:
         """Get a rule by name (for manual @mention invocation)."""
         # Check all scopes
-        for scope in ["subdir", "workspace", "global"]:
+        for scope in ["subdir", "workspace", "global", "root"]:
             key = f"{scope}:{name}"
             if key in self._rules:
                 return self._rules[key]

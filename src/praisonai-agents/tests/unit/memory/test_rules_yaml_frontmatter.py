@@ -181,3 +181,28 @@ def test_invalid_frontmatter_stays_available_without_automatic_activation(manage
     assert manager.get_active_rules(file_path="target.py") == []
     assert manager.build_rules_context() == ""
     assert "Restricted instructions" in manager.build_rules_context(include_manual=[name])
+
+
+@pytest.mark.parametrize("metadata", ["activation: manual", "activation: manual\npriority: true", "false"])
+@pytest.mark.parametrize("parent_instructions", [True, False])
+def test_workspace_root_manual_rule_remains_selectable(tmp_path, monkeypatch, metadata, parent_instructions):
+    git_root = tmp_path / "repository"
+    workspace = git_root / "nested"
+    workspace.mkdir(parents=True)
+    monkeypatch.setattr(RulesManager, "_find_git_root", lambda self: git_root)
+    if parent_instructions:
+        (git_root / "AGENTS.md").write_text(
+            "---\nactivation: manual\n---\nParent instructions", encoding="utf-8"
+        )
+    source = f"---\n{metadata}\n---\nWorkspace instructions"
+    (workspace / "AGENTS.md").write_text(source, encoding="utf-8")
+    manager = RulesManager(workspace_path=str(workspace), global_rules_path=str(tmp_path / "global"))
+    for _ in range(2):
+        selected = manager.get_rule_by_name("agents")
+        assert selected.file_path == str(workspace / "AGENTS.md")
+        assert selected.activation == "manual"
+        assert manager.get_active_rules() == []
+        context = manager.build_rules_context(include_manual=["agents"])
+        assert "Workspace instructions" in context
+        assert "Parent instructions" not in context
+        manager.reload()
