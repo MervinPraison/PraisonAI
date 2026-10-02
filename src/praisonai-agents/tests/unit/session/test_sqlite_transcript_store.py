@@ -224,13 +224,30 @@ class TestSqliteTranscriptStore:
             assert handle.read() == b"\xff\xfe"
 
     def test_migration_continues_after_invalid_utf8_ordered_first(self, tmp_dir):
-        """A bad file sorted before valid ones must not abort later migrations."""
+        """A bad file processed before valid ones must not abort later migrations.
+
+        Migration sorts filenames, so ``aaa_invalid.json`` is deterministically
+        processed before the ``zeta`` session's JSON file — guaranteeing the
+        bad-first scenario is actually exercised.
+        """
         legacy = DefaultSessionStore(session_dir=tmp_dir)
         legacy.add_message("zeta", "user", "valid transcript")
 
         bad_path = os.path.join(tmp_dir, "aaa_invalid.json")
         with open(bad_path, "wb") as handle:
             handle.write(b"\xff\xfe")
+
+        import json as _json
+
+        json_files = sorted(f for f in os.listdir(tmp_dir) if f.endswith(".json"))
+        assert json_files[0] == "aaa_invalid.json"
+        valid_file = next(
+            f for f in json_files
+            if f != "aaa_invalid.json" and "zeta" in _json.dumps(
+                _json.load(open(os.path.join(tmp_dir, f)))
+            )
+        )
+        assert "aaa_invalid.json" < valid_file
 
         store = SqliteTranscriptStore(session_dir=tmp_dir)
         assert store.session_exists("zeta")
