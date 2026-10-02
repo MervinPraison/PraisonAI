@@ -1520,6 +1520,80 @@ class TestSpillOnWriteFailure:
         contents = [m["content"] for m in history]
         assert "good" in contents
 
+    def test_reingest_structured_content(self, env):
+        """A spilled multimodal (JSON-list) turn recovers without TypeError."""
+        store, home = env
+        structured = [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "http://x/y.png"}},
+        ]
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        (spill_dir / "s1.1.1.aa.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "messages": [
+                        {"role": "user", "content": structured, "timestamp": 1.0}
+                    ],
+                }
+            )
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        assert any(m["content"] == structured for m in history)
+        assert not list(spill_dir.glob("s1.*.json"))
+
+    def test_reingest_dedups_structured_against_persisted(self, env):
+        """An already-persisted structured turn is not duplicated on recovery."""
+        store, home = env
+        structured = [{"type": "text", "text": "hi"}]
+        # Persist the structured turn normally first.
+        store._modify_session_locked(
+            "s1",
+            lambda s: s.messages.append(
+                SessionMessage(role="user", content=structured, timestamp=1.0)
+            ),
+        )
+        # A spill carrying the identical structured turn.
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        (spill_dir / "s1.2.1.bb.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "messages": [
+                        {"role": "user", "content": structured, "timestamp": 1.0}
+                    ],
+                }
+            )
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        assert sum(1 for m in history if m["content"] == structured) == 1
+
+    def test_reingest_skips_invalid_utf8_spill(self, env):
+        """An invalid-UTF-8 spill is skipped (not deleted) while a valid one recovers."""
+        store, home = env
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        bad = spill_dir / "s1.1.1.aa.json"
+        bad.write_bytes(b'{"session_id": "s1", "messages": [\xff\xfe]}')
+        (spill_dir / "s1.2.1.bb.json").write_text(
+            json.dumps(
+                {"session_id": "s1", "messages": [{"role": "user", "content": "good"}]}
+            )
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "good" in contents
+        # The undecodable spill is left in place for a later retry.
+        assert bad.exists()
+
 
 class TestRenameSession:
     """Tests for human-readable session titles (Issue #3737)."""

@@ -1153,16 +1153,28 @@ class DefaultSessionStore:
         except (IOError, OSError):
             return
 
-        seen = {
-            (m.role, m.content, m.timestamp) for m in session.messages
-        }
+        def _dedup_key(msg: "SessionMessage") -> tuple:
+            # Structured (multimodal) content is a JSON list/dict and therefore
+            # unhashable; fold it to a stable JSON string so role/content/
+            # timestamp dedup still works without raising TypeError.
+            content = msg.content
+            if isinstance(content, (list, dict)):
+                try:
+                    content = json.dumps(content, sort_keys=True)
+                except (TypeError, ValueError):
+                    content = repr(content)
+            return (msg.role, content, msg.timestamp)
+
+        seen = {_dedup_key(m) for m in session.messages}
         recovered: List[tuple] = []  # (filepath, [SessionMessage])
         for filename in candidates:
             filepath = os.path.join(spill_dir, filename)
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError, IOError, OSError):
+                # Unreadable/undecodable spill (e.g. invalid UTF-8): skip it
+                # without deleting so a valid neighbour still recovers.
                 continue
             # A syntactically valid spill can still carry an unexpected shape
             # (non-object root, non-list messages, non-object message). Guard
@@ -1180,7 +1192,7 @@ class DefaultSessionStore:
                 if not isinstance(raw, dict):
                     continue
                 msg = SessionMessage.from_dict(raw)
-                key = (msg.role, msg.content, msg.timestamp)
+                key = _dedup_key(msg)
                 if key in seen:
                     continue
                 seen.add(key)
