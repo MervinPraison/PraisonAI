@@ -387,9 +387,32 @@ class SqliteSessionStore(DefaultSessionStore):
             except Exception as exc:
                 # The JSON write succeeded, but the old index is no longer a
                 # trustworthy view. Fail closed until a later refresh/rebuild.
-                self._deindex_session(session.session_id)
+                self._invalidate_import_index(session)
                 logger.debug("Post-import index refresh failed for %s: %s", session.session_id, exc)
         return ok
+
+    def _invalidate_import_index(self, session: SessionData) -> None:
+        """Clear a failed import's index only while its file generation is current."""
+        identity = getattr(session, "_import_file_identity", None)
+        conn = self._connect()
+        if identity is None or conn is None:
+            return
+        try:
+            with self._db_lock:
+                # Serialize with other SQLite writers before checking the file.
+                # A peer saving afterward must index after this transaction;
+                # a peer already indexed has a different atomic file identity.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if self._session_file_identity(self._get_session_path(session.session_id)) == identity:
+                        for table in ("session_fts", "session_meta", "session_route"):
+                            conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session.session_id,))
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+        except Exception as exc:
+            logger.debug("Post-import index invalidation failed for %s: %s", session.session_id, exc)
 
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
         """Refresh the index after any locked read-modify-write.

@@ -192,3 +192,35 @@ def test_post_import_read_failure_does_not_restore_old_routes(make_store, monkey
     assert destination.add_message("session", "user", "later update")
     assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
     assert destination.get_by_gateway_session("old-gateway") is None
+
+
+@pytest.mark.parametrize("existing_index", [False, True])
+def test_failed_import_refresh_preserves_new_peer_index(make_store, monkeypatch, existing_index):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "imported pelican")
+    destination = make_store(SqliteSessionStore)
+    if existing_index:
+        assert destination.add_message("session", "user", "old otter")
+    destination.search("pelican")
+    peer = SqliteSessionStore(session_dir=destination.session_dir, db_path=destination.db_path)
+    original = DefaultSessionStore._save_imported_session
+
+    def save_then_peer_write(store, session, **kwargs):
+        saved = original(store, session, **kwargs)
+        assert peer.set_chat_history("session", [{"role": "user", "content": "newer narwhal"}])
+        assert peer.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+        return saved
+
+    def unavailable(*args):
+        raise OSError("post-import refresh unavailable")
+
+    monkeypatch.setattr(DefaultSessionStore, "_save_imported_session", save_then_peer_write)
+    monkeypatch.setattr(destination, "_load_session_from_disk", unavailable)
+    try:
+        assert destination.import_sessions(source.export_all(), overwrite=existing_index).imported == 1
+        conn = destination._connect()
+        assert conn.execute("SELECT content FROM session_fts WHERE session_id = ?", ("session",)).fetchone() == ("newer narwhal",)
+        assert conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", ("session",)).fetchone() == ("new-route", "new-agent")
+    finally:
+        if peer._conn is not None:
+            peer._conn.close()
