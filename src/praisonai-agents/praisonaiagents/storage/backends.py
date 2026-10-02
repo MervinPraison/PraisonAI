@@ -121,7 +121,7 @@ class FileBackend:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
             logger.warning(f"Failed to load {key}: {e}")
             return None
     
@@ -212,7 +212,11 @@ class SQLiteBackend:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         
         if auto_create:
-            self._create_table()
+            try:
+                self._create_table()
+            except Exception:
+                self.close()
+                raise
     
     def _get_conn(self):
         """Get thread-local connection."""
