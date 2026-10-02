@@ -370,7 +370,7 @@ def list_json_sessions(
                 # Try to get item count from file
                 if suffix == ".json":
                     try:
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             # Common patterns for item count
                             if "iterations" in data:
@@ -383,7 +383,7 @@ def list_json_sessions(
                         pass
                 elif suffix == ".jsonl":
                     try:
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             info.item_count = sum(1 for _ in f)
                     except Exception:
                         pass
