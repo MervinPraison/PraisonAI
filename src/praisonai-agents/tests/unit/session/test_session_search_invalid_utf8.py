@@ -104,6 +104,72 @@ def test_broad_query_stops_loading_after_readable_allowance(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("backend", ["fts", "like"])
+def test_transcript_reads_do_not_pin_wal_checkpoint(tmp_path, monkeypatch, backend):
+    import builtins
+
+    store = SqliteSessionStore(session_dir=str(tmp_path))
+    peer = SqliteSessionStore(session_dir=str(tmp_path))
+    checkpoints = []
+    try:
+        assert store.add_message("first", "user", "needle")
+        assert store.add_message("second", "user", "needle")
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        peer_conn = peer._connect()
+        peer_conn.execute("PRAGMA busy_timeout=0")
+        original = builtins.open
+
+        def opened(path, *args, **kwargs):
+            if str(path).endswith("first.json") and not checkpoints:
+                assert peer.add_message("late", "user", "needle")
+                checkpoints.append(peer_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", opened)
+        assert {hit.session_id for hit in store.search("needle")} == {"first", "second"}
+        assert checkpoints and checkpoints[0][0] == 0
+    finally:
+        for current in (store, peer):
+            if current._conn is not None:
+                current._conn.close()
+
+
+@pytest.mark.parametrize("journal", ["delete", "memory"])
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_search_does_not_copy_whole_index(tmp_path, monkeypatch, journal, backend):
+    import sqlite3
+
+    backups = []
+
+    class Connection(sqlite3.Connection):
+        def backup(self, *args, **kwargs):
+            backups.append(True)
+            return super().backup(*args, **kwargs)
+
+    original = sqlite3.connect
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = Connection
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:" if journal == "memory" else None)
+    try:
+        assert store.add_message("valid", "user", "needle")
+        assert store.add_message("unmatched", "user", "filler " * 10000)
+        store._ensure_backfilled()
+        if journal == "delete":
+            store._conn.execute("PRAGMA journal_mode=DELETE")
+        if backend == "like":
+            store._fts_available = False
+        assert [hit.session_id for hit in store.search("needle")] == ["valid"]
+        assert backups == []
+    finally:
+        store._conn.close()
+
+
+@pytest.mark.parametrize("backend", ["fts", "like"])
 def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, monkeypatch, backend):
     import builtins
     store = SqliteSessionStore(session_dir=str(tmp_path))
@@ -188,11 +254,12 @@ def test_continuations_do_not_hide_another_lineage(tmp_path, backend):
 
 @pytest.mark.parametrize("backend", ["fts", "like"])
 @pytest.mark.parametrize("journal", ["wal", "delete", "memory"])
-def test_search_fetches_only_needed_ids(tmp_path, monkeypatch, backend, journal):
+def test_search_snapshots_matching_ids_in_bounded_batches(tmp_path, monkeypatch, backend, journal):
     import sqlite3
 
     reads = []
     all_reads = []
+    batches = []
 
     class Cursor(sqlite3.Cursor):
         tracked = False
@@ -212,6 +279,12 @@ def test_search_fetches_only_needed_ids(tmp_path, monkeypatch, backend, journal)
             if self.tracked and row is not None:
                 reads.append(row[0])
             return row
+
+        def fetchmany(self, size=None):
+            rows = super().fetchmany(size) if size is not None else super().fetchmany()
+            if self.tracked:
+                batches.append(len(rows))
+            return rows
 
     class Connection(sqlite3.Connection):
         def execute(self, sql, parameters=()):
@@ -235,7 +308,9 @@ def test_search_fetches_only_needed_ids(tmp_path, monkeypatch, backend, journal)
             assert store._conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
         assert len(store.search("needle", limit=5)) == 5
         assert all_reads == []
-        assert len(reads) == 25
+        assert reads == []
+        assert sum(batches) == 60
+        assert max(batches) <= 128
     finally:
         store._conn.close()
 

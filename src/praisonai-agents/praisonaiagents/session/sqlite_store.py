@@ -470,38 +470,44 @@ class SqliteSessionStore(DefaultSessionStore):
         return " OR ".join('"%s"' % t for t in terms)
 
     @contextmanager
-    def _search_reader(self, conn):
-        """Isolate a streaming search from the store's writer connection."""
-        import sqlite3
-        import tempfile
-        from pathlib import Path
+    def _search_candidate_ids(self, conn, query: str):
+        """Spool matching IDs in fixed batches; close SQL before file I/O.
 
-        with self._db_lock:
-            journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
-        if self.db_path != ":memory:" and journal.lower() == "wal":
-            reader = sqlite3.connect(
-                Path(self.db_path).resolve().as_uri() + "?mode=ro",
-                uri=True, isolation_level=None,
-            )
-            try:
-                yield reader
-            finally:
-                reader.close()
-        else:
-            # DELETE and in-memory databases cannot provide WAL reader/writer
-            # isolation. Copy to disk rather than materializing matching IDs
-            # in Python or retaining a read lock across transcript work.
-            with tempfile.TemporaryDirectory(prefix="praison-search-") as directory:
-                reader = sqlite3.connect(os.path.join(directory, "index.db"))
+        A stable candidate set requires enumerating the matches. Spooling only
+        IDs bounds Python ID memory without copying the index or keeping a
+        SQLite read snapshot across transcript reads and corruption callbacks.
+        """
+        import json
+        import tempfile
+
+        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as spool:
+            with self._db_lock:
+                if self._fts_available:
+                    cursor = conn.execute(
+                        "SELECT session_id FROM session_fts WHERE session_fts "
+                        "MATCH ? ORDER BY bm25(session_fts), session_id",
+                        (self._to_fts_query(query),),
+                    )
+                else:
+                    like = "%" + query.replace("%", "").replace("_", "") + "%"
+                    cursor = conn.execute(
+                        "SELECT session_id FROM session_fts WHERE content LIKE ? "
+                        "ORDER BY session_id", (like,),
+                    )
                 try:
-                    with self._db_lock:
-                        conn.backup(reader, pages=128)
-                    yield reader
+                    while True:
+                        rows = cursor.fetchmany(128)
+                        if not rows:
+                            break
+                        for row in rows:
+                            spool.write(json.dumps(row[0], ensure_ascii=True) + "\n")
                 finally:
-                    reader.close()
+                    cursor.close()
+            spool.seek(0)
+            yield (json.loads(line) for line in spool)
 
     def _read_search_candidates(self, query: str, limit: int):
-        """Incrementally read usable lineages from an isolated index cursor."""
+        """Read usable lineages outside the SQL lock and read snapshot."""
         import json
 
         conn = self._connect()
@@ -512,37 +518,20 @@ class SqliteSessionStore(DefaultSessionStore):
         candidates = []
         lineages = set()
         try:
-            with self._search_reader(conn) as reader:
-                if self._fts_available:
-                    cursor = reader.execute(
-                        "SELECT session_id FROM session_fts WHERE session_fts "
-                        "MATCH ? ORDER BY bm25(session_fts), session_id",
-                        (self._to_fts_query(query),),
-                    )
-                else:
-                    like = "%" + query.replace("%", "").replace("_", "") + "%"
-                    cursor = reader.execute(
-                        "SELECT session_id FROM session_fts WHERE content LIKE ? "
-                        "ORDER BY session_id", (like,),
-                    )
-                try:
-                    while len(lineages) < allowance:
-                        row = cursor.fetchone()
-                        if row is None:
-                            break
-                        sid = row[0]
-                        filepath = self._get_session_path(sid)
-                        try:
-                            with open(filepath, "r", encoding="utf-8") as handle:
-                                data = json.load(handle)
-                        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
-                            self._report_unreadable_session(sid, filepath, exc)
-                            continue
-                        candidates.append((sid, data))
-                        lineage = self._lineage_key(data)
-                        lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
-                finally:
-                    cursor.close()
+            with self._search_candidate_ids(conn, query) as ids:
+                for sid in ids:
+                    filepath = self._get_session_path(sid)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                    except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+                        self._report_unreadable_session(sid, filepath, exc)
+                        continue
+                    candidates.append((sid, data))
+                    lineage = self._lineage_key(data)
+                    lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
+                    if len(lineages) >= allowance:
+                        break
         except Exception as exc:
             logger.debug("Index query failed (%s); falling back to scan.", exc)
             return None
