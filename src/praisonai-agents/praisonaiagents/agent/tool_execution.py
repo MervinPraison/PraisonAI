@@ -2057,8 +2057,11 @@ class ToolExecutionMixin:
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
             await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
 
-        if response and getattr(self, '_auto_memory', False) and getattr(self, '_memory_instance', None):
-            await asyncio.to_thread(self._process_auto_memory, str(prompt), str(response))
+        if response and getattr(self, '_memory_instance', None):
+            if getattr(self, '_auto_memory', False):
+                await asyncio.to_thread(self._process_auto_memory, str(prompt), str(response))
+            else:
+                await asyncio.to_thread(self._persist_memory_turn, str(prompt), str(response))
         self._after_agent_side_effects(prompt, response, process_auto_memory=False)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
