@@ -1940,7 +1940,7 @@ class ToolExecutionMixin:
             execution_time_ms=(time.time() - start_time) * 1000
         )
 
-    def _after_agent_side_effects(self, prompt, response):
+    def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
 
         Covers auto-memory extraction, auto-learning extraction, and the
@@ -1949,7 +1949,7 @@ class ToolExecutionMixin:
         boundary.
         """
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
-        if response:
+        if response and process_auto_memory:
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
             if getattr(self, "_auto_memory", False):
                 self._process_auto_memory(prompt_str, str(response))
@@ -2057,7 +2057,9 @@ class ToolExecutionMixin:
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
             await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
 
-        self._after_agent_side_effects(prompt, response)
+        if response and getattr(self, '_auto_memory', False) and getattr(self, '_memory_instance', None):
+            await asyncio.to_thread(self._process_auto_memory, str(prompt), str(response))
+        self._after_agent_side_effects(prompt, response, process_auto_memory=False)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
         # In "background" mode the review runs off the hot path on the core
