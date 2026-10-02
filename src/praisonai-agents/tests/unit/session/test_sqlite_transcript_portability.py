@@ -134,3 +134,24 @@ def test_sqlite_restore_keeps_import_guards(stores):
     payload["version"] = target.PORTABLE_VERSION + 1
     assert target.import_sessions(payload, overwrite=True).imported == 0
     assert target.get_chat_history("reference")[0]["content"] == "Original"
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_import_does_not_clobber_peer_created_after_initial_check(stores, monkeypatch, overwrite):
+    target = stores("target")
+    peer = stores("target")
+    original = target._save_imported_session
+
+    def create_peer_before_write(*args, **kwargs):
+        assert peer.add_message("reference", "user", "peer-created")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, "_save_imported_session", create_peer_before_write)
+    payload = {"sessions": [{"session_id": "reference", "messages": [{"role": "user", "content": "imported"}]}]}
+    report = target.import_sessions(payload, overwrite=overwrite)
+    assert report.imported == int(overwrite)
+    assert target.get_chat_history("reference")[0]["content"] == ("imported" if overwrite else "peer-created")
+    if overwrite:
+        assert target._cache["reference"].messages[0].content == "imported"
+    else:
+        assert report.skipped[0]["reason"] == "already exists (use overwrite)"

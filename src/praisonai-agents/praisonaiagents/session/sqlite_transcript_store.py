@@ -216,7 +216,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
         except (json.JSONDecodeError, TypeError):
             return None
 
-    def _write_row(self, session: SessionData, conn=None) -> bool:
+    def _write_row(self, session: SessionData, conn=None, *, overwrite: bool = True) -> bool:
         own_lock = conn is None
         if conn is None:
             conn = self._connect()
@@ -235,17 +235,21 @@ class SqliteTranscriptStore(DefaultSessionStore):
             getattr(session, "updated_at", None),
         )
         sql = (
-            "INSERT OR REPLACE INTO sessions "
+            ("INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE") + " INTO sessions "
             "(session_id, data, agent_name, gateway_session_id, agent_id, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?)"
         )
         try:
             if own_lock:
                 with self._db_lock:
-                    conn.execute(sql, params)
+                    cursor = conn.execute(sql, params)
             else:
-                conn.execute(sql, params)
+                cursor = conn.execute(sql, params)
+            if not overwrite and cursor.rowcount == 0:
+                raise FileExistsError(session.session_id)
             return True
+        except FileExistsError:
+            raise
         except Exception as exc:
             logger.error("Failed to write session %s: %s", session.session_id, exc)
             return False
@@ -288,10 +292,17 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 self._cache[session.session_id] = session
             return True
 
-    def _save_imported_session(self, session: SessionData) -> bool:
+    def _save_imported_session(self, session: SessionData, *, overwrite: bool = True) -> bool:
         """Restore to the database without applying the destination's window."""
         session.updated_at = datetime.now(timezone.utc).isoformat()
-        return self._write_row(session)
+        with self._db_lock:
+            # INSERT OR IGNORE makes no-clobber atomic across store instances;
+            # checking session_exists before a replace would still race.
+            if not self._write_row(session, overwrite=overwrite):
+                return False
+            with self._lock:
+                self._cache[session.session_id] = session
+            return True
 
     def export_all(self) -> Dict[str, Any]:
         """Export durable database rows, not legacy JSON sidecar files."""
