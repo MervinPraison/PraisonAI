@@ -30,6 +30,7 @@ Usage::
 
 import os
 import threading
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
@@ -468,13 +469,39 @@ class SqliteSessionStore(DefaultSessionStore):
             return '""'
         return " OR ".join('"%s"' % t for t in terms)
 
-    def _read_search_candidates(self, query: str, limit: int):
-        """Read usable lineages from a stable snapshot of matching IDs.
+    @contextmanager
+    def _search_reader(self, conn):
+        """Isolate a streaming search from the store's writer connection."""
+        import sqlite3
+        import tempfile
+        from pathlib import Path
 
-        Only the ID query holds the shared connection lock. Transcript reads
-        and corruption callbacks run after the cursor has been closed. IDs are
-        materialized, but transcript loading stops at the lineage allowance.
-        """
+        with self._db_lock:
+            journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        if self.db_path != ":memory:" and journal.lower() == "wal":
+            reader = sqlite3.connect(
+                Path(self.db_path).resolve().as_uri() + "?mode=ro",
+                uri=True, isolation_level=None,
+            )
+            try:
+                yield reader
+            finally:
+                reader.close()
+        else:
+            # DELETE and in-memory databases cannot provide WAL reader/writer
+            # isolation. Copy to disk rather than materializing matching IDs
+            # in Python or retaining a read lock across transcript work.
+            with tempfile.TemporaryDirectory(prefix="praison-search-") as directory:
+                reader = sqlite3.connect(os.path.join(directory, "index.db"))
+                try:
+                    with self._db_lock:
+                        conn.backup(reader, pages=128)
+                    yield reader
+                finally:
+                    reader.close()
+
+    def _read_search_candidates(self, query: str, limit: int):
+        """Incrementally read usable lineages from an isolated index cursor."""
         import json
 
         conn = self._connect()
@@ -485,40 +512,40 @@ class SqliteSessionStore(DefaultSessionStore):
         candidates = []
         lineages = set()
         try:
-            with self._db_lock:
+            with self._search_reader(conn) as reader:
                 if self._fts_available:
-                    cursor = conn.execute(
+                    cursor = reader.execute(
                         "SELECT session_id FROM session_fts WHERE session_fts "
                         "MATCH ? ORDER BY bm25(session_fts), session_id",
                         (self._to_fts_query(query),),
                     )
                 else:
                     like = "%" + query.replace("%", "").replace("_", "") + "%"
-                    cursor = conn.execute(
+                    cursor = reader.execute(
                         "SELECT session_id FROM session_fts WHERE content LIKE ? "
                         "ORDER BY session_id", (like,),
                     )
                 try:
-                    rows = cursor.fetchall()
+                    while len(lineages) < allowance:
+                        row = cursor.fetchone()
+                        if row is None:
+                            break
+                        sid = row[0]
+                        filepath = self._get_session_path(sid)
+                        try:
+                            with open(filepath, "r", encoding="utf-8") as handle:
+                                data = json.load(handle)
+                        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+                            self._report_unreadable_session(sid, filepath, exc)
+                            continue
+                        candidates.append((sid, data))
+                        lineage = self._lineage_key(data)
+                        lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
                 finally:
                     cursor.close()
         except Exception as exc:
             logger.debug("Index query failed (%s); falling back to scan.", exc)
             return None
-        for row in rows:
-            sid = row[0]
-            filepath = self._get_session_path(sid)
-            try:
-                with open(filepath, "r", encoding="utf-8") as handle:
-                    data = json.load(handle)
-            except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
-                self._report_unreadable_session(sid, filepath, exc)
-                continue
-            candidates.append((sid, data))
-            lineage = self._lineage_key(data)
-            lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
-            if len(lineages) >= allowance:
-                break
         return candidates
 
     # ── gateway/agent routing: indexed key → session lookup ───────────

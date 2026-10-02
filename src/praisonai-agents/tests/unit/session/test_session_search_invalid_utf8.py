@@ -104,7 +104,8 @@ def test_broad_query_stops_loading_after_readable_allowance(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("backend", ["fts", "like"])
-def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, backend):
+def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, monkeypatch, backend):
+    import builtins
     store = SqliteSessionStore(session_dir=str(tmp_path))
     peer = SqliteSessionStore(session_dir=str(tmp_path))
     try:
@@ -117,39 +118,16 @@ def test_index_deletion_during_read_does_not_shift_candidates(tmp_path, backend)
         peer_conn = peer._connect()
         for index in range(25):
             (tmp_path / f"bad{index:02}.json").write_bytes(b"\xff\xfe")
-        conn = store._conn
         changed = []
+        original = builtins.open
 
-        def change_index():
-            if not changed:
+        def opened(path, *args, **kwargs):
+            if str(path).endswith("bad00.json") and not changed:
                 peer_conn.execute("DELETE FROM session_fts WHERE session_id = ?", ("bad00",))
                 changed.append(True)
+            return original(path, *args, **kwargs)
 
-        class Cursor:
-            def __init__(self, cursor):
-                self.cursor = cursor
-
-            def fetchall(self):
-                rows = self.cursor.fetchall()
-                change_index()
-                return rows
-
-            def fetchone(self):
-                row = self.cursor.fetchone()
-                change_index()
-                return row
-
-            def close(self):
-                self.cursor.close()
-
-        class Connection:
-            def execute(self, sql, params=()):
-                return Cursor(conn.execute(sql, params))
-
-            def close(self):
-                conn.close()
-
-        store._conn = Connection()
+        monkeypatch.setattr(builtins, "open", opened)
         assert [hit.session_id for hit in store.search("needle")] == ["valid"]
         assert changed
     finally:
@@ -209,12 +187,67 @@ def test_continuations_do_not_hide_another_lineage(tmp_path, backend):
 
 
 @pytest.mark.parametrize("backend", ["fts", "like"])
+@pytest.mark.parametrize("journal", ["wal", "delete", "memory"])
+def test_search_fetches_only_needed_ids(tmp_path, monkeypatch, backend, journal):
+    import sqlite3
+
+    reads = []
+    all_reads = []
+
+    class Cursor(sqlite3.Cursor):
+        tracked = False
+
+        def execute(self, sql, parameters=()):
+            self.tracked = sql.startswith("SELECT session_id FROM session_fts")
+            return super().execute(sql, parameters)
+
+        def fetchall(self):
+            rows = super().fetchall()
+            if self.tracked:
+                all_reads.append(len(rows))
+            return rows
+
+        def fetchone(self):
+            row = super().fetchone()
+            if self.tracked and row is not None:
+                reads.append(row[0])
+            return row
+
+    class Connection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            return self.cursor(factory=Cursor).execute(sql, parameters)
+
+    original = sqlite3.connect
+
+    def connect(*args, **kwargs):
+        kwargs["factory"] = Connection
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:" if journal == "memory" else None)
+    try:
+        for index in range(60):
+            assert store.add_message(f"s{index:02}", "user", "needle")
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        if journal == "delete":
+            assert store._conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+        assert len(store.search("needle", limit=5)) == 5
+        assert all_reads == []
+        assert len(reads) == 25
+    finally:
+        store._conn.close()
+
+
+@pytest.mark.parametrize("backend", ["fts", "like"])
 @pytest.mark.parametrize("pause", ["file", "hook"])
-def test_index_writer_can_finish_during_transcript_work(tmp_path, monkeypatch, backend, pause):
+@pytest.mark.parametrize("journal", ["wal", "delete", "memory"])
+def test_index_writer_can_finish_during_transcript_work(tmp_path, monkeypatch, backend, pause, journal):
     import builtins
     import threading
 
-    store = SqliteSessionStore(session_dir=str(tmp_path))
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:" if journal == "memory" else None)
     threads = []
     completed_during_pause = []
     failures = []
@@ -224,6 +257,8 @@ def test_index_writer_can_finish_during_transcript_work(tmp_path, monkeypatch, b
         if backend == "like":
             store._fts_available = False
         store._ensure_backfilled()
+        if journal == "delete":
+            assert store._conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
 
         def pause_for_writer():
             if threads:
