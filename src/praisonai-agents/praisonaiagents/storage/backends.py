@@ -306,9 +306,9 @@ class SQLiteBackend:
         if prefix:
             cur.execute(f"""
                 SELECT key FROM {self._quoted_table}
-                WHERE key LIKE ?
+                WHERE instr(key, ?) = 1
                 ORDER BY key
-            """, (f"{prefix}%",))
+            """, (prefix,))
         else:
             cur.execute(f"""
                 SELECT key FROM {self._quoted_table}
