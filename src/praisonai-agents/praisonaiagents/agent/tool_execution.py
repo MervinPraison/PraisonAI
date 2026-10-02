@@ -1904,6 +1904,11 @@ class ToolExecutionMixin:
         ``_atrigger_after_agent_hook`` without any async-safety change.
         """
         from ..hooks import HookEvent, AfterAgentInput
+        # AfterAgentInput.response is typed/serialized as a string (its
+        # to_dict truncates via ``response[:500]``). Structured-output turns
+        # (output_pydantic) return a Pydantic instance, so coerce to str here
+        # to keep string-only hooks (e.g. command hooks) from crashing while
+        # the public chat() return value stays the model.
         return AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
             cwd=os.getcwd(),
@@ -1911,7 +1916,7 @@ class ToolExecutionMixin:
             timestamp=str(time.time()),
             agent_name=self.name,
             prompt=prompt if isinstance(prompt, str) else str(prompt),
-            response=response or "",
+            response=response if isinstance(response, str) else (str(response) if response else ""),
             tools_used=tools_used or [],
             total_tokens=0,
             execution_time_ms=(time.time() - start_time) * 1000
@@ -1928,7 +1933,16 @@ class ToolExecutionMixin:
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
         if response:
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
-            self._process_auto_memory(prompt_str, str(response))
+            if getattr(self, "_auto_memory", False):
+                self._process_auto_memory(prompt_str, str(response))
+            else:
+                # When memory is enabled but auto_memory extraction is off, still
+                # persist the raw turn so a later Agent sharing the same memory
+                # (e.g. memory={"user_id": uid}) can recall it. Without this the
+                # sync chat/run/start path wrote nothing and cross-session recall
+                # silently returned empty (issue #5595). Mirrors the write already
+                # done on the async unified path.
+                self._persist_memory_turn(prompt_str, str(response))
 
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()

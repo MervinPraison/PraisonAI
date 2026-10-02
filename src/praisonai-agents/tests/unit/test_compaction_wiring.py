@@ -97,8 +97,10 @@ class TestCompactionMaxTokensResolution:
         agent = self._make_agent("gpt-4o")
         cfg = ExecutionConfig(context_compaction=True)
         resolved = agent._resolve_compaction_max_tokens(cfg)
-        # Well beyond the working budget must trigger compaction.
-        msgs = [{"role": "user", "content": "A" * 4 * (resolved + 50000)}]
+        # Well beyond the working budget must trigger compaction. Repeated
+        # characters compress heavily under tiktoken (~8 chars/token), so use
+        # 8× not the heuristic 4× when sizing synthetic overflow content.
+        msgs = [{"role": "user", "content": "A" * 8 * (resolved + 50000)}]
         compactor = ContextCompactor(max_tokens=resolved)
         assert compactor.needs_compaction(msgs) is True
 

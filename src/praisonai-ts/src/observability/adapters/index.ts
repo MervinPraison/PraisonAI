@@ -83,6 +83,10 @@ export async function createObservabilityAdapter(
     case 'langfuse':
       adapter = await createLangfuseAdapter(config);
       break;
+
+    case 'langsmith':
+      adapter = await createLangSmithAdapter(config);
+      break;
       
     default:
       console.warn(`Unknown observability tool: ${name}, using noop adapter`);
@@ -125,7 +129,6 @@ export function clearAdapterCache(): void {
 type ExternalAdapterCtor = new (config?: ObservabilityToolConfig) => ObservabilityAdapter;
 
 const UNDELIVERED_ADAPTER_LOADERS: Record<string, () => Promise<ExternalAdapterCtor>> = {
-  langsmith: async () => (await import('./external/langsmith')).LangSmithObservabilityAdapter,
   langwatch: async () => (await import('./external/langwatch')).LangWatchObservabilityAdapter,
   arize: async () => (await import('./external/arize')).ArizeObservabilityAdapter,
   axiom: async () => (await import('./external/axiom')).AxiomObservabilityAdapter,
@@ -149,6 +152,19 @@ async function createLangfuseAdapter(config?: ObservabilityToolConfig): Promise<
     // optional `langfuse` SDK is installed is decided in initialize(), which
     // is what makes the adapter report isEnabled true or false.
     console.warn('[OBSERVABILITY] Failed to load the langfuse adapter module, falling back to the memory adapter (traces are not delivered).');
+    return new MemoryObservabilityAdapter();
+  }
+}
+
+async function createLangSmithAdapter(config?: ObservabilityToolConfig): Promise<ObservabilityAdapter> {
+  try {
+    const { LangSmithObservabilityAdapter } = await import('./external/langsmith');
+    return new LangSmithObservabilityAdapter(config);
+  } catch (error) {
+    // The adapter reports isEnabled true only once initialize() validates an
+    // API key and builds an HTTP client; whether it delivers is decided there,
+    // not here. This branch only fires if the local module fails to load.
+    console.warn('[OBSERVABILITY] Failed to load the langsmith adapter module, falling back to the memory adapter (traces are not delivered).');
     return new MemoryObservabilityAdapter();
   }
 }
