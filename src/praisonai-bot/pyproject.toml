@@ -77,3 +77,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonai_bot*"]
+
+[tool.setuptools.package-data]
+"praisonai_bot.bots" = ["*.json"]
