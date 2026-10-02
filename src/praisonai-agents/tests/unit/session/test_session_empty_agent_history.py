@@ -67,14 +67,14 @@ def test_verified_replacement_succeeds_on_first_write(setup, monkeypatch, replac
     store.update_session_metadata("parent", **{AGENT_HISTORY_KEY: {
         "helper:Assistant": OLD, "peer:Assistant": PEER,
     }})
-    original = store.update_session_metadata
+    original = store.merge_session_metadata_map
     writes = []
 
-    def update(*args, **kwargs):
-        writes.append(kwargs)
+    def merge(*args, **kwargs):
+        writes.append((args, kwargs))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(store, "update_session_metadata", update)
+    monkeypatch.setattr(store, "merge_session_metadata_map", merge)
     assert session._store_agent_history(store, "helper:Assistant", replacement)
     assert len(writes) == 1
     assert store.get_session("parent").metadata[AGENT_HISTORY_KEY] == {
