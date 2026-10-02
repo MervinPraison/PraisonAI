@@ -4,9 +4,20 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+from openai.types.responses import EasyInputMessageParam
+from pydantic import TypeAdapter
 
 from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
+
+
+message_schema = TypeAdapter(EasyInputMessageParam)
+
+
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
 
 
 @pytest.mark.asyncio
@@ -33,6 +44,9 @@ async def test_public_responses_preserves_assistant_parts_with_tool_calls(entry,
     requests = []
 
     def respond(**kwargs):
+        for item in kwargs['input']:
+            if 'role' in item:
+                message_schema.validate_python(item, strict=True)
         requests.append(kwargs)
         return SimpleNamespace(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}])
 

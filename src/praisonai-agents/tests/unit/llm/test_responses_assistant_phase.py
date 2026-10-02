@@ -4,9 +4,30 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+from openai.types.responses import EasyInputMessageParam
+from pydantic import TypeAdapter, ValidationError
 
 from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
+
+
+message_schema = TypeAdapter(EasyInputMessageParam)
+
+
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+
+
+@pytest.mark.parametrize('message', [
+    {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Checking'}]},
+    {'role': 'assistant', 'content': [{'type': 'input_text', 'text': 1}]},
+    {'role': 'assistant', 'content': 'Checking', 'phase': 'invalid'},
+])
+def test_message_schema_rejects_invalid_history(message):
+    with pytest.raises(ValidationError):
+        message_schema.validate_python(message, strict=True)
 
 
 @pytest.mark.asyncio
@@ -29,6 +50,9 @@ async def test_public_responses_preserves_assistant_phase(entry, phase, with_too
     requests = []
 
     def respond(**kwargs):
+        for item in kwargs['input']:
+            if 'role' in item:
+                message_schema.validate_python(item, strict=True)
         requests.append(kwargs)
         return SimpleNamespace(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': 'answer'}]}])
 
