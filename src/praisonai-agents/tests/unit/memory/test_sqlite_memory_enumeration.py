@@ -70,3 +70,16 @@ def test_filtered_search_ignores_corrupt_peer_metadata_and_keeps_string_matching
         assert [item['id'] for item in search('', user_id='True', limit=1)] == [wanted]
     finally:
         adapter.close_connections()
+
+
+@pytest.mark.parametrize('tier', ['short', 'long'])
+def test_null_user_is_distinct_from_literal_none_user(tmp_path, tier):
+    adapter = SqliteMemoryAdapter(short_db=str(tmp_path / 'short.db'), long_db=str(tmp_path / 'long.db'))
+    try:
+        write = getattr(adapter, f'store_{tier}_term')
+        write('unowned', metadata={'user_id': None})
+        wanted = write('owned', metadata={'user_id': 'None'})
+        search = getattr(adapter, f'search_{tier}_term')
+        assert [item['id'] for item in search('', user_id='None')] == [wanted]
+    finally:
+        adapter.close_connections()

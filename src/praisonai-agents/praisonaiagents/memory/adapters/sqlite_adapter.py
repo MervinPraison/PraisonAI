@@ -24,7 +24,7 @@ def _metadata_user_id(raw):
     """Match the existing Python JSON reader, including non-finite values."""
     try:
         metadata = json.loads(raw) if raw else {}
-        return str(metadata.get("user_id", "")) if isinstance(metadata, dict) else None
+        return str(metadata["user_id"]) if isinstance(metadata, dict) and metadata.get("user_id") is not None else None
     except (TypeError, ValueError):
         return None
 
