@@ -1191,6 +1191,55 @@ class TestPluginTypedSubsystems:
             mgr.disable(name)
             mgr.unregister(name)
 
+    def test_has_registered_plugins_reflects_registration(self):
+        """The hot-path gate is False with no plugins and True once registered."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents.plugins.manager import has_registered_plugins
+
+        mgr = get_plugin_manager()
+        # Clean baseline: no plugins registered on the singleton.
+        if not mgr._plugins:
+            assert has_registered_plugins() is False
+
+        plugin, name = self._make_plugin(
+            PluginType.GUARDRAIL, name="gate_probe_test",
+            as_guardrail=lambda self: object(),
+        )
+        mgr.register(plugin)
+        try:
+            assert has_registered_plugins() is True
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
+    def test_registered_plugin_still_merges_despite_fast_path(self):
+        """Agent init must still route a registered plugin even with the gate."""
+        from praisonaiagents.plugins.plugin import PluginType
+        from praisonaiagents.plugins import get_plugin_manager
+        from praisonaiagents.plugins.manager import has_registered_plugins
+        from praisonaiagents import Agent
+
+        class _G:
+            def validate_output(self, content, **kw):
+                return True, content
+
+        plugin, name = self._make_plugin(
+            PluginType.GUARDRAIL, name="fastpath_merge_test",
+            as_guardrail=lambda self: _G(),
+        )
+        mgr = get_plugin_manager()
+        mgr.register(plugin)
+        mgr.enable(name)
+        try:
+            # Gate is True, so the merge methods do NOT early-return.
+            assert has_registered_plugins() is True
+            agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+            assert agent._tool_result_guardrails
+        finally:
+            mgr.disable(name)
+            mgr.unregister(name)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
