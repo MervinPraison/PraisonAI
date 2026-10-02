@@ -7,7 +7,7 @@ and ContextCompactor is called when enabled.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 class TestExecutionConfigCompactionFields:
