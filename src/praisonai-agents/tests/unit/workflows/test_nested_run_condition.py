@@ -187,4 +187,3 @@ def test_nested_gate_with_real_agent():
     flow.run("same", verbose=False)
     assert calls == ["run"]
     assert flow.step_statuses["conditional"] == "skipped"
-
