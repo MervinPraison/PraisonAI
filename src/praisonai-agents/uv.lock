@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -2263,7 +2263,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.25.0"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2281,9 +2281,9 @@ dependencies = [
     { name = "typing-inspection" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/2d/649d80a0ecf6a1f82632ca44bec21c0461a9d9fc8934d38cb5b319f2db5e/mcp-1.25.0.tar.gz", hash = "sha256:56310361ebf0364e2d438e5b45f7668cbb124e158bb358333cd06e49e83a6802", size = 605387, upload-time = "2025-12-19T10:19:56.985Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/93/0142dc84a666daf8ad51a34268f34c12fd6fda4f3810c4be2504eecc8212/mcp-1.30.0.tar.gz", hash = "sha256:445414625fce5c295faa505bb11bacece661ab6f4028d57c935db57820b7a3e4", size = 680511, upload-time = "2026-09-07T14:34:15.845Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/fc/6dc7659c2ae5ddf280477011f4213a74f806862856b796ef08f028e664bf/mcp-1.25.0-py3-none-any.whl", hash = "sha256:b37c38144a666add0862614cc79ec276e97d72aa8ca26d622818d4e278b9721a", size = 233076, upload-time = "2025-12-19T10:19:55.416Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/f4/e58bc33317c92a0203664daaf00bf6f41166cc0149e5d6870a03f7cd004a/mcp-1.30.0-py3-none-any.whl", hash = "sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0", size = 234581, upload-time = "2026-09-07T14:34:14.266Z" },
 ]
 
 [[package]]
@@ -3123,7 +3123,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.9"
+version = "1.7.10"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3219,6 +3219,9 @@ os = [
     { name = "pyjwt" },
     { name = "uvicorn" },
 ]
+parallel-search = [
+    { name = "mcp" },
+]
 sandbox = [
     { name = "praisonai-sandbox" },
 ]
@@ -3250,6 +3253,7 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
+    { name = "mcp", marker = "extra == 'parallel-search'", specifier = ">=1.30.0,<2" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.4.0" },
@@ -3288,7 +3292,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["sandbox", "mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
+provides-extras = ["sandbox", "mcp", "parallel-search", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "primp"

@@ -753,6 +753,43 @@ Your Goal: {self.goal}"""
         
         return None
 
+    def _coerce_structured_output(self, response_text, schema_model):
+        """Parse a string response into the requested Pydantic model.
+
+        When ``output_pydantic``/``output_json`` is a Pydantic model, callers
+        expect a validated instance rather than a raw string. This tolerates
+        markdown code fences around the JSON payload.
+
+        Returns the parsed model instance on success, or the original
+        ``response_text`` unchanged if parsing is not possible (preserves
+        backward compatibility for non-Pydantic schemas or malformed output).
+        """
+        if not schema_model or not isinstance(response_text, str):
+            return response_text
+        if not hasattr(schema_model, 'model_validate_json'):
+            return response_text
+
+        candidate = response_text.strip()
+        try:
+            return schema_model.model_validate_json(candidate)
+        except Exception:
+            pass
+
+        # Strip a surrounding markdown code fence (```json ... ```) if present
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
+        if fenced:
+            try:
+                return schema_model.model_validate_json(fenced.group(1).strip())
+            except Exception:
+                pass
+
+        logging.warning(
+            f"Agent {self.name}: output_pydantic={getattr(schema_model, '__name__', schema_model)} "
+            f"was requested but the response could not be parsed into the model; "
+            f"returning raw string."
+        )
+        return response_text
+
     def _supports_native_structured_output(self):
         """Check if current model supports native structured output via response_format.
         
@@ -3564,6 +3601,13 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=processed_history)
+                        # Coerce into the requested Pydantic model so callers
+                        # get a validated instance, not a raw JSON string.
+                        # Only output_pydantic changes the return type; output_json
+                        # must stay a string for backward-compatible downstream
+                        # JSON parsing (task parsing, workflow results).
+                        if output_pydantic:
+                            validated_response = self._coerce_structured_output(validated_response, output_pydantic)
                         # Execute callback and display after validation
                         self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return self._trigger_after_agent_hook(prompt, validated_response, start_time)
@@ -3571,7 +3615,7 @@ Your Goal: {self.goal}"""
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
-                        return None
+                        return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:
@@ -3695,6 +3739,11 @@ Your Goal: {self.goal}"""
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                # Coerce into the requested Pydantic model so callers
+                                # get a validated instance, not a raw JSON string.
+                                # output_json intentionally stays a string (backward compat).
+                                if output_pydantic:
+                                    validated_response = self._coerce_structured_output(validated_response, output_pydantic)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -3702,7 +3751,7 @@ Your Goal: {self.goal}"""
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
@@ -3723,7 +3772,7 @@ Your Goal: {self.goal}"""
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
@@ -3734,7 +3783,7 @@ Your Goal: {self.goal}"""
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
@@ -3802,7 +3851,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     self._end_run(None, "error", {"error": str(e)})
-                                    return None
+                                    return self._guardrail_blocked_message(e)
 
                             # Check if we've hit max reflections
                             if reflection_count >= self.max_reflect - 1:
@@ -3820,7 +3869,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             
                             # If not satisfactory and not at max reflections, continue with regeneration
                             logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
@@ -4230,6 +4279,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
+                        # Coerce into the requested Pydantic model so callers
+                        # get a validated instance, not a raw JSON string.
+                        # output_json intentionally stays a string (backward compat).
+                        if output_pydantic:
+                            validated_response = self._coerce_structured_output(validated_response, output_pydantic)
                         # Execute callback after validation
                         self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
@@ -4237,7 +4291,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
-                        return None
+                        return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:
@@ -4375,6 +4429,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                # Coerce into the requested Pydantic model so callers
+                                # get a validated instance, not a raw JSON string.
+                                # output_json intentionally stays a string (backward compat).
+                                if output_pydantic:
+                                    validated_response = self._coerce_structured_output(validated_response, output_pydantic)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4382,7 +4441,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
-                                return None
+                                return self._guardrail_blocked_message(e)
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
@@ -4405,7 +4464,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                             else:
                                 # Apply guardrail to regular response content
                                 try:
@@ -4417,7 +4476,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    return None
+                                    return self._guardrail_blocked_message(e)
                         
                         # If self-reflection is enabled, implement reflection logic
                         if self.self_reflect:
@@ -4457,7 +4516,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     _areflection_kwargs = {}
                                     if temperature is not None:
@@ -4491,7 +4550,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     # Check if we've hit max reflections
                                     if reflection_count >= self.max_reflect - 1:
@@ -4510,7 +4569,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(e)
                                     
                                     # Regenerate response based on reflection
                                     regenerate_messages = reflection_messages + [
@@ -4560,7 +4619,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
-                                            return None
+                                            return self._guardrail_blocked_message(guard_e)
                                     continue
                         
                         # This should never be reached due to the returns above
@@ -4610,6 +4669,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
                                 logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            # Coerce into the requested Pydantic model so callers
+                            # get a validated instance, not a raw JSON string.
+                            # output_json intentionally stays a string (backward compat).
+                            if output_pydantic:
+                                response_text = self._coerce_structured_output(response_text, output_pydantic)
                             # Execute callback after JSON/Pydantic completion
                             self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
@@ -4724,7 +4788,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
-                            return None
+                            return self._guardrail_blocked_message(e)
                 except ToolExecutionError:
                     raise
                 except Exception as e:

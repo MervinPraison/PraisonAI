@@ -368,6 +368,7 @@ def test_release_reclaims_even_on_an_event_loop_thread():
     ever runs, silently leaking the instance -- so _release must bridge the loop
     the way SharedCompute does, not call asyncio.run() directly."""
     import asyncio
+    import time
 
     from praisonai.integrations.compute_managed_agent import _release
 
@@ -381,4 +382,11 @@ def test_release_reclaims_even_on_an_event_loop_thread():
         _release(Fake(), "inst-loop", "docker")
 
     asyncio.run(collect_on_the_loop())
+    # _release routes through the shared AsyncBridge's background loop
+    # fire-and-forget, so the shutdown lands a beat after asyncio.run()
+    # returns. Wait (bounded) for it rather than racing it — the assertion
+    # still fails if _release ever leaks (never schedules the shutdown).
+    deadline = time.monotonic() + 5.0
+    while not released and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert released == ["inst-loop"], "an instance leaked when GC ran on a live loop"
