@@ -12,11 +12,12 @@ def test_invalid_utf8_does_not_interrupt_legacy_migration(tmp_path, monkeypatch,
 
     legacy = DefaultSessionStore(session_dir=str(tmp_path))
     assert legacy.add_message("valid", "user", "preserve this history")
-    bad = tmp_path / "invalid.json"
+    bad = tmp_path / ("a-invalid.json" if bad_first else "z-invalid.json")
     payload = b"\xff\xfe"
     bad.write_bytes(payload)
     valid = "valid.json"
     names = [bad.name, valid] if bad_first else [valid, bad.name]
+    assert (sorted(names)[0] == bad.name) == bad_first
     original = module.os.listdir
 
     def ordered(path):
@@ -35,7 +36,7 @@ def test_invalid_utf8_does_not_interrupt_legacy_migration(tmp_path, monkeypatch,
         reopened = SqliteTranscriptStore(session_dir=str(tmp_path))
         assert reopened.get_chat_history("valid") == store.get_chat_history("valid")
         assert bad.read_bytes() == payload
-        assert not store.session_exists("invalid")
+        assert not store.session_exists(bad.stem)
     finally:
         for current in (store, reopened):
             if current is not None and current._conn is not None:
