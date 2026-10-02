@@ -1624,7 +1624,11 @@ class AgentFlow:
             if _step_cache is not None:
                 from .step_cache import make_step_key
                 _cache_key = make_step_key(step, previous_output, input, all_variables)
-                _cached = _step_cache.get(_cache_key)
+                try:
+                    _cached = copy.deepcopy(_step_cache.get(_cache_key))
+                except Exception:
+                    _cached = None
+                    logger.warning("Could not restore cached workflow step '%s'", step.name)
                 if _cached is not None:
                     if verbose:
                         print(f"↩︎  cache hit: {step.name}")
@@ -2008,10 +2012,10 @@ class AgentFlow:
                 try:
                     _step_cache.set(
                         _cache_key,
-                        {
+                        copy.deepcopy({
                             "output": output, "variables": cached_variable_updates,
                             "stop": stop, "step_record": step_record,
-                        },
+                        }),
                     )
                 except Exception:
                     # Custom caches may only accept serializable state. Keep
@@ -2729,7 +2733,11 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             )
         from .step_cache import make_step_key
         key = make_step_key(step, previous_output, input, all_variables)
-        hit = cache.get(key)
+        try:
+            hit = copy.deepcopy(cache.get(key))
+        except Exception:
+            hit = None
+            logger.warning("Could not restore cached workflow step")
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
@@ -2745,7 +2753,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # that would replay the failure on every identical re-run and never let
         # the step retry -- turning a transient error into a permanent one.
         if isinstance(result, dict) and not result.get("error"):
-            cache.set(key, result)
+            try:
+                cache.set(key, copy.deepcopy(result))
+            except Exception:
+                logger.warning("Could not cache workflow step")
         return result
 
     def _execute_single_step_uncached(
@@ -5596,7 +5607,11 @@ class WorkflowManager:
             )
         from .step_cache import make_step_key
         key = make_step_key(step, None, original_input, all_variables)
-        hit = cache.get(key)
+        try:
+            hit = copy.deepcopy(cache.get(key))
+        except Exception:
+            hit = None
+            logger.warning("Could not restore cached workflow step")
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
@@ -5608,7 +5623,10 @@ class WorkflowManager:
         # Only cache a successful result -- a failed step must be free to retry
         # on the next run rather than replay a cached failure forever.
         if isinstance(result, dict) and not result.get("error"):
-            cache.set(key, result)
+            try:
+                cache.set(key, copy.deepcopy(result))
+            except Exception:
+                logger.warning("Could not cache workflow step")
         return result
 
     def _execute_single_step_nocache(

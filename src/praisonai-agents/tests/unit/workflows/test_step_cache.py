@@ -55,6 +55,41 @@ class TestCachingWorks:
 
 
 class TestCorrectnessOnAHit:
+    @pytest.mark.parametrize("boundary", ["miss", "hit"])
+    @pytest.mark.parametrize("field", ["output", "variables", "steps"])
+    def test_reference_cache_does_not_share_live_payloads(self, boundary, field):
+        class ReferenceCache:
+            def __init__(self):
+                self.entries = {}
+
+            def get(self, key):
+                return self.entries.get(key)
+
+            def set(self, key, value):
+                self.entries[key] = value
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output={"items": [1]}, variables={"records": [{"value": 1}]})
+
+        flow = AgentFlow(steps=[produce], cache=ReferenceCache())
+        result = flow.run("same", verbose=False)
+        if boundary == "hit":
+            result = flow.run("same", verbose=False)
+        if field == "output":
+            result["output"]["items"].append(999)
+        elif field == "variables":
+            result["variables"]["records"][0]["value"] = 999
+        else:
+            result["steps"][0]["status"] = "corrupted"
+        later = flow.run("same", verbose=False)
+        assert later["output"] == {"items": [1]}
+        assert later["variables"]["records"] == [{"value": 1}]
+        assert later["steps"][0]["status"] == "completed"
+        assert calls == ["produce"]
+
     def test_uncopyable_handler_variables_are_not_cached_by_reference(self):
         import threading
 
@@ -72,6 +107,32 @@ class TestCorrectnessOnAHit:
         second = flow.run("same", verbose=False)
         assert second["variables"]["items"] == [1]
         assert calls == ["produce", "produce"]
+
+    @pytest.mark.parametrize("boundary", ["miss", "hit"])
+    def test_nested_reference_cache_snapshots_variables(self, boundary):
+        class ReferenceCache:
+            def __init__(self):
+                self.entries = {}
+
+            def get(self, key):
+                return self.entries.get(key)
+
+            def set(self, key, value):
+                self.entries[key] = value
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output="ready", variables={"records": [{"value": 1}]})
+
+        flow = AgentFlow(steps=[Parallel(steps=[produce])], cache=ReferenceCache())
+        result = flow.run("same", verbose=False)
+        if boundary == "hit":
+            result = flow.run("same", verbose=False)
+        result["variables"]["records"][0]["value"] = 999
+        assert flow.run("same", verbose=False)["variables"]["records"] == [{"value": 1}]
+        assert calls == ["produce"]
 
     def test_custom_cache_rejecting_variables_does_not_abort_workflow(self):
         import json
