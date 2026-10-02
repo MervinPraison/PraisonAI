@@ -117,13 +117,22 @@ jobs:
               const labels = issue.labels.map((l) => l.name);
 
               if (status !== 'DIRTY' && labels.includes(LABEL)) {
-                await github.rest.issues.removeLabel({
-                  owner,
-                  repo,
-                  issue_number: prNumber,
-                  name: LABEL,
-                });
-                core.info(`Removed ${LABEL} from PR #${prNumber}`);
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    name: LABEL,
+                  });
+                  core.info(`Removed ${LABEL} from PR #${prNumber}`);
+                } catch (err) {
+                  // Fork PRs may return 403 when the token cannot mutate labels on the issue.
+                  if (err.status === 403 || err.status === 404) {
+                    core.info(`Skip remove ${LABEL} on PR #${prNumber}: ${err.status}`);
+                  } else {
+                    throw err;
+                  }
+                }
               }
 
               if (status !== 'DIRTY') return { skipped: true, reason: 'not dirty' };
