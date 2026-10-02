@@ -11,6 +11,8 @@ Tests cover:
 import threading
 from pathlib import Path
 
+import pytest
+
 from praisonaiagents.storage.backends import FileBackend, SQLiteBackend, get_backend
 from praisonaiagents.storage.protocols import StorageBackendProtocol
 
@@ -247,6 +249,68 @@ class TestSQLiteBackend:
         backend2 = SQLiteBackend(db_path=str(db_path))
         loaded = backend2.load("key1")
         assert loaded["data"] == 1
+
+    @pytest.mark.parametrize("table_name", ["select", "123", "9table", "praison_storage"])
+    def test_sqlite_backend_keyword_and_digit_table_names(self, tmp_path, table_name):
+        """Validator-accepted names that are SQL keywords or start with a digit
+        must work across schema creation and all CRUD operations (Issue #5569)."""
+        db_path = tmp_path / "test.db"
+        backend = SQLiteBackend(db_path=str(db_path), table_name=table_name)
+
+        # save / upsert
+        backend.save("key1", {"version": 1})
+        backend.save("key1", {"version": 2})
+        assert backend.load("key1")["version"] == 2
+
+        # exists
+        assert backend.exists("key1")
+        assert not backend.exists("missing")
+
+        # list_keys (full + prefix)
+        backend.save("key2", {"data": 2})
+        backend.save("other", {"data": 3})
+        assert backend.list_keys() == ["key1", "key2", "other"]
+        assert backend.list_keys(prefix="key") == ["key1", "key2"]
+
+        # delete
+        assert backend.delete("other") is True
+        assert not backend.exists("other")
+
+        # clear
+        assert backend.clear() == 2
+        assert backend.list_keys() == []
+
+    def test_sqlite_backend_reopen_with_auto_create_false(self, tmp_path):
+        """A keyword table name persists and reopens with auto_create=False."""
+        db_path = tmp_path / "test.db"
+        backend = SQLiteBackend(db_path=str(db_path), table_name="select")
+        backend.save("key1", {"data": 1})
+        backend.close()
+
+        backend2 = SQLiteBackend(
+            db_path=str(db_path), table_name="select", auto_create=False
+        )
+        assert backend2.load("key1")["data"] == 1
+
+    def test_sqlite_backend_separate_tables_same_db(self, tmp_path):
+        """Quoted identifiers keep distinct tables isolated in one DB file."""
+        db_path = tmp_path / "test.db"
+        t1 = SQLiteBackend(db_path=str(db_path), table_name="select")
+        t2 = SQLiteBackend(db_path=str(db_path), table_name="praison_storage")
+
+        t1.save("shared", {"from": "select"})
+        t2.save("shared", {"from": "praison_storage"})
+
+        assert t1.load("shared")["from"] == "select"
+        assert t2.load("shared")["from"] == "praison_storage"
+
+    def test_sqlite_backend_invalid_table_name_rejected(self, tmp_path):
+        """Names with disallowed characters are still rejected by the validator."""
+        db_path = tmp_path / "test.db"
+        with pytest.raises(ValueError):
+            SQLiteBackend(db_path=str(db_path), table_name="bad name")
+        with pytest.raises(ValueError):
+            SQLiteBackend(db_path=str(db_path), table_name='drop";')
 
 
 class TestGetBackend:
