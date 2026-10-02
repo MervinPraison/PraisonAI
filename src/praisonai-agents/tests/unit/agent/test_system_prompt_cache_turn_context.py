@@ -27,6 +27,29 @@ def test_cache_hit_preserves_complete_prompt(agent, override):
     assert ('sample_tool' in second) is (override != [])
 
 
+def test_cache_hit_refreshes_current_default_tools(agent, monkeypatch):
+    """A reused prefix must advertise the current default tool set."""
+    def replacement_tool() -> str:
+        """Return a different fixed local result."""
+        return 'replacement'
+
+    builds = []
+    monkeypatch.setattr(
+        agent, '_resolve_harness_base_prompt',
+        lambda: builds.append('build') or 'stable prefix',
+    )
+    first = agent._build_system_prompt(tools=None)
+    assert 'sample_tool' in first
+    assert 'replacement_tool' not in first
+
+    agent.tools = [replacement_tool]
+    second = agent._build_system_prompt(tools=None)
+    assert builds == ['build']
+    assert 'stable prefix' in second
+    assert 'replacement_tool' in second
+    assert 'sample_tool' not in second
+
+
 def test_cache_hit_refreshes_session_context(agent, monkeypatch):
     import praisonaiagents.session.context as context
 
