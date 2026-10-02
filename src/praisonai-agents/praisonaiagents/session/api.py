@@ -502,6 +502,10 @@ class Session:
     ) -> bool:
         """Persist one sub-agent transcript onto this session's own record.
 
+        Built-in stores merge the entry under their session file lock. Older
+        custom stores retain the bounded read/write verification fallback below;
+        that fallback cannot guarantee atomic preservation of concurrent entries.
+
         The store replaces the whole ``AGENT_HISTORY_KEY`` map per write, so a
         naive read-then-replace would let a concurrent writer (another agent
         under the same parent) clobber this agent's entry, or vice versa. We
@@ -509,6 +513,14 @@ class Session:
         *other* key changed underneath us, retrying a bounded number of times.
         Legacy per-agent records are always merged in (they stay on disk).
         """
+        merge_map = getattr(session_store, "merge_session_metadata_map", None)
+        if callable(merge_map):
+            # Built-in stores merge inside their locked read/modify/write path.
+            # A post-write comparison cannot detect entries lost to a stale map.
+            return merge_map(
+                self.session_id, AGENT_HISTORY_KEY, {agent_key: messages},
+                defaults=self._legacy_agent_histories(session_store),
+            )
         update_meta = getattr(session_store, "update_session_metadata", None)
         if not callable(update_meta):
             return False
