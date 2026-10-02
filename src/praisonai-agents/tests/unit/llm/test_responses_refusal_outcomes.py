@@ -9,6 +9,13 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    """Fake Responses clients must not inherit a configured chat endpoint."""
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+
+
 def output_response(shape, profile):
     blocks = []
     if profile != 'refusal':
