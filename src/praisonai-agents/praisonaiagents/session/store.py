@@ -1154,28 +1154,54 @@ class DefaultSessionStore:
             return
 
         def _freeze(value: Any) -> Any:
-            # JSON arrays/objects (including multimodal content) are not
-            # hashable. Preserve their structural equality for deduplication.
-            if isinstance(value, list):
-                return ("list", tuple(_freeze(item) for item in value))
-            if isinstance(value, dict):
-                return ("dict", frozenset((key, _freeze(item)) for key, item in value.items()))
-            # Python equates bool/int/float values that JSON keeps distinct.
-            return (type(value), value)
+            # A flat, iterative key avoids recursion both while converting and
+            # hashing deeply nested JSON. Sort object keys to preserve equality
+            # independently of insertion order; keep scalar types distinct.
+            tokens = []
+            stack = [("visit", value)]
+            ancestors = set()
+            while stack:
+                operation, item = stack.pop()
+                if operation == "leave":
+                    ancestors.remove(item)
+                elif operation == "key":
+                    tokens.append(("key", type(item), item))
+                elif isinstance(item, (list, dict)):
+                    identity = id(item)
+                    if identity in ancestors:
+                        raise ValueError("cyclic spill content")
+                    ancestors.add(identity)
+                    stack.append(("leave", identity))
+                    tokens.append((type(item), len(item)))
+                    if isinstance(item, list):
+                        stack.extend(("visit", child) for child in reversed(item))
+                    else:
+                        for key in sorted(item, reverse=True):
+                            stack.append(("visit", item[key]))
+                            stack.append(("key", key))
+                else:
+                    tokens.append((type(item), item))
+            return tuple(tokens)
 
         def _key(message: SessionMessage) -> tuple:
             return tuple(_freeze(value) for value in (
                 message.role, message.content, message.timestamp,
             ))
 
-        seen = {_key(m) for m in session.messages}
+        seen = set()
+        for message in session.messages:
+            try:
+                seen.add(_key(message))
+            except (RecursionError, TypeError, ValueError):
+                # An unsupported existing value must not stop other salvage.
+                continue
         recovered: List[tuple] = []  # (filepath, [SessionMessage])
         for filename in candidates:
             filepath = os.path.join(spill_dir, filename)
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, UnicodeDecodeError, IOError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, IOError, OSError):
                 continue
             # A syntactically valid spill can still carry an unexpected shape
             # (non-object root, non-list messages, non-object message). Guard
@@ -1189,15 +1215,21 @@ class DefaultSessionStore:
             if not isinstance(raw_messages, list):
                 continue
             msgs = []
-            for raw in raw_messages:
-                if not isinstance(raw, dict):
-                    continue
-                msg = SessionMessage.from_dict(raw)
-                key = _key(msg)
-                if key in seen:
-                    continue
-                seen.add(key)
-                msgs.append(msg)
+            pending_keys = set()
+            try:
+                for raw in raw_messages:
+                    if not isinstance(raw, dict):
+                        continue
+                    msg = SessionMessage.from_dict(raw)
+                    key = _key(msg)
+                    if key in seen or key in pending_keys:
+                        continue
+                    pending_keys.add(key)
+                    msgs.append(msg)
+            except (RecursionError, TypeError, ValueError):
+                # Retain the entire spill, without poisoning neighbor dedup.
+                continue
+            seen.update(pending_keys)
             recovered.append((filepath, msgs))
 
         if not recovered:
