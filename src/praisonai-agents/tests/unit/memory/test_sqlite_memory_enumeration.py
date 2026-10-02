@@ -40,3 +40,33 @@ def test_get_all_memories_includes_every_stored_row(tmp_path, monkeypatch, facad
         adapter.close_connections()
         if facade:
             store.close_connections()
+
+
+@pytest.mark.parametrize('tier', ['short', 'long'])
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf')])
+def test_filtered_search_accepts_writer_nonfinite_metadata(tmp_path, tier, value):
+    adapter = SqliteMemoryAdapter(short_db=str(tmp_path / 'short.db'), long_db=str(tmp_path / 'long.db'))
+    try:
+        write = getattr(adapter, f'store_{tier}_term')
+        search = getattr(adapter, f'search_{tier}_term')
+        write('other record', metadata={'user_id': 'other', 'value': value})
+        wanted = write('wanted record', metadata={'user_id': 'wanted', 'value': value})
+        assert [item['id'] for item in search('', user_id='wanted', limit=1)] == [wanted]
+        assert search('', user_id='absent') == []
+    finally:
+        adapter.close_connections()
+
+
+@pytest.mark.parametrize('tier', ['short', 'long'])
+def test_filtered_search_ignores_corrupt_peer_metadata_and_keeps_string_matching(tmp_path, tier):
+    adapter = SqliteMemoryAdapter(short_db=str(tmp_path / 'short.db'), long_db=str(tmp_path / 'long.db'))
+    try:
+        write = getattr(adapter, f'store_{tier}_term')
+        wanted = write('wanted', metadata={'user_id': True})
+        conn = getattr(adapter, f'_get_{"stm" if tier == "short" else "ltm"}_conn')()
+        conn.execute(f'INSERT INTO {tier}_term_memory (content, metadata) VALUES (?, ?)', ('broken peer', '{invalid'))
+        conn.commit()
+        search = getattr(adapter, f'search_{tier}_term')
+        assert [item['id'] for item in search('', user_id='True', limit=1)] == [wanted]
+    finally:
+        adapter.close_connections()

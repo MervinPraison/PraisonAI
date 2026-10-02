@@ -19,6 +19,16 @@ from ..protocols import MemoryProtocol
 
 logger = get_logger(__name__)
 
+
+def _metadata_user_id(raw):
+    """Match the existing Python JSON reader, including non-finite values."""
+    try:
+        metadata = json.loads(raw) if raw else {}
+        return str(metadata.get("user_id", "")) if isinstance(metadata, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
 class SqliteMemoryAdapter:
     """
     SQLite-based memory adapter implementing MemoryProtocol.
@@ -79,6 +89,7 @@ class SqliteMemoryAdapter:
                 check_same_thread=False,
                 timeout=10.0
             )
+            self._local.stm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
             self._local.stm_conn.execute("""
                 CREATE TABLE IF NOT EXISTS short_term_memory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +114,7 @@ class SqliteMemoryAdapter:
                 check_same_thread=False,
                 timeout=10.0
             )
+            self._local.ltm_conn.create_function("memory_user_id", 1, _metadata_user_id, deterministic=True)
             self._local.ltm_conn.execute("""
                 CREATE TABLE IF NOT EXISTS long_term_memory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,7 +156,7 @@ class SqliteMemoryAdapter:
         """Search short-term memory."""
         conn = self._get_stm_conn()
         user_id = kwargs.get("user_id")
-        user_filter = " AND CAST(json_extract(metadata, '$.user_id') AS TEXT) = ?" if user_id else ""
+        user_filter = " AND memory_user_id(metadata) = ?" if user_id else ""
         params = (f"%{query}%", str(user_id), limit) if user_id else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM short_term_memory "
@@ -188,7 +200,7 @@ class SqliteMemoryAdapter:
         """Search long-term memory."""
         conn = self._get_ltm_conn()
         user_id = kwargs.get("user_id")
-        user_filter = " AND CAST(json_extract(metadata, '$.user_id') AS TEXT) = ?" if user_id else ""
+        user_filter = " AND memory_user_id(metadata) = ?" if user_id else ""
         params = (f"%{query}%", str(user_id), limit) if user_id else (f"%{query}%", limit)
         cursor = conn.execute(
             "SELECT id, content, metadata, timestamp FROM long_term_memory "
