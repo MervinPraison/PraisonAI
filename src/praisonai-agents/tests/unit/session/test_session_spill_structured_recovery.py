@@ -37,3 +37,29 @@ def test_invalid_utf8_spill_does_not_block_valid_neighbor(tmp_path, monkeypatch)
     assert store.get_chat_history("s") == [{"role": "user", "content": "recovered"}]
     assert not Path(spill).exists()
     assert bad.read_bytes() == b"\xff\xfeinvalid"
+
+
+@pytest.mark.parametrize("shape", ["object", "array"])
+@pytest.mark.parametrize("previous,incoming", [(True, 1), (1, 1.0), (False, 0), (True, True)])
+def test_spill_identity_preserves_json_scalar_types(tmp_path, monkeypatch, shape, previous, incoming):
+    directory = tmp_path / "sessions"
+    store = DefaultSessionStore(session_dir=str(directory))
+    monkeypatch.setattr(store, "_spill_dir", lambda: str(tmp_path / "spill"))
+
+    def content(value):
+        return {"nested": {"value": value}} if shape == "object" else [{"value": value}]
+
+    assert store.add_message("s", "user", content(previous))
+    timestamp = store.get_session("s").messages[0].timestamp
+    spill = store._spill("s", [SessionMessage(role="user", content=content(incoming), timestamp=timestamp)])
+    assert spill is not None
+    history = store.get_chat_history("s")
+    expected = 1 if type(previous) is type(incoming) else 2
+    assert len(history) == expected
+
+    reopened = DefaultSessionStore(session_dir=str(directory))
+    persisted = reopened.get_chat_history("s")
+    assert len(persisted) == expected
+    values = [m["content"]["nested"]["value"] if shape == "object" else m["content"][0]["value"] for m in persisted]
+    assert [type(value) for value in values] == ([type(previous)] if expected == 1 else [type(previous), type(incoming)])
+    assert not Path(spill).exists()

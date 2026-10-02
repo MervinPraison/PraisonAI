@@ -1160,7 +1160,8 @@ class DefaultSessionStore:
                 return ("list", tuple(_freeze(item) for item in value))
             if isinstance(value, dict):
                 return ("dict", frozenset((key, _freeze(item)) for key, item in value.items()))
-            return value
+            # Python equates bool/int/float values that JSON keeps distinct.
+            return (type(value), value)
 
         def _key(message: SessionMessage) -> tuple:
             return tuple(_freeze(value) for value in (
