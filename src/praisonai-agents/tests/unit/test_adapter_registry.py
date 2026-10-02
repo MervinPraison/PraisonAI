@@ -376,3 +376,44 @@ class TestGetProviderAdapter:
     def test_unknown_model_returns_default_adapter(self):
         from praisonaiagents.llm.adapters import get_provider_adapter, DefaultAdapter
         assert isinstance(get_provider_adapter("gpt-4o"), DefaultAdapter)
+
+
+# ---------------------------------------------------------------------------
+# Provider registry accessor + entry-point discovery (issue #5607)
+# ---------------------------------------------------------------------------
+
+class TestProviderRegistryAccessor:
+    def test_list_provider_adapters_includes_builtins(self):
+        from praisonaiagents.llm.adapters import list_provider_adapters
+        names = list_provider_adapters()
+        assert "anthropic" in names
+        assert "gemini" in names
+        assert names == sorted(names)
+
+    def test_list_reflects_runtime_registration(self):
+        from praisonaiagents.llm.adapters import (
+            add_provider_adapter,
+            list_provider_adapters,
+            DefaultAdapter,
+        )
+        add_provider_adapter("dummy5607", DefaultAdapter())
+        assert "dummy5607" in list_provider_adapters()
+
+    def test_runtime_registered_provider_resolves(self):
+        from praisonaiagents.llm.adapters import (
+            add_provider_adapter,
+            get_provider_adapter,
+            DefaultAdapter,
+        )
+
+        class DummyAdapter(DefaultAdapter):
+            pass
+
+        add_provider_adapter("dummyroute5607", DummyAdapter())
+        assert isinstance(get_provider_adapter("dummyroute5607/model"), DummyAdapter)
+
+    def test_load_provider_entry_points_is_idempotent(self):
+        from praisonaiagents.llm.adapters import load_provider_entry_points
+        # Must not raise and must be safe to call repeatedly.
+        load_provider_entry_points()
+        load_provider_entry_points()

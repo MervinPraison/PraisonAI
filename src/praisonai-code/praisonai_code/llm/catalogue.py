@@ -243,13 +243,50 @@ PROVIDER_ENV_CATALOGUE: Dict[str, tuple] = {
 }
 
 
+def discovered_providers() -> List[str]:
+    """Return provider ids registered in core beyond the static catalogue.
+
+    Unions providers registered in Python via ``add_provider_adapter`` and
+    those published under the ``praisonai.providers`` entry-point group, minus
+    the built-in core adapters (``default``/``local``/``claude``/… — not
+    user-facing provider ids) and anything already in
+    :data:`PROVIDER_ENV_CATALOGUE`. Lazy and failure-tolerant: if core is
+    unavailable the CLI simply sees the static catalogue, exactly as before.
+    """
+    try:
+        from praisonaiagents.llm.adapters import list_provider_adapters
+    except Exception:
+        return []
+    builtin = {"default", "local", "ollama", "anthropic", "claude", "gemini"}
+    found: List[str] = []
+    try:
+        for name in list_provider_adapters():
+            pid = (name or "").strip().lower()
+            if pid and pid not in builtin and pid not in PROVIDER_ENV_CATALOGUE:
+                if pid not in found:
+                    found.append(pid)
+    except Exception:
+        return []
+    return found
+
+
 def provider_env_vars() -> tuple:
-    """Return every credential env-var declared in the catalogue (deduped)."""
+    """Return every credential env-var declared in the catalogue (deduped).
+
+    Includes the conventional ``<PROVIDER>_API_KEY`` for each discovered
+    (Python-registered or entry-point) provider so first-run credential
+    auto-detection recognises a key set for a plugin provider, not just the
+    static catalogue.
+    """
     seen: list = []
     for env_vars, _model, _prefix in PROVIDER_ENV_CATALOGUE.values():
         for var in env_vars:
             if var not in seen:
                 seen.append(var)
+    for pid in discovered_providers():
+        var = f"{pid.upper()}_API_KEY"
+        if var not in seen:
+            seen.append(var)
     return tuple(seen)
 
 
@@ -274,15 +311,31 @@ def provider_for_model(model: str) -> Optional[str]:
         return "gemini"
     if m.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
+    # A discovered (Python-registered / entry-point) provider addressed as
+    # ``myprovider/model`` resolves to its id so YAML/CLI model strings route
+    # through the same credential path as built-ins.
+    if "/" in m:
+        prefix = m.split("/", 1)[0]
+        if prefix in discovered_providers():
+            return prefix
     return None
 
 
 def env_vars_for_provider(provider: str) -> tuple:
-    """Return the credential env-var(s) for a provider id, or ``()``."""
+    """Return the credential env-var(s) for a provider id, or ``()``.
+
+    Falls back to the conventional ``<PROVIDER>_API_KEY`` for discovered
+    providers so a plugin provider gets a credential env-var hint and key
+    validation like a built-in, without a catalogue edit.
+    """
     if not provider:
         return ()
     row = PROVIDER_ENV_CATALOGUE.get(provider.lower())
-    return row[0] if row else ()
+    if row:
+        return row[0]
+    if provider.lower() in discovered_providers():
+        return (f"{provider.upper()}_API_KEY",)
+    return ()
 
 
 class ModelCatalogue:
@@ -489,6 +542,12 @@ class ModelCatalogue:
         for model in self._get_models():
             provider = (model.provider or "").strip().lower()
             if provider and provider not in seen:
+                seen.append(provider)
+        # Fold in providers registered in Python / via the
+        # ``praisonai.providers`` entry-point group so a plugin provider is
+        # first-class in the setup/auth pickers, not just LiteLLM-known ones.
+        for provider in discovered_providers():
+            if provider not in seen:
                 seen.append(provider)
         return sorted(seen)
 
