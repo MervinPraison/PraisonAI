@@ -74,6 +74,7 @@ class SqliteSessionStore(DefaultSessionStore):
             db_path = os.path.expanduser(db_path)
         self.db_path = db_path
         self._db_lock = threading.RLock()
+        self._backfill_lock = threading.Lock()
         self._conn = None
         self._fts_available = False
         self._db_ready = False
@@ -294,9 +295,9 @@ class SqliteSessionStore(DefaultSessionStore):
             logger.debug("Session de-index failed for %s: %s", session_id, exc)
 
     def _ensure_backfilled(self) -> None:
-        """Backfill the index from existing JSON transcripts exactly once.
+        """Backfill existing transcripts, retrying an incomplete pass.
 
-        Guarded by a one-time flag rather than by an empty-index check: a
+        Guarded by a successful-pass flag rather than an empty-index check: a
         single ``add_message`` on a *new* session could otherwise make the
         index non-empty and permanently skip backfilling pre-existing JSON
         transcripts, silently omitting legacy sessions from search results.
@@ -305,11 +306,12 @@ class SqliteSessionStore(DefaultSessionStore):
         """
         if self._backfilled:
             return
-        with self._db_lock:
+        # Do not hold the database lock while waiting for transcript locks:
+        # imports acquire their file lock before refreshing SQLite.
+        with self._backfill_lock:
             if self._backfilled:
                 return
-            self._backfilled = True
-            self._reindex_all()
+            self._backfilled = self._reindex_all()
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.
@@ -321,8 +323,7 @@ class SqliteSessionStore(DefaultSessionStore):
         otherwise have its already-content-indexed sessions skipped by backfill,
         leaving ``session_route`` empty and breaking gateway routing. Requiring a
         route row forces those sessions to be re-indexed so their route rows are
-        populated. Backfill runs at most once (guarded by ``_backfilled``), so
-        this stays a cheap one-time pass.
+        populated. Successful backfill runs once; incomplete passes can retry.
         """
         conn = self._connect()
         if conn is None:
@@ -341,7 +342,7 @@ class SqliteSessionStore(DefaultSessionStore):
         except Exception:
             return set()
 
-    def _reindex_all(self) -> None:
+    def _reindex_all(self) -> bool:
         """Backfill the index from existing JSON transcripts.
 
         Normally cheap: sessions already fully indexed are skipped. When the
@@ -355,13 +356,15 @@ class SqliteSessionStore(DefaultSessionStore):
         try:
             filenames = os.listdir(self.session_dir)
         except (IOError, OSError):
-            return
+            return False
         conn = self._connect()
-        stale = (
-            conn is not None
-            and self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
-        )
+        if conn is None:
+            # No index is available; readers already use the parent JSON scan.
+            return True
+        with self._db_lock:
+            stale = self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
         already = set() if stale else self._indexed_ids()
+        complete = True
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
@@ -369,12 +372,22 @@ class SqliteSessionStore(DefaultSessionStore):
             if sid in already:
                 continue
             try:
-                session = self._read_session_fresh(sid)
+                filepath = self._get_session_path(sid)
+                with FileLock(filepath, self.lock_timeout):
+                    # Match import's file -> database order and keep a peer
+                    # replacement from making the just-read projection stale.
+                    session = self._load_session_from_disk(sid, filepath)
+                    self._reingest_spill(sid, session)
+                    with self._lock:
+                        self._cache[sid] = session
+                    if not self._index_session(session):
+                        complete = False
             except Exception:
-                continue
-            self._index_session(session)
-        if conn is not None:
-            self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
+                complete = False
+        if complete:
+            with self._db_lock:
+                self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
+        return complete
 
     # ── write path: keep the index in sync ────────────────────────────
 

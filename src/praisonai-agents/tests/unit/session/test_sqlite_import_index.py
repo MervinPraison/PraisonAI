@@ -7,7 +7,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
-from praisonaiagents.session.store import DefaultSessionStore
+from praisonaiagents.session.store import DefaultSessionStore, FileLock
 
 
 @pytest.fixture
@@ -441,3 +441,68 @@ def test_failed_nested_index_refresh_preserves_callers_transaction(make_store):
     assert conn.execute("SELECT updated_at FROM session_meta WHERE session_id = 'unrelated'").fetchone() == ("caller-pending",)
     assert conn.execute("SELECT content FROM session_fts WHERE session_id = 'session'").fetchone() == ("old otter",)
     conn.execute("COMMIT")
+
+
+def test_import_and_initial_backfill_do_not_invert_file_database_locks(make_store, monkeypatch):
+    from praisonaiagents.session import sqlite_store as indexed_module
+    from praisonaiagents.session import store as store_module
+
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "imported narwhal")
+    destination = make_store(SqliteSessionStore, lock_timeout=0.3)
+    destination._connect()
+    import_holds_file = threading.Event()
+    backfill_attempts_file = threading.Event()
+    release_import = threading.Event()
+    failed_locks = []
+    original_load = destination._load_session_from_disk
+
+    class ObservedFileLock(FileLock):
+        def acquire(self):
+            if threading.current_thread().name.startswith("backfill"):
+                backfill_attempts_file.set()
+            acquired = super().acquire()
+            if not acquired:
+                failed_locks.append(self.filepath)
+            return acquired
+
+    def load(session_id, filepath):
+        if threading.current_thread().name.startswith("import"):
+            import_holds_file.set()
+            assert release_import.wait(5)
+        return original_load(session_id, filepath)
+
+    monkeypatch.setattr(indexed_module, "FileLock", ObservedFileLock)
+    monkeypatch.setattr(store_module, "FileLock", ObservedFileLock)
+    monkeypatch.setattr(destination, "_load_session_from_disk", load)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="import") as imports, ThreadPoolExecutor(max_workers=1, thread_name_prefix="backfill") as reads:
+        restoring = imports.submit(destination.import_sessions, source.export_all())
+        try:
+            assert import_holds_file.wait(5)
+            searching = reads.submit(destination.search, "narwhal")
+            assert backfill_attempts_file.wait(5)
+        finally:
+            release_import.set()
+        assert restoring.result(timeout=5).imported == 1
+        assert [hit.session_id for hit in searching.result(timeout=5)] == ["session"]
+    assert failed_locks == [], "backfill retained the DB lock while waiting for import's file lock"
+
+
+@pytest.mark.parametrize("failure", ["file_lock", "sql_refresh"])
+def test_initial_backfill_retries_after_a_failed_transcript(make_store, failure):
+    destination = make_store(SqliteSessionStore, lock_timeout=0.05)
+    plain = DefaultSessionStore(session_dir=destination.session_dir)
+    assert plain.add_message("legacy", "user", "legacy narwhal")
+    assert plain.set_gateway_info("legacy", gateway_session_id="legacy-route", agent_id="legacy-agent")
+    conn = destination._connect()
+    if failure == "file_lock":
+        with FileLock(plain._get_session_path("legacy")):
+            assert destination.search("narwhal") == []
+    else:
+        conn.execute("CREATE TRIGGER fail_metadata BEFORE INSERT ON session_meta "
+                     "BEGIN SELECT RAISE(FAIL, 'backfill failed'); END")
+        assert destination.search("narwhal") == []
+        conn.execute("DROP TRIGGER fail_metadata")
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["legacy"]
+    assert destination.get_by_gateway_session("legacy-route").session_id == "legacy"
+    assert destination.list_sessions_by_gateway_agent("legacy-agent") == ["legacy"]
