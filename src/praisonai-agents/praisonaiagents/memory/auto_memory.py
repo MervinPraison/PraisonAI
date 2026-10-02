@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_MAX_PENDING_INTERACTIONS = 1000
+
 class AutoMemoryExtractor:
     """
     Automatically extracts memorable content from conversations.
@@ -293,8 +295,7 @@ class AutoMemory:
         Returns:
             List of extracted memories
         """
-        with self._processing_lock:
-            return self._process_interaction(user_message, assistant_response, store)
+        return self._process_interaction(user_message, assistant_response, store)
 
     def _process_interaction(
         self, user_message: str, assistant_response: Optional[str], store: bool
@@ -310,24 +311,37 @@ class AutoMemory:
         # Check if already processed
         import hashlib
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-        if text_hash in self._processed_hashes:
-            return []
-        
-        if text_hash in self._pending_memories:
-            memories = self._pending_memories[text_hash]
-        else:
+        with self._processing_lock:
+            if text_hash in self._processed_hashes:
+                return []
+            memories = self._pending_memories.get(text_hash)
+            if store and memories is None and len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
+                raise RuntimeError("AutoMemory pending interaction limit reached; retry pending writes first")
+
+        if memories is None:
             # Quick filter
             if not self.extractor.should_remember(text):
                 return []
             memories = self.extractor.extract(text)
         
         if store and memories:
-            self._pending_memories[text_hash] = memories
-            self._store_memories(memories, text_hash)
-            # Only a completed storage operation consumes deduplication.
-            self._processed_hashes.add(text_hash)
-            self._pending_memories.pop(text_hash, None)
-            self._stored_offsets.pop(text_hash, None)
+            with self._processing_lock:
+                # Another caller may have completed or partially stored this
+                # interaction while extraction ran outside the lock.
+                if text_hash in self._processed_hashes:
+                    return []
+                pending = self._pending_memories.get(text_hash)
+                if pending is not None:
+                    memories = pending
+                elif len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
+                    raise RuntimeError("AutoMemory pending interaction limit reached; retry pending writes first")
+                self._pending_memories[text_hash] = memories
+                self._store_memories(memories, text_hash)
+                # Keep partial progress on failure; do not evict it to admit
+                # another interaction and duplicate its successful writes.
+                self._processed_hashes.add(text_hash)
+                self._pending_memories.pop(text_hash, None)
+                self._stored_offsets.pop(text_hash, None)
         
         return memories
     
