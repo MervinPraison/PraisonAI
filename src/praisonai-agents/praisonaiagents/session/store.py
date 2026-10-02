@@ -1356,9 +1356,17 @@ class DefaultSessionStore:
             return
         records = []
         for m in messages:
-            # The background sink must not share nested values with callers
-            # or the local session cache while it waits or processes a record.
-            record = copy.deepcopy(m.to_dict())
+            # Normalize to the JSON shape that was persisted. Container
+            # subclasses may be JSON-serializable but carry uncopyable attrs.
+            try:
+                record = json.loads(json.dumps(m.to_dict(), ensure_ascii=False))
+            except Exception as exc:
+                logger.warning(
+                    "session mirror record preparation failed for %s; "
+                    "dropping record (local write unaffected): %s",
+                    session_id, exc,
+                )
+                continue
             record.setdefault(
                 "id", f"{session_id}:{record.get('timestamp', time.time())}"
             )

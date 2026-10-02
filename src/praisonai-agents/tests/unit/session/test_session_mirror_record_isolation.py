@@ -2,10 +2,64 @@
 
 from copy import deepcopy
 from threading import Event
+import threading
 
 import pytest
 
 from praisonaiagents.session.store import DefaultSessionStore
+
+
+@pytest.mark.parametrize("field", ["metadata", "tool_calls"])
+def test_json_container_subclass_does_not_fail_local_add(tmp_path, field):
+    class Mapping(dict):
+        pass
+
+    class Sequence(list):
+        pass
+
+    received = []
+
+    class Mirror:
+        def append(self, session_id, records):
+            received.extend(deepcopy(records))
+
+    metadata = Mapping({"value": "original"})
+    calls = Sequence([{"id": "call_1", "function": {"name": "lookup", "arguments": "{}"}}])
+    container = metadata if field == "metadata" else calls
+    container.lock = threading.Lock()
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=Mirror())
+    try:
+        assert store.add_message("s", "assistant", "hello", metadata=metadata, tool_calls=calls)
+        assert store.flush_mirror(timeout=10)
+        durable = DefaultSessionStore(session_dir=str(tmp_path)).get_session("s")
+        assert received[0][field] == durable.messages[0].to_dict()[field]
+    finally:
+        store.close_mirror()
+
+
+def test_mirror_preparation_failure_keeps_local_success(tmp_path, monkeypatch, caplog):
+    import praisonaiagents.session.store as store_module
+
+    class Mirror:
+        def append(self, session_id, records):
+            raise AssertionError("failed preparation must not enqueue a record")
+
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=Mirror())
+
+    def fail(*args, **kwargs):
+        raise TypeError("snapshot preparation failed")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(store_module.json, "dumps", fail)
+            assert store.add_message("s", "user", "durable")
+        assert store.flush_mirror(timeout=10)
+        assert DefaultSessionStore(session_dir=str(tmp_path)).get_chat_history("s") == [
+            {"role": "user", "content": "durable"},
+        ]
+        assert "local write unaffected" in caplog.text
+    finally:
+        store.close_mirror()
 
 
 @pytest.mark.parametrize("field", ["metadata", "tool_calls"])
