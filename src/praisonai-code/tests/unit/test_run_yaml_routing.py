@@ -198,5 +198,56 @@ def test_modern_run_delegation_does_not_reenter_run_app(monkeypatch, tmp_path):
     assert result == "READY"
 
 
+def test_modern_run_delegation_preserves_resolved_agent_file(monkeypatch, tmp_path):
+    """Greptile #5606: the delegated legacy ``run`` branch must keep the
+    constructor-provided (resolved, possibly absolute) ``agent_file`` instead of
+    overwriting it with the relative ``sys.argv`` token.
+
+    For ``run <file>.yaml --worktree`` the modern runner resolves the target to
+    an absolute path *before* chdir'ing into the isolated worktree, then passes
+    that path to ``PraisonAI(agent_file=...)``. If the legacy branch replaced it
+    with the relative CLI arg, an untracked/ignored YAML (absent from the fresh
+    worktree) would fail to load. This asserts the resolved path survives.
+    """
+    pa = _load_module()
+    _require_wrapper_argparse()
+
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+    resolved = str(yaml_path)  # absolute path, as the worktree runner passes
+
+    seen = {"agent_file": None}
+
+    class _FakeGenerator:
+        def __init__(self, agent_file, *a, **k):
+            seen["agent_file"] = agent_file
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def generate_crew_and_kickoff(self):
+            return "READY"
+
+    monkeypatch.setattr(pa, "_get_agents_generator", lambda: _FakeGenerator)
+    monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", "1")
+
+    import sys as _sys
+
+    # sys.argv carries the *relative* CLI token; a bare "agents.yaml" that is not
+    # present in the (simulated) new cwd. The resolved absolute path handed to the
+    # constructor must win.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_sys, "argv", ["praisonai", "run", "agents.yaml"])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    result = pa.PraisonAI(agent_file=resolved).main()
+
+    assert seen["agent_file"] == resolved
+    assert result == "READY"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -1413,7 +1413,19 @@ class PraisonAI:
                     # exceeded", issue #5597). Execute the YAML directly instead:
                     # set it as the agent file and fall through to the normal
                     # legacy execution path below.
-                    self.agent_file = first
+                    #
+                    # Prefer the constructor-provided ``agent_file`` over the
+                    # relative ``sys.argv`` token: the modern runner resolves the
+                    # target to an absolute path *before* a ``--worktree`` chdir
+                    # and passes it here (``self.agent_file`` is still pristine at
+                    # this point), so an untracked/ignored YAML absent from the
+                    # fresh worktree still loads. Fall back to ``first`` only when
+                    # no explicit path was supplied (default ``agents.yaml``
+                    # sentinel from ``__init__``).
+                    if self.agent_file and self.agent_file != "agents.yaml":
+                        pass  # keep the resolved constructor path
+                    else:
+                        self.agent_file = first
                     args.command = None
                 elif is_yaml_target:
                     # Modern engine (``commands/run.py`` run_main); the first
