@@ -336,8 +336,6 @@ class AutoMemory:
             if text_hash in self._processed_hashes:
                 return []
             memories = self._pending_memories.get(text_hash)
-            if store and memories is None and len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
-                self._make_pending_room()
 
         if memories is None:
             # Quick filter
