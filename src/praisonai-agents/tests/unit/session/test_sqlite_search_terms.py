@@ -206,19 +206,28 @@ def test_nonwal_backup_completes_despite_writes_between_backup_steps(sqlite_stor
     assert callbacks[-1] == 0
 
 
-def test_nonwal_continuous_peer_writes_abort_without_scoring_partial_snapshot(sqlite_store, monkeypatch):
+@pytest.mark.parametrize("through_tool", [False, True])
+def test_nonwal_continuous_peer_writes_fall_back_to_complete_source_snapshot(sqlite_store, monkeypatch, through_tool):
+    import json
     import sqlite3
     from praisonaiagents.storage import sqlite as sqlite_factory
+    from praisonaiagents.tools.session_tools import SessionTools
 
     store = sqlite_store
     assert store.add_message("reference", "user", "alpha beta " + "x" * 1_000_000)
+    for index in range(260):
+        assert store.add_message(f"newer-{index}", "user", "alpha only")
     store._conn.execute("PRAGMA journal_mode=DELETE")
     connect = sqlite_factory.connect
     writes = []
     writing = True
+    copies = []
+    sources = []
 
     class BusySource(sqlite3.Connection):
         def backup(self, target, **kwargs):
+            copies.append(target)
+            sources.append(self)
             observer = kwargs.pop("progress", None)
             def progress(status, remaining, total):
                 if observer is not None:
@@ -239,16 +248,29 @@ def test_nonwal_continuous_peer_writes_abort_without_scoring_partial_snapshot(sq
     scoring = []
     original = store._searchable_messages
     def observe_scoring(data):
+        # An interrupted copy must be discarded before any decoded scoring.
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            copies[-1].execute("SELECT 1")
+        assert sources[-1].in_transaction
         scoring.append(data)
         return original(data)
     monkeypatch.setattr(store, "_searchable_messages", observe_scoring)
-    with pytest.raises(sqlite3.OperationalError, match="concurrent writes"):
-        store.search("alpha beta")
+    if through_tool:
+        result = json.loads(SessionTools(store=store).session_search("alpha beta", limit=300))
+        assert result["success"] is True
+        hits = result["results"]
+    else:
+        hits = [hit.as_dict() for hit in store.search("alpha beta", limit=300)]
+    assert len(hits) == 261
+    assert hits[0]["session_id"] == "reference"
     assert 3 < len(writes) < 50
-    assert scoring == []
+    assert len(scoring) == 261
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        sources[-1].execute("SELECT 1")
     assert store.add_message("after-search", "user", "writer resumed")
     writing = False
-    assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
+    monkeypatch.setattr(store, "_searchable_messages", original)
+    assert [hit.session_id for hit in store.search("alpha beta", limit=1)] == ["reference"]
 
 
 @pytest.mark.parametrize("failure", ["temporary_directory", "sqlite_full"])
