@@ -132,6 +132,7 @@ def test_pending_outage_has_backpressure_without_evicting_partial_retry(tmp_path
     with pytest.raises(RuntimeError, match="pending"):
         auto.process_interaction("I prefer detailed answers.")
     assert len(auto._pending_memories) == 2
+    assert auto.process_interaction("Hello!") == []
     monkeypatch.setattr(memory, "add_long_term", original)
     assert auto.process_interaction("I prefer detailed answers.")
     assert auto.process_interaction(partial) == []
@@ -141,6 +142,7 @@ def test_pending_outage_has_backpressure_without_evicting_partial_retry(tmp_path
 
 def test_first_overlapping_agent_calls_share_one_wrapper(tmp_path, monkeypatch):
     from praisonaiagents.agent.memory_mixin import MemoryMixin
+    from praisonaiagents.agent import memory_mixin
     from praisonaiagents.memory import auto_memory as module
 
     class Host(MemoryMixin):
@@ -149,8 +151,21 @@ def test_first_overlapping_agent_calls_share_one_wrapper(tmp_path, monkeypatch):
 
     host = Host()
     host._memory_instance = FileMemory(user_id="first-use", base_path=tmp_path)
-    entered, release, second_started = Event(), Event(), Event()
+    entered, release, second_attempted = Event(), Event(), Event()
     constructed = []
+
+    class ObservedLock:
+        def __init__(self):
+            from threading import Lock
+            self.lock = Lock()
+
+        def __enter__(self):
+            if entered.is_set():
+                second_attempted.set()
+            self.lock.acquire()
+
+        def __exit__(self, *args):
+            self.lock.release()
 
     def construct(*args, **kwargs):
         constructed.append(1)
@@ -160,17 +175,14 @@ def test_first_overlapping_agent_calls_share_one_wrapper(tmp_path, monkeypatch):
         return AutoMemory(*args, **kwargs)
 
     monkeypatch.setattr(module, "AutoMemory", construct)
-    def second_call():
-        second_started.set()
-        host._process_auto_memory("I prefer examples.", "reply")
+    monkeypatch.setattr(memory_mixin, "_auto_memory_init_lock", ObservedLock())
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(host._process_auto_memory, "I prefer examples.", "reply")
         try:
             assert entered.wait(2)
-            second = pool.submit(second_call)
-            assert second_started.wait(2)
-            # The first constructor stays paused until both calls have started.
+            second = pool.submit(host._process_auto_memory, "I prefer examples.", "reply")
+            assert second_attempted.wait(2), "second call did not attempt initialization"
         finally:
             release.set()
         first.result(timeout=5)
