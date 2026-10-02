@@ -15,6 +15,7 @@ Usage:
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -38,9 +39,13 @@ def last_run_pointer_path() -> Path:
 
 
 def _atomic_write(path: Path, data: str) -> None:
-    """Write ``data`` to ``path`` atomically via a temp file + replace."""
+    """Write ``data`` to ``path`` atomically via a temp file + replace.
+
+    Uses a unique per-write temp file so concurrent writers to the same
+    directory do not clobber each other's in-flight temp file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(data, encoding="utf-8")
         tmp.replace(path)

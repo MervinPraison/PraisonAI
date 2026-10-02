@@ -38,29 +38,36 @@ def _load_trace_spans(trace_path):
 def _spans_to_harness_trace(events):
     """Map trace events to the HarnessEvaluator trace shape.
 
-    Collects tool names from ``tool_start``/``tool_end`` events and any
-    output artifacts so the existing evaluator can grade them.
+    Counts one tool call per ``tool_start`` event (the start of each
+    invocation) so repeated calls to the same tool are preserved and
+    start/end pairs are not double-counted. Falls back to ``tool_end``
+    only when a trace emits ends without starts.
     """
-    tool_calls = []
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        if ev.get("event_type") in ("tool_start", "tool_end") and ev.get("tool_name"):
-            tool_calls.append({"name": ev["tool_name"]})
-    # Deduplicate consecutive start/end pairs by name while preserving order.
-    seen = []
-    deduped = []
-    for call in tool_calls:
-        if call["name"] not in seen:
-            seen.append(call["name"])
-            deduped.append(call)
-    return {"tool_calls": deduped}
+    starts = [
+        {"name": ev["tool_name"]}
+        for ev in events
+        if isinstance(ev, dict)
+        and ev.get("event_type") == "tool_start"
+        and ev.get("tool_name")
+    ]
+    if starts:
+        return {"tool_calls": starts}
+    ends = [
+        {"name": ev["tool_name"]}
+        for ev in events
+        if isinstance(ev, dict)
+        and ev.get("event_type") == "tool_end"
+        and ev.get("tool_name")
+    ]
+    return {"tool_calls": ends}
 
 
 @app.command("last-trace")
 def eval_last_trace(
     min_tool_calls: int = typer.Option(
-        0, "--min-tool-calls", help="Minimum number of tool calls required to pass"
+        1,
+        "--min-tool-calls",
+        help="Minimum number of tool calls required to pass (default 1; 0 disables the gate)",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit result as JSON to stdout"),
 ):
