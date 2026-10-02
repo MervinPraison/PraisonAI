@@ -1153,16 +1153,28 @@ class DefaultSessionStore:
         except (IOError, OSError):
             return
 
-        seen = {
-            (m.role, m.content, m.timestamp) for m in session.messages
-        }
+        def _freeze(value: Any) -> Any:
+            # JSON arrays/objects (including multimodal content) are not
+            # hashable. Preserve their structural equality for deduplication.
+            if isinstance(value, list):
+                return ("list", tuple(_freeze(item) for item in value))
+            if isinstance(value, dict):
+                return ("dict", frozenset((key, _freeze(item)) for key, item in value.items()))
+            return value
+
+        def _key(message: SessionMessage) -> tuple:
+            return tuple(_freeze(value) for value in (
+                message.role, message.content, message.timestamp,
+            ))
+
+        seen = {_key(m) for m in session.messages}
         recovered: List[tuple] = []  # (filepath, [SessionMessage])
         for filename in candidates:
             filepath = os.path.join(spill_dir, filename)
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError, IOError, OSError):
                 continue
             # A syntactically valid spill can still carry an unexpected shape
             # (non-object root, non-list messages, non-object message). Guard
@@ -1180,7 +1192,7 @@ class DefaultSessionStore:
                 if not isinstance(raw, dict):
                     continue
                 msg = SessionMessage.from_dict(raw)
-                key = (msg.role, msg.content, msg.timestamp)
+                key = _key(msg)
                 if key in seen:
                     continue
                 seen.add(key)
