@@ -224,3 +224,38 @@ def test_failed_import_refresh_preserves_new_peer_index(make_store, monkeypatch,
     finally:
         if peer._conn is not None:
             peer._conn.close()
+
+
+@pytest.mark.parametrize("peer_write", [False, True])
+def test_post_import_sql_failure_invalidates_all_old_index_views(make_store, monkeypatch, peer_write):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "narwhal replacement")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "pelican original")
+    assert destination.set_gateway_info("session", gateway_session_id="old-gateway", agent_id="old-agent")
+    assert destination.search("pelican")
+    conn = destination._connect()
+    conn.execute("CREATE TRIGGER fail_import_metadata BEFORE INSERT ON session_meta "
+                 "BEGIN SELECT RAISE(FAIL, 'injected index failure'); END")
+    if peer_write:
+        peer = DefaultSessionStore(session_dir=destination.session_dir)
+        original = DefaultSessionStore._save_imported_session
+
+        def save_then_peer_write(store, session, **kwargs):
+            saved = original(store, session, **kwargs)
+            assert peer.set_chat_history("session", [{"role": "user", "content": "narwhal peer replacement"}])
+            return saved
+
+        monkeypatch.setattr(DefaultSessionStore, "_save_imported_session", save_then_peer_write)
+    report = destination.import_sessions(source.export_all(), overwrite=True)
+    assert report.imported == 1
+    assert report.skipped == []
+    for table in ("session_fts", "session_meta", "session_route"):
+        assert conn.execute(f"SELECT session_id FROM {table} WHERE session_id = ?", ("session",)).fetchall() == []
+    expected = "narwhal peer replacement" if peer_write else "narwhal replacement"
+    assert destination.get_session("session").messages[0].content == expected
+    assert destination.get_by_gateway_session("old-gateway") is None
+    assert destination.list_sessions_by_gateway_agent("old-agent") == []
+    conn.execute("DROP TRIGGER fail_import_metadata")
+    assert destination.add_message("session", "user", "recovered update")
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]

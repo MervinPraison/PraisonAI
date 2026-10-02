@@ -230,11 +230,11 @@ class SqliteSessionStore(DefaultSessionStore):
                 parts.append(str(content))
         return "\n".join(parts)
 
-    def _index_session(self, session: SessionData) -> None:
-        """Insert/replace a session's content in the index (best-effort)."""
+    def _index_session(self, session: SessionData) -> bool:
+        """Refresh the index best-effort, reporting whether it succeeded."""
         conn = self._connect()
         if conn is None:
-            return
+            return False
         content = self._flatten(session)
         sid = session.session_id
         gateway_session_id = getattr(session, "gateway_session_id", None)
@@ -266,6 +266,8 @@ class SqliteSessionStore(DefaultSessionStore):
                     )
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
+            return False
+        return True
 
     def _deindex_session(self, session_id: str) -> None:
         conn = self._connect()
@@ -381,9 +383,13 @@ class SqliteSessionStore(DefaultSessionStore):
                     # it can restore routing fields removed by the import.
                     fresh = self._load_session_from_disk(session.session_id, filepath)
                     self._reingest_spill(session.session_id, fresh)
-                with self._lock:
-                    self._cache[session.session_id] = fresh
-                self._index_session(fresh)
+                    # Cleanup must describe the generation actually refreshed,
+                    # including a peer write that followed the durable import.
+                    session._import_file_identity = self._session_file_identity(filepath)
+                    with self._lock:
+                        self._cache[session.session_id] = fresh
+                    if not self._index_session(fresh):
+                        raise RuntimeError("post-import index update failed")
             except Exception as exc:
                 # The JSON write succeeded, but the old index is no longer a
                 # trustworthy view. Fail closed until a later refresh/rebuild.
