@@ -92,6 +92,40 @@ def test_search_scoring_does_not_block_session_operations(sqlite_store, monkeypa
         assert search.result(timeout=5)[0].session_id == "reference"
 
 
+@pytest.mark.parametrize("in_memory", [False, True])
+def test_search_keeps_strong_match_when_concurrent_write_moves_its_order(tmp_path, monkeypatch, in_memory):
+    """A row beyond the first batch must remain in this search's snapshot."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    store = SqliteTranscriptStore(session_dir=str(tmp_path), db_path=":memory:" if in_memory else None)
+    try:
+        assert store.add_message("strong", "user", "alpha beta")
+        for index in range(260):
+            assert store.add_message(f"newer-{index}", "user", "alpha only")
+        expected = store.search("alpha beta", limit=300)
+        scoring, release = Event(), Event()
+        original = store._searchable_messages
+        def paused(data):
+            scoring.set()
+            assert release.wait(5)
+            return original(data)
+        monkeypatch.setattr(store, "_searchable_messages", paused)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            search = pool.submit(store.search, "alpha beta", limit=300)
+            try:
+                assert scoring.wait(2)
+                assert store.add_message("strong", "assistant", "alpha beta added later")
+            finally:
+                release.set()
+            actual = search.result(timeout=5)
+        assert [(hit.session_id, hit.score) for hit in actual] == [(hit.session_id, hit.score) for hit in expected]
+        assert sum(hit.session_id == "strong" for hit in actual) == 1
+    finally:
+        if store._conn is not None:
+            store._conn.close()
+
+
 @pytest.mark.parametrize("crowding", ["lineage", "automated", "metadata"])
 def test_score_and_lineage_selection_precede_result_limit(tmp_path, sqlite_store, crowding):
     json_store = DefaultSessionStore(session_dir=str(tmp_path / "json"))
