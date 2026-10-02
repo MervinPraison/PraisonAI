@@ -125,6 +125,59 @@ class TestAgentRetrievalConfigProperty:
         assert agent._knowledge_sources is not None or agent.knowledge is not None
 
 
+class TestAgentRetrievalConfigKwarg:
+    """Test Agent(..., retrieval_config=...) kwarg (issue #5599)."""
+
+    def test_agent_accepts_retrieval_config_dict_with_knowledge(self):
+        """retrieval_config= dict is accepted and merged over knowledge= config."""
+        from praisonaiagents import Agent
+
+        agent = Agent(
+            name="TestAgent",
+            instructions="Test",
+            knowledge=["test.txt"],
+            retrieval_config={"top_k": 7},
+        )
+
+        assert agent._retrieval_config is not None
+        assert agent._retrieval_config.top_k == 7
+
+    def test_agent_accepts_retrieval_config_without_knowledge(self):
+        """retrieval_config= dict works even without knowledge= (no TypeError)."""
+        from praisonaiagents import Agent
+
+        agent = Agent(
+            name="TestAgent",
+            instructions="Test",
+            retrieval_config={"top_k": 3},
+        )
+
+        assert agent._retrieval_config is not None
+        assert agent._retrieval_config.top_k == 3
+
+    def test_agent_accepts_retrieval_config_instance(self):
+        """retrieval_config= RetrievalConfig instance is passed through."""
+        from praisonaiagents import Agent
+        from praisonaiagents.rag.retrieval_config import RetrievalConfig
+
+        config = RetrievalConfig(top_k=11)
+        agent = Agent(
+            name="TestAgent",
+            instructions="Test",
+            retrieval_config=config,
+        )
+
+        assert agent._retrieval_config is config
+
+    def test_agent_without_retrieval_config_backward_compat(self):
+        """No retrieval_config= keeps prior behaviour (None without knowledge)."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="TestAgent", instructions="Test")
+
+        assert agent._retrieval_config is None
+
+
 class TestAgentSharedKnowledge:
     """Test Agent with shared Knowledge instances."""
     

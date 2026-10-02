@@ -270,6 +270,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         "rate_limiter": None,           # -> execution=ExecutionConfig(rate_limiter=obj)
         "verification_hooks": None,     # -> autonomy=AutonomyConfig(verification_hooks=[...])
         "cli_backend": None,            # -> runtime=
+        "retrieval_config": None,       # RAG tuning, merged into the knowledge= config
     }
 
     @property
@@ -716,6 +717,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 - bool: True enables defaults
                 - List[str]: File paths, URLs, or text content
                 - KnowledgeConfig: Custom configuration
+            retrieval_config: Optional RAG tuning merged on top of the config
+                derived from ``knowledge=``. Accepts a dict or RetrievalConfig
+                (e.g. ``retrieval_config={"citations": True, "top_k": 5}``).
             planning: Planning mode. Accepts:
                 - bool: True enables with defaults
                 - PlanningConfig: Custom configuration
@@ -911,6 +915,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         rate_limiter = legacy_kwargs.get("rate_limiter", _legacy_defaults["rate_limiter"])
         verification_hooks = legacy_kwargs.get("verification_hooks", _legacy_defaults["verification_hooks"])
         cli_backend = legacy_kwargs.get("cli_backend", _legacy_defaults["cli_backend"])
+        _user_retrieval_config = legacy_kwargs.get("retrieval_config", _legacy_defaults["retrieval_config"])
 
         # ── where does this agent run? ───────────────────────────────────────
         # Resolved before anything else is built so a contradiction fails at the
@@ -1748,6 +1753,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 knowledge = _knowledge_config
         elif knowledge is False:
             knowledge = None
+
+        # Explicit retrieval_config= (the RAG tuning surface shown in the docs
+        # and docstring examples) is merged on top of whatever the knowledge=
+        # param derived. A dict overrides the derived keys; a RetrievalConfig
+        # instance (or when no knowledge= was given) replaces it wholesale so
+        # the downstream RetrievalConfig resolver (below) receives it unchanged.
+        if _user_retrieval_config is not None:
+            if isinstance(_user_retrieval_config, dict) and isinstance(retrieval_config, dict):
+                retrieval_config.update(_user_retrieval_config)
+            else:
+                retrieval_config = _user_retrieval_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param - FAST PATH
