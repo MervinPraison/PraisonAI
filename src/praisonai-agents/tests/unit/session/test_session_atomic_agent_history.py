@@ -1,8 +1,8 @@
 """Concurrent Session closes must merge different agent histories under lock."""
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
 from pathlib import Path
+from threading import Event
 
 import pytest
 
