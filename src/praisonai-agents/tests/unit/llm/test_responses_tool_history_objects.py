@@ -9,6 +9,13 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
+@pytest.fixture(autouse=True)
+def isolate_responses_endpoint(monkeypatch):
+    """History tests exercise Responses independently of local endpoint settings."""
+    monkeypatch.delenv('OPENAI_API_BASE', raising=False)
+    monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+
+
 def tool_call(shape):
     """Return equivalent nested and flattened supported call shapes."""
     sdk = ChatCompletionMessageToolCall(
