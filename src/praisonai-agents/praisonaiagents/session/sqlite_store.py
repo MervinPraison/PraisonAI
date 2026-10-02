@@ -557,8 +557,12 @@ class SqliteSessionStore(DefaultSessionStore):
             spool.seek(0)
             yield (json.loads(line) for line in spool)
 
-    def _read_search_candidates(self, query: str, limit: int):
-        """Read usable lineages outside the SQL lock and read snapshot."""
+    def _read_search_candidates(self, query: str, limit: int, consume=None):
+        """Read usable lineages outside the SQL lock and read snapshot.
+
+        A consumer scores each payload immediately instead of retaining every
+        continuation. Without a consumer, preserve the private list interface.
+        """
         import json
 
         conn = self._connect()
@@ -578,7 +582,10 @@ class SqliteSessionStore(DefaultSessionStore):
                     except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
                         self._report_unreadable_session(sid, filepath, exc)
                         continue
-                    candidates.append((sid, data))
+                    if consume is None:
+                        candidates.append((sid, data))
+                    else:
+                        consume(sid, data)
                     lineage = self._lineage_key(data)
                     lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
                     if len(lineages) >= allowance:
@@ -663,20 +670,19 @@ class SqliteSessionStore(DefaultSessionStore):
         if not query:
             return []
 
-        candidates = self._read_search_candidates(query, limit)
-        if candidates is None:
-            return super().search(query, limit=limit, window=window)
-        if not candidates:
-            return []
-
         needle = query.lower()
         terms = [t for t in needle.split() if t]
-        hits: List[tuple] = []
+        hits: Dict[Any, tuple] = {}
+        position = 0
 
-        for sid, data in candidates:
+        def consume(sid, data):
+            """Retain each lineage's best hit and its original tie position."""
+            nonlocal position
+            ordinal = position
+            position += 1
             messages = self._searchable_messages(data)
             if not messages:
-                continue
+                return
 
             best_index = -1
             best_score = 0.0
@@ -698,7 +704,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     best_index = idx
 
             if best_index < 0:
-                continue
+                return
 
             start = max(0, best_index - window)
             end = min(len(messages), best_index + window + 1)
@@ -729,13 +735,26 @@ class SqliteSessionStore(DefaultSessionStore):
                 messages=context,
                 bookends=self._bookends(messages, self.BOOKEND_SIZE),
             )
-            hits.append((self._lineage_key(data), hit))
+            lineage = self._lineage_key(data)
+            key = ("lineage", lineage) if lineage is not None else ("session", sid)
+            previous = hits.get(key)
+            if previous is None or (hit.score, hit.when or "") > (
+                previous[1].score, previous[1].when or ""
+            ):
+                hits[key] = (lineage, hit, ordinal)
 
-        hits.sort(key=lambda item: (item[1].score, item[1].when or ""), reverse=True)
+        candidates = self._read_search_candidates(query, limit, consume=consume)
+        if candidates is None:
+            return super().search(query, limit=limit, window=window)
+        ranked = sorted(
+            hits.values(),
+            key=lambda item: (item[1].score, item[1].when or "", -item[2]),
+            reverse=True,
+        )
 
         deduped: List[Any] = []
         seen_lineage: set = set()
-        for lineage, hit in hits:
+        for lineage, hit, _ in ranked:
             if lineage is not None:
                 if lineage in seen_lineage:
                     continue
