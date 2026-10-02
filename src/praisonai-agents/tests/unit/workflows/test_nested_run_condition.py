@@ -88,15 +88,15 @@ def test_included_recipe_leaves_reuse_cache_without_cross_recipe_hits(tmp_path, 
     for name in ("first", "second"):
         recipe = tmp_path / name
         recipe.mkdir()
-        (recipe / "workflow.yaml").write_text("name: placeholder\n", encoding="utf-8")
+        (recipe / "workflow.yaml").write_text(f"name: {name}\n", encoding="utf-8")
         recipes.append(recipe)
 
-    def parse_file(parser, path):
-        name = str(path)
+    def parse_string(parser, content):
+        name = content
         return AgentFlow(steps=[Task(name="same_leaf", handler=lambda ctx:
                                     calls.append(name) or name)])
 
-    monkeypatch.setattr(YAMLWorkflowParser, "parse_file", parse_file)
+    monkeypatch.setattr(YAMLWorkflowParser, "parse_string", parse_string)
     monkeypatch.setitem(__import__("sys").modules, "agent_recipes", None)
     flow = AgentFlow(steps=[Parallel(steps=[Include(recipe=str(p)) for p in recipes])], cache=True)
     first = flow.run("same", verbose=False)
@@ -136,7 +136,6 @@ def test_cache_hit_resets_skipped_status_to_completed():
 
 
 def test_included_recipe_definition_change_invalidates_cached_leaves(tmp_path, monkeypatch):
-    from pathlib import Path
     from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
 
     recipe = tmp_path / "recipe"
@@ -145,12 +144,11 @@ def test_included_recipe_definition_change_invalidates_cached_leaves(tmp_path, m
     definition.write_text("old action", encoding="utf-8")
     calls = []
 
-    def parse_file(parser, path):
-        action = Path(path).read_text(encoding="utf-8")
+    def parse_string(parser, action):
         return AgentFlow(steps=[Task(name="leaf", handler=lambda ctx:
                                     calls.append(action) or action)])
 
-    monkeypatch.setattr(YAMLWorkflowParser, "parse_file", parse_file)
+    monkeypatch.setattr(YAMLWorkflowParser, "parse_string", parse_string)
     monkeypatch.setitem(__import__("sys").modules, "agent_recipes", None)
     flow = AgentFlow(steps=[Parallel(steps=[Include(recipe=str(recipe))])], cache=True)
     assert flow.run("same", verbose=False)["output"] == "old action"
