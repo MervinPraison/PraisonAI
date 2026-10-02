@@ -483,29 +483,12 @@ class ExecutionMixin:
 
     def _execute_backend_sync(self, prompt: str, **kwargs) -> Optional[str]:
         """Execute backend in sync mode, handling async backends."""
-        try:
-            # Try to run in existing event loop
-            loop = asyncio.get_running_loop()
-            # If we're already in an async context, we can't use asyncio.run()
-            # Create a new task instead
-            import concurrent.futures
-            import threading
-            
-            def run_async():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(self.backend.execute(prompt, **kwargs))
-                finally:
-                    new_loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_async)
-                return future.result()
-
-        except RuntimeError:
-            # No event loop running, safe to use asyncio.run()
-            return asyncio.run(self.backend.execute(prompt, **kwargs))
+        from ..utils.async_bridge import run_coroutine_from_any_context
+        # Single shared bridge: copies contextvars and surfaces backend errors
+        # unchanged, whether or not an event loop is already running.
+        return run_coroutine_from_any_context(
+            self.backend.execute(prompt, **kwargs), timeout=None
+        )
     
     def _delegate_streaming_to_backend(self, prompt: str, **kwargs):
         """Delegate to backend's streaming method."""

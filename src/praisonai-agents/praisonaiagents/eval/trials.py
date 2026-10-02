@@ -467,21 +467,12 @@ def run_trials(
     capture_record: bool = True,
 ) -> TrialReport:
     """Sync wrapper around :func:`arun_trials` (see it for arguments)."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(
-            arun_trials(agent, package, k=k, concurrency=concurrency,
-                        capture_record=capture_record)
-        )
-    # Already inside an event loop: run on a dedicated loop in a worker thread.
-    import concurrent.futures
+    # Shared bridge: copies contextvars and surfaces errors unchanged, whether
+    # or not an event loop is already running on this thread.
+    from ..utils.async_bridge import run_coroutine_from_any_context
 
-    def _runner() -> TrialReport:
-        return asyncio.run(
-            arun_trials(agent, package, k=k, concurrency=concurrency,
-                        capture_record=capture_record)
-        )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_runner).result()
+    return run_coroutine_from_any_context(
+        arun_trials(agent, package, k=k, concurrency=concurrency,
+                    capture_record=capture_record),
+        timeout=None,
+    )

@@ -248,21 +248,15 @@ def _run_lsp(language: str, coro_factory, open_path: Optional[str] = None):
                     pass
             await client.stop()
 
-    def _run() -> Tuple[Optional[object], Optional[str]]:
-        return asyncio.run(
-            asyncio.wait_for(_driver(), timeout=_LSP_TIMEOUT + 5)
-        )
-
     try:
-        # If a loop is already running in this thread, we cannot call
-        # asyncio.run() here; offload to a dedicated thread with its own loop.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return _run()
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_run).result(timeout=_LSP_TIMEOUT + 10)
+        # Shared bridge: copies contextvars, surfaces errors unchanged, and
+        # enforces the timeout both inside the worker loop (via wait_for) and as
+        # a caller-side backstop — whether or not a loop is already running here.
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
+        return run_coroutine_from_any_context(
+            _driver(), timeout=_LSP_TIMEOUT + 5
+        )
     except Exception as e:
         logger.debug("LSP navigation error (%s): %s", language, e)
         return None, f"Error: lsp navigation failed: {e}"
