@@ -1213,6 +1213,25 @@ class TestPluginTypedSubsystems:
             mgr.disable(name)
             mgr.unregister(name)
 
+    def test_has_registered_plugins_does_not_create_singleton(self):
+        """The gate must stay False and NOT build the singleton when uncreated.
+
+        The hot-path optimisation relies on the common case (no plugins ever
+        registered) being allocation-free. This isolates the
+        ``_default_manager is None`` branch, which the other tests never reach
+        because they call ``get_plugin_manager()`` first.
+        """
+        from praisonaiagents.plugins import manager as manager_mod
+
+        saved = manager_mod._default_manager
+        manager_mod._default_manager = None
+        try:
+            assert manager_mod.has_registered_plugins() is False
+            # The cheap check must not have constructed the singleton.
+            assert manager_mod._default_manager is None
+        finally:
+            manager_mod._default_manager = saved
+
     def test_registered_plugin_still_merges_despite_fast_path(self):
         """Agent init must still route a registered plugin even with the gate."""
         from praisonaiagents.plugins.plugin import PluginType
