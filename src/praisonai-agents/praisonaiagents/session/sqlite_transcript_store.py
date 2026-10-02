@@ -547,10 +547,17 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         # the source read lock has been released.
                         source.backup(snapshot, pages=-1)
                     except (sqlite3.Error, OSError) as exc:
-                        full = (
-                            getattr(exc, "sqlite_errorcode", None) == sqlite3.SQLITE_FULL
-                            or isinstance(exc, OSError) and exc.errno == errno.ENOSPC
-                        )
+                        if isinstance(exc, OSError):
+                            full = exc.errno == errno.ENOSPC
+                        else:
+                            # Python 3.10 has neither SQLite error attributes
+                            # nor SQLITE_* constants. SQLite's primary FULL
+                            # code is 13; older runtimes expose only its text.
+                            code = getattr(exc, "sqlite_errorcode", None)
+                            full = (
+                                code & 0xFF == 13 if code is not None
+                                else str(exc) == "database or disk is full"
+                            )
                         if not full:
                             raise
                         if snapshot is not source:

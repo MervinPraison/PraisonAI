@@ -141,9 +141,22 @@ def test_search_keeps_strong_match_when_concurrent_write_moves_its_order(tmp_pat
 
 
 @pytest.mark.parametrize("crowding", ["lineage", "automated", "metadata"])
-def test_score_and_lineage_selection_precede_result_limit(tmp_path, sqlite_store, crowding):
+def test_score_and_lineage_selection_precede_result_limit(tmp_path, sqlite_store, crowding, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from itertools import count
+    from praisonaiagents.session import store as store_module
+
+    class OrderedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=next(ticks))
+
+    # Equal wall-clock timestamps otherwise leave tie order dependent on each
+    # backend's enumeration order, obscuring the scoring/lineage assertion.
+    monkeypatch.setattr(store_module, "datetime", OrderedDatetime)
     json_store = DefaultSessionStore(session_dir=str(tmp_path / "json"))
     for store in (json_store, sqlite_store):
+        ticks = count()
         assert store.add_message("independent", "user", "alpha" if crowding == "lineage" else "alpha beta")
         for index in range(26):
             session_id = f"newer-{index}"
@@ -190,7 +203,8 @@ def test_nonwal_backup_completes_despite_writes_between_backup_steps(sqlite_stor
 
 
 @pytest.mark.parametrize("failure", ["temporary_directory", "sqlite_full"])
-def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlite_store, monkeypatch, failure):
+@pytest.mark.parametrize("legacy_errors", [False, True])
+def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlite_store, monkeypatch, failure, legacy_errors):
     import errno
     import sqlite3
     import tempfile
@@ -209,6 +223,12 @@ def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlit
                 probe.execute("CREATE TABLE full (data BLOB)")
                 probe.execute("PRAGMA max_page_count=2")
                 probe.execute("INSERT INTO full VALUES (zeroblob(100000))")
+            except sqlite3.Error as exc:
+                if legacy_errors:
+                    for attr in ("sqlite_errorcode", "sqlite_errorname"):
+                        if hasattr(exc, attr):
+                            delattr(exc, attr)
+                raise
             finally:
                 probe.close()
 
@@ -221,6 +241,8 @@ def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlit
         raise OSError(errno.ENOSPC, "temporary volume full")
 
     monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
+    if legacy_errors:
+        monkeypatch.delattr(sqlite3, "SQLITE_FULL", raising=False)
     if failure == "temporary_directory":
         monkeypatch.setattr(tempfile, "TemporaryDirectory", no_space)
     assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
@@ -228,6 +250,38 @@ def test_nonwal_search_remains_readable_when_snapshot_space_is_unavailable(sqlit
     # cannot leave a rollback-journal reader blocking later commits.
     store._conn.execute("PRAGMA busy_timeout=50")
     assert store.add_message("after-search", "user", "writer resumed")
+
+
+@pytest.mark.parametrize("error_kind", ["sqlite", "filesystem"])
+def test_nonwal_backup_preserves_unrelated_errors_on_legacy_python(sqlite_store, monkeypatch, error_kind):
+    import errno
+    import sqlite3
+    from praisonaiagents.storage import sqlite as sqlite_factory
+
+    store = sqlite_store
+    assert store.add_message("reference", "user", "alpha beta")
+    store._conn.execute("PRAGMA journal_mode=DELETE")
+    connect = sqlite_factory.connect
+    error = (
+        sqlite3.OperationalError("database is locked")
+        if error_kind == "sqlite"
+        else OSError(errno.EACCES, "permission denied")
+    )
+
+    class FailedSource(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            raise error
+
+    def delete_journal(*args, **kwargs):
+        conn = connect(*args, factory=FailedSource, **kwargs)
+        conn.execute("PRAGMA journal_mode=DELETE")
+        return conn
+
+    monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
+    monkeypatch.delattr(sqlite3, "SQLITE_FULL", raising=False)
+    with pytest.raises(type(error)) as caught:
+        store.search("alpha beta")
+    assert caught.value is error
 
 
 def test_memory_backup_allows_a_write_before_copy_finishes(tmp_path, monkeypatch):
