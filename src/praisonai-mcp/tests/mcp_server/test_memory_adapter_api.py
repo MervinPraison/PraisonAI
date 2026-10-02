@@ -73,6 +73,27 @@ def test_memory_show_calls_real_api(fake_memory, memory_tools):
     assert "hello" in out
 
 
+@pytest.mark.parametrize("user_id,expected", [
+    ("", ["empty"]),
+    ("None", ["literal-none"]),
+    ("u1", ["named"]),
+    (None, ["missing", "null", "empty", "literal-none", "named"]),
+])
+def test_memory_show_distinguishes_missing_and_explicit_user_ids(fake_memory, memory_tools, monkeypatch, user_id, expected):
+    import praisonaiagents.memory as module
+
+    records = [
+        {"id": "missing", "metadata": {}},
+        {"id": "null", "metadata": {"user_id": None}},
+        {"id": "empty", "metadata": {"user_id": ""}},
+        {"id": "literal-none", "metadata": {"user_id": "None"}},
+        {"id": "named", "metadata": {"user_id": "u1"}},
+    ]
+    monkeypatch.setattr(module.Memory, "get_all_memories", lambda self: records)
+    actual = ast.literal_eval(_call(memory_tools, "praisonai.memory.show", user_id=user_id))
+    assert [record["id"] for record in actual] == expected
+
+
 def test_memory_add_calls_store_short_term(fake_memory, memory_tools):
     out = _call(memory_tools, "praisonai.memory.add", content="note")
     assert not out.startswith("Error:")

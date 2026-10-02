@@ -40,10 +40,11 @@ def register_memory_tools() -> None:
                         })
             else:
                 data = memory.get_all_memories()
-            if user_id:
+            if user_id is not None:
                 data = [
                     m for m in data
-                    if str((m.get("metadata") or {}).get("user_id")) == str(user_id)
+                    if (m.get("metadata") or {}).get("user_id") is not None
+                    and str((m.get("metadata") or {}).get("user_id")) == str(user_id)
                 ]
             return str(data)
         except ImportError:
