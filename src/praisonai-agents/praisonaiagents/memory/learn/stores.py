@@ -199,16 +199,16 @@ class BaseStore(ABC):
         try:
             self._load(strict=True)
             return True
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             # Unreadable source: retain the cache without persisting telemetry.
-            pass
+            refresh_error = exc
         except (KeyError, TypeError, ValueError, AttributeError):
             # Invalid records are data errors, not temporary backend outages.
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            refresh_error = exc
         import logging
-        logging.warning("Failed to refresh learning store; using read-only cached entries.")
+        logging.warning("Failed to refresh learning store; using read-only cached entries: %s", refresh_error)
         return False
     
     def search(self, query: str, limit: int = 10) -> List[LearnEntry]:
