@@ -488,6 +488,10 @@ class SqliteTranscriptStore(DefaultSessionStore):
         This copies the full database once per non-WAL search. If temporary
         storage is full, a stable source read transaction preserves search
         availability but can delay DELETE-mode writers until scoring completes.
+        Non-WAL copies release source locks between bounded steps. Repeated
+        concurrent writes can restart a copy; exhausting its step budget raises
+        sqlite3.OperationalError so callers can retry, without scoring a partial
+        snapshot or holding a source lock for a full-database copy.
         """
         from contextlib import closing
 
@@ -542,10 +546,24 @@ class SqliteTranscriptStore(DefaultSessionStore):
                     try:
                         temporary = TemporaryDirectory(prefix="praison-search-")
                         snapshot = sqlite3.connect(os.path.join(temporary.name, "snapshot.db"))
-                        # One complete step prevents repeated peer commits from
-                        # restarting incremental copies. Decoding starts after
-                        # the source read lock has been released.
-                        source.backup(snapshot, pages=-1)
+                        steps = 0
+                        step_limit = None
+
+                        def bound_restarts(status, remaining, total):
+                            nonlocal steps, step_limit
+                            if step_limit is None:
+                                # Allow several complete copies plus retry room,
+                                # while keeping sustained peer writes bounded.
+                                step_limit = 4 * ((total + 127) // 128) + 8
+                            steps += 1
+                            if remaining > 0 and steps >= step_limit:
+                                raise sqlite3.OperationalError(
+                                    "Search snapshot interrupted by concurrent writes; retry search"
+                                )
+
+                        # Native locks are released between steps. A completed
+                        # backup is consistent; never score an interrupted copy.
+                        source.backup(snapshot, pages=128, progress=bound_restarts)
                     except (sqlite3.Error, OSError) as exc:
                         if isinstance(exc, OSError):
                             full = exc.errno == errno.ENOSPC

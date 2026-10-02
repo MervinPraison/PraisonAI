@@ -181,15 +181,18 @@ def test_nonwal_backup_completes_despite_writes_between_backup_steps(sqlite_stor
     store._conn.execute("PRAGMA journal_mode=DELETE")
     connect = sqlite_factory.connect
     callbacks = []
+    writes = []
 
     class BusySource(sqlite3.Connection):
         def backup(self, target, **kwargs):
+            observer = kwargs.pop("progress", None)
             def progress(status, remaining, total):
                 callbacks.append(remaining)
-                if remaining:
+                if observer is not None:
+                    observer(status, remaining, total)
+                if remaining and len(writes) < 3:
                     store._conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (str(len(callbacks)), "reference"))
-                    if len(callbacks) >= 4:
-                        raise RuntimeError("backup repeatedly restarted after committed peer writes")
+                    writes.append(remaining)
             return super().backup(target, progress=progress, **kwargs)
 
     def delete_journal(*args, **kwargs):
@@ -199,7 +202,53 @@ def test_nonwal_backup_completes_despite_writes_between_backup_steps(sqlite_stor
 
     monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
     assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
+    assert len(writes) == 3, "no peer writes occurred before the backup completed"
     assert callbacks[-1] == 0
+
+
+def test_nonwal_continuous_peer_writes_abort_without_scoring_partial_snapshot(sqlite_store, monkeypatch):
+    import sqlite3
+    from praisonaiagents.storage import sqlite as sqlite_factory
+
+    store = sqlite_store
+    assert store.add_message("reference", "user", "alpha beta " + "x" * 1_000_000)
+    store._conn.execute("PRAGMA journal_mode=DELETE")
+    connect = sqlite_factory.connect
+    writes = []
+    writing = True
+
+    class BusySource(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            observer = kwargs.pop("progress", None)
+            def progress(status, remaining, total):
+                if observer is not None:
+                    observer(status, remaining, total)
+                if writing and remaining:
+                    store._conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (str(len(writes)), "reference"))
+                    writes.append(remaining)
+                    if len(writes) >= 50:
+                        raise AssertionError("backup never bounded repeated restarts")
+            return super().backup(target, progress=progress, **kwargs)
+
+    def delete_journal(*args, **kwargs):
+        conn = connect(*args, factory=BusySource, **kwargs)
+        conn.execute("PRAGMA journal_mode=DELETE")
+        return conn
+
+    monkeypatch.setattr(sqlite_factory, "connect", delete_journal)
+    scoring = []
+    original = store._searchable_messages
+    def observe_scoring(data):
+        scoring.append(data)
+        return original(data)
+    monkeypatch.setattr(store, "_searchable_messages", observe_scoring)
+    with pytest.raises(sqlite3.OperationalError, match="concurrent writes"):
+        store.search("alpha beta")
+    assert 3 < len(writes) < 50
+    assert scoring == []
+    assert store.add_message("after-search", "user", "writer resumed")
+    writing = False
+    assert [hit.session_id for hit in store.search("alpha beta")] == ["reference"]
 
 
 @pytest.mark.parametrize("failure", ["temporary_directory", "sqlite_full"])
