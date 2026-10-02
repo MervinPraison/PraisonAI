@@ -125,6 +125,13 @@ class BotConfig:
     
     # Edit interval for streaming responses in milliseconds (default: 700ms)
     stream_edit_interval_ms: int = 700
+
+    # Opt-in privacy-safe runtime footer on the final reply (default: False).
+    # When True, a short trailing line (e.g. ``— gpt-4o · 4.2s``) reporting the
+    # model and turn latency is appended to the final reply only. Privacy-safe:
+    # never surfaces tool args, URLs, paths or message content. Unavailable
+    # fields are omitted rather than shown as placeholders.
+    footer: bool = False
     
     # Intentional silence support
     allow_silence: bool = False
@@ -185,6 +192,7 @@ class BotConfig:
             "owner_user_id": "***" if self.owner_user_id else None,
             "streaming": self.streaming,
             "stream_edit_interval_ms": self.stream_edit_interval_ms,
+            "footer": self.footer,
             "allow_silence": self.allow_silence,
             "silence_token": self.silence_token,
             "allow_bots": self.allow_bots,

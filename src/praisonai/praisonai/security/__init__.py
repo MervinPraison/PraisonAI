@@ -22,7 +22,7 @@ Usage (selective):
     enable_audit_log()
 """
 
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, Dict, Optional, List
 
 if TYPE_CHECKING:
     from .injection import InjectionDefense, ScanResult, ThreatLevel
@@ -86,7 +86,7 @@ def enable_injection_defense(
     extra_patterns: Optional[List[str]] = None,
     block_threshold: Optional[int] = None,
     trusted_sources: Optional[List[str]] = None,
-) -> str:
+) -> Dict[str, str]:
     """
     Enable prompt injection defense globally for all agents.
 

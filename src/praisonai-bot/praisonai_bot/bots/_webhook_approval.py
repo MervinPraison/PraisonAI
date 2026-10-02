@@ -27,9 +27,14 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
-from ._approval_base import DEFAULT_APPROVAL_TIMEOUT, DurableApprovalMixin
+from ._approval_base import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    DurableApprovalMixin,
+    is_authorized_actor,
+    normalize_approvers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,13 @@ class WebhookApproval(DurableApprovalMixin):
         headers: Extra HTTP headers (e.g. auth tokens).
         timeout: Max seconds to wait for a response (default 300).
         poll_interval: Seconds between status polls (default 5.0).
+        allowed_approvers: Optional allowlist of approver IDs permitted to
+            resolve an approval. When provided, a decision whose ``approver``
+            is not in the allowlist is dropped (polling continues) so an
+            unauthorised responder to the status endpoint cannot resolve a
+            gated tool. When ``None`` (default) any responder may decide
+            (legacy behaviour, backward compatible). Falls back to a
+            comma-separated ``WEBHOOK_APPROVERS`` env var when not passed.
 
     Example::
 
@@ -71,6 +83,7 @@ class WebhookApproval(DurableApprovalMixin):
         headers: Optional[Dict[str, str]] = None,
         timeout: float = DEFAULT_APPROVAL_TIMEOUT,
         poll_interval: float = 5.0,
+        allowed_approvers: Optional[Iterable[str]] = None,
         store: Optional[Any] = None,
     ):
         self._webhook_url = webhook_url or os.environ.get("APPROVAL_WEBHOOK_URL", "")
@@ -82,10 +95,28 @@ class WebhookApproval(DurableApprovalMixin):
         self._headers = headers or {}
         self._timeout = timeout
         self._poll_interval = poll_interval
+        if allowed_approvers is None:
+            _env = os.environ.get("WEBHOOK_APPROVERS", "").strip()
+            if _env:
+                allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
+        self._allowed_approvers = normalize_approvers(allowed_approvers)
         self._init_store(store)
 
     def __repr__(self) -> str:
         return f"WebhookApproval(webhook_url={self._webhook_url!r})"
+
+    def _approver_authorized(self, approver: Any) -> bool:
+        """Return whether *approver* may resolve an approval.
+
+        No-op (always ``True``) when no allowlist is configured (legacy
+        behaviour). Otherwise the responder's ``approver`` must be in the
+        allowlist, so an unauthorised party that can reach the status endpoint
+        cannot resolve a gated tool.
+        """
+        return is_authorized_actor(
+            None if approver is None else str(approver),
+            self._allowed_approvers,
+        )
 
     # ── Internal HTTP helper ───────────────────────────────────────────
 
@@ -158,7 +189,9 @@ class WebhookApproval(DurableApprovalMixin):
 
                 # Check for immediate decision
                 if isinstance(post_data, dict):
-                    if "approved" in post_data:
+                    if "approved" in post_data and self._approver_authorized(
+                        post_data.get("approver")
+                    ):
                         decision = ApprovalDecision(
                             approved=bool(post_data["approved"]),
                             reason=post_data.get("reason", "Webhook immediate response"),
@@ -167,6 +200,11 @@ class WebhookApproval(DurableApprovalMixin):
                         )
                         await self._resolve_pending(request, decision)
                         return decision
+                    if "approved" in post_data:
+                        logger.warning(
+                            "Dropping webhook immediate decision from unauthorised "
+                            "approver %r", post_data.get("approver"),
+                        )
 
                 # 2. Poll for decision
                 status_url = self._status_url or f"{self._webhook_url}/{request_id}"
@@ -225,6 +263,17 @@ class WebhookApproval(DurableApprovalMixin):
                 status = data.get("status", "")
                 status = str(status).lower() if status is not None else ""
                 if status == "pending":
+                    continue
+
+                has_decision = (
+                    "approved" in data
+                    or status in ("approved", "approve", "yes", "denied", "deny", "rejected", "no")
+                )
+                if has_decision and not self._approver_authorized(data.get("approver")):
+                    logger.warning(
+                        "Dropping webhook decision from unauthorised approver %r "
+                        "for %s", data.get("approver"), request_id,
+                    )
                     continue
 
                 if "approved" in data:

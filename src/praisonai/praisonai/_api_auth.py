@@ -15,8 +15,11 @@ def build_api_key_middleware(api_key: str, public_paths: Optional[Iterable[str]]
         api_key: The expected API key; requests must present it via a
             ``Bearer`` ``Authorization`` header or ``X-API-Key`` header.
         public_paths: Paths that bypass authentication. Any request whose path
-            is in this set, or starts with ``/__praisonai__/``, is allowed
-            through without a token.
+            is in this set, or is exactly ``/__praisonai__/discovery`` (the
+            unauthenticated capability document), is allowed through without a
+            token. The discovery path is matched exactly -- never by prefix --
+            so a server whose ``api_prefix`` happens to sit under
+            ``/__praisonai__`` does not silently expose its routes.
 
     Imports of ``hmac``/``starlette`` are kept inside this function so callers
     stay lazy-import friendly.
@@ -26,11 +29,12 @@ def build_api_key_middleware(api_key: str, public_paths: Optional[Iterable[str]]
     from starlette.responses import JSONResponse
 
     public = set(public_paths or ())
+    public.add("/__praisonai__/discovery")
 
     class _APIKeyMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path in public or path.startswith("/__praisonai__/"):
+            if path in public:
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             header_key = request.headers.get("X-API-Key", "")

@@ -6,8 +6,13 @@ Compares agent instantiation times across popular AI agent frameworks.
 
 Usage:
     python benchmarks/simple_benchmark.py
+    python benchmarks/simple_benchmark.py --skip-crewai --json
+    python benchmarks/simple_benchmark.py --json --fail-over-threshold
 """
 
+import json
+import os
+import sys
 import time
 from typing import Literal
 import argparse
@@ -15,6 +20,14 @@ import argparse
 
 ITERATIONS = 100
 WARMUP = 10
+
+THRESHOLDS_PATH = os.path.join(os.path.dirname(__file__), 'thresholds.json')
+
+
+def load_thresholds(path: str = THRESHOLDS_PATH) -> dict:
+    """Load benchmark thresholds from thresholds.json."""
+    with open(path) as f:
+        return json.load(f)
 
 
 def sample_tool(city: Literal['nyc', 'sf']):
@@ -36,35 +49,44 @@ def measure_instantiation(create_fn, iterations=ITERATIONS, warmup=WARMUP):
     return sum(times) / len(times)
 
 
-def run_benchmark():
+def run_benchmark(skip_crewai: bool = False, quiet: bool = False,
+                  iterations: int = ITERATIONS, warmup: int = WARMUP):
     """Run the benchmark across all available frameworks (without tools)."""
     results = {}
-    
-    print('=' * 60)
-    print('PraisonAI Agents - Performance Benchmark')
-    print('=' * 60)
-    print(f'\nIterations: {ITERATIONS}')
-    print('Metric: Agent instantiation time (microseconds)\n')
+
+    def log(msg: str = ''):
+        if not quiet:
+            print(msg)
+
+    def measure(create_fn):
+        return measure_instantiation(create_fn, iterations=iterations, warmup=warmup)
+
+    log('=' * 60)
+    log('PraisonAI Agents - Performance Benchmark')
+    log('=' * 60)
+    log(f'\nIterations: {iterations}')
+    log(f'Warmup: {warmup}')
+    log('Metric: Agent instantiation time (microseconds)\n')
     
     # PraisonAI (without tools)
-    print("Testing PraisonAI...")
+    log("Testing PraisonAI...")
     from praisonaiagents import Agent as PraisonAgent
     
-    results['PraisonAI'] = measure_instantiation(
+    results['PraisonAI'] = measure(
         lambda: PraisonAgent(name='Test', model='gpt-4o-mini', output="silent")
     )
     
-    results['PraisonAI (LiteLLM)'] = measure_instantiation(
+    results['PraisonAI (LiteLLM)'] = measure(
         lambda: PraisonAgent(name='Test', model='openai/gpt-4o-mini', output="silent")
     )
     
     # Other frameworks for comparison
-    print("Testing other frameworks...")
+    log("Testing other frameworks...")
     
     try:
         from agno.agent import Agent as AgnoAgent
         from agno.models.openai import OpenAIChat
-        results['Agno'] = measure_instantiation(
+        results['Agno'] = measure(
             lambda: AgnoAgent(model=OpenAIChat(id='gpt-4o-mini'))
         )
     except ImportError:
@@ -72,7 +94,7 @@ def run_benchmark():
     
     try:
         from pydantic_ai import Agent as PydanticAgent
-        results['PydanticAI'] = measure_instantiation(
+        results['PydanticAI'] = measure(
             lambda: PydanticAgent('openai:gpt-4o-mini')
         )
     except ImportError:
@@ -80,7 +102,7 @@ def run_benchmark():
     
     try:
         from agents import Agent as OpenAIAgent
-        results['OpenAI Agents SDK'] = measure_instantiation(
+        results['OpenAI Agents SDK'] = measure(
             lambda: OpenAIAgent(name='Test', model='gpt-4o-mini')
         )
     except ImportError:
@@ -96,47 +118,50 @@ def run_benchmark():
             """Get weather info."""
             return 'sunny' if city == 'sf' else 'cloudy'
         
-        results['LangGraph'] = measure_instantiation(
+        results['LangGraph'] = measure(
             lambda: create_react_agent(model=ChatOpenAI(model='gpt-4o-mini'), tools=[get_weather_lg])
         )
     except ImportError:
         pass
     
-    try:
-        from crewai.agent import Agent as CrewAgent
-        from crewai.tools import tool as crewai_tool
-        
-        @crewai_tool("Weather Tool")
-        def get_weather_crew(city: Literal['nyc', 'sf']):
-            """Get weather info."""
-            return 'sunny' if city == 'sf' else 'cloudy'
-        
-        results['CrewAI'] = measure_instantiation(
-            lambda: CrewAgent(
-                role='Weather Agent',
-                goal='Provide weather info',
-                backstory='A weather expert',
-                tools=[get_weather_crew],
-                verbose=False
+    if skip_crewai:
+        log("Skipping CrewAI (--skip-crewai): optional framework import can hang on some platforms.")
+    else:
+        try:
+            from crewai.agent import Agent as CrewAgent
+            from crewai.tools import tool as crewai_tool
+
+            @crewai_tool("Weather Tool")
+            def get_weather_crew(city: Literal['nyc', 'sf']):
+                """Get weather info."""
+                return 'sunny' if city == 'sf' else 'cloudy'
+
+            results['CrewAI'] = measure(
+                lambda: CrewAgent(
+                    role='Weather Agent',
+                    goal='Provide weather info',
+                    backstory='A weather expert',
+                    tools=[get_weather_crew],
+                    verbose=False
+                )
             )
-        )
-    except ImportError:
-        pass
+        except ImportError:
+            pass
     
     # Print results
-    print('\n' + '=' * 60)
-    print('RESULTS')
-    print('=' * 60)
+    log('\n' + '=' * 60)
+    log('RESULTS')
+    log('=' * 60)
     
     baseline = results.get('PraisonAI', 1)
-    print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Relative':<10}")
-    print('-' * 50)
+    log(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Relative':<10}")
+    log('-' * 50)
     
     for name, avg in sorted(results.items(), key=lambda x: x[1]):
         ratio = avg / baseline
-        print(f'{name:<25} {avg:<15.2f} {ratio:.2f}x')
+        log(f'{name:<25} {avg:<15.2f} {ratio:.2f}x')
     
-    print('\n' + '=' * 60)
+    log('\n' + '=' * 60)
     return results
 
 
@@ -163,8 +188,13 @@ def get_package_versions():
     return versions
 
 
-def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
-    """Save benchmark results to a markdown file and update README."""
+def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md', *,
+                 iterations: int = ITERATIONS, log=print):
+    """Save benchmark results to a markdown file and update README.
+
+    Status messages are emitted via ``log`` (defaults to ``print``). Pass a
+    stderr logger when stdout must stay machine-readable (e.g. ``--json``).
+    """
     import os
     import re
     from datetime import datetime
@@ -191,7 +221,7 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
     with open(filepath, 'w') as f:
         f.write('# PraisonAI Agents - Benchmark Results\n\n')
         f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-        f.write(f'**Iterations:** {ITERATIONS}\n')
+        f.write(f'**Iterations:** {iterations}\n')
         f.write('**Test:** Agent instantiation (without tools)\n\n')
         f.write('## Results\n\n')
         f.write('| Framework | Avg Time (μs) | Relative |\n')
@@ -208,17 +238,17 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
         f.write('python benchmarks/simple_benchmark.py\n')
         f.write('```\n')
     
-    print(f'\nResults saved to: {filepath}')
+    log(f'\nResults saved to: {filepath}')
     
     # Also update the main README.md
     readme_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'README.md')
     if os.path.exists(readme_path):
-        update_readme(readme_path, table_rows)
+        update_readme(readme_path, table_rows, log=log)
     
     return filepath
 
 
-def update_readme(readme_path: str, table_rows: list):
+def update_readme(readme_path: str, table_rows: list, *, log=print):
     """Update the performance section in README.md with latest results."""
     import re
     
@@ -239,17 +269,54 @@ def update_readme(readme_path: str, table_rows: list):
         with open(readme_path, 'w') as f:
             f.write(content)
         
-        print(f'README.md updated: {readme_path}')
+        log(f'README.md updated: {readme_path}')
+
+
+def main():
+    parser = argparse.ArgumentParser(description='PraisonAI Agents - Performance Benchmark')
+    parser.add_argument('--save', action='store_true', help='Save results to file')
+    parser.add_argument('--skip-crewai', action='store_true',
+                        help='Skip the optional CrewAI benchmark (its import can hang on some platforms)')
+    parser.add_argument('--json', action='store_true',
+                        help='Emit results as JSON to stdout (for CI baselines/artifacts)')
+    parser.add_argument('--fail-over-threshold', action='store_true',
+                        help='Exit non-zero if PraisonAI instantiation exceeds the budget in thresholds.json')
+    args = parser.parse_args()
+
+    thresholds = load_thresholds()
+    iterations = int(thresholds.get('iterations', ITERATIONS))
+    warmup = int(thresholds.get('warmup', WARMUP))
+
+    results = run_benchmark(
+        skip_crewai=args.skip_crewai,
+        quiet=args.json,
+        iterations=iterations,
+        warmup=warmup,
+    )
+
+    if args.save:
+        # Keep stdout machine-readable under --json by sending save status to stderr.
+        save_log = (lambda msg='': print(msg, file=sys.stderr)) if args.json else print
+        save_results(results, iterations=iterations, log=save_log)
+    elif not args.json:
+        print('\nResults not saved (use --save flag to save results to file)')
+
+    exit_code = 0
+    if args.fail_over_threshold:
+        max_us = thresholds['praisonai_instantiation_us_max']
+        actual_us = results.get('PraisonAI')
+        if actual_us is not None and actual_us > max_us:
+            print(
+                f"ERROR: PraisonAI instantiation {actual_us:.2f} us > threshold {max_us} us",
+                file=sys.stderr,
+            )
+            exit_code = 1
+
+    if args.json:
+        print(json.dumps({'results': results, 'iterations': iterations, 'warmup': warmup}))
+
+    return exit_code
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='PraisonAI Agents - Performance Benchmark')
-    parser.add_argument('--save', action='store_true', help='Save results to file')
-    args = parser.parse_args()
-    
-    results = run_benchmark()
-    
-    if args.save:
-        save_results(results)
-    else:
-        print('\nResults not saved (use --save flag to save results to file)')
+    sys.exit(main())
