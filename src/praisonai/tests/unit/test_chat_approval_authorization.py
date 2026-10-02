@@ -351,3 +351,208 @@ class TestDiscordAuthorization:
         backend._discord_api = mock_api
         decision = asyncio.run(backend.request_approval(_make_request()))
         assert decision.approved is True
+
+
+# ── HTTP dashboard (out-of-band) ─────────────────────────────────────────────
+
+
+class TestHTTPAuthorization:
+    def _backend(self, **kwargs):
+        from praisonai.bots._http_approval import HTTPApproval
+
+        backend = HTTPApproval(port=0, timeout=1, **kwargs)
+
+        async def mock_server():
+            backend._server_started = True
+
+        backend._ensure_server = mock_server
+        return backend
+
+    def test_no_allowlist_mints_no_token(self):
+        """Legacy: no allowlist → no token on the pending approval."""
+        backend = self._backend()
+
+        async def run():
+            async def simulate():
+                await asyncio.sleep(0.2)
+                for info in backend._pending.values():
+                    assert info.get("token") is None
+                    info["decided"] = True
+                    info["approved"] = True
+                    info["approver"] = "anyone"
+                    break
+
+            task = asyncio.create_task(simulate())
+            decision = await backend.request_approval(_make_request())
+            await task
+            return decision
+
+        decision = asyncio.run(run())
+        assert decision.approved is True
+
+    def test_allowlist_mints_token(self):
+        """With an allowlist a single-use token is bound to the approval."""
+        backend = self._backend(allowed_approvers=["owner"])
+
+        async def run():
+            async def simulate():
+                await asyncio.sleep(0.2)
+                for info in backend._pending.values():
+                    assert info.get("token")
+                    info["decided"] = True
+                    info["approved"] = True
+                    info["approver"] = "owner"
+                    break
+
+            task = asyncio.create_task(simulate())
+            decision = await backend.request_approval(_make_request())
+            await task
+            return decision
+
+        decision = asyncio.run(run())
+        assert decision.approved is True
+
+    def test_decide_without_token_rejected(self):
+        """A POST lacking the per-approval token is refused (403)."""
+        backend = self._backend(allowed_approvers=["owner"])
+        backend._pending["r1"] = {
+            "decided": False, "approved": False, "token": "secret-tok", "info": {},
+        }
+
+        class _Req:
+            match_info = {"request_id": "r1"}
+            query: dict = {}
+            headers: dict = {}
+
+            async def json(self):
+                return {"decision": "approve", "approver": "owner"}
+
+        resp = asyncio.run(backend._handle_decide(_Req()))
+        assert resp.status == 403
+        assert backend._pending["r1"]["decided"] is False
+
+    def test_decide_with_token_but_unauthorized_approver_rejected(self):
+        """Correct token but approver not in allowlist is refused."""
+        backend = self._backend(allowed_approvers=["owner"])
+        backend._pending["r1"] = {
+            "decided": False, "approved": False, "token": "secret-tok", "info": {},
+        }
+
+        class _Req:
+            match_info = {"request_id": "r1"}
+            query = {"token": "secret-tok"}
+            headers: dict = {}
+
+            async def json(self):
+                return {"decision": "approve", "approver": "intruder"}
+
+        resp = asyncio.run(backend._handle_decide(_Req()))
+        assert resp.status == 403
+        assert backend._pending["r1"]["decided"] is False
+
+    def test_decide_with_token_and_authorized_approver_resolves(self):
+        backend = self._backend(allowed_approvers=["owner"])
+        backend._pending["r1"] = {
+            "decided": False, "approved": False, "token": "secret-tok", "info": {},
+        }
+
+        class _Req:
+            match_info = {"request_id": "r1"}
+            query = {"token": "secret-tok"}
+            headers: dict = {}
+
+            async def json(self):
+                return {"decision": "approve", "approver": "owner"}
+
+        resp = asyncio.run(backend._handle_decide(_Req()))
+        assert resp.status == 200
+        assert backend._pending["r1"]["decided"] is True
+        assert backend._pending["r1"]["approved"] is True
+        assert backend._pending["r1"]["approver"] == "owner"
+
+
+# ── Webhook (out-of-band) ────────────────────────────────────────────────────
+
+
+class TestWebhookAuthorization:
+    def _backend(self, **kwargs):
+        from praisonai.bots._webhook_approval import WebhookApproval
+
+        return WebhookApproval(
+            webhook_url="https://example.com", timeout=1, poll_interval=0.05, **kwargs
+        )
+
+    def test_unauthorized_immediate_decision_dropped(self):
+        """Immediate POST approval from a non-allowlisted approver is dropped."""
+        backend = self._backend(allowed_approvers=["owner"])
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"approved": True, "approver": "intruder"}
+            return {"status": "pending"}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is False
+        assert "timed out" in decision.reason.lower()
+
+    def test_authorized_immediate_decision_resolves(self):
+        backend = self._backend(allowed_approvers=["owner"])
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"approved": True, "approver": "owner"}
+            return {"status": "pending"}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is True
+        assert decision.approver == "owner"
+
+    def test_unauthorized_poll_decision_dropped(self):
+        backend = self._backend(allowed_approvers=["owner"])
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"status": "pending"}
+            if method == "GET":
+                return {"status": "approved", "approver": "intruder"}
+            return {}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is False
+        assert "timed out" in decision.reason.lower()
+
+    def test_authorized_poll_decision_resolves(self):
+        backend = self._backend(allowed_approvers=["owner"])
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"status": "pending"}
+            if method == "GET":
+                return {"approved": True, "approver": "owner"}
+            return {}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is True
+        assert decision.approver == "owner"
+
+    def test_no_allowlist_permits_any_approver(self):
+        """Backward compatible: without an allowlist, any approver resolves."""
+        backend = self._backend()
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"approved": True, "approver": "anyone"}
+            return {}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is True
+
+    def test_env_var_allowlist(self, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_APPROVERS", "owner, boss")
+        backend = self._backend()
+        assert backend._allowed_approvers == {"owner", "boss"}

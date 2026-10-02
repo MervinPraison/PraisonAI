@@ -2532,16 +2532,31 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # Other active threads should manage their own connections
         # Only clear full registry in __del__ or explicit shutdown
         
-        # Close memory adapter if it exists (protocol-driven path)
+        # Close memory adapter if it exists (protocol-driven path).
+        #
+        # SQLite is thread-scoped by contract (#1562/#1563): close only the
+        # calling thread's adapter connections and KEEP the shared adapter so
+        # other threads and subsequent same-thread searches keep using the
+        # adapter's tables. Tearing it down here would make searches fall back
+        # to legacy SQL against short_mem/long_mem (#5486).
         if hasattr(self, 'memory_adapter') and self.memory_adapter:
-            try:
-                if hasattr(self.memory_adapter, 'close') and callable(self.memory_adapter.close):
-                    self.memory_adapter.close()
-                    logger.debug("Memory adapter closed successfully")
-            except Exception as e:
-                logger.warning(f"Error closing memory adapter: {e}")
-            finally:
-                self.memory_adapter = None
+            if isinstance(self.memory_adapter, SqliteMemoryAdapter):
+                try:
+                    if hasattr(self.memory_adapter, 'close_thread_connections'):
+                        self.memory_adapter.close_thread_connections()
+                        logger.debug("SQLite adapter thread connections closed")
+                except Exception as e:
+                    logger.warning(f"Error closing SQLite adapter thread connections: {e}")
+                # Intentionally preserve self.memory_adapter for reuse.
+            else:
+                try:
+                    if hasattr(self.memory_adapter, 'close') and callable(self.memory_adapter.close):
+                        self.memory_adapter.close()
+                        logger.debug("Memory adapter closed successfully")
+                except Exception as e:
+                    logger.warning(f"Error closing memory adapter: {e}")
+                finally:
+                    self.memory_adapter = None
         
         # Close MongoDB client if it exists (legacy path)
         if hasattr(self, 'mongo_client') and self.mongo_client:
