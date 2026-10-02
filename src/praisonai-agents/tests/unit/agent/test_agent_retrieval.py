@@ -177,6 +177,27 @@ class TestAgentRetrievalConfigKwarg:
 
         assert agent._retrieval_config is None
 
+    def test_retrieval_config_instance_with_local_model(self):
+        """RetrievalConfig instance + local llm must not raise AttributeError.
+
+        Regression for the local-model embedding setup that assumed
+        retrieval_config was a dict and called ``.get()`` / ``.setdefault()``
+        on it. A RetrievalConfig dataclass instance has no such methods, so
+        construction crashed before this fix.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.rag.retrieval_config import RetrievalConfig
+
+        config = RetrievalConfig(top_k=4)
+        agent = Agent(
+            name="TestAgent",
+            instructions="Test",
+            llm="ollama/llama3",
+            retrieval_config=config,
+        )
+
+        assert agent._retrieval_config is config
+
 
 class TestAgentSharedKnowledge:
     """Test Agent with shared Knowledge instances."""

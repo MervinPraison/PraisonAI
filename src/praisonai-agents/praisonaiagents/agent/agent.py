@@ -2275,8 +2275,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             _wants_embeddings = (retrieval_config is not None
                                  or embedder_config is not None
                                  or memory not in (None, False))
-            if _wants_embeddings and not embedder_config and not (
-                    retrieval_config or {}).get('embedder_config'):
+            # retrieval_config may be a dict (knowledge=-derived or user dict) or a
+            # RetrievalConfig instance (passed explicitly); read embedder_config
+            # from either shape without assuming .get() exists.
+            _rc_embedder = (
+                retrieval_config.get('embedder_config')
+                if isinstance(retrieval_config, dict)
+                else getattr(retrieval_config, 'embedder_config', None))
+            if _wants_embeddings and not embedder_config and not _rc_embedder:
                 from ..local import (local_embedder_config as _local_embedder,
                                      select_embedding_model as _select_embed)
                 _embed_model = _select_embed(
@@ -2304,8 +2310,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                                 _cfg["embedding_dims"] = _dims
                         except Exception:  # noqa: BLE001 -- a missing width must not break setup
                             pass
-                    if retrieval_config is not None:
+                    if isinstance(retrieval_config, dict):
                         retrieval_config.setdefault('embedder_config', embedder_config)
+                    elif retrieval_config is not None and getattr(
+                            retrieval_config, 'embedder_config', None) is None:
+                        retrieval_config.embedder_config = embedder_config
                 else:
                     logging.warning(
                         "llm=%r resolved a local model, but %s serves no embedding "
