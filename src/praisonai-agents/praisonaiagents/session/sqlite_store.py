@@ -425,7 +425,7 @@ class SqliteSessionStore(DefaultSessionStore):
 
     # ── read path: bounded index lookup + anchored hits ───────────────
 
-    def _candidate_ids(self, query: str, limit: int) -> Optional[List[str]]:
+    def _candidate_ids(self, query: str, limit: int, *, offset: int = 0) -> Optional[List[str]]:
         """Return matching session_ids via the index, or None to fall back."""
         conn = self._connect()
         if conn is None:
@@ -443,15 +443,15 @@ class SqliteSessionStore(DefaultSessionStore):
                     match = self._to_fts_query(query)
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE session_fts "
-                        "MATCH ? ORDER BY bm25(session_fts) LIMIT ?",
-                        (match, fetch),
+                        "MATCH ? ORDER BY bm25(session_fts), session_id LIMIT ? OFFSET ?",
+                        (match, fetch, offset),
                     ).fetchall()
                 else:
                     like = "%" + query.replace("%", "").replace("_", "") + "%"
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE content LIKE ? "
-                        "LIMIT ?",
-                        (like, fetch),
+                        "ORDER BY session_id LIMIT ? OFFSET ?",
+                        (like, fetch, offset),
                     ).fetchall()
         except Exception as exc:
             logger.debug("Index query failed (%s); falling back to scan.", exc)
@@ -549,6 +549,17 @@ class SqliteSessionStore(DefaultSessionStore):
         if not candidate_ids:
             return []
 
+        # Invalid/missing transcripts must not consume the entire candidate
+        # allowance. Read every matching index page before final scoring and
+        # lineage deduplication, using stable ordering for page boundaries.
+        page_size = max(limit * 5, limit)
+        page = candidate_ids
+        while page_size > 0 and len(page) == page_size:
+            page = self._candidate_ids(query, limit, offset=len(candidate_ids))
+            if page is None:
+                return super().search(query, limit=limit, window=window)
+            candidate_ids.extend(page)
+
         needle = query.lower()
         terms = [t for t in needle.split() if t]
         hits: List[tuple] = []
@@ -561,15 +572,7 @@ class SqliteSessionStore(DefaultSessionStore):
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
-                # Read-only path: never quarantine or rewrite during search.
-                # Log so an unreadable indexed candidate is observable rather
-                # than a silent miss, then keep scoring the remaining valid
-                # sessions.
-                logger.debug(
-                    "Skipping unreadable session file %s during search: %s",
-                    filepath,
-                    exc,
-                )
+                self._report_unreadable_session(sid, filepath, exc)
                 continue
 
             messages = self._searchable_messages(data)

@@ -34,6 +34,49 @@ def test_search_skips_invalid_utf8_candidate(tmp_path, backend):
             conn.close()
 
 
+@pytest.mark.parametrize("backend", ["fts", "like"])
+def test_unreadable_candidates_do_not_hide_later_valid_hit(tmp_path, backend):
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    try:
+        for index in range(25):
+            assert store.add_message(f"bad{index:02}", "user", "needle")
+        assert store.add_message("valid", "user", "needle " + "filler " * 100)
+        if backend == "fts" and not store._fts_available:
+            pytest.skip("SQLite build lacks FTS5")
+        if backend == "like":
+            store._fts_available = False
+        store._ensure_backfilled()
+        candidates = store._candidate_ids("needle", 5)
+        assert len(candidates) == 25 and "valid" not in candidates
+        for index in range(25):
+            (tmp_path / f"bad{index:02}.json").write_bytes(b"\xff\xfe")
+        assert [hit.session_id for hit in store.search("needle")] == ["valid"]
+    finally:
+        if store._conn is not None:
+            store._conn.close()
+
+
+@pytest.mark.parametrize("backend", ["json", "fts"])
+def test_search_reports_corruption_without_moving_file(tmp_path, monkeypatch, caplog, backend):
+    store = DefaultSessionStore(session_dir=str(tmp_path)) if backend == "json" else SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    events = []
+    monkeypatch.setattr(store, "_fire_corruption_hook", lambda *args: events.append(args))
+    try:
+        assert store.add_message("bad", "user", "needle")
+        assert store.add_message("valid", "user", "needle")
+        store.search("needle")
+        bad = tmp_path / "bad.json"
+        bad.write_bytes(b"\xff\xfe")
+        assert [hit.session_id for hit in store.search("needle")] == ["valid"]
+        assert events and events[0][0] == "bad" and events[0][2] is None
+        assert "Skipping unreadable session file" in caplog.text
+        assert bad.read_bytes() == b"\xff\xfe"
+    finally:
+        conn = getattr(store, "_conn", None)
+        if conn is not None:
+            conn.close()
+
+
 @pytest.mark.parametrize("operation", ["list", "agent", "gateway", "gateway_agent", "export_all", "lineage"])
 def test_directory_reads_skip_invalid_utf8(tmp_path, monkeypatch, operation):
     import praisonaiagents.session.store as module

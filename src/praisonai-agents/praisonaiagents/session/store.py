@@ -979,6 +979,12 @@ class DefaultSessionStore:
         except Exception:  # pragma: no cover - observability must never break load
             logger.debug("SESSION corruption hook failed", exc_info=True)
 
+    def _report_unreadable_session(self, session_id: str, filepath: str, error: Exception) -> None:
+        """Report decode failures during scans without modifying the source file."""
+        if isinstance(error, (UnicodeDecodeError, json.JSONDecodeError)):
+            logger.warning("Skipping unreadable session file %s: %s", filepath, error)
+            self._fire_corruption_hook(session_id, str(error), None)
+
     def _atomic_write_json(self, filepath: str, data: Any) -> bool:
         """Atomically write JSON data to disk (temp file + os.replace)."""
         temp_path = None
@@ -1693,7 +1699,8 @@ class DefaultSessionStore:
                             "total_tokens": data.get("total_tokens") or data.get("token_count") or (data.get("metadata") or {}).get("total_tokens"),
                             "cost": data.get("cost") or (data.get("metadata") or {}).get("cost"),
                         })
-                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                        self._report_unreadable_session(filename[:-5], filepath, exc)
                         continue
         except (IOError, OSError):
             pass
@@ -1727,7 +1734,8 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("agent_name") == agent_name:
                             session_ids.append(data.get("session_id", filename[:-5]))
-                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                        self._report_unreadable_session(filename[:-5], filepath, exc)
                         continue
         except (IOError, OSError):
             pass
@@ -1835,7 +1843,8 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("gateway_session_id") == gateway_session_id:
                             return SessionData.from_dict(data)
-                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                        self._report_unreadable_session(filename[:-5], filepath, exc)
                         continue
         except (IOError, OSError):
             pass
@@ -1865,7 +1874,8 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("agent_id") == agent_id:
                             session_ids.append(data.get("session_id", filename[:-5]))
-                    except (UnicodeDecodeError, json.JSONDecodeError, IOError):
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                        self._report_unreadable_session(filename[:-5], filepath, exc)
                         continue
         except (IOError, OSError):
             pass
@@ -2076,14 +2086,7 @@ class DefaultSessionStore:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
-                # Read-only path: never quarantine or rewrite during search.
-                # Log so an unreadable transcript is observable rather than a
-                # silent miss, then keep scoring the remaining valid sessions.
-                logger.debug(
-                    "Skipping unreadable session file %s during search: %s",
-                    filepath,
-                    exc,
-                )
+                self._report_unreadable_session(filename[:-5], filepath, exc)
                 continue
 
             messages = self._searchable_messages(data)
@@ -2277,7 +2280,8 @@ class DefaultSessionStore:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     sessions.append(json.load(f))
-            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
+                self._report_unreadable_session(filename[:-5], filepath, exc)
                 continue
         return {"version": self.PORTABLE_VERSION, "sessions": sessions}
 
@@ -2306,7 +2310,8 @@ class DefaultSessionStore:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError):
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError, OSError) as exc:
+                self._report_unreadable_session(filename[:-5], filepath, exc)
                 continue
             if data.get("session_id") == exclude:
                 continue
