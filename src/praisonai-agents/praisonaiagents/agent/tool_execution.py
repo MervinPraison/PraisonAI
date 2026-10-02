@@ -1904,6 +1904,11 @@ class ToolExecutionMixin:
         ``_atrigger_after_agent_hook`` without any async-safety change.
         """
         from ..hooks import HookEvent, AfterAgentInput
+        # AfterAgentInput.response is typed/serialized as a string (its
+        # to_dict truncates via ``response[:500]``). Structured-output turns
+        # (output_pydantic) return a Pydantic instance, so coerce to str here
+        # to keep string-only hooks (e.g. command hooks) from crashing while
+        # the public chat() return value stays the model.
         return AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
             cwd=os.getcwd(),
@@ -1911,7 +1916,7 @@ class ToolExecutionMixin:
             timestamp=str(time.time()),
             agent_name=self.name,
             prompt=prompt if isinstance(prompt, str) else str(prompt),
-            response=response or "",
+            response=response if isinstance(response, str) else (str(response) if response else ""),
             tools_used=tools_used or [],
             total_tokens=0,
             execution_time_ms=(time.time() - start_time) * 1000
