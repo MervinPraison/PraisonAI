@@ -506,3 +506,39 @@ def test_initial_backfill_retries_after_a_failed_transcript(make_store, failure)
     assert [hit.session_id for hit in destination.search("narwhal")] == ["legacy"]
     assert destination.get_by_gateway_session("legacy-route").session_id == "legacy"
     assert destination.list_sessions_by_gateway_agent("legacy-agent") == ["legacy"]
+
+
+@pytest.mark.parametrize("failure", ["file_lock", "sql_refresh"])
+def test_upgrade_backfill_does_not_rebuild_successful_sessions_on_retry(make_store, failure):
+    destination = make_store(SqliteSessionStore, lock_timeout=0.02)
+    plain = DefaultSessionStore(session_dir=destination.session_dir)
+    for sid in ("healthy", "unavailable"):
+        assert plain.add_message(sid, "user", sid + " narwhal")
+        assert plain.set_gateway_info(sid, gateway_session_id=sid + "-route")
+    conn = destination._connect()
+    destination._set_index_content_version(conn, destination.INDEX_CONTENT_VERSION - 1)
+    conn.execute("CREATE TABLE backfill_writes (session_id TEXT)")
+    conn.execute("CREATE TRIGGER observe_backfill AFTER INSERT ON session_meta "
+                 "BEGIN INSERT INTO backfill_writes VALUES (NEW.session_id); END")
+    lock = FileLock(plain._get_session_path("unavailable"))
+    if failure == "file_lock":
+        lock.acquire()
+    else:
+        conn.execute("CREATE TRIGGER fail_backfill BEFORE INSERT ON session_meta "
+                     "WHEN NEW.session_id = 'unavailable' "
+                     "BEGIN SELECT RAISE(FAIL, 'unavailable transcript'); END")
+    try:
+        for _ in range(3):
+            assert [hit.session_id for hit in destination.search("healthy")] == ["healthy"]
+            assert destination.get_by_gateway_session("healthy-route").session_id == "healthy"
+        assert conn.execute("SELECT COUNT(*) FROM backfill_writes WHERE session_id = 'healthy'").fetchone() == (1,)
+        assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION - 1
+    finally:
+        if failure == "file_lock":
+            lock.release()
+        else:
+            conn.execute("DROP TRIGGER fail_backfill")
+    assert destination.get_by_gateway_session("unavailable-route").session_id == "unavailable"
+    assert conn.execute("SELECT COUNT(*) FROM backfill_writes WHERE session_id = 'healthy'").fetchone() == (1,)
+    assert conn.execute("SELECT COUNT(*) FROM backfill_writes WHERE session_id = 'unavailable'").fetchone() == (1,)
+    assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION

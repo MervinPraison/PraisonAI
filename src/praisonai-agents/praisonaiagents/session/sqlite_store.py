@@ -79,6 +79,7 @@ class SqliteSessionStore(DefaultSessionStore):
         self._fts_available = False
         self._db_ready = False
         self._backfilled = False
+        self._backfill_upgraded_ids = set()
 
     # ── index lifecycle ───────────────────────────────────────────────
 
@@ -351,7 +352,9 @@ class SqliteSessionStore(DefaultSessionStore):
         indexed, Issue #5031), every session's FTS row is rebuilt once so
         archived-only queries work immediately after upgrade rather than only
         after each session's next write. The new version is then persisted so
-        subsequent startups fall back to the cheap skip behaviour.
+        subsequent startups fall back to the cheap skip behaviour. Completed
+        upgrades are retained in memory across failed passes; retries skip
+        those sessions while their complete index projection still exists.
         """
         try:
             filenames = os.listdir(self.session_dir)
@@ -363,7 +366,11 @@ class SqliteSessionStore(DefaultSessionStore):
             return True
         with self._db_lock:
             stale = self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
-        already = set() if stale else self._indexed_ids()
+        indexed = self._indexed_ids()
+        # Remember successful upgrades within this store's incomplete pass.
+        # The global version stays old until every transcript succeeds, but
+        # a single unavailable file must not repeatedly rebuild healthy rows.
+        already = indexed & self._backfill_upgraded_ids if stale else indexed
         complete = True
         for filename in filenames:
             if not filename.endswith(".json"):
@@ -380,7 +387,9 @@ class SqliteSessionStore(DefaultSessionStore):
                     self._reingest_spill(sid, session)
                     with self._lock:
                         self._cache[sid] = session
-                    if not self._index_session(session):
+                    if self._index_session(session):
+                        self._backfill_upgraded_ids.add(sid)
+                    else:
                         complete = False
             except Exception:
                 complete = False
