@@ -6571,10 +6571,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def _stop_reason_scope(self):
         """Restore an active parent's binding when a nested call returns."""
         owner = self._stop_reason_context()
-        active = self._stop_reason_active_var
+        active = getattr(self, "_stop_reason_active_var", None)
+        if active is None:
+            active = contextvars.ContextVar("stop_reason_active", default=None)
+            self._stop_reason_active_var = active
         nested = active.get() == owner
         active_token = active.set(owner)
-        reason = self._last_stop_reason_var
+        reason = getattr(self, "_last_stop_reason_var", None)
+        if reason is None:
+            reason = contextvars.ContextVar("last_stop_reason", default=None)
+            self._last_stop_reason_var = reason
         reason_token = reason.set((owner, "completed"))
         try:
             yield
