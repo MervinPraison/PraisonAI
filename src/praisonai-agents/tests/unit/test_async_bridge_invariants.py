@@ -16,8 +16,10 @@ Covers issue #5588:
 import ast
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from praisonaiagents.tools import call_executor as ce
 from praisonaiagents.tools.call_executor import ToolCall, run_single_tool_call
 
 
@@ -109,3 +111,69 @@ def test_tool_timeout_uses_daemon_worker_and_does_not_leak():
     tool_workers = [t for t in new_threads if t.name == "tool-timeout"]
     assert tool_workers, "expected an abandoned tool-timeout worker thread"
     assert all(t.daemon for t in tool_workers), "timeout workers must be daemon"
+
+
+def test_many_concurrent_healthy_timed_calls_are_not_refused():
+    """Healthy concurrent timed calls must not be refused by the orphan cap.
+
+    Regression for #5589: the orphaned-worker semaphore must only bound workers
+    that outlive their deadline, never healthy calls that finish in time. Run
+    more concurrent fast calls than the cap and assert none is refused.
+    """
+    count = ce._TIMEOUT_POOL_MAX + 8
+
+    def fast_tool(name, arguments, tool_call_id, **kwargs):
+        return "ok"
+
+    def run_one(i):
+        call = ToolCall(function_name="fast", arguments={}, tool_call_id=f"c{i}")
+        return run_single_tool_call(call, fast_tool, timeout_ms=5000)
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        results = list(pool.map(run_one, range(count)))
+
+    assert all(r.error is None for r in results), (
+        "healthy concurrent timed calls were refused: "
+        + str([r.error_kind for r in results if r.error is not None])
+    )
+    assert all(r.result == "ok" for r in results)
+
+
+def test_saturated_orphan_pool_reports_capacity_not_timeout(monkeypatch):
+    """When the orphan pool is saturated, a refused call is typed 'capacity'.
+
+    A capacity refusal (process already full of hung workers) must be reported
+    distinctly from a per-tool timeout so the model/operator can tell them apart.
+    """
+    import threading as _threading
+
+    # Shrink the cap to 1 and saturate it with one genuinely hung worker.
+    monkeypatch.setattr(ce, "_timeout_slots", _threading.BoundedSemaphore(1))
+
+    release = _threading.Event()
+
+    def hung_tool(name, arguments, tool_call_id, **kwargs):
+        release.wait(5)
+        return "late"
+
+    def quick_hang(name, arguments, tool_call_id, **kwargs):
+        release.wait(5)
+        return "late"
+
+    try:
+        # First call times out and charges the single orphan slot.
+        first = run_single_tool_call(
+            ToolCall(function_name="hung1", arguments={}, tool_call_id="h1"),
+            hung_tool, timeout_ms=50,
+        )
+        assert first.error_kind == "timeout"
+
+        # Second call also outlives its deadline but the pool is saturated, so it
+        # must be refused as a capacity error, not a timeout.
+        second = run_single_tool_call(
+            ToolCall(function_name="hung2", arguments={}, tool_call_id="h2"),
+            quick_hang, timeout_ms=50,
+        )
+        assert second.error_kind == "capacity"
+    finally:
+        release.set()
