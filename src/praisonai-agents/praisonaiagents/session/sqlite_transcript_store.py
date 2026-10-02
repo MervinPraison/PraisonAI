@@ -486,12 +486,13 @@ class SqliteTranscriptStore(DefaultSessionStore):
         Non-WAL files are also copied before scoring so slow decoding cannot
         retain a source read transaction that prevents writers from committing.
         This copies the full database once per non-WAL search. If temporary
-        storage is full, a stable source read transaction preserves search
+        storage is full or concurrent writes interrupt the copy, a stable
+        source read transaction preserves search
         availability but can delay DELETE-mode writers until scoring completes.
         Non-WAL copies release source locks between bounded steps. Repeated
-        concurrent writes can restart a copy; exhausting its step budget raises
-        sqlite3.OperationalError so callers can retry, without scoring a partial
-        snapshot or holding a source lock for a full-database copy.
+        concurrent writes can restart a copy; exhausting its step budget
+        discards the incomplete copy and uses that source read transaction.
+        Only the completed copy or a complete source snapshot is scored.
         """
         from contextlib import closing
 
@@ -543,6 +544,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         conn.backup(snapshot, pages=128, progress=allow_writes)
                 elif snapshot.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
                     source = snapshot
+                    interrupted = False
                     try:
                         temporary = TemporaryDirectory(prefix="praison-search-")
                         snapshot = sqlite3.connect(os.path.join(temporary.name, "snapshot.db"))
@@ -550,15 +552,16 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         step_limit = None
 
                         def bound_restarts(status, remaining, total):
-                            nonlocal steps, step_limit
+                            nonlocal steps, step_limit, interrupted
                             if step_limit is None:
                                 # Allow several complete copies plus retry room,
                                 # while keeping sustained peer writes bounded.
                                 step_limit = 4 * ((total + 127) // 128) + 8
                             steps += 1
                             if remaining > 0 and steps >= step_limit:
+                                interrupted = True
                                 raise sqlite3.OperationalError(
-                                    "Search snapshot interrupted by concurrent writes; retry search"
+                                    "Search snapshot interrupted by concurrent writes"
                                 )
 
                         # Native locks are released between steps. A completed
@@ -576,7 +579,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                                 code & 0xFF == 13 if code is not None
                                 else str(exc) == "database or disk is full"
                             )
-                        if not full:
+                        if not full and not interrupted:
                             raise
                         if snapshot is not source:
                             snapshot.close()
@@ -584,7 +587,8 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         # a consistent streaming read without another copy.
                         snapshot = source
                         source = None
-                        logger.warning("Search snapshot storage is full; reading the source transaction instead")
+                        reason = "interrupted by concurrent writes" if interrupted else "storage is full"
+                        logger.warning("Search snapshot %s; reading the source transaction instead", reason)
                     finally:
                         if source is not None:
                             source.close()
