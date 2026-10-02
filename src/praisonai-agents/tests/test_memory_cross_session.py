@@ -10,6 +10,8 @@ These tests drive the after-agent side-effect pipeline directly so they do
 not require an LLM or OPENAI_API_KEY.
 """
 
+import asyncio
+import os
 import sys
 import tempfile
 import unittest
@@ -73,6 +75,61 @@ class TestCrossSessionMemoryRecall(unittest.TestCase):
             self.assertEqual(
                 agent._memory_instance.get_stats()["short_term_count"], 0
             )
+
+    def test_dict_memory_config_persists_and_recalls(self):
+        """MEM-004: the advertised ``memory={'user_id': uid}`` dict config —
+        resolved by the Agent itself, not a preconstructed FileMemory — persists
+        a turn that a second Agent with the same user_id recalls.
+
+        Guards the configuration-resolution + hook wiring that the direct-call
+        tests above cannot (Greptile #3). Runs in a temp cwd so the default
+        FileMemory base path is hermetic; no LLM/API key needed.
+        """
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                uid = "dict-config-user"
+                agent_a = Agent(name="A", instructions="x", memory={"user_id": uid})
+                self.assertIsInstance(agent_a._memory_instance, FileMemory)
+                agent_a._after_agent_side_effects(
+                    "My codename is BLUE-FOX.",
+                    "Acknowledged. Your codename is BLUE-FOX.",
+                )
+
+                agent_b = Agent(name="B", instructions="x", memory={"user_id": uid})
+                context = agent_b.get_memory_context(query="What is my codename?")
+                self.assertIn("BLUE-FOX", context)
+            finally:
+                os.chdir(cwd)
+
+    def test_async_path_persists_without_blocking_loop(self):
+        """MEM-005: on the async after-agent path the blocking store write is
+        offloaded to a thread (AGENTS.md §4.5), yet the turn is still persisted
+        and recalled by a later Agent. Exercises the running-loop branch of
+        ``_persist_memory_turn``.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = f"{tmpdir}/memory"
+
+            async def write_turn():
+                agent_a = self._agent("async-user", base)
+                agent_a._after_agent_side_effects(
+                    "My codename is GREEN-HAWK.",
+                    "Acknowledged. Your codename is GREEN-HAWK.",
+                )
+                # The write is scheduled via run_in_executor; yield until the
+                # short-term store reflects it (bounded) rather than racing it.
+                for _ in range(500):
+                    if agent_a._memory_instance.get_stats()["short_term_count"] > 0:
+                        break
+                    await asyncio.sleep(0.01)
+
+            asyncio.run(write_turn())
+
+            agent_b = self._agent("async-user", base)
+            context = agent_b.get_memory_context(query="What is my codename?")
+            self.assertIn("GREEN-HAWK", context)
 
 
 if __name__ == "__main__":
