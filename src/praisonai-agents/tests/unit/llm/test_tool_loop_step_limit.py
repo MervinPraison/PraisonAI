@@ -107,4 +107,7 @@ async def _assert_step_limit(monkeypatch, asynchronous, tool_name, limit, output
     if output_mode == "self_reflect":
         assert reflection_answers == [final_answer]
     elif output_mode in ("output_json", "output_pydantic"):
-        assert llm.chat_history[-1]["content"] == final_answer
+        # The LLM layer is stateless w.r.t. conversation history: the budget
+        # summary is surfaced via the returned value (asserted above), not via a
+        # write-only ``llm.chat_history`` list.
+        assert result == final_answer

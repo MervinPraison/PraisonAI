@@ -243,30 +243,20 @@ class OpenAIAdapter:
         Delegates to async method following protocol requirements for
         sync methods to be wrappers around the canonical async implementation.
         """
-        import asyncio
-        
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
         # For streaming, explicitly disallow as it violates sync protocol contract
         if kwargs.get('stream', False):
             raise ValueError(
                 "Streaming is not supported in sync OpenAIAdapter. "
                 "Use achat_completion() for streaming support."
             )
-        
-        # Check if we're already in an event loop
-        try:
-            loop = asyncio.get_running_loop()
-            # In event loop - use thread pool to avoid nesting
-            import concurrent.futures
-            
-            def run_in_thread():
-                return asyncio.run(self.achat_completion(messages, **kwargs))
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                return future.result()
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(self.achat_completion(messages, **kwargs))
+
+        # Single shared bridge: copies contextvars, surfaces provider errors
+        # unchanged, and never nests asyncio.run inside a running loop.
+        return run_coroutine_from_any_context(
+            self.achat_completion(messages, **kwargs), timeout=None
+        )
 
 
 class UnifiedLLMDispatcher:

@@ -11,8 +11,6 @@ wrote. Orchestration (routing, parallel, repeat) still runs locally.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import logging
 import shlex
 import threading
@@ -39,15 +37,14 @@ CAPABILITY_PROMPT = (
 
 
 def _run_sync(coro):
-    """Run ``coro`` to completion from sync code, even inside a running loop."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    # Already inside a loop (e.g. called from async workflow code): hand the
-    # coroutine to a private loop on another thread so we never re-enter.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    """Run ``coro`` to completion from sync code, even inside a running loop.
+
+    Routes through the shared bridge so contextvars propagate and the
+    coroutine's errors surface unchanged, whether or not a loop is running.
+    """
+    from ..utils.async_bridge import run_coroutine_from_any_context
+
+    return run_coroutine_from_any_context(coro, timeout=None)
 
 
 class SharedCompute:
