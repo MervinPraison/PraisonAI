@@ -74,7 +74,8 @@ class SqliteSessionStore(DefaultSessionStore):
             db_path = os.path.expanduser(db_path)
         self.db_path = db_path
         self._db_lock = threading.RLock()
-        self._backfill_lock = threading.Lock()
+        self._backfill_lock = threading.RLock()
+        self._backfill_running = False
         self._conn = None
         self._fts_available = False
         self._db_ready = False
@@ -310,9 +311,15 @@ class SqliteSessionStore(DefaultSessionStore):
         # Do not hold the database lock while waiting for transcript locks:
         # imports acquire their file lock before refreshing SQLite.
         with self._backfill_lock:
-            if self._backfilled:
+            if self._backfilled or self._backfill_running:
                 return
-            self._backfilled = self._reindex_all()
+            # A corruption callback can query this store during the pass.
+            # It sees the index built so far; other threads wait for completion.
+            self._backfill_running = True
+            try:
+                self._backfilled = self._reindex_all()
+            finally:
+                self._backfill_running = False
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.
