@@ -622,9 +622,10 @@ Respond with ONLY a valid JSON tool call in this format:
         # by several concurrently-running agents (gateway channels, asyncio.gather),
         # so a plain attribute would let one agent's set_current_agent() clobber
         # another's mid-await and misattribute token spend (issues #5052/#3933).
-        # A ContextVar keeps the value isolated per asyncio task / thread.
+        # A ContextVar keeps each task's value isolated; the ``current_agent_name``
+        # property below preserves the historical attribute-style read/write API.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar("current_agent_name", default=None)
+            contextvars.ContextVar("praison_llm_current_agent_name", default=None)
         )
         self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_id", default=None)
@@ -6682,7 +6683,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for key, value in self.__dict__.items():
             if key == "_current_agent_name_var":
                 clone.__dict__[key] = contextvars.ContextVar(
-                    "current_agent_name", default=None
+                    "praison_llm_current_agent_name", default=None
                 )
                 continue
             if key == "_last_stop_reason_var":
