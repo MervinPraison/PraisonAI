@@ -45,7 +45,7 @@ export const DEFAULT_CORPUS_EXTENSIONS: readonly string[] = [
 
 /**
  * Simple token estimation (~4 chars per token).
- * Port of `estimate_tokens_simple` (indexing.py:34-38).
+ * Mirrors the Python `estimate_tokens` heuristic in `rag/budget.py`.
  */
 export function estimateTokensSimple(text: string): number {
   if (!text) {
