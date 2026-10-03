@@ -105,9 +105,13 @@ class _LRUSessionCache(OrderedDict):
     insertion order is managed, so callers need no other changes.
     """
 
-    def __init__(self, maxsize: int = DEFAULT_CACHE_MAXSIZE):
+    def __init__(self, maxsize: int = DEFAULT_CACHE_MAXSIZE, on_evict=None):
         super().__init__()
         self.maxsize = maxsize
+        # Optional callback invoked with the key of each LRU-evicted entry, so a
+        # companion structure (e.g. the hierarchical store's _cache_mtimes) can
+        # drop the same key and stay bounded alongside this cache.
+        self._on_evict = on_evict
 
     def __getitem__(self, key):
         value = super().__getitem__(key)
@@ -122,7 +126,9 @@ class _LRUSessionCache(OrderedDict):
             super().__setitem__(key, value)
         if self.maxsize and self.maxsize > 0:
             while len(self) > self.maxsize:
-                self.popitem(last=False)
+                evicted_key, _ = self.popitem(last=False)
+                if self._on_evict is not None:
+                    self._on_evict(evicted_key)
 
 @dataclass
 class SessionMessage:

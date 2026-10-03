@@ -18,7 +18,13 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from .store import SessionData, SessionMessage, DefaultSessionStore, FileLock
+from .store import (
+    SessionData,
+    SessionMessage,
+    DefaultSessionStore,
+    FileLock,
+    _LRUSessionCache,
+)
 
 logger = get_logger(__name__)
 
@@ -129,8 +135,21 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._extended_cache: Dict[str, ExtendedSessionData] = {}
         self._cache_fingerprints: Dict[str, Tuple[ExtendedSessionData, bytes]] = {}
+        # Bound the extended-session cache with the same LRU policy (and
+        # maxsize) as the base ``_cache`` so a long-lived process using this
+        # subclass does not retain every session it has ever loaded in RAM.
+        # Disk stays the source of truth, so an eviction just reloads on next
+        # access. When an entry is evicted its companion mtime is dropped too so
+        # ``_cache_mtimes`` stays bounded alongside the cache.
+        self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
+        self._extended_cache: Dict[str, ExtendedSessionData] = _LRUSessionCache(
+            getattr(self._cache, "maxsize", 0),
+            on_evict=lambda key: (
+                self._cache_mtimes.pop(key, None),
+                self._cache_fingerprints.pop(key, None),
+            ),
+        )
 
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
@@ -711,10 +730,12 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 self._cache.pop(session_id, None)
                 self._extended_cache.pop(session_id, None)
                 self._cache_fingerprints.pop(session_id, None)
+                self._cache_mtimes.pop(session_id, None)
             else:
                 self._cache.clear()
                 self._extended_cache.clear()
                 self._cache_fingerprints.clear()
+                self._cache_mtimes.clear()
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """

@@ -346,11 +346,16 @@ class ContextCompactor:
                 # aiohttp, Jupyter or a bot handler). The naive fallback is kept
                 # only for genuine failures, and is now logged so a silent
                 # degradation in context quality is visible.
+                #
+                # Keep the bridge's bounded default timeout rather than
+                # ``timeout=None`` so a summariser that never completes (a hung
+                # network call that ignores cancellation) falls back to the
+                # naive summary below instead of pinning the caller's thread
+                # indefinitely. ``TimeoutError`` is caught by the ``except`` here.
                 from ..utils.async_bridge import run_coroutine_from_any_context
                 try:
                     compacted = run_coroutine_from_any_context(
                         self._llm_summarize_async(processed_messages, focus_topic),
-                        timeout=None,
                     )
                 except Exception:
                     logger.warning(

@@ -178,10 +178,18 @@ class HookRunner:
         # FastAPI/aiohttp handler, Jupyter, or a bot callback invoking
         # agent.start()/agent.chat(). Raising here would turn documented sync
         # entry points into hard failures whenever any hook is registered.
+        #
+        # Bound the bridge wait so a hook that ignores its own per-hook timeout
+        # (e.g. a blocking C call on the worker loop) can never pin the caller's
+        # thread forever. Each hook already enforces ``default_timeout``
+        # internally; we give the whole chain headroom of one timeout per hook
+        # so legitimately slow sequential chains are not cut short, while still
+        # providing a hard backstop instead of ``timeout=None``.
         from ..utils.async_bridge import run_coroutine_from_any_context
+        bridge_timeout = max(self._default_timeout, 1.0) * (len(hooks) + 1)
         return run_coroutine_from_any_context(
             self.execute(event, input_data, target, _hooks=hooks),
-            timeout=None,
+            timeout=bridge_timeout,
         )
     
     async def _execute_parallel(
