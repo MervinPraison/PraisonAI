@@ -595,7 +595,12 @@ class FileMemory:
                 self._long_term.sort(key=lambda x: x.importance, reverse=True)
                 self._long_term = self._long_term[:limit]
             
-            if self._save_long_term() is False:
+            try:
+                saved = self._save_long_term()
+            except Exception:
+                self._long_term = previous_items
+                raise
+            if saved is False:
                 self._long_term = previous_items
                 raise OSError("Failed to persist long-term memory")
             self._log(f"Added long-term memory: {content[:50]}...")
@@ -668,7 +673,12 @@ class FileMemory:
                 )
                 self._entities[entity_id] = entity
             
-            if self._save_entities() is False:
+            try:
+                saved = self._save_entities()
+            except Exception:
+                self._entities = previous_entities
+                raise
+            if saved is False:
                 self._entities = previous_entities
                 raise OSError("Failed to persist entity memory")
             self._log(f"Added/updated entity: {name} ({entity_type})")
