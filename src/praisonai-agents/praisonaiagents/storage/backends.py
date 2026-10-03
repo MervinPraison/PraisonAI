@@ -229,6 +229,9 @@ class SQLiteBackend:
             try:
                 self._create_table()
             except Exception:
+                # Schema init failed; close any opened connection so callers
+                # (who never received a backend to close) don't leak handles,
+                # then re-raise without touching the existing database.
                 self.close()
                 raise
     
