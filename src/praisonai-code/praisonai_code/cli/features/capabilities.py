@@ -979,7 +979,7 @@ class CapabilitiesHandler:
         """Handle realtime subcommands."""
         parser = argparse.ArgumentParser(prog="praisonai realtime")
         parser.add_argument("action", choices=["connect", "info"], help="Action")
-        parser.add_argument("--model", "-m", default="gpt-4o-realtime-preview", help="Model")
+        parser.add_argument("--model", "-m", default="gpt-realtime", help="Model")
         
         try:
             parsed = parser.parse_args(unknown_args)

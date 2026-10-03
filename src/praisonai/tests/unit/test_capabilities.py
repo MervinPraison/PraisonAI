@@ -593,7 +593,27 @@ class TestNewCapabilities:
         )
         
         assert session.id == "realtime-abc123"
-    
+
+    def test_realtime_connect_defaults_to_gpt_realtime(self):
+        """Default model must be the GA (non-deprecated) gpt-realtime id."""
+        from praisonai.capabilities.realtime import realtime_connect
+
+        session = realtime_connect(api_base="wss://api.openai.com")
+
+        assert session.model == "gpt-realtime"
+        assert "model=gpt-realtime" in session.url
+
+    def test_arealtime_connect_defaults_to_gpt_realtime(self):
+        """Async default model must match the sync GA gpt-realtime id."""
+        import asyncio
+
+        from praisonai.capabilities.realtime import arealtime_connect
+
+        session = asyncio.run(arealtime_connect(api_base="wss://api.openai.com"))
+
+        assert session.model == "gpt-realtime"
+        assert "model=gpt-realtime" in session.url
+
     def test_mcp_result_dataclass(self):
         """Test MCPResult dataclass."""
         from praisonai.capabilities.mcp import MCPResult
