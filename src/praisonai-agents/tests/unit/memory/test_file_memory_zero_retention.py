@@ -96,6 +96,60 @@ def test_concurrent_snapshot_is_committed_once(tmp_path):
     assert reopened.export()["short_term"] == []
 
 
+@pytest.mark.parametrize("turnovers", [1, 2])
+@pytest.mark.parametrize("peer_instance", [False, True])
+def test_turnover_retries_only_surviving_selected_records(tmp_path, turnovers, peer_instance):
+    memory = FileMemory(user_id="turnover", base_path=tmp_path,
+                        config={"short_term_limit": 4, "auto_promote": False})
+    for i in range(4):
+        memory.add_short_term(f"original {i}")
+    writer = FileMemory(user_id="turnover", base_path=tmp_path,
+                        config={"short_term_limit": 4, "auto_promote": False}) if peer_instance else memory
+    prompts = []
+
+    def summarize(prompt):
+        prompts.append(prompt)
+        if len(prompts) <= turnovers:
+            writer.add_short_term(f"new {len(prompts) - 1}")
+        return prompt
+
+    summary = memory.compress(llm_func=summarize, max_items=0)
+    assert summary
+    assert len(prompts) == turnovers + 1
+    for i in range(turnovers):
+        assert f"original {i}" not in summary
+    for i in range(turnovers, 4):
+        assert f"original {i}" in summary
+    assert all("new " not in prompt for prompt in prompts)
+    reopened = FileMemory(user_id="turnover", base_path=tmp_path)
+    assert [item["content"] for item in reopened.export()["short_term"]] == [
+        f"new {i}" for i in range(turnovers)
+    ]
+    summaries = reopened.export()["long_term"]
+    assert len(summaries) == 1
+    assert summaries[0]["metadata"]["items_compressed"] == 4 - turnovers
+
+
+def test_continuous_turnover_stops_when_original_snapshot_is_gone(tmp_path):
+    memory = FileMemory(user_id="continuous", base_path=tmp_path,
+                        config={"short_term_limit": 2, "auto_promote": False})
+    memory.add_short_term("original 0")
+    memory.add_short_term("original 1")
+    prompts = []
+
+    def summarize(prompt):
+        prompts.append(prompt)
+        assert len(prompts) <= 2
+        memory.add_short_term(f"new {len(prompts) - 1}")
+        return prompt
+
+    assert memory.compress(llm_func=summarize, max_items=0) == ""
+    assert len(prompts) == 2
+    reopened = FileMemory(user_id="continuous", base_path=tmp_path)
+    assert reopened.export()["long_term"] == []
+    assert [item["content"] for item in reopened.export()["short_term"]] == ["new 0", "new 1"]
+
+
 @pytest.mark.parametrize("keep", [0, 1])
 @pytest.mark.parametrize("peer_instance", [False, True])
 def test_records_added_during_summary_are_retained(tmp_path, keep, peer_instance):
