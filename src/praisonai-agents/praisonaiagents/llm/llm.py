@@ -1021,8 +1021,8 @@ Respond with ONLY a valid JSON tool call in this format:
         provider and is always safe to replay.
         """
         try:
-            from .error_classifier import is_replay_unsafe
-            return is_replay_unsafe(error)
+            from .error_classifier import _is_replay_unsafe_chain
+            return _is_replay_unsafe_chain(error)
         except Exception:  # noqa: BLE001 - classification must never break retry
             return False
 
@@ -4638,6 +4638,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         def _stream_cancel_reason() -> str:
             return getattr(cancel_token, "reason", None) or "user"
 
+        tool_execution_started = False
+        if execute_tool_fn is not None:
+            from functools import wraps
+
+            stream_executor = execute_tool_fn
+
+            @wraps(stream_executor)
+            def tracked_stream_executor(*args, **tool_kwargs):
+                nonlocal tool_execution_started
+                tool_execution_started = True
+                return stream_executor(*args, **tool_kwargs)
+
+            execute_tool_fn = tracked_stream_executor
+
         try:
             import litellm
             
@@ -4661,6 +4675,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
             if use_streaming:
                 # Real-time streaming approach with tool call support
+                stream_request_has_tools = bool(formatted_tools)
                 try:
                     tool_calls = []
                     response_text = ""
@@ -4668,17 +4683,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
                     
-                    stream_iterator = self._completion_with_retry(
-                        **self._build_completion_params(
-                            messages=messages,
-                            tools=formatted_tools,
-                            temperature=temperature,
-                            stream=True,
-                            output_json=output_json,
-                            output_pydantic=output_pydantic,
-                            **kwargs
-                        )
+                    stream_params = self._build_completion_params(
+                        messages=messages,
+                        tools=formatted_tools,
+                        temperature=temperature,
+                        stream=True,
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
+                        **kwargs
                     )
+                    # Provider tools can be added by the builder even when the
+                    # caller passed none. Gate replays on the dispatched request.
+                    stream_request_has_tools = bool(stream_params.get('tools'))
+                    stream_iterator = self._completion_with_retry(**stream_params)
                     
                     # Wrap the iteration with additional error handling for LiteLLM JSON parsing errors
                     try:
@@ -4967,6 +4984,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             
                 except Exception as e:
+                    # Switching response mode still replays the provider call.
+                    # Do not undo the retry gate, including iterator failures
+                    # wrapped by the streaming error handler above.
+                    if tool_execution_started or (stream_request_has_tools and self._is_post_dispatch_failure(e)):
+                        # An enclosing Agent must preserve this decision even
+                        # when its own tool list omits provider-added tools.
+                        e._praisonai_stream_replay_blocked = True
+                        raise
                     error_msg = str(e).lower()
                     
                     # Provide more specific error messages based on the error type
