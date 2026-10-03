@@ -525,7 +525,9 @@ class _SessionMirrorWriter:
         delay = 0.05
         for attempt in range(1, self._max_retries + 1):
             try:
-                self._mirror.append(session_id, records)
+                # A sink may mutate its input before failing. Keep the queued
+                # snapshot unchanged so each retry receives the same record.
+                self._mirror.append(session_id, copy.deepcopy(records))
                 return
             except Exception as e:  # pragma: no cover - defensive; mirror is external
                 if attempt >= self._max_retries:
@@ -1360,7 +1362,17 @@ class DefaultSessionStore:
             return
         records = []
         for m in messages:
-            record = m.to_dict()
+            # Normalize to the JSON shape that was persisted. Container
+            # subclasses may be JSON-serializable but carry uncopyable attrs.
+            try:
+                record = json.loads(json.dumps(m.to_dict(), ensure_ascii=False))
+            except Exception as exc:
+                logger.warning(
+                    "session mirror record preparation failed for %s; "
+                    "dropping record (local write unaffected): %s",
+                    session_id, exc,
+                )
+                continue
             record.setdefault(
                 "id", f"{session_id}:{record.get('timestamp', time.time())}"
             )
