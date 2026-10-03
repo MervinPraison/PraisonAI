@@ -26,6 +26,7 @@ export class FileMemory {
   private compactionThreshold: number;
   private autoCompact: boolean;
   private initialized: boolean = false;
+  private initPromise?: Promise<void>;
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(config: FileMemoryConfig) {
@@ -41,7 +42,21 @@ export class FileMemory {
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+    // Cache the in-flight initialization so concurrent callers await the same
+    // work. The promise stays pending through any threshold-triggered
+    // compaction, so add()/delete() cannot append before the rewrite finishes.
+    if (!this.initPromise) {
+      this.initPromise = this.doInitialize().catch((error) => {
+        // Reset so a later caller can retry after a transient filesystem error.
+        this.initialized = false;
+        this.initPromise = undefined;
+        throw error;
+      });
+    }
+    return this.initPromise;
+  }
 
+  private async doInitialize(): Promise<void> {
     let shouldCompact = false;
 
     try {
@@ -74,10 +89,11 @@ export class FileMemory {
       }
     }
 
+    // Mark initialized before compaction, but keep the init promise pending so
+    // concurrent add()/delete() calls await the rewrite and are not discarded.
     this.initialized = true;
-    // compact() checks initialization, so finish loading before calling it.
     if (shouldCompact) {
-      await this.compact();
+      await this.writeCompactedFile();
     }
   }
 
@@ -195,7 +211,14 @@ export class FileMemory {
    */
   async compact(): Promise<void> {
     await this.initialize();
+    await this.writeCompactedFile();
+  }
 
+  /**
+   * Rewrite the log with only active entries. Does not call initialize(), so it
+   * is safe to invoke from within the initialization flow without recursing.
+   */
+  private async writeCompactedFile(): Promise<void> {
     const fs = await import('fs/promises');
     const activeEntries = Array.from(this.entries.values()).filter(e => !e.deleted);
 
@@ -231,7 +254,7 @@ export class FileMemory {
     for (const entry of entries) {
       this.entries.set(entry.id, entry as FileMemoryEntry);
     }
-    await this.compact();
+    await this.writeCompactedFile();
   }
 
   /**

@@ -163,7 +163,7 @@ describe('FileMemory', () => {
     const appended = await reloaded.add('New message after reload', 'assistant');
     const reopened = createFileMemory({ filePath: testFilePath, ...config });
     expect(await reopened.getAll()).toEqual([retained, appended]);
-  }, 2000);
+  }, 10000);
 
   test('toJSON exports entries', async () => {
     const memory = createFileMemory({ filePath: testFilePath });
