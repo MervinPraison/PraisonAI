@@ -924,3 +924,52 @@ def test_native_adapter_forwards_tool_timeout_to_core_tool_config():
     tc = captured.get("tool_config")
     assert isinstance(tc, ToolConfig)
     assert tc.timeout == 7
+
+
+def test_native_adapter_preserves_subsecond_tool_timeout():
+    # Regression (#5650 review): a subsecond per-agent budget must survive the
+    # forward to core unrounded. Previously the adapter did int(round(budget)),
+    # collapsing 0.4 -> 0; core treats a non-positive timeout as "no timeout"
+    # and the native callable is left unwrapped, so enforcement was silently
+    # lost. The fractional budget must reach core intact.
+    try:
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+        from praisonaiagents.config.feature_configs import ToolConfig
+    except ImportError:
+        pytest.skip("PraisonAIAdapter / core ToolConfig not available")
+
+    import praisonaiagents
+    from unittest import mock
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    adapter._format_template = lambda v, topic="": v
+
+    captured = {}
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    class _FakeTask:
+        def __init__(self, **kwargs):
+            pass
+
+    config = {"roles": {"a": {"role": "A", "tool_timeout": 0.4, "tools": []}}}
+
+    def _native_resolver(agent_key):
+        return 0.4 if agent_key == "a" else None
+
+    cli_config = {"_native_tool_timeout_resolver": _native_resolver}
+
+    with mock.patch.object(praisonaiagents, "Agent", _FakeAgent), \
+         mock.patch.object(praisonaiagents, "Task", _FakeTask):
+        adapter._build_agents_and_tasks(
+            config, "topic", {}, None, None, "gpt-4o-mini",
+            cli_config=cli_config,
+        )
+
+    tc = captured.get("tool_config")
+    assert isinstance(tc, ToolConfig)
+    # Fractional budget preserved exactly (not rounded to 0, not to 1).
+    assert tc.timeout == 0.4
+    assert tc.timeout > 0

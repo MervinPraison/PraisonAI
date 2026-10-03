@@ -612,7 +612,15 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 if isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0:
                     try:
                         from praisonaiagents.config.feature_configs import ToolConfig
-                        agent_kwargs['tool_config'] = ToolConfig(timeout=int(round(budget)))
+                        # Preserve the resolved budget as-is (float seconds).
+                        # Core consumes ToolConfig.timeout directly as seconds in
+                        # both the sync (future.result(timeout=...)) and async
+                        # (asyncio.wait_for(timeout=...)) paths, so fractional
+                        # budgets survive. Rounding to int would collapse a
+                        # subsecond budget (e.g. 0.4 -> 0), and core treats a
+                        # non-positive timeout as "no timeout" — silently dropping
+                        # enforcement for native callables that are now unwrapped.
+                        agent_kwargs['tool_config'] = ToolConfig(timeout=budget)
                     except Exception as _tc_err:
                         logger.warning(
                             "Could not set core tool_config timeout for agent %r: %s",
