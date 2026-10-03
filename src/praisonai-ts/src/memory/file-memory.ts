@@ -58,6 +58,8 @@ export class FileMemory {
 
   private async doInitialize(): Promise<void> {
     let shouldCompact = false;
+    // A retry must rebuild from the current log, not a failed attempt's snapshot.
+    this.entries.clear();
 
     try {
       const fs = await import('fs/promises');

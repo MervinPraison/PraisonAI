@@ -226,6 +226,27 @@ describe('FileMemory', () => {
     }
   });
 
+  test('initialization retry reads the current log after another writer compacts it', async () => {
+    const original = createFileMemory({ filePath: testFilePath });
+    const deleted = await original.add('Deleted message', 'user');
+    const retained = await original.add('Retained message', 'assistant');
+    await original.delete(deleted.id);
+    const reloaded = createFileMemory({ filePath: testFilePath, compactionThreshold: 0 });
+    const renameSpy = jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('Compaction failed'));
+
+    try {
+      await expect(reloaded.initialize()).rejects.toThrow('Compaction failed');
+      await original.delete(retained.id);
+      await original.compact();
+      await reloaded.initialize();
+      expect(await reloaded.getAll()).toEqual([]);
+      await reloaded.compact();
+      expect(await fs.readFile(testFilePath, 'utf-8')).toBe('');
+    } finally {
+      renameSpy.mockRestore();
+    }
+  });
+
   test('toJSON exports entries', async () => {
     const memory = createFileMemory({ filePath: testFilePath });
     await memory.add('Message 1', 'user');
