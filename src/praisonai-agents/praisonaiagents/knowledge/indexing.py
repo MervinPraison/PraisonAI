@@ -31,13 +31,6 @@ STRATEGY_THRESHOLDS = {
 DEFAULT_STRATEGY = "hierarchical"  # > 100000 files
 
 
-def estimate_tokens_simple(text: str) -> int:
-    """Simple token estimation (~4 chars per token)."""
-    if not text:
-        return 0
-    return len(text) // 4 + 1
-
-
 @dataclass
 class CorpusStats:
     """
