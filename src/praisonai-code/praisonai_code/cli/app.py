@@ -214,6 +214,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "audit": ("praisonai.cli.commands.audit", "audit", "Compliance auditing"),
     "managed": ("praisonai.cli.commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
     "models": (".commands.models", "app", "List and describe available models"),
+    "decisions": (".commands.decisions", "app", "System One / Jev typed decision models"),
     "backends": (".commands.backends", "app", "List registered CLI backends"),
 
     # Resident commands — see ``_*_RESIDENT_COMMANDS`` below. Their implementation

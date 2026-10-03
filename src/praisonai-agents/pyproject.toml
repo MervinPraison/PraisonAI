@@ -73,6 +73,11 @@ llm = [
     "pydantic>=2.10.0"
 ]
 
+# System One / Jev decision models (optional; HTTP client works without this)
+decisions = [
+    "typesafe-sdk>=0.7.0",
+]
+
 # Add API dependencies
 api = [
     "fastapi>=0.115.0",
@@ -140,6 +145,7 @@ all = [
     "praisonaiagents[knowledge]",
     "praisonaiagents[graph]",
     "praisonaiagents[llm]",
+    "praisonaiagents[decisions]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
     "praisonaiagents[telemetry]",

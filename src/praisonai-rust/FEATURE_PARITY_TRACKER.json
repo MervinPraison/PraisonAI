@@ -1,14 +1,14 @@
 {
   "version": "1.7.6",
-  "lastUpdated": "2026-09-17",
+  "lastUpdated": "2026-10-01",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "IN_PROGRESS",
   "summary": {
-    "pythonCoreFeatures": 421,
+    "pythonCoreFeatures": 433,
     "rustFeatures": 667,
-    "gapCount": 138,
-    "parityPercentage": 67.2
+    "gapCount": 150,
+    "parityPercentage": 65.4
   },
   "pythonCoreSDK": {
     "exports": [
@@ -95,6 +95,8 @@
       "ContextTraceSinkProtocol",
       "CorpusStats",
       "CustomToolUseEvent",
+      "DecisionRoutePlan",
+      "DecisionTriageRouter",
       "DeepResearchAgent",
       "DeepResearchResponse",
       "DefaultsConfig",
@@ -281,6 +283,7 @@
       "StopReason",
       "StructuredFormatter",
       "SuccessCriterion",
+      "SystemOneResult",
       "Task",
       "TaskOutput",
       "TelemetryCollector",
@@ -322,12 +325,15 @@
       "allow_model_requests",
       "apply_config_defaults",
       "async_display_callbacks",
+      "asystem_one",
+      "choice_question",
       "clean_triple_backticks",
       "cleanup_telemetry_resources",
       "collapse",
       "config",
       "configure_structured_logging",
       "create_context_agent",
+      "default_ticket_triage_questions",
       "detect_url_scheme",
       "disable_performance_mode",
       "disable_telemetry",
@@ -371,6 +377,7 @@
       "has_toolset",
       "if_",
       "include",
+      "is_decision_model",
       "is_path_like",
       "is_policy_string",
       "is_sticky",
@@ -383,6 +390,7 @@
       "memory",
       "merge_run_terminal",
       "no_model_requests",
+      "noul_question",
       "parallel",
       "parallel_handoffs",
       "parse_plugin_header",
@@ -418,13 +426,17 @@
       "resolve_toolsets",
       "resolve_web",
       "route",
+      "score_question",
       "suggest_similar",
       "sync_display_callbacks",
+      "system_one",
       "termination_to_run_status",
       "tool",
       "tools",
       "trace_context",
       "track_workflow",
+      "triage_decision",
+      "triaged_start",
       "unregister_toolset",
       "validate",
       "validate_config",
@@ -3610,6 +3622,24 @@
         "category": "other"
       },
       {
+        "feature": "DecisionRoutePlan",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "DecisionTriageRouter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "DefaultsConfig",
         "python": true,
         "rust": true,
@@ -4681,6 +4711,15 @@
         "category": "other"
       },
       {
+        "feature": "SystemOneResult",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "Task",
         "python": true,
         "rust": true,
@@ -4906,6 +4945,24 @@
         "category": "main"
       },
       {
+        "feature": "asystem_one",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "choice_question",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "clean_triple_backticks",
         "python": true,
         "rust": true,
@@ -4934,6 +4991,15 @@
       },
       {
         "feature": "configure_structured_logging",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "default_ticket_triage_questions",
         "python": true,
         "rust": false,
         "priority": "P3",
@@ -5221,6 +5287,15 @@
         "category": "other"
       },
       {
+        "feature": "is_decision_model",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "is_path_like",
         "python": true,
         "rust": true,
@@ -5303,6 +5378,15 @@
       },
       {
         "feature": "no_model_requests",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "noul_question",
         "python": true,
         "rust": false,
         "priority": "P3",
@@ -5572,6 +5656,15 @@
         "category": "config"
       },
       {
+        "feature": "score_question",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "suggest_similar",
         "python": true,
         "rust": true,
@@ -5588,6 +5681,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "system_one",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "termination_to_run_status",
@@ -5624,6 +5726,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "flow_display"
+      },
+      {
+        "feature": "triage_decision",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "triaged_start",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "unregister_toolset",
