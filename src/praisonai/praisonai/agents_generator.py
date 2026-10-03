@@ -373,7 +373,7 @@ def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
     return proxy
 
 
-def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None, owner_key=None):
+def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None, owner_key=None, native_delegates_to_core=False):
     """Enforce a per-call timeout on a tool, sync or async.
 
     For async tools the underlying task is cancelled on timeout. For sync tools
@@ -387,8 +387,31 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     On timeout the wrapper raises :class:`ToolTimeoutError` rather than returning
     a JSON string, so a tool's declared return-type contract is never silently
     downgraded; the framework adapter decides how to surface the timeout.
+
+    ``native_delegates_to_core``: when True, a *plain native callable* (not a
+    framework tool object) is returned unwrapped so core's own per-tool timeout
+    enforcement (``praisonaiagents`` ``agent/tool_execution.py`` /
+    ``tools/call_executor.py``, configured via the agent's ``tool_config``
+    timeout) owns it — avoiding a second, duplicated abandon-on-timeout thread
+    pool for tools that already flow through core (#5650). Framework tool
+    objects (CrewAI/AutoGen/LangChain ``BaseTool``) never reach core's executor,
+    so they are *always* wrapped here to preserve their ``args_schema``.
     """
     if timeout_seconds is None or timeout_seconds <= 0:
+        return tool
+
+    # praisonai-native path: a plain callable already flows through core's tool
+    # executor, which enforces the resolved per-tool timeout. Returning it
+    # unwrapped lets core own the abandon-on-expiry semantics instead of the
+    # wrapper standing up a second thread pool with the same behaviour. Only
+    # framework tool objects (which bypass core) still need wrapper wrapping, so
+    # they fall through to the logic below.
+    if (
+        native_delegates_to_core
+        and callable(tool)
+        and not isinstance(tool, type)
+        and not _looks_like_framework_tool(tool)
+    ):
         return tool
 
     import asyncio
@@ -775,14 +798,31 @@ class AgentsGenerator:
         with self._tool_timeout_executor_lock:
             self._leaked_workers += 1
 
-    def _wrap_tool_with_timeout(self, tool, timeout_seconds):
-        """Wrap a tool with this generator's instance-owned timeout executor."""
+    def _wrap_tool_with_timeout(self, tool, timeout_seconds, native_delegates_to_core=None):
+        """Wrap a tool with this generator's instance-owned timeout executor.
+
+        On the praisonai-native framework the resolved per-tool timeout is
+        enforced by core (``praisonaiagents`` ``agent/tool_execution.py``, wired
+        via the agent's ``tool_config`` timeout), so a *native* callable is left
+        unwrapped here instead of being bound to a second wrapper-owned thread
+        pool with the same abandon-on-expiry semantics (#5650). Framework tool
+        objects (CrewAI/AutoGen/LangChain ``BaseTool``) bypass core, so they are
+        still wrapped.
+
+        ``native_delegates_to_core``: callers that already know the resolved
+        framework (the per-run wrap/resolver closures) pass it explicitly;
+        otherwise it is inferred from ``self.framework`` (resolved to the chosen
+        adapter name by the time an adapter invokes a wrap closure at run time).
+        """
+        if native_delegates_to_core is None:
+            native_delegates_to_core = (getattr(self, "framework", None) or "") == "praisonai"
         return _wrap_with_timeout(
             tool,
             timeout_seconds,
             self._get_tool_timeout_executor,
             on_leaked=self._note_leaked_worker,
             owner_key=self._timeout_owner_key,
+            native_delegates_to_core=native_delegates_to_core,
         )
 
     def close(self):
@@ -1080,11 +1120,35 @@ class AgentsGenerator:
         # that when the *same* generator instance is reused with a different
         # timeout layout, a stale closure from a previous run can never leak into
         # the adapters and apply the wrong budget to the current run.
+        # Resolve the chosen framework now (the same registry resolution the
+        # run prep uses) so native-vs-framework tool handling is decided BEFORE
+        # the uniform wrap is applied eagerly below — ``self.framework`` is not
+        # yet updated to the resolved adapter name at this point in the run.
+        _requested_framework = getattr(self, "framework", None) or config.get('framework')
+        registry = getattr(self, "_adapter_registry", None)
+        try:
+            resolved_framework = (
+                registry.resolve_or_default(_requested_framework)
+                if registry is not None else _requested_framework
+            )
+        except Exception:
+            resolved_framework = _requested_framework
+        native = resolved_framework == "praisonai"
+
         uniform = self._resolve_uniform_tool_timeout(config)
         wrap = None
         resolver = None
         if uniform and uniform > 0:
-            wrap = lambda t, _sec=uniform: self._wrap_tool_with_timeout(t, _sec)
+            # On the native framework a *plain callable* is left unwrapped so
+            # core enforces the budget (#5650) — the raw value is exposed below
+            # so the native adapter configures each agent's tool_config timeout.
+            # Framework tool *objects* are still wrapped here regardless, so
+            # their args_schema survives for the LLM. ``native`` is passed
+            # explicitly because ``self.framework`` is not yet resolved here.
+            wrap = (
+                lambda t, _sec=uniform, _n=native:
+                self._wrap_tool_with_timeout(t, _sec, native_delegates_to_core=_n)
+            )
             tools_dict = {name: wrap(tool) for name, tool in tools_dict.items()}
         else:
             # No single uniform timeout. If any agent declared a per-agent
@@ -1105,9 +1169,21 @@ class AgentsGenerator:
         # so adapters still read them via the same keys. Both are written every
         # time so the inactive path is cleared rather than left holding a prior
         # closure.
+        # On the native framework, plain callables are no longer wrapped by the
+        # wrapper's own executor (above) — core enforces the timeout instead
+        # (#5650). Expose the resolved per-agent timeout (float seconds) so the
+        # native adapter can configure each core Agent's ``tool_config`` timeout.
+        # ``None`` for non-native frameworks, which keep wrapper-side wrapping.
+        native_tool_timeout_resolver = None
+        if native:
+            native_tool_timeout_resolver = (
+                lambda agent_key, _cfg=config: self.resolve_agent_tool_timeout(agent_key, _cfg)
+            )
+
         self._run_ctx = {
             "_tool_timeout_wrap": wrap,
             "_agent_tool_wrap_resolver": resolver,
+            "_native_tool_timeout_resolver": native_tool_timeout_resolver,
         }
         return tools_dict
 

@@ -596,7 +596,29 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Add approval config if present
             if agent_approval:
                 agent_kwargs['approval'] = agent_approval
-            
+
+            # Forward the resolved per-agent tool_timeout to core so native
+            # tools are enforced by core's own per-tool timeout (#5650) instead
+            # of a duplicate wrapper-side executor. The generator exposes the
+            # resolved budget only on the native framework; framework tool
+            # objects keep wrapper-side wrapping. A user-supplied tool_config in
+            # YAML (details['llm'] etc.) is not overridden here — this only
+            # fills the timeout the wrapper would otherwise have enforced.
+            native_timeout_resolver = (cli_config or {}).get(
+                "_native_tool_timeout_resolver"
+            )
+            if callable(native_timeout_resolver) and 'tool_config' not in agent_kwargs:
+                budget = native_timeout_resolver(role)
+                if isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0:
+                    try:
+                        from praisonaiagents.config.feature_configs import ToolConfig
+                        agent_kwargs['tool_config'] = ToolConfig(timeout=int(round(budget)))
+                    except Exception as _tc_err:
+                        logger.warning(
+                            "Could not set core tool_config timeout for agent %r: %s",
+                            role_filled, _tc_err,
+                        )
+
             agent = PraisonAgent(**agent_kwargs)
             
             if agent_callback:
