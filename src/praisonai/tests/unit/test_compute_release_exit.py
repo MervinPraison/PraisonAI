@@ -9,6 +9,20 @@ import pytest
 
 
 CHILD = r'''
+import os
+coverage_file = os.environ.get("PRAISONAI_EXIT_TEST_COVERAGE_FILE")
+if coverage_file:
+    import atexit
+    from coverage import Coverage
+    if Coverage.current() is None:
+        child_coverage = Coverage(data_file=coverage_file, data_suffix=True, source=["praisonai"])
+        child_coverage.start()
+        def save_child_coverage():
+            child_coverage.stop()
+            child_coverage.save()
+        # Registered before runtime cleanup: tracing stops after the real
+        # exit callbacks have run, including their background teardown.
+        atexit.register(save_child_coverage)
 import asyncio
 from pathlib import Path
 import sys
@@ -93,6 +107,18 @@ def _child(tmp_path, mode):
         + [env.get("PYTHONPATH", "")]
     )
     env["PRAISONAI_COMPUTE_RELEASE_EXIT_TIMEOUT"] = "0.2" if mode == "hung" else "2"
+    env.pop("PRAISONAI_EXIT_TEST_COVERAGE_FILE", None)
+    try:
+        from coverage import Coverage
+    except ImportError:
+        pass
+    else:
+        active_coverage = Coverage.current()
+        if active_coverage is not None:
+            # pytest-cov combines parallel data files when its parent run ends.
+            env["PRAISONAI_EXIT_TEST_COVERAGE_FILE"] = str(
+                Path(active_coverage.config.data_file).resolve()
+            )
     result = subprocess.run(
         [sys.executable, "-c", CHILD, str(marker), mode], env=env,
         capture_output=True, text=True, timeout=10,
