@@ -68,7 +68,7 @@ def test_discarded_summary_preserves_source_records(tmp_path):
                         config={"long_term_limit": 1, "auto_promote": False})
     memory.add_long_term("essential", importance=1.0)
     memory.add_short_term("source")
-    memory.compress(max_items=0)
+    assert memory.compress(max_items=0) == ""
     reopened = FileMemory(user_id="retention", base_path=tmp_path)
     assert [i["content"] for i in reopened.export()["short_term"]] == ["source"]
     assert [i["content"] for i in reopened.export()["long_term"]] == ["essential"]

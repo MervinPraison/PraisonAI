@@ -1528,7 +1528,7 @@ class FileMemory:
                        added while summarizing are also retained.
             
         Returns:
-            The generated summary
+            The persisted summary, or an empty string if no compression commits.
         """
         # Check length and gather content under lock
         with self._lock:
@@ -1572,7 +1572,7 @@ Summary:"""
             )
             retained = self._read_json(self.long_term_file, [])
             if not any(item["id"] == summary_id for item in retained):
-                return summary
+                return ""
             # Remove sources only after verifying their summary survived retention.
             self._short_term = [
                 MemoryItem.from_dict(item)
