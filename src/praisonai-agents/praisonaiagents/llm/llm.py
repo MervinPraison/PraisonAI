@@ -4976,6 +4976,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.warning(f"Streaming failed due to connection issues: {e}")
                     else:
                         logging.error(f"Streaming failed with unexpected error: {e}")
+
+                    # Replay-safety gate (#3860): switching response mode is still
+                    # a provider replay. The retry driver already surfaces a
+                    # post-dispatch failure (read timeout, connection reset
+                    # mid-response) on a side-effecting turn rather than replaying
+                    # it — a tool call may already have run server-side. Reissuing
+                    # the same request with stream=False here would silently bypass
+                    # that decision. The streaming path re-raises wrapping the
+                    # cause (raise Exception(...) from read_timeout), so inspect
+                    # the whole chain. Only block when the turn exposes tools; a
+                    # pure text turn (or a pre-dispatch failure) stays falling back.
+                    from .error_classifier import is_replay_unsafe_chain
+                    side_effecting = bool(formatted_tools) or execute_tool_fn is not None
+                    if side_effecting and is_replay_unsafe_chain(e):
+                        logging.warning(
+                            "Not falling back to non-streaming on a tool turn: the "
+                            "streaming failure is replay-unsafe (post-dispatch); "
+                            "surfacing the original error to avoid re-executing the turn."
+                        )
+                        raise
                     
                     # Fall back to non-streaming if streaming fails
                     use_streaming = False
