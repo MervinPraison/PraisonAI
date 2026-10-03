@@ -410,18 +410,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
         
         Args:
             session_id: The session to fork from
-            from_message_index: Message index to fork from (None = all messages)
+            from_message_index: Zero-based, inclusive message index to fork from
+                (None = all messages, including an empty session).
             title: Optional title for the forked session
             
         Returns:
             The new forked session ID
 
         Raises:
+            ValueError: The explicit message index is outside the parent history.
             OSError: Saving the fork or registering it with the parent failed.
                 A saved fork is retained if parent registration fails.
         """
         # Force reload to get latest messages from disk
         parent = self._load_extended_session(session_id, force_reload=True)
+
+        if from_message_index is not None and (
+            from_message_index < 0 or from_message_index >= len(parent.messages)
+        ):
+            raise ValueError(f"Invalid message index {from_message_index}")
         
         # Determine which messages to copy
         if from_message_index is None:
