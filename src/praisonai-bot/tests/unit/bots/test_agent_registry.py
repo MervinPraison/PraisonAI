@@ -103,6 +103,64 @@ class TestAgentRegistry:
         assert sorted(reg.numbers()) == ["+14155550123", "+442071838750"]
 
 
+class TestAgentRegistryConcurrency:
+    def test_concurrent_assign_resolve_is_race_free(self):
+        """Concurrent assign/unassign/resolve must not corrupt the table.
+
+        Exercises the per-instance lock: many threads mutate and read the
+        shared mapping at once; the registry must never raise (e.g. a dict
+        "changed size during iteration") and every resolve must return either
+        the exact assigned agent or the fallback — never a torn/partial value.
+        """
+        import threading
+
+        n = 50
+        agents = {f"+1415555{i:04d}": _FakeAgent(str(i)) for i in range(n)}
+        fallback = _FakeAgent("default")
+        reg = AgentRegistry(default_agent=fallback)
+        errors: list[Exception] = []
+        barrier = threading.Barrier(n)
+
+        def worker(number: str, agent: _FakeAgent) -> None:
+            try:
+                barrier.wait()
+                for _ in range(100):
+                    reg.assign(number, agent)
+                    resolved = reg.resolve(number)
+                    assert resolved is agent or resolved is fallback
+                    list(reg.numbers())
+                    len(reg)
+                    reg.unassign(number)
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(num, ag))
+            for num, ag in agents.items()
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"concurrent access raised: {errors[:3]}"
+
+    def test_iter_snapshot_is_stable_under_mutation(self):
+        """``__iter__`` returns a stable snapshot, not a live view.
+
+        The iterator is taken over a copy, so mutating the registry after
+        obtaining it must not raise a "dictionary changed size during
+        iteration" error nor retroactively alter the captured snapshot.
+        """
+        a = _FakeAgent("a")
+        reg = AgentRegistry()
+        reg.assign("+14155550123", a)
+        snapshot = iter(reg)
+        reg.assign("+442071838750", _FakeAgent("b"))
+        reg.unassign("+14155550123")
+        assert dict(snapshot) == {"+14155550123": a}
+
+
 def test_registry_routes_real_agents():
     """Integration: real ``Agent`` instances resolve by phone number.
 

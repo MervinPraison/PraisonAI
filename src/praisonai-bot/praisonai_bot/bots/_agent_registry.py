@@ -31,6 +31,7 @@ finally to ``None``.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 _NON_DIGITS = re.compile(r"[^0-9]")
@@ -56,12 +57,18 @@ def normalize_number(number: Optional[str]) -> Optional[str]:
 
 
 class AgentRegistry:
-    """A thread-unsafe, in-memory phone-number → agent routing table.
+    """A thread-safe, in-memory phone-number → agent routing table.
 
     Lightweight by design: it holds references to already-constructed agents
-    and a normalised-number index. It performs no I/O and adds no dependencies,
-    so a gateway can build one per process and consult it on every inbound
-    message.
+    and a normalised-number index. It performs no I/O and adds no dependencies
+    beyond the stdlib, so a gateway can build one per process and consult it on
+    every inbound message.
+
+    Access is guarded by a per-instance :class:`threading.Lock` so concurrent
+    inbound turns (the gateway dispatches turns concurrently) cannot race on
+    the shared mapping: a simultaneous ``assign``/``unassign`` can never be
+    observed as a torn read by ``resolve``, and the ``__len__``/``__iter__``/
+    ``numbers`` snapshots are taken atomically.
 
     Args:
         default_agent: Optional fallback returned by :meth:`resolve` when an
@@ -72,6 +79,7 @@ class AgentRegistry:
     def __init__(self, default_agent: Optional[Any] = None) -> None:
         self._by_number: Dict[str, Any] = {}
         self._default_agent = default_agent
+        self._lock = threading.Lock()
 
     def assign(self, number: str, agent: Any) -> str:
         """Assign ``number`` to ``agent`` and return the normalised key.
@@ -84,7 +92,8 @@ class AgentRegistry:
         key = normalize_number(number)
         if key is None:
             raise ValueError(f"invalid phone number: {number!r}")
-        self._by_number[key] = agent
+        with self._lock:
+            self._by_number[key] = agent
         return key
 
     def unassign(self, number: str) -> bool:
@@ -95,7 +104,8 @@ class AgentRegistry:
         key = normalize_number(number)
         if key is None:
             return False
-        return self._by_number.pop(key, None) is not None
+        with self._lock:
+            return self._by_number.pop(key, None) is not None
 
     def resolve(self, number: Optional[str]) -> Optional[Any]:
         """Return the agent assigned to ``number``.
@@ -105,26 +115,33 @@ class AgentRegistry:
         """
         key = normalize_number(number)
         if key is not None:
-            agent = self._by_number.get(key)
+            with self._lock:
+                agent = self._by_number.get(key)
             if agent is not None:
                 return agent
         return self._default_agent
 
     def numbers(self) -> List[str]:
         """Return all assigned (normalised) numbers."""
-        return list(self._by_number.keys())
+        with self._lock:
+            return list(self._by_number.keys())
 
     def __contains__(self, number: object) -> bool:
         if not isinstance(number, str):
             return False
         key = normalize_number(number)
-        return key is not None and key in self._by_number
+        if key is None:
+            return False
+        with self._lock:
+            return key in self._by_number
 
     def __len__(self) -> int:
-        return len(self._by_number)
+        with self._lock:
+            return len(self._by_number)
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        return iter(self._by_number.items())
+        with self._lock:
+            return iter(dict(self._by_number).items())
 
 
 __all__ = ["AgentRegistry", "normalize_number"]
