@@ -118,6 +118,29 @@ class TestConfigurableModelProvider:
         assert agent._using_custom_llm is True
         mock_llm.assert_not_called()
 
+    def test_agent_with_cheaperinference_openai_compatible_config(self):
+        """Agent should pass Cheaper Inference OpenAI-compatible settings to LLM."""
+        from praisonaiagents import Agent
+
+        with patch("praisonaiagents.llm.llm.LLM") as mock_llm:
+            agent = Agent(
+                name="Test",
+                instructions="Test agent",
+                llm={
+                    "model": "openai/gpt-5.4-mini",
+                    "api_key": "test-cheaperinference-key",
+                    "base_url": "https://api.cheaperinference.com/v1",
+                },
+            )
+
+        assert agent is not None
+        assert agent.llm == "openai/gpt-5.4-mini"
+        assert agent._llm_init_params["model"] == "openai/gpt-5.4-mini"
+        assert agent._llm_init_params["api_key"] == "test-cheaperinference-key"
+        assert agent._llm_init_params["base_url"] == "https://api.cheaperinference.com/v1"
+        assert agent._using_custom_llm is True
+        mock_llm.assert_not_called()
+
 
 class TestConfigurableModelThreadSafety:
     """Test thread safety of agent model usage."""
