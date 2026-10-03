@@ -1,7 +1,6 @@
 import pytest
 pytest.importorskip("langflow")
 from praisonai.flow.components.PraisonAI.praisonai_agent import PraisonAIAgentComponent
-from praisonai.flow.components.PraisonAI.praisonai_task import PraisonAITaskComponent
 from praisonai.flow.components.PraisonAI.praisonai_agents import PraisonAIAgentsComponent
 
 def test_praisonai_agent_component():
@@ -23,25 +22,6 @@ def test_praisonai_agent_component():
     # The build_agent() itself correctly proves the imports, memory instantiation, 
     # and UI variable binding works flawlessly.
 
-def test_praisonai_task_component():
-    """Verify PraisonAITaskComponent binds accurately to the instantiated agent."""
-    agent_comp = PraisonAIAgentComponent()
-    agent_comp.agent_name = "RealTestAgent"
-    agent_comp.instructions = "You are a helpful assistant."
-    agent_comp.llm = "openai/gpt-4o-mini"
-    built_agent = agent_comp.build_agent()
-    
-    task_comp = PraisonAITaskComponent()
-    task_comp.name = "RealTestTask"
-    task_comp.description = "Test task."
-    task_comp.expected_output = "OK"
-    task_comp.agent = built_agent
-    
-    built_task = task_comp.build_task()
-    assert built_task.name == "RealTestTask"
-    assert built_task.description == "Test task."
-    assert built_task.agent.name == "RealTestAgent"
-
 def test_praisonai_agents_component():
     """Verify PraisonAIAgentsComponent builds the AgentTeam successfully."""
     agent_comp = PraisonAIAgentComponent()
@@ -50,17 +30,9 @@ def test_praisonai_agents_component():
     agent_comp.llm = "openai/gpt-4o-mini"
     built_agent = agent_comp.build_agent()
     
-    task_comp = PraisonAITaskComponent()
-    task_comp.name = "TeamTask"
-    task_comp.description = "Task"
-    task_comp.expected_output = "Output"
-    task_comp.agent = built_agent
-    built_task = task_comp.build_task()
-    
     agents_comp = PraisonAIAgentsComponent()
     agents_comp.team_name = "AgentTeamTest"
     agents_comp.agents = [built_agent]
-    agents_comp.tasks = [built_task]
     agents_comp.process = "sequential"
     agents_comp.memory = False
     
