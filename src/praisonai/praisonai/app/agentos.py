@@ -135,7 +135,7 @@ class AgentOS:
     
     def _register_routes(self, app: Any) -> None:
         """Register API routes."""
-        from fastapi import HTTPException, Query
+        from fastapi import HTTPException, Query, WebSocket, WebSocketDisconnect
         from pydantic import BaseModel
         
         class ChatRequest(BaseModel):
@@ -147,6 +147,26 @@ class AgentOS:
             response: str
             agent_name: str
             session_id: Optional[str] = None
+
+        class RunRequest(BaseModel):
+            message: str
+            session_id: Optional[str] = None
+
+        async def _invoke(target: Any, message: str) -> Any:
+            """Invoke a team/flow without blocking the loop: prefer its async
+            entry point, else offload the sync call to a worker thread."""
+            for attr in ("arun", "astart"):
+                fn = getattr(target, attr, None)
+                if callable(fn):
+                    return await fn(message)
+            for attr in ("run", "start"):
+                fn = getattr(target, attr, None)
+                if callable(fn):
+                    return await asyncio.to_thread(fn, message)
+            raise HTTPException(
+                status_code=501,
+                detail="target exposes no run/start entry point",
+            )
         
         @app.get("/")
         async def root():
@@ -250,11 +270,13 @@ class AgentOS:
                 _unavailable("Approvals", "praisonaiagents.approval is not installed.")
             registry = get_approval_registry()
 
-            # The registry stores approval requirements across four fields --
-            # global tools plus per-agent overrides -- rather than a single
-            # dict. Reading the public accessors (is_required/get_risk_level)
-            # keeps this decoupled from that private shape. Fall back to the
-            # attributes only to enumerate which (agent, tool) pairs exist.
+            # Prefer the registry's public requirement listing so a core-SDK
+            # refactor of its internal storage can never silently 503 this
+            # production surface. Fall back to the private fields only on older
+            # cores that predate list_requirements().
+            if hasattr(registry, "list_requirements"):
+                return {"requirements": registry.list_requirements()}
+
             global_tools = getattr(registry, "_required_tools", None)
             agent_tools = getattr(registry, "_agent_required_tools", None)
             if global_tools is None and agent_tools is None:
@@ -350,6 +372,87 @@ class AgentOS:
                 )
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+
+        # ── Teams & flows ─────────────────────────────────────────────────
+        # The constructor accepts teams/flows and `/` reports their counts, so
+        # a POST to invoke them must exist or those collections silently do
+        # nothing. Routed by name; 404 when the name is unknown.
+
+        @app.post(f"{self.config.api_prefix}/teams/{{team_name}}/run")
+        async def run_team(team_name: str, request: RunRequest):
+            team = next(
+                (t for t in self.teams if getattr(t, "name", None) == team_name),
+                None,
+            )
+            if team is None:
+                raise HTTPException(status_code=404, detail=f"Team '{team_name}' not found")
+            try:
+                result = await _invoke(team, request.message)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+            return {"team": team_name, "result": str(result), "session_id": request.session_id}
+
+        @app.post(f"{self.config.api_prefix}/flows/{{flow_name}}/run")
+        async def run_flow(flow_name: str, request: RunRequest):
+            flow = next(
+                (f for f in self.flows if getattr(f, "name", None) == flow_name),
+                None,
+            )
+            if flow is None:
+                raise HTTPException(status_code=404, detail=f"Flow '{flow_name}' not found")
+            try:
+                result = await _invoke(flow, request.message)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+            return {"flow": flow_name, "result": str(result), "session_id": request.session_id}
+
+        # ── WebSocket chat ────────────────────────────────────────────────
+        # The docstring advertises WebSocket endpoints. Deliver one that speaks
+        # the same agent surface as POST /chat (achat/chat) rather than a
+        # fabricated streaming API the core Agent does not expose. The whole
+        # response is sent as one frame followed by a terminal {"done": true}.
+
+        @app.websocket(f"{self.config.api_prefix}/chat/stream")
+        async def chat_stream(ws: WebSocket):
+            await ws.accept()
+            try:
+                while True:
+                    payload = await ws.receive_json()
+                    message = payload.get("message")
+                    if not message:
+                        await ws.send_json({"error": "message is required"})
+                        continue
+                    agent_name = payload.get("agent_name")
+                    agent = None
+                    if agent_name:
+                        agent = next(
+                            (a for a in self.agents
+                             if getattr(a, "name", None) == agent_name),
+                            None,
+                        )
+                        if agent is None:
+                            await ws.send_json({"error": f"Agent '{agent_name}' not found"})
+                            continue
+                    elif self.agents:
+                        agent = self.agents[0]
+                    else:
+                        await ws.send_json({"error": "no agents available"})
+                        continue
+                    try:
+                        if hasattr(agent, "achat") and callable(getattr(agent, "achat")):
+                            response = await agent.achat(message)
+                        else:
+                            response = await asyncio.to_thread(agent.chat, message)
+                        await ws.send_json({"response": str(response)})
+                        await ws.send_json({"done": True})
+                    except Exception as e:
+                        await ws.send_json({"error": str(e)})
+            except WebSocketDisconnect:
+                return
     
     def get_app(self) -> Any:
         """

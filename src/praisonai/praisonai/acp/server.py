@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from .config import ACPConfig
 from .session import ACPSession, SessionStore
+from .._async_bridge import run_cli_coro
 
 # Configure logging to stderr only (stdout reserved for JSON-RPC)
 logger = logging.getLogger(__name__)
@@ -665,4 +666,8 @@ def serve(
         approval_mode=approval_mode,
     )
     
-    asyncio.run(_run_server(config))
+    # Route through the shared AsyncBridge so per-loop connection pools survive
+    # across calls, any embedder-installed scoped_bridge() is honoured, and a
+    # fresh event loop is NOT torn down on every invocation (which breaks
+    # per-loop cached async clients with "Event loop is closed").
+    run_cli_coro(_run_server(config))
