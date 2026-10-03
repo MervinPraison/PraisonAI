@@ -8103,8 +8103,20 @@ class WebSocketGateway:
 
         for agent_id, agent_def in agents_cfg.items():
             instructions = agent_def.get("instructions", "")
-            # G7: Apply provider.model as fallback when agent has no model
-            model = agent_def.get("model", None) or default_model
+            # G7: Apply provider.model as fallback when agent has no model.
+            # An unset or ``"auto"`` model resolves to the detected provider's
+            # default (Issue #5609) so a non-OpenAI operator is not silently
+            # handed gpt-4o-mini; an explicit model/default_model still wins.
+            model = agent_def.get("model", None)
+            if not model or str(model).strip().lower() == "auto":
+                if default_model:
+                    model = default_model
+                else:
+                    from praisonai_bot.bots._config_schema import (
+                        resolve_model_by_provider,
+                    )
+
+                    model = resolve_model_by_provider()
             memory = agent_def.get("memory", False)
 
             # G2: Pass temperature through (optional, SDK uses its own default)
