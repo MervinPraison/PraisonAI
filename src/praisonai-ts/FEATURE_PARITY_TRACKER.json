@@ -5,7 +5,7 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 421,
-    "pythonWrapperFeatures": 21,
+    "pythonWrapperFeatures": 20,
     "typescriptFeatures": 2087,
     "gapCount": 4,
     "stubCount": 0,
@@ -934,7 +934,6 @@
       "endpoints",
       "eval",
       "gateway",
-      "ollama",
       "onboard",
       "persistence",
       "recipe",
