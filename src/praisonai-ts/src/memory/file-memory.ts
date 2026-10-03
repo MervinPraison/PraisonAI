@@ -89,12 +89,11 @@ export class FileMemory {
       }
     }
 
-    // Mark initialized before compaction, but keep the init promise pending so
-    // concurrent add()/delete() calls await the rewrite and are not discarded.
-    this.initialized = true;
+    // Keep concurrent callers waiting until the automatic rewrite finishes.
     if (shouldCompact) {
       await this.writeCompactedFile();
     }
+    this.initialized = true;
   }
 
   /**
