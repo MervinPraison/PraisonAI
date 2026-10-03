@@ -163,6 +163,8 @@ class RedisTurnLock:
 
         self._client = client
         self._ttl = float(ttl)
+        if self._ttl <= 0:
+            raise ValueError("ttl must be positive")
         self._prefix = prefix
         self._poll_interval = poll_interval
         self._local = LockMap()

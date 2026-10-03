@@ -91,6 +91,23 @@ class BoomRedis:
         raise RuntimeError("redis down")
 
 
+@pytest.mark.parametrize("ttl", [0, -1, -0.001])
+def test_redis_turn_lock_rejects_nonpositive_ttl(ttl):
+    """Invalid lease lifetimes fail before acquisition or renewal can start."""
+    redis = FakeRedis()
+    with pytest.raises(ValueError, match="ttl must be positive"):
+        RedisTurnLock(redis, ttl=ttl)
+    assert redis.store == {}
+    assert redis.eval_calls == []
+
+
+@pytest.mark.parametrize("ttl", [0.001, 0.03, 0.06, 60])
+def test_redis_turn_lock_preserves_positive_ttl(ttl):
+    """Small positive lifetimes retain the existing configured expiry contract."""
+    lock = RedisTurnLock(FakeRedis(), ttl=ttl)
+    assert lock._ttl == ttl
+
+
 def test_build_turn_lock_local_returns_lockmap():
     lock = build_turn_lock(TurnLockConfig())  # default local
     assert isinstance(lock, LockMap)
