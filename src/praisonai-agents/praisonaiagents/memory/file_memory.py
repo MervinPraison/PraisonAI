@@ -1559,15 +1559,21 @@ Summary:"""
             # Simple concatenation if no LLM
             summary = "Compressed context: " + " | ".join(content_list) + "..."
         
-        # Add summary as a high-importance long-term memory (add_long_term has its own lock)
-        self.add_long_term(
-            content=f"[Session Summary] {summary}",
-            metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
-            importance=0.9
-        )
-        
-        # Remove only the summarized snapshot, preserving intervening additions.
+        # Commit a still-current snapshot under the shared store lock. The LLM
+        # stays outside it; overlapping calls must not commit duplicate summaries.
         with self._lock:
+            current = self._read_json(self.short_term_file, [])
+            if not compressed_ids.issubset({item["id"] for item in current}):
+                return ""
+            summary_id = self.add_long_term(
+                content=f"[Session Summary] {summary}",
+                metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
+                importance=0.9,
+            )
+            retained = self._read_json(self.long_term_file, [])
+            if not any(item["id"] == summary_id for item in retained):
+                return summary
+            # Remove sources only after verifying their summary survived retention.
             self._short_term = [
                 MemoryItem.from_dict(item)
                 for item in self._read_json(self.short_term_file, [])

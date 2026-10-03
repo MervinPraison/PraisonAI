@@ -63,6 +63,39 @@ def test_empty_zero_retention_does_not_call_summarizer(tmp_path):
     assert memory.get_stats()["long_term_count"] == 0
 
 
+def test_discarded_summary_preserves_source_records(tmp_path):
+    memory = FileMemory(user_id="retention", base_path=tmp_path,
+                        config={"long_term_limit": 1, "auto_promote": False})
+    memory.add_long_term("essential", importance=1.0)
+    memory.add_short_term("source")
+    memory.compress(max_items=0)
+    reopened = FileMemory(user_id="retention", base_path=tmp_path)
+    assert [i["content"] for i in reopened.export()["short_term"]] == ["source"]
+    assert [i["content"] for i in reopened.export()["long_term"]] == ["essential"]
+
+
+def test_concurrent_snapshot_is_committed_once(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    memory = FileMemory(user_id="same-snapshot", base_path=tmp_path)
+    memory.add_short_term("source")
+    peer = FileMemory(user_id="same-snapshot", base_path=tmp_path)
+    barrier = Barrier(2)
+
+    def summarize(prompt):
+        barrier.wait(timeout=5)
+        return "summary"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(m.compress, summarize, 0) for m in (memory, peer)]
+        for future in futures:
+            future.result(timeout=10)
+    reopened = FileMemory(user_id="same-snapshot", base_path=tmp_path)
+    assert len(reopened.export()["long_term"]) == 1
+    assert reopened.export()["short_term"] == []
+
+
 @pytest.mark.parametrize("keep", [0, 1])
 @pytest.mark.parametrize("peer_instance", [False, True])
 def test_records_added_during_summary_are_retained(tmp_path, keep, peer_instance):
