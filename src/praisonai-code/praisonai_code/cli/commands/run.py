@@ -2543,9 +2543,24 @@ def _run_from_file_profiled(
     profiler.mark_init_end()
     
     # Execution phase
+    # Re-entrancy guard: like the non-profiled ``_run_from_file`` path, the
+    # legacy ``PraisonAI.run()`` re-parses ``sys.argv`` and, for a YAML target,
+    # would otherwise dispatch back into this modern Typer ``run`` app and
+    # recurse forever. Set the sentinel so the legacy ``run`` branch executes
+    # the YAML directly, and always restore the prior value afterwards so the
+    # suppression never leaks into a later in-process invocation.
+    import os as _os_guard
+    _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
+    _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
     profiler.mark_exec_start()
-    result = praison.run()
-    profiler.mark_exec_end()
+    try:
+        result = praison.run()
+    finally:
+        profiler.mark_exec_end()
+        if _prev_in_run is None:
+            _os_guard.environ.pop(_IN_MODERN_RUN_ENV, None)
+        else:
+            _os_guard.environ[_IN_MODERN_RUN_ENV] = _prev_in_run
     
     _record_session_usage(session_id or auto_save_name, model, None)
     
