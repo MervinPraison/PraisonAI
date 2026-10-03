@@ -11,7 +11,7 @@ from praisonaiagents.workflows.step_cache import (
     make_step_key,
     resolve_step_cache,
 )
-from praisonaiagents.workflows.workflows import AgentFlow, Parallel
+from praisonaiagents.workflows.workflows import AgentFlow, Parallel, StepResult
 
 
 def _counting_step(name, calls):
@@ -55,6 +55,169 @@ class TestCachingWorks:
 
 
 class TestCorrectnessOnAHit:
+    @pytest.mark.parametrize("boundary", ["miss", "hit"])
+    @pytest.mark.parametrize("field", ["output", "variables", "steps"])
+    def test_reference_cache_does_not_share_live_payloads(self, boundary, field):
+        class ReferenceCache:
+            def __init__(self):
+                self.entries = {}
+
+            def get(self, key):
+                return self.entries.get(key)
+
+            def set(self, key, value):
+                self.entries[key] = value
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output={"items": [1]}, variables={"records": [{"value": 1}]})
+
+        flow = AgentFlow(steps=[produce], cache=ReferenceCache())
+        result = flow.run("same", verbose=False)
+        if boundary == "hit":
+            result = flow.run("same", verbose=False)
+        if field == "output":
+            result["output"]["items"].append(999)
+        elif field == "variables":
+            result["variables"]["records"][0]["value"] = 999
+        else:
+            result["steps"][0]["status"] = "corrupted"
+        later = flow.run("same", verbose=False)
+        assert later["output"] == {"items": [1]}
+        assert later["variables"]["records"] == [{"value": 1}]
+        assert later["steps"][0]["status"] == "completed"
+        assert calls == ["produce"]
+
+    def test_uncopyable_handler_variables_are_not_cached_by_reference(self):
+        import threading
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(
+                output="ready", variables={"lock": threading.Lock(), "items": [1]}
+            )
+
+        flow = AgentFlow(steps=[produce], cache=True)
+        first = flow.run("same", verbose=False)
+        first["variables"]["items"].append(999)
+        second = flow.run("same", verbose=False)
+        assert second["variables"]["items"] == [1]
+        assert calls == ["produce", "produce"]
+
+    @pytest.mark.parametrize("boundary", ["miss", "hit"])
+    def test_nested_reference_cache_snapshots_variables(self, boundary):
+        class ReferenceCache:
+            def __init__(self):
+                self.entries = {}
+
+            def get(self, key):
+                return self.entries.get(key)
+
+            def set(self, key, value):
+                self.entries[key] = value
+
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output="ready", variables={"records": [{"value": 1}]})
+
+        flow = AgentFlow(steps=[Parallel(steps=[produce])], cache=ReferenceCache())
+        result = flow.run("same", verbose=False)
+        if boundary == "hit":
+            result = flow.run("same", verbose=False)
+        result["variables"]["records"][0]["value"] = 999
+        assert flow.run("same", verbose=False)["variables"]["records"] == [{"value": 1}]
+        assert calls == ["produce"]
+
+    def test_custom_cache_rejecting_variables_does_not_abort_workflow(self):
+        import json
+        import threading
+
+        class JsonCache:
+            def get(self, key):
+                return None
+
+            def set(self, key, value):
+                json.dumps(value)
+
+        def produce(ctx):
+            return StepResult(output="ready", variables={"lock": threading.Lock()})
+
+        flow = AgentFlow(steps=[produce], cache=JsonCache())
+        result = flow.run("same", verbose=False)
+        assert result["output"] == "ready"
+        assert "lock" in result["variables"]
+        assert result["steps"][0]["status"] == "completed"
+
+    def test_legacy_cache_entry_restores_output_variable_and_status(self):
+        cache = InMemoryStepCache()
+        cache.set(make_step_key("upstream", None, "same", {"input": "same"}), {
+            "output": "cached", "variables": {"upstream_output": "cached"},
+        })
+        calls = []
+        flow = AgentFlow(steps=[_counting_step("upstream", calls)], cache=cache)
+        result = flow.run("same", verbose=False)
+        assert calls == []
+        assert result["output"] == "cached"
+        assert result["variables"]["upstream_output"] == "cached"
+        assert result["steps"] == [{
+            "step": "upstream", "output": "cached", "status": "completed", "retries": 0,
+        }]
+        assert flow.step_statuses["upstream"] == "completed"
+
+    def test_a_cache_hit_preserves_early_stop(self):
+        calls = []
+
+        def finish(ctx):
+            calls.append("finish")
+            return StepResult(
+                output="done", stop_workflow=True, variables={"finished": True}
+            )
+
+        def downstream(ctx):
+            calls.append("downstream")
+            return "unexpected"
+
+        flow = AgentFlow(steps=[finish, downstream], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert calls == ["finish"]
+        assert second == first
+        assert "finish_output" not in second["variables"]
+
+    def test_a_cache_hit_restores_handler_variables_for_downstream(self):
+        calls = []
+
+        def produce(ctx):
+            calls.append("produce")
+            return StepResult(output="ready", variables={"answer": 42})
+
+        def consume(ctx):
+            calls.append("consume")
+            return str(ctx.variables.get("answer", "missing"))
+
+        flow = AgentFlow(steps=[produce, consume], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert first["output"] == second["output"] == "42"
+        assert second["variables"]["answer"] == 42
+        assert calls == ["produce", "consume"]
+
+    def test_a_cache_hit_reports_completed_step_status(self):
+        flow = AgentFlow(steps=[_counting_step("upstream", [])], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+
+        assert second["steps"] == first["steps"]
+        assert flow.step_statuses["upstream"] == "completed"
+
     def test_a_cache_hit_still_exposes_the_step_output_variable(self):
         """A fresh run starts with empty working variables. A hit that restored
         only `output` would leave `<step>_output` missing from the run's
@@ -125,6 +288,14 @@ class TestKeys:
 
 
 class TestTheCacheItself:
+    def test_uncopyable_replacement_removes_the_old_entry(self):
+        import threading
+
+        cache = InMemoryStepCache()
+        cache.set("k", {"output": "old"})
+        cache.set("k", {"output": "new", "lock": threading.Lock()})
+        assert cache.get("k") is None
+
     def test_it_is_bounded(self):
         """Unbounded would be a memory leak that only shows up in production."""
         cache = InMemoryStepCache(max_entries=2)
