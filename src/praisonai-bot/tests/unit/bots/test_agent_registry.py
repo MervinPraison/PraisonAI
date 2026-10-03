@@ -145,6 +145,67 @@ class TestAgentRegistryConcurrency:
 
         assert not errors, f"concurrent access raised: {errors[:3]}"
 
+    def test_shared_key_churn_during_iteration_is_race_free(self):
+        """Readers iterating/snapshotting while writers churn a shared key.
+
+        This is the case that a missing lock surfaces: on an unguarded dict,
+        ``numbers()``/``__iter__``/``__len__`` taken while another thread is
+        mutating the *same* keys can raise ``RuntimeError: dictionary changed
+        size during iteration`` or observe a torn ``resolve``. Writers add and
+        remove a small, overlapping key set as fast as possible while readers
+        continuously snapshot; the run must complete with zero errors and every
+        resolved value must be a known agent or the fallback.
+        """
+        import threading
+
+        keys = [f"+1415555{i:04d}" for i in range(8)]
+        agents = {k: _FakeAgent(k) for k in keys}
+        known = set(agents.values())
+        fallback = _FakeAgent("default")
+        reg = AgentRegistry(default_agent=fallback)
+        errors: list[Exception] = []
+        stop = threading.Event()
+        n_readers = 16
+        n_writers = 8
+        barrier = threading.Barrier(n_readers + n_writers)
+
+        def writer() -> None:
+            try:
+                barrier.wait()
+                while not stop.is_set():
+                    for k in keys:
+                        reg.assign(k, agents[k])
+                    for k in keys:
+                        reg.unassign(k)
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                barrier.wait()
+                for _ in range(2000):
+                    list(reg.numbers())
+                    dict(reg)
+                    len(reg)
+                    for k in keys:
+                        resolved = reg.resolve(k)
+                        assert resolved in known or resolved is fallback
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer) for _ in range(n_writers)]
+        threads += [threading.Thread(target=reader) for _ in range(n_readers)]
+        for t in threads:
+            t.start()
+        # readers finish their bounded loops; then release writers.
+        for t in threads[n_writers:]:
+            t.join()
+        stop.set()
+        for t in threads[:n_writers]:
+            t.join()
+
+        assert not errors, f"shared-key concurrent access raised: {errors[:3]}"
+
     def test_iter_snapshot_is_stable_under_mutation(self):
         """``__iter__`` returns a stable snapshot, not a live view.
 
