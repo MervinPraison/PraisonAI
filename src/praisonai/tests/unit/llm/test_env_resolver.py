@@ -277,6 +277,7 @@ class TestProviderMapping:
             "cohere/": "https://api.cohere.ai/v1",
             "openrouter/": "https://openrouter.ai/api/v1",
             "ollama/": "http://localhost:11434/v1",
+            "edenai/": "https://api.edenai.run/v3",
         }
         
         for prefix, (key_var, base_url) in _PROVIDER_MAP.items():
@@ -297,3 +298,58 @@ class TestProviderMapping:
             assert ep.model == "anthropic/claude-3-5-sonnet"
             # Should be None, not any other provider's key
             assert ep.api_key is None
+
+
+class TestEdenAIEndpointPrecedence:
+    """Eden AI is a separate gateway; its endpoint must resolve from
+    EDENAI_BASE_URL (then the Eden default) and never be captured by the
+    generic OPENAI_BASE_URL/OPENAI_API_BASE variables, which would otherwise
+    send the EDENAI_API_KEY to an unrelated OpenAI endpoint."""
+
+    def test_edenai_default_base_url(self):
+        env = {
+            "MODEL_NAME": "edenai/openai/gpt-4.1-mini",
+            "EDENAI_API_KEY": "eden-key",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "edenai/openai/gpt-4.1-mini"
+            assert ep.api_key == "eden-key"
+            assert ep.base_url == "https://api.edenai.run/v3"
+
+    def test_edenai_base_url_override(self):
+        env = {
+            "MODEL_NAME": "edenai/openai/gpt-4.1-mini",
+            "EDENAI_API_KEY": "eden-key",
+            "EDENAI_BASE_URL": "https://proxy.internal/eden",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.base_url == "https://proxy.internal/eden"
+            assert ep.api_key == "eden-key"
+
+    def test_openai_base_url_does_not_capture_edenai_route(self):
+        env = {
+            "MODEL_NAME": "edenai/openai/gpt-4.1-mini",
+            "EDENAI_API_KEY": "eden-key",
+            "OPENAI_BASE_URL": "http://localhost:11434/v1",
+            "OPENAI_API_BASE": "http://localhost:11434/v1",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            # OpenAI overrides must NOT capture the Eden route.
+            assert ep.base_url == "https://api.edenai.run/v3"
+            assert ep.api_key == "eden-key"
+
+    def test_edenai_route_never_uses_openai_api_key(self):
+        env = {
+            "MODEL_NAME": "edenai/anthropic/claude-sonnet-4-5",
+            "OPENAI_API_KEY": "sk-openai-key",
+            # EDENAI_API_KEY intentionally missing
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "edenai/anthropic/claude-sonnet-4-5"
+            # Must fail closed: no Eden key means no key, never the OpenAI one.
+            assert ep.api_key is None
+            assert ep.base_url == "https://api.edenai.run/v3"

@@ -74,6 +74,40 @@ def is_hosted_only_model(model_name: str) -> bool:
     return False
 
 
+# Eden AI is an OpenAI-compatible gateway: one endpoint fronts many vendors, and
+# the model id it expects is itself ``<vendor>/<model>``
+# (``anthropic/claude-sonnet-4-5``). litellm has no ``edenai`` provider -- the
+# slug is absent from its provider list -- so an ``edenai/`` route is resolved
+# here and sent through litellm's OpenAI-compatible client instead.
+#
+# Only the prefix is ever matched. Everything after it is forwarded untouched,
+# so this package keeps no catalogue of Eden AI models and needs no change when
+# Eden AI adds a vendor or a model.
+EDENAI_ROUTE_PREFIX = "edenai/"
+EDENAI_API_KEY_VAR = "EDENAI_API_KEY"
+EDENAI_BASE_URL_VAR = "EDENAI_BASE_URL"
+EDENAI_DEFAULT_BASE_URL = "https://api.edenai.run/v3"
+
+
+def is_edenai_model(model_name: str) -> bool:
+    """True if ``model_name`` is routed through the Eden AI gateway.
+
+    Matches the ``edenai/`` route prefix only. The remainder is Eden AI's own
+    ``<vendor>/<model>`` identifier and is deliberately not inspected: the
+    vendor named there is *reached through* Eden AI, not called directly, so it
+    must not be read as a direct Anthropic/Gemini/Ollama route.
+
+    A non-string model is not a route, so it returns ``False`` rather than
+    raising: this runs on every request build, and ``_resolve_openai_compatible_model``
+    guards the same way. Without the type check a duck-typed stand-in made
+    ``startswith`` answer with a truthy object, which read as an Eden AI route
+    and then demanded ``EDENAI_API_KEY``.
+    """
+    if not isinstance(model_name, str) or not model_name:
+        return False
+    return model_name.lower().startswith(EDENAI_ROUTE_PREFIX)
+
+
 # The small helper model used for internal auxiliary calls -- memory quality
 # scoring, context compaction, session titling, workflow routing. Historically
 # about a dozen sites resolved this from OPENAI_MODEL_NAME while about twenty
