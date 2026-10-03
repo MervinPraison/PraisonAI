@@ -24,6 +24,7 @@ import hashlib
 import logging
 from praisonaiagents._logging import get_logger
 import threading
+import weakref
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -37,6 +38,20 @@ else:
     _HAS_FCNTL = False
 
 logger = get_logger(__name__)
+
+_store_locks = weakref.WeakValueDictionary()
+_store_locks_guard = threading.Lock()
+
+
+def _shared_store_lock(path):
+    """Share in-process transactions for instances targeting the same store."""
+    key = os.path.normcase(str(path.resolve()))
+    with _store_locks_guard:
+        lock = _store_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _store_locks[key] = lock
+        return lock
 
 
 @dataclass
@@ -171,7 +186,7 @@ class FileMemory:
         self.config = self._load_config(config)
         
         # Initialize thread-safe memory stores with lock for in-memory data protection
-        self._lock = threading.RLock()  # Reentrant lock for nested operations
+        self._lock = _shared_store_lock(self.user_path)
         self._short_term: List[MemoryItem] = []
         self._long_term: List[MemoryItem] = []
         self._entities: Dict[str, EntityItem] = {}
@@ -1062,6 +1077,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             for i, item in enumerate(self._short_term):
                 if item.id == memory_id:
                     del self._short_term[i]
@@ -1504,24 +1523,32 @@ class FileMemory:
         
         Args:
             llm_func: Optional LLM function for summarization.
-                      Should accept (prompt: str) -> str
-            max_items: Max items to keep after compression
+                      Should accept (prompt: str) -> str. May be called again
+                      if concurrent turnover removes selected records.
+            max_items: Max snapshot items to keep after compression. Records
+                       added while summarizing are also retained.
             
         Returns:
-            The generated summary
+            The persisted summary, or an empty string if no compression commits.
         """
         # Check length and gather content under lock
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             if len(self._short_term) <= max_items:
                 return ""  # No compression needed
             
             # Gather content to compress while holding lock
-            items_to_compress = self._short_term[:-max_items]
-            content_list = [item.content for item in items_to_compress]
+            items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
+            compressed_ids = {item.id for item in items_to_compress}
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
-        if llm_func:
-            prompt = f"""Summarize the following conversation context into key points.
+        while items_to_compress:
+            content_list = [item.content for item in items_to_compress]
+            if llm_func:
+                prompt = f"""Summarize the following conversation context into key points.
 Preserve important facts, decisions, and context.
 Be concise but comprehensive.
 
@@ -1529,26 +1556,46 @@ Context to summarize:
 {chr(10).join(f'- {c}' for c in content_list)}
 
 Summary:"""
-            summary = llm_func(prompt)
-        else:
-            # Simple concatenation if no LLM
-            summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
+                summary = llm_func(prompt)
+            else:
+                # Simple concatenation if no LLM
+                summary = "Compressed context: " + " | ".join(content_list) + "..."
         
-        # Add summary as a high-importance long-term memory (add_long_term has its own lock)
-        self.add_long_term(
-            content=f"[Session Summary] {summary}",
-            metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
-            importance=0.9
-        )
+            # Commit a still-current snapshot under the shared store lock. The LLM
+            # stays outside it; overlapping calls must not commit duplicate summaries.
+            with self._lock:
+                current = self._read_json(self.short_term_file, [])
+                if not compressed_ids.issubset({item["id"] for item in current}):
+                    # Turnover may evict only part of the snapshot. Summarize
+                    # its survivors afresh, never records added during this call.
+                    # Every retry loses at least one ID, so retries are finite;
+                    # a peer that consumed the whole snapshot produces no duplicate.
+                    items_to_compress = [
+                        MemoryItem.from_dict(item) for item in current
+                        if item["id"] in compressed_ids
+                    ]
+                    compressed_ids = {item.id for item in items_to_compress}
+                    continue
+                summary_id = self.add_long_term(
+                    content=f"[Session Summary] {summary}",
+                    metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
+                    importance=0.9,
+                )
+                retained = self._read_json(self.long_term_file, [])
+                if not any(item["id"] == summary_id for item in retained):
+                    return ""
+                # Remove sources only after verifying their summary survived retention.
+                self._short_term = [
+                    MemoryItem.from_dict(item)
+                    for item in self._read_json(self.short_term_file, [])
+                    if item["id"] not in compressed_ids
+                ]
+                self._save_short_term()
         
-        # Keep only recent items under lock
-        with self._lock:
-            self._short_term = self._short_term[-max_items:]
-            self._save_short_term()
+            self._log(f"Compressed {len(items_to_compress)} items into summary")
         
-        self._log(f"Compressed {len(items_to_compress)} items into summary")
-        
-        return summary
+            return summary
+        return ""
     
     def auto_compress_if_needed(
         self,
