@@ -1880,7 +1880,10 @@ class AgentFlow:
                     if self.on_step_complete:
                         try:
                             self.on_step_complete(
-                                step.name, StepResult(output=previous_output or ""),
+                                step.name, StepResult(
+                                    output=previous_output or "",
+                                    stop_workflow=bool(_cached.get("stop")),
+                                ),
                             )
                         except Exception as e:
                             logger.error(f"on_step_complete callback failed: {e}")
