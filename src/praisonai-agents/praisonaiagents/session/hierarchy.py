@@ -13,7 +13,7 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -78,27 +78,13 @@ class ExtendedSessionData(SessionData):
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExtendedSessionData":
-        messages = [
-            SessionMessage.from_dict(m) 
-            for m in data.get("messages", [])
-        ]
-        archived = [
-            SessionMessage.from_dict(m)
-            for m in (data.get("archived_messages") or [])
-        ]
+        base = SessionData.from_dict(data)
         snapshots = [
             SessionSnapshot.from_dict(s)
             for s in data.get("snapshots", [])
         ]
         return cls(
-            session_id=data.get("session_id", ""),
-            messages=messages,
-            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
-            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
-            agent_name=data.get("agent_name"),
-            user_id=data.get("user_id"),
-            metadata=data.get("metadata", {}),
-            archived_messages=archived,
+            **{descriptor.name: getattr(base, descriptor.name) for descriptor in fields(SessionData)},
             parent_id=data.get("parent_id"),
             forked_from_message_id=data.get("forked_from_message_id"),
             children_ids=data.get("children_ids", []),
@@ -111,13 +97,7 @@ class ExtendedSessionData(SessionData):
     def from_session_data(cls, session: SessionData) -> "ExtendedSessionData":
         """Convert a basic SessionData to ExtendedSessionData."""
         return cls(
-            session_id=session.session_id,
-            messages=session.messages,
-            created_at=session.created_at,
-            updated_at=session.updated_at,
-            agent_name=session.agent_name,
-            user_id=session.user_id,
-            metadata=session.metadata,
+            **{descriptor.name: getattr(session, descriptor.name) for descriptor in fields(SessionData)},
         )
 
 class HierarchicalSessionStore(DefaultSessionStore):
