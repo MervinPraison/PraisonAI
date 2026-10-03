@@ -235,10 +235,24 @@ def test_provider_for_model_resolves_every_catalogue_provider(clean_env, provide
 @pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
 def test_env_default_detected_for_every_catalogue_provider(clean_env, provider):
     # First-run key auto-detection (env.py) must recognise a key for every
-    # catalogued provider and return that provider's default model.
-    env_var = PROVIDER_ENV_CATALOGUE[provider][0][0]
-    clean_env.setenv(env_var, "test-key-value")
-    assert (
-        llm_env.default_model_for_available_provider()
-        == PROVIDER_ENV_CATALOGUE[provider][1]
-    )
+    # catalogued provider and return a model that routes back to *that same
+    # provider*. Since #5408 the chosen id is the capability-ranked
+    # best-available model rather than the fixed representative, so the
+    # guarantee under test is provider-routing correctness (the returned id
+    # resolves to the provider's own credential env-var), not equality with a
+    # specific literal. Non-prefixed providers (openai) keep returning a bare
+    # id; prefixed providers keep their prefix.
+    env_vars, representative, prefix = PROVIDER_ENV_CATALOGUE[provider]
+    clean_env.setenv(env_vars[0], "test-key-value")
+
+    resolved = llm_env.default_model_for_available_provider()
+
+    # Routing must still resolve to this provider's credential env-var, exactly
+    # as the fixed representative did.
+    assert model_resolver._provider_for_model(
+        resolved
+    ) == model_resolver._provider_for_model(representative)
+    # The provider prefix (empty for OpenAI) is preserved so runtime routing is
+    # unchanged.
+    if prefix:
+        assert resolved.startswith(prefix)
