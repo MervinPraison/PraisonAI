@@ -11,6 +11,7 @@ from praisonaiagents.workflows.step_cache import (
     make_step_key,
     resolve_step_cache,
 )
+from praisonaiagents.task.task import Task
 from praisonaiagents.workflows.workflows import AgentFlow, Parallel, StepResult
 
 
@@ -245,6 +246,71 @@ class TestCorrectnessOnAHit:
         flow.run("same", verbose=False)   # must retry, not serve cached failure
         assert attempts["n"] == 2
 
+    def test_a_cached_stop_still_stops_the_workflow(self):
+        """A handler that stopped the cold run must also stop the cached run.
+        Losing the stop flag on a hit ran downstream steps that the cold run
+        never reached."""
+        calls = []
+
+        def finish(ctx):
+            calls.append("finish")
+            return StepResult(output="done", stop_workflow=True)
+
+        finish.__name__ = "finish"
+
+        def downstream(ctx):
+            calls.append("downstream")
+            return "unexpected"
+
+        downstream.__name__ = "downstream"
+
+        flow = AgentFlow(steps=[finish, downstream], cache=True)
+        flow.run("same", verbose=False)
+        flow.run("same", verbose=False)
+        assert calls == ["finish"]
+
+    def test_a_cached_hit_preserves_handler_variables(self):
+        """A producer returning variables followed by a consumer reading them
+        must give the same output on the cached run as the cold one."""
+        def producer(ctx):
+            return StepResult(output="p", variables={"answer": 42})
+
+        producer.__name__ = "producer"
+
+        def consumer(ctx):
+            return f"answer={ctx.variables.get('answer')}"
+
+        consumer.__name__ = "consumer"
+
+        flow = AgentFlow(steps=[producer, consumer], cache=True)
+        first = flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        assert first["output"] == "answer=42"
+        assert second["output"] == first["output"]
+
+    def test_a_cached_hit_preserves_completion_metadata(self):
+        """Step status and retries must survive a cache hit, not disappear from
+        the result records."""
+        flow = AgentFlow(steps=[_counting_step("s", [])], cache=True)
+        flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        record = second["steps"][0]
+        assert record["status"] == "completed"
+        assert record["retries"] == 0
+
+    def test_an_early_stop_hit_does_not_insert_the_output_variable(self):
+        """The cold path stops before writing `<step>_output`; a cached early
+        stop must not insert it either."""
+        def finish(ctx):
+            return StepResult(output="done", stop_workflow=True)
+
+        finish.__name__ = "finish"
+
+        flow = AgentFlow(steps=[finish], cache=True)
+        flow.run("same", verbose=False)
+        second = flow.run("same", verbose=False)
+        assert "finish_output" not in second["variables"]
+
     def test_a_mutated_hit_does_not_corrupt_the_cache(self):
         """Values handed back on a hit are snapshots; mutating one must not
         change what the next hit returns."""
@@ -256,6 +322,66 @@ class TestCorrectnessOnAHit:
         second = cache.get("k")
         assert second["variables"]["a"] == 1
         assert second["output"] == "v"
+
+    def test_a_cached_hit_preserves_variables_from_rejected_retries(self):
+        """A handler whose earlier (guardrail-rejected) attempt wrote extra
+        variables leaves those in the live run; the accepted attempt's variables
+        add to them. A hit must replay the union, not only the last attempt, or
+        a downstream step sees a different variable set than on the cold run."""
+        attempts = {"n": 0}
+
+        def producer(ctx):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                return StepResult(
+                    output="bad",
+                    variables={"shared": 1, "only_first": 2},
+                )
+            return StepResult(output="good", variables={"shared": 3})
+
+        def reject_first(result):
+            return (result.output != "bad", "retry")
+
+        producer_task = Task(
+            name="producer", handler=producer, guardrails=reject_first
+        )
+
+        def consumer(ctx):
+            return (
+                f"shared={ctx.variables.get('shared')},"
+                f"only_first={ctx.variables.get('only_first')}"
+            )
+
+        consumer.__name__ = "consumer"
+
+        flow = AgentFlow(steps=[producer_task, consumer], cache=True)
+        first = flow.run("same", verbose=False)
+        assert first["output"] == "shared=3,only_first=2"
+        attempts["n"] = 99  # a hit must not re-run the producer
+        second = flow.run("same", verbose=False)
+        assert second["output"] == first["output"]
+
+    def test_a_cached_mutable_variable_is_isolated_between_runs(self):
+        """A handler returns a mutable object; a downstream step on the cold run
+        mutates it. That mutation must not leak back into the cache, so a later
+        hit replays the pristine value the producer originally returned."""
+        def producer(ctx):
+            return StepResult(output="p", variables={"items": [1, 2]})
+
+        producer.__name__ = "producer"
+
+        def consumer(ctx):
+            ctx.variables["items"].append(999)  # mutate the live copy
+            return f"len={len(ctx.variables['items'])}"
+
+        consumer.__name__ = "consumer"
+
+        flow = AgentFlow(steps=[producer, consumer], cache=True)
+        flow.run("same", verbose=False)       # cold run mutates items -> [1,2,999]
+        second = flow.run("same", verbose=False)  # served from cache
+        # The producer's cached snapshot must be unaffected by the cold run's
+        # in-place mutation; without isolation it would replay [1, 2, 999].
+        assert second["variables"]["items"] == [1, 2]
 
 
 class TestKeys:
