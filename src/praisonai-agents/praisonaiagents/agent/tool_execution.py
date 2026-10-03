@@ -155,11 +155,11 @@ MULTIMODAL_IMAGE_BYTE_LIMIT = 5_000_000
 def _memory_prompt_text(prompt: Any) -> str:
     """Match text-only conversation history without retaining attachment parts."""
     if isinstance(prompt, list):
-        return next((
+        return "\n".join(
             part["text"] for part in prompt
             if isinstance(part, dict) and part.get("type") == "text"
             and isinstance(part.get("text"), str)
-        ), "")
+        )
     return prompt if isinstance(prompt, str) else str(prompt)
 
 
