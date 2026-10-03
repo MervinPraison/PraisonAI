@@ -12,6 +12,32 @@ from typing import Optional, List, Dict, Any
 logger = logging.getLogger(__name__)
 
 
+def _load_agents_from_yaml(agent_file: str):
+    """Build the agent(s) defined in ``agent_file`` without running them.
+
+    Mirrors the one working construction pattern (``_entrypoint.run``): resolve
+    a framework adapter via the registry, build the LLM config list, then
+    construct ``AgentsGenerator`` with its required args inside a ``with`` block
+    so its tool-timeout thread pool is released after use. Returns the list of
+    constructed agents (empty list if none are defined).
+    """
+    from praisonai.framework_adapters.registry import get_default_registry
+    from praisonai.llm.config import build_config_list
+    from praisonai.agents_generator import AgentsGenerator
+
+    registry = get_default_registry()
+    adapter = registry.create(registry.pick_default())
+    config_list = build_config_list()
+
+    with AgentsGenerator(
+        agent_file=agent_file,
+        framework=adapter.name,
+        config_list=config_list,
+        adapter=adapter,
+    ) as gen:
+        return gen.build_agents()
+
+
 class EvalHandler:
     """Handler for evaluation CLI commands."""
     
@@ -75,13 +101,11 @@ class EvalHandler:
             elif agent_file:
                 # Load from agents.yaml
                 try:
-                    from praisonai.agents_generator import AgentsGenerator
-                    generator = AgentsGenerator(agent_file)
-                    agents = generator.generate_agents()
-                    
+                    agents = _load_agents_from_yaml(agent_file)
+
                     if not agents:
                         return {"error": "No agents found in configuration"}
-                    
+
                     agent = agents[0] if isinstance(agents, list) else agents
                 except Exception as e:
                     return {"error": f"Failed to load agents from {agent_file}: {e}"}
@@ -130,18 +154,16 @@ class EvalHandler:
         """
         try:
             from praisonaiagents.eval import PerformanceEvaluator
-            from praisonai.agents_generator import AgentsGenerator
         except ImportError as e:
             logger.error(f"Failed to import evaluation modules: {e}")
             return {"error": str(e)}
         
         try:
-            generator = AgentsGenerator(agent_file)
-            agents = generator.generate_agents()
-            
+            agents = _load_agents_from_yaml(agent_file)
+
             if not agents:
                 return {"error": "No agents found in configuration"}
-            
+
             agent = agents[0] if isinstance(agents, list) else agents
             
             evaluator = PerformanceEvaluator(
@@ -184,18 +206,16 @@ class EvalHandler:
         """
         try:
             from praisonaiagents.eval import ReliabilityEvaluator
-            from praisonai.agents_generator import AgentsGenerator
         except ImportError as e:
             logger.error(f"Failed to import evaluation modules: {e}")
             return {"error": str(e)}
         
         try:
-            generator = AgentsGenerator(agent_file)
-            agents = generator.generate_agents()
-            
+            agents = _load_agents_from_yaml(agent_file)
+
             if not agents:
                 return {"error": "No agents found in configuration"}
-            
+
             agent = agents[0] if isinstance(agents, list) else agents
             
             evaluator = ReliabilityEvaluator(
@@ -243,18 +263,16 @@ class EvalHandler:
         """
         try:
             from praisonaiagents.eval import CriteriaEvaluator
-            from praisonai.agents_generator import AgentsGenerator
         except ImportError as e:
             logger.error(f"Failed to import evaluation modules: {e}")
             return {"error": str(e)}
         
         try:
-            generator = AgentsGenerator(agent_file)
-            agents = generator.generate_agents()
-            
+            agents = _load_agents_from_yaml(agent_file)
+
             if not agents:
                 return {"error": "No agents found in configuration"}
-            
+
             agent = agents[0] if isinstance(agents, list) else agents
             
             evaluator = CriteriaEvaluator(
