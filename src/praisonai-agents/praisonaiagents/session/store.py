@@ -21,6 +21,7 @@ try:
     _HAS_FCNTL = True
 except ImportError:
     _HAS_FCNTL = False
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -86,6 +87,48 @@ DEFAULT_RETENTION = RETENTION_COMPACT
 # Emit a one-off warning once archived_messages under "compact" retention grows
 # past this many entries, so operators can spot runaway sessions on disk.
 ARCHIVE_WARN_THRESHOLD = 10_000
+
+# Bound the in-memory session cache so a long-lived gateway or bot process that
+# serves many users does not retain every session ever touched in RAM. The
+# on-disk file is already the source of truth, so an eviction just means the
+# next access reloads from disk. ``0`` or ``None`` disables the bound.
+DEFAULT_CACHE_MAXSIZE = 256
+
+
+class _LRUSessionCache(OrderedDict):
+    """An ``OrderedDict`` that evicts the least-recently-used entry once it
+    grows past ``maxsize``. Reads and writes refresh recency so the hot set
+    survives. ``maxsize <= 0`` disables eviction (unbounded, legacy behaviour).
+
+    All mutating/reading operations used by :class:`DefaultSessionStore`
+    (``in``, ``[]`` get/set, ``del``, ``pop``, ``clear``) work unchanged; only
+    insertion order is managed, so callers need no other changes.
+    """
+
+    def __init__(self, maxsize: int = DEFAULT_CACHE_MAXSIZE, on_evict=None):
+        super().__init__()
+        self.maxsize = maxsize
+        # Optional callback invoked with the key of each LRU-evicted entry, so a
+        # companion structure (e.g. the hierarchical store's _cache_mtimes) can
+        # drop the same key and stay bounded alongside this cache.
+        self._on_evict = on_evict
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self:
+            super().__setitem__(key, value)
+            self.move_to_end(key)
+        else:
+            super().__setitem__(key, value)
+        if self.maxsize and self.maxsize > 0:
+            while len(self) > self.maxsize:
+                evicted_key, _ = self.popitem(last=False)
+                if self._on_evict is not None:
+                    self._on_evict(evicted_key)
 
 @dataclass
 class SessionMessage:
@@ -599,6 +642,7 @@ class DefaultSessionStore:
         retention: Optional[str] = None,
         active_window: Optional[int] = None,
         mirror: Optional[Any] = None,
+        cache_maxsize: int = DEFAULT_CACHE_MAXSIZE,
     ):
         """
         Initialize session store.
@@ -625,6 +669,11 @@ class DefaultSessionStore:
                 appended to the mirror on a background thread (local-first: the
                 local write always happens first and a mirror outage never
                 blocks or fails the turn). Left ``None`` there is zero overhead.
+            cache_maxsize: Maximum number of sessions kept in the in-memory LRU
+                cache (default 256). A long-lived multi-tenant process otherwise
+                retains every session ever touched in RAM. Disk is the source of
+                truth, so an evicted session simply reloads on next access. Pass
+                ``0`` to disable the bound (legacy unbounded cache).
         """
         self.session_dir = session_dir or _resolve_default_session_dir()
         self.max_messages = max_messages
@@ -649,7 +698,11 @@ class DefaultSessionStore:
         self.active_window = active_window if active_window is not None else max_messages
 
         self._lock = threading.RLock()
-        self._cache: Dict[str, SessionData] = {}
+        # LRU-bounded so a long-lived multi-tenant process does not retain every
+        # session ever touched in RAM. Pass cache_maxsize=0 for the legacy
+        # unbounded cache. Disk remains the source of truth, so an eviction just
+        # triggers a reload on next access.
+        self._cache: Dict[str, SessionData] = _LRUSessionCache(cache_maxsize)
 
         self._mirror = mirror
 
