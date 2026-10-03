@@ -25,7 +25,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3941 |
 | ✅ Autonomy | 3 | 7 | 2805 |
-| ✅ Bots | 7 | 38 | 15809 |
+| ✅ Bots | 7 | 38 | 15972 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 124 | 39199 |
 | ✅ Chunking | 2 | 2 | 435 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 537 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
-| ✅ Gateway | 7 | 97 | 37652 |
+| ✅ Gateway | 7 | 97 | 37661 |
 | ✅ Guardrails | 5 | 4 | 2642 |
 | ✅ Handoffs | 11 | 6 | 2748 |
 | ✅ Hooks | 2 | 9 | 5230 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (44 docs, 8292 lines)
+- ℹ️ Database (44 docs, 8325 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 
