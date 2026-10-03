@@ -8,6 +8,7 @@ from praisonaiagents.memory.docs_manager import DocsManager
 @pytest.mark.parametrize("scope", ["workspace", "global"])
 @pytest.mark.parametrize("priority", [0, -5, 200, 1500])
 def test_created_doc_priority_and_selection_survive_reload(tmp_path, scope, priority):
+    """Persist explicit priorities and preserve selection across manager lifecycles."""
     options = dict(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))
     manager = DocsManager(**options)
     manager.create_doc("reference", "Stable documentation content", priority=priority, scope=scope)
@@ -23,6 +24,7 @@ def test_created_doc_priority_and_selection_survive_reload(tmp_path, scope, prio
 
 
 def test_new_global_doc_does_not_temporarily_outrank_workspace_doc(tmp_path):
+    """Apply the global priority offset immediately when creating documents."""
     manager = DocsManager(workspace_path=str(tmp_path), global_docs_path=str(tmp_path / "global"))
     manager.create_doc("local", "local content", priority=200)
     manager.create_doc("shared", "global content", priority=300, scope="global")

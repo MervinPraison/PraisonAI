@@ -30,6 +30,7 @@ def test_real_agent_uses_same_document_context_after_reload(tmp_path):
     original_context = manager.format_docs_for_prompt()
 
     def verify(current):
+        """Check effective priorities and the real answer for one manager lifecycle."""
         assert current.get_doc("zero").priority == 0
         assert current.get_doc("shared").priority == -700
         context = current.format_docs_for_prompt()
