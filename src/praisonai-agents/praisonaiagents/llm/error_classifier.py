@@ -486,7 +486,6 @@ _REPLAY_SAFE_EXCEPTION_NAMES = frozenset({
     "connecterror",             # httpx connect error (pre-dispatch)
     "newconnectionerror",       # urllib3: connection never established
     "gaierror",                 # DNS resolution failure
-    "sslerror",                 # TLS handshake failure (pre-dispatch)
     "sslcertverificationerror",
 })
 
@@ -508,9 +507,6 @@ _REPLAY_SAFE_MESSAGE_PATTERNS = (
     r"name.?resolution",
     r"failed.?to.?resolve",
     r"getaddrinfo",
-    r"ssl",
-    r"handshake",
-    r"tls",
 )
 
 
@@ -518,7 +514,7 @@ def is_replay_unsafe(error: Exception) -> bool:
     """Return True if replaying the request could double-execute the turn.
 
     Distinguishes *pre-dispatch* failures (the request provably never reached
-    the provider — DNS/connect/TLS failures) which are safe to replay, from
+    the provider — DNS/connect/TLS handshake failures) which are safe to replay, from
     *post-dispatch* failures (read timeout, connection reset mid-response) where
     the provider may already have produced output and any side-effecting tool
     calls may already have run. Post-dispatch failures are replay-unsafe.
@@ -527,7 +523,20 @@ def is_replay_unsafe(error: Exception) -> bool:
     existing auto-retry behaviour is preserved unless a post-dispatch signal is
     present. Callers should only block the retry when the turn is side-effecting.
     """
-    # 1. Exception type (walk the MRO to catch provider subclasses) — most stable.
+    # 1. A failure the message explicitly places during the TLS handshake is
+    # pre-dispatch — the request bytes were never sent, so a reset/timeout at
+    # that point is safe to replay even though the text also mentions "reset"
+    # or "timeout". This check wins over the generic read/reset signals below.
+    error_text = f"{type(error).__name__} {error}".lower()
+    if re.search(
+        r"\bhandshake\s+(?:failed|failure|error|aborted|(?:read\s+)?(?:timed?\s*out|timeout))\b"
+        r"|\b(?:during|in)\s+(?:the\s+)?(?:(?:tls|ssl)\s+)?handshake\b",
+        error_text,
+    ):
+        return False
+
+    # 2. Exception type (walk the MRO to catch provider subclasses). Typed
+    # reset/read errors remain unsafe unless explicitly scoped to handshake.
     for cls in type(error).__mro__:
         name = cls.__name__.lower()
         if name in _REPLAY_SAFE_EXCEPTION_NAMES:
@@ -535,14 +544,15 @@ def is_replay_unsafe(error: Exception) -> bool:
         if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
             return True
 
-    # 2. Message text — pre-dispatch signals win over the generic "timeout".
-    error_text = f"{type(error).__name__} {error}".lower()
-    for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
-        if re.search(pattern, error_text):
-            return False
+    # 3. Explicit read/reset signals win over transport labels or a message
+    # mentioning an earlier connection attempt. SSLError itself is not proof
+    # of a handshake failure: it can also be raised by an established stream.
     for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
         if re.search(pattern, error_text):
             return True
+    for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
+        if re.search(pattern, error_text):
+            return False
 
     return False
 
