@@ -662,14 +662,18 @@ class RulesManager:
             
             section = f"{header}\n{rule_text}\n"
             
-            if total_chars + len(section) <= max_chars:
+            separator_chars = 1 if parts else 0
+            remaining = max_chars - total_chars - separator_chars
+            if len(section) <= remaining:
                 parts.append(section)
-                total_chars += len(section)
+                total_chars += separator_chars + len(section)
             else:
-                # Truncate last rule
-                remaining = max_chars - total_chars
-                if remaining > 100:
-                    parts.append(section[:remaining] + "\n... (truncated)")
+                # Preserve the complete header and truncation notice.
+                marker = "\n... (truncated)"
+                prefix = f"{header}\n"
+                body_budget = remaining - len(prefix) - len(marker)
+                if body_budget > 0:
+                    parts.append(prefix + rule_text[:body_budget] + marker)
                 break
         
         return "\n".join(parts)
