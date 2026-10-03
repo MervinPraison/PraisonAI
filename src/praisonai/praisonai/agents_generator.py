@@ -1550,6 +1550,44 @@ class AgentsGenerator:
                 "stream-json bridge."
             )
 
+    def build_agents(self):
+        """Build the agent objects from the YAML spec *without running them*.
+
+        This is the "build only" counterpart to
+        :meth:`generate_crew_and_kickoff` and exists for callers that need the
+        constructed :class:`~praisonaiagents.Agent` instances rather than a run
+        result -- e.g. the ``praisonai eval`` evaluators, which drive an agent
+        themselves. It reuses the same :meth:`_prepare_for_run` normalisation so
+        the agents are identical to what a real run would build.
+
+        Returns:
+            list: The constructed agent instances (empty list if none defined).
+        """
+        config = self._load_config()
+        prep = self._prepare_for_run(config)
+        adapter = prep['adapter']
+        builder = getattr(adapter, "_build_agents_and_tasks", None)
+        if not callable(builder):
+            raise NotImplementedError(
+                f"Framework {adapter.name!r} does not support building agents "
+                "without running them; use generate_crew_and_kickoff()."
+            )
+        model_name = adapter._pick_model(self.config_list)
+        agents, _tasks = builder(
+            prep['config'],
+            prep['topic'],
+            prep['tools_dict'],
+            getattr(self, 'agent_callback', None),
+            getattr(self, 'task_callback', None),
+            model_name,
+            cli_config=self._dispatch_cli_config(),
+        )
+        # _build_agents_and_tasks returns a name->agent mapping; callers expect
+        # a flat list in definition order.
+        if isinstance(agents, dict):
+            return list(agents.values())
+        return list(agents) if agents else []
+
     def generate_crew_and_kickoff(self):
         """
         Generates a crew of agents and initiates tasks based on the provided configuration.

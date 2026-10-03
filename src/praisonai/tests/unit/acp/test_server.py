@@ -129,11 +129,14 @@ class TestACPServer:
 
         captured = {}
 
-        def fake_run_server(config):
+        async def fake_run_server(config):
             captured["config"] = config
 
-        monkeypatch.setattr(acp_server.asyncio, "run", lambda coro: coro)
+        # serve() now routes through the shared AsyncBridge via run_cli_coro
+        # instead of a bare asyncio.run. Patch that leaf to capture the config
+        # without spinning up a real server loop.
         monkeypatch.setattr(acp_server, "_run_server", fake_run_server)
+        monkeypatch.setattr(acp_server, "run_cli_coro", lambda coro: asyncio.run(coro))
 
         acp_server.serve(allow_network=True)
 
