@@ -167,27 +167,22 @@ class HookRunner:
         Returns:
             List of execution results
         """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            # Cannot execute sync in running event loop - would block the loop
-            # Guide users to use the async API instead
-            raise RuntimeError(
-                "execute_sync() cannot be called from within a running event loop. "
-                "Use 'await runner.execute(event, input_data, target)' instead in async contexts."
-            )
-
         # Fast path: no hooks → no loop creation needed
         # This mirrors the same check in execute() but avoids event loop creation overhead
         hooks = self._registry.get_hooks(event, target)
         if not hooks:
             return []
 
-        # No running loop and hooks exist — safe to create one
-        return asyncio.run(self.execute(event, input_data, target, _hooks=hooks))
+        # Use the canonical sync-to-async bridge so blocking policy/guardrail
+        # hooks still run (and can deny) from a running event loop — e.g. a
+        # FastAPI/aiohttp handler, Jupyter, or a bot callback invoking
+        # agent.start()/agent.chat(). Raising here would turn documented sync
+        # entry points into hard failures whenever any hook is registered.
+        from ..utils.async_bridge import run_coroutine_from_any_context
+        return run_coroutine_from_any_context(
+            self.execute(event, input_data, target, _hooks=hooks),
+            timeout=None,
+        )
     
     async def _execute_parallel(
         self,

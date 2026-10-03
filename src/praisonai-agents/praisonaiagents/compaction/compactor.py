@@ -6,6 +6,7 @@ Manages context window by compacting messages when needed.
 
 import re
 import threading
+import logging
 from typing import List, Dict, Any, Optional, Callable, Awaitable, Tuple
 import asyncio
 
@@ -13,6 +14,8 @@ from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
 from .strategy import CompactionStrategy
 from .result import CompactionResult
 from .protocols import ToolResultPrunerProtocol, MessageFormatterProtocol, SummaryBuilderProtocol
+
+logger = logging.getLogger(__name__)
 
 
 # Cache for the one-time offline-safe tiktoken probe (see estimate_tokens).
@@ -337,18 +340,23 @@ class ContextCompactor:
             compacted = self._prune(processed_messages)
         elif self.strategy == CompactionStrategy.LLM_SUMMARIZE:
             if self.llm_summarize_fn:
-                # For sync calls with LLM function, we need to run async
+                # Route through the canonical sync-to-async bridge so the
+                # user-configured LLM summariser runs identically whether or not
+                # a loop is already running (e.g. an agent hosted in FastAPI,
+                # aiohttp, Jupyter or a bot handler). The naive fallback is kept
+                # only for genuine failures, and is now logged so a silent
+                # degradation in context quality is visible.
+                from ..utils.async_bridge import run_coroutine_from_any_context
                 try:
-                    # Check if we're already in an async context
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # If in async context, fallback to naive summarization
-                        compacted = self._summarize(processed_messages)
-                    except RuntimeError:
-                        # No running loop, safe to create one
-                        compacted = asyncio.run(self._llm_summarize_async(processed_messages, focus_topic))
+                    compacted = run_coroutine_from_any_context(
+                        self._llm_summarize_async(processed_messages, focus_topic),
+                        timeout=None,
+                    )
                 except Exception:
-                    # Fallback to naive summarization if async fails
+                    logger.warning(
+                        "LLM summarisation failed; using naive summary",
+                        exc_info=True,
+                    )
                     compacted = self._summarize(processed_messages)
             else:
                 compacted = self._llm_summarize(processed_messages, focus_topic)
