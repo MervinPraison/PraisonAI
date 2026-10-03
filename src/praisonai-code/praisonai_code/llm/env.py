@@ -141,6 +141,18 @@ def has_provider_credential() -> bool:
             continue
         if os.environ.get(key_var):
             return True
+    # A discovered (Python-registered / entry-point) provider's conventional
+    # ``<PROVIDER>_API_KEY`` also counts as a cloud credential, so a first run
+    # configured only with a plugin provider's key is not misreported as keyless
+    # and pushed to the local/OpenAI fallback.
+    try:
+        from praisonai_code.llm.catalogue import discovered_providers
+
+        for pid in discovered_providers():
+            if os.environ.get(f"{pid.upper()}_API_KEY"):
+                return True
+    except Exception:
+        pass
     return False
 
 

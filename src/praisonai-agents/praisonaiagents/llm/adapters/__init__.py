@@ -556,6 +556,67 @@ def add_provider_adapter(name: str, adapter: LLMProviderAdapterProtocol) -> None
     _provider_adapters[name] = adapter
 
 
+def list_provider_adapters() -> List[str]:
+    """Return the names of all registered provider adapters, sorted.
+
+    Read-only, lazy accessor so wrapper surfaces (CLI ``setup``/``auth``/
+    ``models``, YAML resolution) can enumerate providers registered via
+    :func:`add_provider_adapter` or the ``praisonai.providers`` entry-point
+    group without importing heavy modules. Call
+    :func:`load_provider_entry_points` first if entry-point providers should be
+    included.
+    """
+    load_provider_entry_points()
+    return sorted(_provider_adapters.keys())
+
+
+_provider_entry_points_loaded = False
+
+
+def load_provider_entry_points() -> None:
+    """Discover and register providers published under ``praisonai.providers``.
+
+    Lazy and idempotent (runs its scan at most once, mirroring the tool
+    registry's ``discover_plugins()``): a pip-installed distribution can ship a
+    provider adapter without any edit to core::
+
+        [project.entry-points."praisonai.providers"]
+        myprovider = "my_pkg:MyAdapter"
+
+    The entry point may load either an adapter instance or a zero-arg callable/
+    class producing one. Discovery never raises — a broken plugin must not break
+    provider resolution.
+    """
+    global _provider_entry_points_loaded
+    if _provider_entry_points_loaded:
+        return
+    _provider_entry_points_loaded = True
+    try:
+        from importlib.metadata import entry_points
+
+        for ep in entry_points(group="praisonai.providers"):
+            name = ep.name.lower()
+            if name in _provider_adapters:
+                # Never let a plugin silently replace a built-in adapter.
+                continue
+            try:
+                loaded = ep.load()
+                # A class or a factory callable is instantiated; an already
+                # constructed adapter instance (has the protocol's methods) is
+                # used as-is.
+                if isinstance(loaded, type):
+                    adapter = loaded()
+                elif callable(loaded) and not hasattr(loaded, "supports_prompt_caching"):
+                    adapter = loaded()
+                else:
+                    adapter = loaded
+            except Exception:
+                continue
+            _provider_adapters[name] = adapter
+    except Exception:  # pragma: no cover - discovery must never break resolution
+        pass
+
+
 def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     """
     Get provider adapter by name with fallback to default.
@@ -571,6 +632,17 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     # Exact match first
     if name_lower in _provider_adapters:
         return _provider_adapters[name_lower]
+
+    # A plugin/entry-point provider (e.g. ``myprovider/model``) is only
+    # registered on first discovery; load lazily so prefixed model ids route
+    # through a discovered adapter rather than silently falling to default.
+    if name_lower not in _provider_adapters:
+        load_provider_entry_points()
+        if name_lower in _provider_adapters:
+            return _provider_adapters[name_lower]
+        base = name_lower.split("/", 1)[0]
+        if base in _provider_adapters:
+            return _provider_adapters[base]
         
     # Provider prefixes or substrings
     if "ollama" in name_lower:
@@ -594,4 +666,6 @@ __all__ = [
     'GeminiAdapter',
     'get_provider_adapter',
     'add_provider_adapter',
+    'list_provider_adapters',
+    'load_provider_entry_points',
 ]
