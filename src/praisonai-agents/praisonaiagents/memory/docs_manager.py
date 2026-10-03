@@ -179,6 +179,11 @@ class DocsManager:
                         self._docs[key] = doc
                         self._log(f"Loaded doc: {key}")
     
+    @staticmethod
+    def _effective_priority(priority: int, scope: str) -> int:
+        """Apply the same global-document offset on creation and reload."""
+        return priority - 1000 if scope == "global" else priority
+
     def _load_all_docs(self):
         """Load all docs from global and workspace directories."""
         self._docs.clear()
@@ -188,7 +193,7 @@ class DocsManager:
             self._load_docs_from_dir(self.global_docs_path, "global")
             for key, doc in self._docs.items():
                 if key.startswith("global:"):
-                    doc.priority = doc.priority - 1000  # Lower priority for global
+                    doc.priority = self._effective_priority(doc.priority, "global")
         
         # 2. Load workspace docs
         workspace_docs_dir = self.workspace_path / self.DOCS_DIR_NAME.replace("/", os.sep)
@@ -355,8 +360,8 @@ class DocsManager:
         frontmatter_lines = ["---"]
         if description:
             frontmatter_lines.append(f'description: "{description}"')
-        if priority != 0:
-            frontmatter_lines.append(f"priority: {priority}")
+        # Persist explicit zero instead of reloading the workspace default (100).
+        frontmatter_lines.append(f"priority: {priority}")
         if tags:
             tags_str = ", ".join(f'"{t}"' for t in tags)
             frontmatter_lines.append(f"tags: [{tags_str}]")
@@ -372,7 +377,7 @@ class DocsManager:
             name=name,
             content=content,
             description=description,
-            priority=priority,
+            priority=self._effective_priority(priority, scope),
             tags=tags or [],
             file_path=str(file_path)
         )
