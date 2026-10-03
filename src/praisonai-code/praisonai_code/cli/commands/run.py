@@ -2002,6 +2002,8 @@ def _run_from_file(
             args._max_tokens_explicit = max_tokens is not None
             if effective_approval:
                 args.approval = effective_approval
+            if permissions_config:
+                args.permissions_config = permissions_config
             if approve_all_tools:
                 args.approve_all_tools = approve_all_tools
             if approval_timeout is not None:
@@ -2540,6 +2542,8 @@ def _run_from_file_profiled(
         args._max_tokens_explicit = max_tokens is not None
         if effective_approval:
             args.approval = effective_approval
+        if permissions_config:
+            args.permissions_config = permissions_config
         if approve_all_tools:
             args.approve_all_tools = approve_all_tools
         if approval_timeout is not None:

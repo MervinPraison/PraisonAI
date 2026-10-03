@@ -297,15 +297,14 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 # Check if permissions are specified inline
                 permissions = approval_config.get('permissions')
                 if permissions:
-                    # Create backend with permissions
-                    backend = InteractiveCLIApprovalBackend(
-                        permissions_config=permissions
-                    )
-                    return ApprovalConfig(
-                        backend=backend,
-                        all_tools=approval_config.get('all_tools', False),
-                        timeout=approval_config.get('timeout', 0),
-                        permissions=permissions,
+                    from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+
+                    # Use the same backend/mode precedence as direct CLI runs.
+                    return resolve_approval_config(
+                        approval_config.get('backend') or 'console',
+                        all_tools=approval_config.get('all_tools', approval_config.get('approve_all_tools', False)),
+                        timeout=approval_config.get('timeout'),
+                        permissions_config=permissions,
                     )
                 # Otherwise map the wrapper approval dict onto the core
                 # ApprovalConfig fields. The wrapper spec carries extra keys

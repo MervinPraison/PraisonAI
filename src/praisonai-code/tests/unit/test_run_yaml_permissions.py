@@ -269,3 +269,78 @@ def test_profiled_yaml_path_forwards_output_mode(monkeypatch):
     args = _FakePraisonAI.last_instance.args
     assert args is not None
     assert args.output == "stream-json"
+
+
+@pytest.mark.parametrize("profiled", [False, True])
+@pytest.mark.parametrize("section", ["roles", "agents"])
+@pytest.mark.parametrize("action", ["deny", "allow"])
+def test_yaml_rules_reach_approval_decision(monkeypatch, tmp_path, profiled, section, action):
+    """Resolved rules survive reparse, YAML merge and actual backend decisions."""
+    import asyncio
+    import logging
+
+    from praisonai.agents_generator import AgentsGenerator
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+    from praisonai_code.cli.legacy.praison_ai import PraisonAI
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.chdir(tmp_path)
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    rules = {"audit_probe:*": action}
+    runner("workflow.yaml", no_save=True, permissions_config=rules)
+    with monkeypatch.context() as parsing_patch:
+        args = _run_main_preserving(parsing_patch, _FakePraisonAI.last_instance.args)
+    legacy = PraisonAI.__new__(PraisonAI)
+    legacy.args = args
+    cli_config = legacy._extract_cli_config_for_yaml()
+    generator = AgentsGenerator.__new__(AgentsGenerator)
+    generator.logger = logging.getLogger(__name__)
+    config = {section: {"reviewer": {}}}
+    generator._merge_cli_config(config, cli_config)
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    approval = adapter._resolve_agent_approval(config[section]["reviewer"], config)
+
+    def unexpected_prompt(request):
+        """A matched declarative rule must decide without an interactive fallback."""
+        pytest.fail("resolved rule was lost before tool approval")
+
+    monkeypatch.setattr(approval.backend, "_prompt_user", unexpected_prompt)
+    decision = asyncio.run(approval.backend.request_approval(
+        ApprovalRequest(tool_name="audit_probe", arguments={}, risk_level="low")
+    ))
+    assert decision.approved is (action == "allow")
+    assert decision.approver == "permission_rule"
+    assert approval.permissions == rules
+
+
+def test_yaml_inline_rules_preserve_explicit_plan_and_approval_options(tmp_path, monkeypatch):
+    """Inline rules retain explicit mode, all-tools and timeout configuration."""
+    import asyncio
+
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+    from praisonaiagents.approval.protocols import ApprovalRequest
+    from praisonaiagents.permissions import PermissionMode
+
+    monkeypatch.chdir(tmp_path)
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    approval = adapter._resolve_agent_approval({"approval": {
+        "backend": "plan", "permissions": {"write:*": "allow"},
+        "approve_all_tools": True, "timeout": 30,
+    }}, {})
+    assert approval.backend.permission_mode == PermissionMode.PLAN
+    assert approval.all_tools is True
+    assert approval.timeout == 30
+    decision = asyncio.run(approval.backend.request_approval(
+        ApprovalRequest(tool_name="write", arguments={}, risk_level="low")
+    ))
+    assert decision.approved is False
+
+
+def test_yaml_inline_rules_preserve_explicit_disabled_backend():
+    """An explicit disabled backend follows the same override as direct runs."""
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    assert adapter._resolve_agent_approval({"approval": {
+        "backend": "none", "permissions": {"audit_probe:*": "deny"},
+    }}, {}) is None
