@@ -1757,6 +1757,8 @@ def run_main(
     if profile or profile_deep:
         if is_file:
             # Profiling for YAML file execution
+            file_permissions = _parse_permissions(allow, deny, permissions, permission_default)
+            _, _, file_permissions, _ = _apply_config_defaults(None, None, file_permissions)
             _run_from_file_profiled(
                 target,
                 model=model,
@@ -1772,6 +1774,7 @@ def run_main(
                 approval_timeout=approval_timeout,
                 output_mode=output_mode,
                 max_tokens=max_tokens,
+                permissions_config=file_permissions,
             )
         else:
             # Profiling for direct prompt
@@ -2453,6 +2456,7 @@ def _run_from_file_profiled(
     approval_timeout: Optional[str] = None,
     output_mode: Optional[str] = None,
     max_tokens: Optional[int] = None,
+    permissions_config: Optional[dict] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2520,7 +2524,10 @@ def _run_from_file_profiled(
     # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
     # permission-gated identically to the non-profiled path instead of silently
     # dropping the deny policy.
-    if session_id or auto_save_name or approval or approve_all_tools or output_mode or max_tokens is not None:
+    effective_approval = approval
+    if effective_approval is None and permissions_config:
+        effective_approval = "console"
+    if session_id or auto_save_name or effective_approval or approve_all_tools or output_mode or max_tokens is not None:
         class Args:
             pass
         
@@ -2531,8 +2538,8 @@ def _run_from_file_profiled(
         args.output = output_mode
         args.max_tokens = max_tokens
         args._max_tokens_explicit = max_tokens is not None
-        if approval:
-            args.approval = approval
+        if effective_approval:
+            args.approval = effective_approval
         if approve_all_tools:
             args.approve_all_tools = approve_all_tools
         if approval_timeout is not None:
@@ -2552,11 +2559,13 @@ def _run_from_file_profiled(
     import os as _os_guard
     _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
     _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
-    profiler.mark_exec_start()
     try:
-        result = praison.run()
+        profiler.mark_exec_start()
+        try:
+            result = praison.run()
+        finally:
+            profiler.mark_exec_end()
     finally:
-        profiler.mark_exec_end()
         if _prev_in_run is None:
             _os_guard.environ.pop(_IN_MODERN_RUN_ENV, None)
         else:

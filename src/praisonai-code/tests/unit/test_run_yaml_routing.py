@@ -273,9 +273,11 @@ def test_profiled_yaml_run_sets_and_restores_modern_run_sentinel(
         config_list = [{"model": None}]
 
         def __init__(self, *a, **k):
+            """Accept the legacy engine constructor arguments."""
             pass
 
         def run(self):
+            """Observe routing state and optionally simulate execution failure."""
             observed["in_run"] = os.environ.get("PRAISONAI_IN_MODERN_RUN")
             if raises:
                 raise RuntimeError("execution failed")
@@ -301,6 +303,47 @@ def test_profiled_yaml_run_sets_and_restores_modern_run_sentinel(
     # The sentinel was active for the duration of the legacy run...
     assert observed["in_run"] == "1"
     # ...and restored afterwards, including when legacy execution fails.
+    assert os.environ.get("PRAISONAI_IN_MODERN_RUN") == previous
+
+
+@pytest.mark.parametrize("previous", [None, "already-running"])
+@pytest.mark.parametrize("boundary", ["mark_exec_start", "mark_exec_end"])
+def test_profiled_yaml_restores_sentinel_when_profiler_raises(
+    monkeypatch, tmp_path, previous, boundary
+):
+    """Profiler bookkeeping must not leak routing suppression into later runs."""
+    import os
+
+    import praisonai_code.cli.commands.run as run_mod
+    import praisonai_code.cli.main as main_mod
+    from praisonai_code.cli.features.cli_profiler import CLIProfiler
+
+    class _Engine:
+        """Execute without provider calls while retaining the real profiler."""
+
+        def __init__(self, *args, **kwargs):
+            """Accept the engine's normal initialization parameters."""
+
+        def run(self):
+            """Verify routing suppression is active during execution."""
+            assert os.environ["PRAISONAI_IN_MODERN_RUN"] == "1"
+            return "DONE"
+
+    def fail_boundary(self):
+        """Simulate an instrumentation failure at the selected boundary."""
+        raise RuntimeError("profiler boundary failed")
+
+    monkeypatch.setattr(main_mod, "PraisonAI", _Engine)
+    monkeypatch.setattr(CLIProfiler, boundary, fail_boundary)
+    if previous is None:
+        monkeypatch.delenv("PRAISONAI_IN_MODERN_RUN", raising=False)
+    else:
+        monkeypatch.setenv("PRAISONAI_IN_MODERN_RUN", previous)
+    yaml_path = tmp_path / "agents.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+
+    with pytest.raises(RuntimeError, match="profiler boundary failed"):
+        run_mod._run_from_file_profiled(str(yaml_path), no_save=True)
     assert os.environ.get("PRAISONAI_IN_MODERN_RUN") == previous
 
 
