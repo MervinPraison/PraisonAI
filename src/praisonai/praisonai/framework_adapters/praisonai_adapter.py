@@ -303,7 +303,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     return resolve_approval_config(
                         approval_config.get('backend') or 'console',
                         all_tools=approval_config.get('all_tools', approval_config.get('approve_all_tools', False)),
-                        timeout=approval_config.get('timeout'),
+                        timeout=(
+                            'none'
+                            if 'timeout' in approval_config and approval_config['timeout'] is None
+                            else approval_config.get('timeout')
+                        ),
                         permissions_config=permissions,
                     )
                 # Otherwise map the wrapper approval dict onto the core

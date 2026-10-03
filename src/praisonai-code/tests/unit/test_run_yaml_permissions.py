@@ -344,3 +344,19 @@ def test_yaml_inline_rules_preserve_explicit_disabled_backend():
     assert adapter._resolve_agent_approval({"approval": {
         "backend": "none", "permissions": {"audit_probe:*": "deny"},
     }}, {}) is None
+
+
+@pytest.mark.parametrize("timeout_options, expected", [
+    ({}, 0), ({"timeout": None}, None), ({"timeout": 30}, 30),
+    ({"timeout": 0}, 0), ({"timeout": "none"}, None),
+])
+def test_yaml_inline_rules_preserve_timeout_semantics(timeout_options, expected):
+    """Explicit null waits indefinitely; omission retains the backend default."""
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    approval = adapter._resolve_agent_approval({"approval": {
+        "backend": "console", "permissions": {"audit_probe:*": "deny"},
+        **timeout_options,
+    }}, {})
+    assert approval.timeout == expected
