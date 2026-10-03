@@ -31,6 +31,38 @@ class ImageResult:
         return path
 
 
+def _model_rejects_response_format(model: str) -> bool:
+    """Return True when the target OpenAI image model rejects ``response_format``.
+
+    Current OpenAI image routes reject ``response_format`` outright:
+
+    - ``gpt-image-*`` models never accept it (they always return base64) and
+      LiteLLM raises ``UnsupportedParamsError`` before the request is sent.
+    - The current ``dall-e-3`` images route returns HTTP 400
+      ``Unknown parameter: 'response_format'``.
+
+    LiteLLM's own ``drop_params`` does *not* strip ``response_format`` for these
+    models because its per-model param table still lists it as supported, so we
+    must drop it here. ``dall-e-2`` and non-OpenAI providers still accept it and
+    are left untouched.
+    """
+    name = model.lower().rsplit('/', 1)[-1]
+    return name.startswith('gpt-image') or name.startswith('dall-e-3')
+
+
+def _finalize_image_kwargs(call_kwargs: Dict[str, Any], model: str) -> None:
+    """Normalise kwargs before dispatching to LiteLLM.
+
+    Drops ``response_format`` for models that reject it entirely (``gpt-image-*``
+    and the current ``dall-e-3`` route) and scopes ``drop_params`` to this call
+    so LiteLLM strips any other unsupported params instead of failing. The global
+    ``litellm.drop_params`` is left untouched; callers may override ``drop_params``.
+    """
+    if _model_rejects_response_format(model):
+        call_kwargs.pop('response_format', None)
+    call_kwargs.setdefault('drop_params', True)
+
+
 def image_generate(
     prompt: str,
     model: str = "dall-e-3",
@@ -94,6 +126,7 @@ def image_generate(
     if metadata:
         call_kwargs['metadata'] = metadata
     
+    _finalize_image_kwargs(call_kwargs, model)
     response = litellm.image_generation(**call_kwargs)
     
     results = []
@@ -155,6 +188,7 @@ async def aimage_generate(
     if metadata:
         call_kwargs['metadata'] = metadata
     
+    _finalize_image_kwargs(call_kwargs, model)
     response = await litellm.aimage_generation(**call_kwargs)
     
     results = []
@@ -238,6 +272,7 @@ def image_edit(
         if metadata:
             call_kwargs['metadata'] = metadata
         
+        _finalize_image_kwargs(call_kwargs, model)
         response = litellm.image_edit(**call_kwargs)
         
         results = []
@@ -310,6 +345,7 @@ async def aimage_edit(
         if metadata:
             call_kwargs['metadata'] = metadata
         
+        _finalize_image_kwargs(call_kwargs, model)
         response = await litellm.aimage_edit(**call_kwargs)
         
         results = []
