@@ -236,6 +236,7 @@ class StepResult:
     output: str = ""  # Step output content
     stop_workflow: bool = False  # If True, stop the entire workflow early
     variables: Dict[str, Any] = field(default_factory=dict)  # Variables to add/update
+    skipped: bool = False  # Completion observer outcome when no handler ran
 
 # Aliases for backward compatibility
 StepInput = WorkflowContext
@@ -1613,17 +1614,52 @@ class AgentFlow:
                 variables=all_variables.copy()
             )
 
-            # Step-result cache (opt-in via cache=). This linear path invokes
-            # handlers INLINE rather than through _execute_single_step_internal,
-            # which the pattern paths use -- so both are wrapped. Caching only
-            # one would make the feature work or not depending on whether a step
-            # happened to sit inside a Parallel or an If, which is worse than
-            # not having it.
+            # Start a step attempt before notifying lifecycle observers. The
+            # attempt may finish as skipped or from cache without a handler call.
+            if hasattr(step, 'status'):
+                step.status = "running"
+            self.step_statuses[step.name] = "running"
+
+            # Preserve the preparation hook before the gate: it may populate
+            # context variables used by should_run, including on cached runs.
+            if self.on_step_start:
+                try:
+                    self.on_step_start(step.name, context)
+                except Exception as e:
+                    logger.error(f"on_step_start callback failed: {e}")
+
+            # Check should_run condition
+            if step.should_run:
+                try:
+                    if not step.should_run(context):
+                        if verbose:
+                            print(f"⏭️ Skipped: {step.name}")
+                        if hasattr(step, 'status'):
+                            step.status = "skipped"
+                        self.step_statuses[step.name] = "skipped"
+                        if self.on_step_complete:
+                            try:
+                                self.on_step_complete(step.name, StepResult(output="", skipped=True))
+                            except Exception as e:
+                                logger.error(f"on_step_complete callback failed: {e}")
+                        i += 1
+                        continue
+                except Exception as e:
+                    logger.error(f"should_run failed for {step.name}: {e}")
+
+            # Cache only the result, never the decision to run. A condition can
+            # observe external state that is absent from the cache key, so it
+            # must be evaluated even when identical inputs have a cached result.
             _step_cache = getattr(self, "_step_cache", None)
             _cache_key = None
             if _step_cache is not None:
                 from .step_cache import make_step_key
-                _cache_key = make_step_key(step, previous_output, input, all_variables)
+                if step.handler:
+                    _cache_key = make_step_key(step, context.previous_result, context.input, context.variables)
+                else:
+                    # Agent prompts and attachments consume workflow inputs,
+                    # not the handler context prepared by lifecycle hooks.
+                    _cache_key = make_step_key(step, previous_output, input, all_variables)
                 try:
                     _cached = copy.deepcopy(_step_cache.get(_cache_key))
                 except Exception:
@@ -1651,38 +1687,22 @@ class AgentFlow:
                         step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    if self.on_step_complete:
+                        try:
+                            self.on_step_complete(
+                                step.name, StepResult(
+                                    output=previous_output or "",
+                                    stop_workflow=bool(_cached.get("stop")),
+                                ),
+                            )
+                        except Exception as e:
+                            logger.error(f"on_step_complete callback failed: {e}")
                     if _cached.get("stop"):
                         if verbose:
                             print(f"🛑 Workflow stopped at: {step.name}")
                         break
                     i += 1
                     continue
-            
-            # Update step status
-            if hasattr(step, 'status'):
-                step.status = "running"
-            self.step_statuses[step.name] = "running"
-            
-            # Call on_step_start callback
-            if self.on_step_start:
-                try:
-                    self.on_step_start(step.name, context)
-                except Exception as e:
-                    logger.error(f"on_step_start callback failed: {e}")
-            
-            # Check should_run condition
-            if step.should_run:
-                try:
-                    if not step.should_run(context):
-                        if verbose:
-                            print(f"⏭️ Skipped: {step.name}")
-                        if hasattr(step, 'status'):
-                            step.status = "skipped"
-                        self.step_statuses[step.name] = "skipped"
-                        i += 1
-                        continue
-                except Exception as e:
-                    logger.error(f"should_run failed for {step.name}: {e}")
             
             # Gap 3c: Check for cross-step handoff cycles
             self._check_handoff_cycle(step)
@@ -2217,6 +2237,9 @@ class AgentFlow:
                 step_result_internal = self._execute_single_step_internal(
                     step, previous_output, input, all_variables, model, verbose, i, stream
                 )
+                if step_result_internal.get("skipped"):
+                    results.append({"step": step_name, "output": None, "status": "skipped"})
+                    continue
                 output = step_result_internal.get("output", "")
                 stop = step_result_internal.get("stop", False)
                 step_vars = step_result_internal.get("variables", {})
@@ -2740,6 +2763,38 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         depth: int = 0
     ) -> Dict[str, Any]:
         """Cache wrapper. The uncached body is _execute_single_step_uncached."""
+        # Patterns are control flow, not deterministic leaf results. Re-enter
+        # them on every run so their conditions and nested Task gates execute;
+        # their individual leaves can still reuse cached results.
+        if isinstance(step, (Loop, Parallel, Route, Repeat, Discussion, If, Include)):
+            return self._execute_single_step_uncached(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        if depth > MAX_NESTING_DEPTH:
+            raise ValueError(
+                f"Maximum nesting depth ({MAX_NESTING_DEPTH}) exceeded. "
+                "Simplify your workflow or reduce pattern nesting."
+            )
+        step = self._normalize_single_step(step, index)
+        if step.should_run:
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name, variables=all_variables.copy(),
+            )
+            try:
+                should_run = step.should_run(context)
+            except Exception as e:
+                logger.error(f"should_run failed for {step.name}: {e}")
+                should_run = True  # Preserve the linear executor's error policy.
+            if not should_run:
+                step.status = "skipped"
+                self.step_statuses[step.name] = "skipped"
+                return {
+                    "step": step.name, "output": previous_output,
+                    "stop": False, "skipped": True, "variables": {},
+                }
         cache = getattr(self, "_step_cache", None)
         if cache is None:
             return self._execute_single_step_uncached(
@@ -2756,6 +2811,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            # A cache hit means the gated-in step is being served a prior result,
+            # so its status is "completed" -- not whatever a previous run left in
+            # step_statuses. Without this reset, a step that was gated OUT on an
+            # earlier run ("skipped") and is now gated IN would still report
+            # "skipped" to callers even though its cached output is returned.
+            if hasattr(step, "status"):
+                step.status = "completed"
+            self.step_statuses[step.name] = "completed"
             # Copy: a caller mutating a returned result must not edit the cache.
             return dict(hit)
         result = self._execute_single_step_uncached(
@@ -3526,6 +3589,12 @@ CONCISE SUMMARY:"""
                         parallel_stopped = True
 
                 if branch_error is None:
+                    if step_result.get("skipped"):
+                        results.append({"step": step_result["step"], "output": None, "status": "skipped"})
+                        # Keep branch indexes stable without counting prior context
+                        # as output produced by a branch that never ran.
+                        outputs.append(None)
+                        continue
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
                     branch_deltas.append(
@@ -3584,7 +3653,7 @@ CONCISE SUMMARY:"""
         self._merge_branch_variables(all_variables, branch_deltas)
 
         # Combine outputs
-        combined_output = "\n---\n".join(str(o) for o in outputs)
+        combined_output = "\n---\n".join(str(o) for o in outputs if o is not None)
         all_variables["parallel_outputs"] = outputs
         
         if verbose:
@@ -4308,6 +4377,7 @@ CONCISE SUMMARY:"""
             
             # Load tools from the recipe's tools.py if present (opt-in only)
             tool_registry = {}
+            tools_snapshot = None
             tools_py = recipe_path / "tools.py"
             if tools_py.exists():
                 try:
@@ -4322,7 +4392,10 @@ CONCISE SUMMARY:"""
                         import importlib.util
                         spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
                         recipe_module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(recipe_module)
+                        # Execute and cache the same source snapshot, bypassing stale pyc files.
+                        tools_content = tools_py.read_bytes()
+                        exec(compile(tools_content, str(tools_py), "exec"), recipe_module.__dict__)
+                        tools_snapshot = (str(tools_py.resolve()), tools_content)
                     else:
                         logger.warning(
                             "Skipping included recipe tools.py: set PRAISONAI_ALLOW_LOCAL_TOOLS "
@@ -4358,7 +4431,18 @@ CONCISE SUMMARY:"""
             # Parse and execute the included workflow
             from .yaml_parser import YAMLWorkflowParser
             parser = YAMLWorkflowParser(tool_registry=tool_registry)
-            included_workflow = parser.parse_file(str(recipe_yaml))
+            # Match parse_file's decoding policy, but read only once: the cache
+            # namespace must describe the same snapshot that the parser saw.
+            with open(recipe_yaml, 'r') as recipe_file:
+                recipe_content = recipe_file.read()
+            included_workflow = parser.parse_string(recipe_content)
+            parent_cache = getattr(self, "_step_cache", None)
+            if parent_cache is not None:
+                from .step_cache import _ScopedStepCache
+                included_workflow._step_cache = _ScopedStepCache(
+                    parent_cache,
+                    f"{recipe_yaml.resolve()}:{recipe_content}:{tools_snapshot!r}"
+                )
             
             # Merge parent variables into included workflow
             included_workflow.variables.update(all_variables)
