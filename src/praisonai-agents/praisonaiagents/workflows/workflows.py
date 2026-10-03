@@ -25,7 +25,6 @@ import json
 import copy
 import time
 import logging
-import threading
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -48,10 +47,7 @@ DEFAULT_MAX_PARALLEL_WORKERS = 3
 # summarisation request consumes roughly as many tokens as it saves.
 MIN_BRANCHES_FOR_LLM_SUMMARY = 3
 
-# Guards lazy creation of each Workflow's per-instance _run_lock so two threads
-# entering run()/astart() concurrently on a fresh instance cannot each create
-# and acquire a *different* lock object (which would defeat the run guard).
-_RUN_LOCK_INIT_GUARD = threading.Lock()
+from .._run_lock import ensure_run_lock
 
 
 class _WriteTrackingDict(dict):
@@ -796,14 +792,7 @@ class AgentFlow:
         first reach run()/astart() concurrently observe the *same* lock object
         (double-checked locking) rather than each minting and acquiring its own.
         """
-        lock = self._run_lock
-        if lock is None:
-            with _RUN_LOCK_INIT_GUARD:
-                lock = self._run_lock
-                if lock is None:
-                    lock = threading.Lock()
-                    self._run_lock = lock
-        return lock
+        return ensure_run_lock(self)
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
