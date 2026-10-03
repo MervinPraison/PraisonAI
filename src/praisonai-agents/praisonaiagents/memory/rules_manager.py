@@ -181,6 +181,7 @@ class RulesManager:
         self.verbose = verbose
         
         self._rules: Dict[str, Rule] = {}
+        self._extra_rule_files: List[str] = []
         self._load_all_rules()
     
     def _log(self, msg: str, level: int = logging.INFO):
@@ -443,6 +444,7 @@ class RulesManager:
     def _load_all_rules(self):
         """Load rules from all sources including git root and additional directories."""
         self._rules = {}
+        self._explicit_rule_keys = set()
         
         # Find git root for monorepo support
         git_root = self._find_git_root()
@@ -515,6 +517,9 @@ class RulesManager:
             
             current = current.parent
         
+        for path in self._extra_rule_files:
+            self._load_extra_rule_file(path)
+
         self._log(f"Loaded {len(self._rules)} rules total")
     
     def add_rule_file(self, path: str) -> int:
@@ -532,6 +537,14 @@ class RulesManager:
         Returns:
             Number of rule files successfully added.
         """
+        path = str(path)
+        if path in self._extra_rule_files:
+            self._extra_rule_files.remove(path)
+        self._extra_rule_files.append(path)
+        return self._load_extra_rule_file(path)
+
+    def _load_extra_rule_file(self, path: str) -> int:
+        """Load the current matches for a registered instruction file or glob."""
         candidate = Path(path)
         if candidate.is_absolute():
             matches = [candidate] if candidate.exists() else list(
@@ -543,13 +556,31 @@ class RulesManager:
                 matches = list(self.workspace_path.glob(path))
 
         added = 0
-        for file_path in matches:
+        for file_path in sorted(matches, key=str):
             if not file_path.is_file():
                 continue
             rule = self._load_root_instruction_file(file_path)
             if rule:
                 rule.priority = rule.priority + 200  # Explicit files win
-                self._rules[f"extra:{rule.name}"] = rule
+                source = os.path.normcase(str(file_path.resolve()))
+                # Explicit registration replaces any auto-discovered or previous
+                # copy of this file, but keeps distinct files with the same name.
+                duplicates = [
+                    key for key, existing in self._rules.items()
+                    if existing.file_path
+                    and os.path.normcase(str(Path(existing.file_path).resolve())) == source
+                ]
+                # Keep a discovered scope key so public name lookup/deletion
+                # still addresses this file, without retaining a second copy.
+                storage_key = next(
+                    (key for key in duplicates if not key.startswith("extra:")),
+                    f"extra:{source}",
+                )
+                for key in duplicates:
+                    del self._rules[key]
+                    self._explicit_rule_keys.discard(key)
+                self._rules[storage_key] = rule
+                self._explicit_rule_keys.add(storage_key)
                 added += 1
         self._log(f"Added {added} extra rule file(s) from '{path}'")
         return added
@@ -596,6 +627,11 @@ class RulesManager:
     
     def get_rule_by_name(self, name: str) -> Optional[Rule]:
         """Get a rule by name (for manual @mention invocation)."""
+        # Registration precedence is independent of the retained deletion scope.
+        for key, rule in reversed(list(self._rules.items())):
+            if key in self._explicit_rule_keys and rule.name == name:
+                return rule
+
         # Check all scopes
         for scope in ["subdir", "workspace", "global"]:
             key = f"{scope}:{name}"
@@ -684,7 +720,7 @@ class RulesManager:
 
         Only rules with ``activation == "glob"`` are considered; ``always``
         rules are handled up front by the system-prompt builder. Results are
-        deduplicated by rule name and any name in ``exclude_names`` is skipped
+        deduplicated by file identity and any name in ``exclude_names`` is skipped
         so already-injected rules are not emitted twice.
 
         Args:
@@ -700,11 +736,15 @@ class RulesManager:
         for rule in self._rules.values():
             if rule.activation != "glob":
                 continue
-            if rule.name in exclude or rule.name in seen:
+            identity = (
+                os.path.normcase(str(Path(rule.file_path).resolve()))
+                if rule.file_path else rule.name
+            )
+            if rule.name in exclude or identity in seen:
                 continue
             if any(rule.matches_file(fp) for fp in file_paths):
                 matched.append(rule)
-                seen.add(rule.name)
+                seen.add(identity)
         matched.sort(key=lambda r: r.priority, reverse=True)
         return matched
 
@@ -811,6 +851,7 @@ class RulesManager:
         try:
             Path(rule.file_path).unlink()
             del self._rules[key]
+            self._explicit_rule_keys.discard(key)
             self._log(f"Deleted rule '{name}'")
             return True
         except Exception as e:
