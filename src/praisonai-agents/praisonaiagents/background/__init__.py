@@ -32,6 +32,8 @@ Usage:
     result = await task.wait()
 """
 
+from .._lazy import create_lazy_getattr
+
 __all__ = [
     # Core classes
     "BackgroundRunner",
@@ -47,30 +49,13 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name == "BackgroundRunner":
-        from .runner import BackgroundRunner
-        return BackgroundRunner
-    
-    if name == "BackgroundTask":
-        from .task import BackgroundTask
-        return BackgroundTask
-    
-    if name == "TaskStatus":
-        from .task import TaskStatus
-        return TaskStatus
-    
-    if name == "BackgroundConfig":
-        from .config import BackgroundConfig
-        return BackgroundConfig
-    
-    if name == "get_background_runner":
-        from .runner import get_background_runner
-        return get_background_runner
-    
-    if name == "SqliteBackgroundJobStore":
-        from .sqlite_store import SqliteBackgroundJobStore
-        return SqliteBackgroundJobStore
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+_LAZY_IMPORTS = {
+    "BackgroundRunner": ("praisonaiagents.background.runner", "BackgroundRunner"),
+    "BackgroundTask": ("praisonaiagents.background.task", "BackgroundTask"),
+    "TaskStatus": ("praisonaiagents.background.task", "TaskStatus"),
+    "BackgroundConfig": ("praisonaiagents.background.config", "BackgroundConfig"),
+    "get_background_runner": ("praisonaiagents.background.runner", "get_background_runner"),
+    "SqliteBackgroundJobStore": ("praisonaiagents.background.sqlite_store", "SqliteBackgroundJobStore"),
+}
+
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
