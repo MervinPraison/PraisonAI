@@ -84,6 +84,7 @@ class RateLimiter:
 
     def __post_init__(self):
         """Initialize internal state."""
+        self.max_retry_delay = max(0, self.max_retry_delay)
         # Request-based limiting
         if self.requests_per_minute is not None:
             self._tokens = float(self.burst)
