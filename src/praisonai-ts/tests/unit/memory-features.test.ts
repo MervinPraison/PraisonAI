@@ -133,6 +133,38 @@ describe('FileMemory', () => {
     expect(all[0].content).toBe('Message 2');
   });
 
+  test.each([
+    { autoCompact: true, compactionThreshold: 1 },
+    { autoCompact: false, compactionThreshold: 1 },
+    { autoCompact: true, compactionThreshold: 2 }
+  ])('reloads deleted entries with %j', async (config) => {
+    const original = createFileMemory({ filePath: testFilePath });
+    const first = await original.add('Deleted user message', 'user');
+    const second = await original.add('Deleted assistant message', 'assistant');
+    const retained = await original.add('Retained message', 'user');
+    await original.delete(first.id);
+    await original.delete(second.id);
+    const beforeReload = await fs.readFile(testFilePath, 'utf-8');
+
+    const reloaded = createFileMemory({ filePath: testFilePath, ...config });
+    await reloaded.initialize();
+    expect(await reloaded.getAll()).toEqual([retained]);
+    expect(await reloaded.get(first.id)).toBeUndefined();
+    expect(await reloaded.get(second.id)).toBeUndefined();
+
+    const afterReload = await fs.readFile(testFilePath, 'utf-8');
+    if (config.autoCompact && config.compactionThreshold === 1) {
+      expect(afterReload.trim().split('\n').map(line => JSON.parse(line)))
+        .toEqual([retained]);
+    } else {
+      expect(afterReload).toBe(beforeReload);
+    }
+
+    const appended = await reloaded.add('New message after reload', 'assistant');
+    const reopened = createFileMemory({ filePath: testFilePath, ...config });
+    expect(await reopened.getAll()).toEqual([retained, appended]);
+  }, 2000);
+
   test('toJSON exports entries', async () => {
     const memory = createFileMemory({ filePath: testFilePath });
     await memory.add('Message 1', 'user');

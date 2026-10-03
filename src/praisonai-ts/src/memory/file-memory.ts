@@ -42,6 +42,8 @@ export class FileMemory {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
+    let shouldCompact = false;
+
     try {
       const fs = await import('fs/promises');
       const content = await fs.readFile(this.filePath, 'utf-8').catch(() => '');
@@ -64,10 +66,7 @@ export class FileMemory {
           }
         }
 
-        // Auto-compact if too many deleted entries
-        if (this.autoCompact && deletedCount > this.compactionThreshold) {
-          await this.compact();
-        }
+        shouldCompact = this.autoCompact && deletedCount > this.compactionThreshold;
       }
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
@@ -76,6 +75,10 @@ export class FileMemory {
     }
 
     this.initialized = true;
+    // compact() checks initialization, so finish loading before calling it.
+    if (shouldCompact) {
+      await this.compact();
+    }
   }
 
   /**
