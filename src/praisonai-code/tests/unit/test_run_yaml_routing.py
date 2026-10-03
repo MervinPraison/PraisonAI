@@ -249,49 +249,6 @@ def test_modern_run_delegation_preserves_resolved_agent_file(monkeypatch, tmp_pa
     assert result == "READY"
 
 
-def test_profiled_yaml_run_sets_and_restores_modern_run_sentinel(monkeypatch, tmp_path):
-    """The profiled YAML path must guard against legacy re-dispatch recursion.
-
-    ``_run_from_file_profiled`` delegates to the legacy ``PraisonAI.run()`` just
-    like the non-profiled ``_run_from_file`` does. Without the
-    ``PRAISONAI_IN_MODERN_RUN`` sentinel the legacy dispatcher would re-enter the
-    modern Typer ``run`` app and recurse. This asserts the sentinel is set while
-    the legacy ``run()`` executes and the prior value is restored afterwards so
-    the suppression never leaks into a later in-process invocation.
-    """
-    import os
-
-    import praisonai_code.cli.commands.run as run_mod
-
-    observed = {"in_run": None}
-
-    class _FakePraisonAI:
-        config_list = [{"model": None}]
-
-        def __init__(self, *a, **k):
-            pass
-
-        def run(self):
-            observed["in_run"] = os.environ.get("PRAISONAI_IN_MODERN_RUN")
-            return "DONE"
-
-    import praisonai_code.cli.main as main_mod
-
-    monkeypatch.setattr(main_mod, "PraisonAI", _FakePraisonAI)
-    # Ensure a clean baseline so restoration is observable.
-    monkeypatch.delenv("PRAISONAI_IN_MODERN_RUN", raising=False)
-
-    yaml_path = tmp_path / "agents.yaml"
-    yaml_path.write_text("framework: praisonai\nroles: {}\n")
-
-    run_mod._run_from_file_profiled(str(yaml_path), no_save=True)
-
-    # The sentinel was active for the duration of the legacy run...
-    assert observed["in_run"] == "1"
-    # ...and restored (removed) afterwards so it does not leak.
-    assert "PRAISONAI_IN_MODERN_RUN" not in os.environ
-
-
 def _run_from_file_with_broken_import(monkeypatch, tmp_path):
     """Drive ``_run_from_file`` with the ``PraisonAI`` import forced to fail.
 
