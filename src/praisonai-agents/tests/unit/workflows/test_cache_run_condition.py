@@ -179,3 +179,34 @@ def test_agent_cache_uses_actual_prompt_variables_after_hook_clears_context():
     assert flow.run("same", verbose=False)["output"] == "second"
     assert flow.run("same", verbose=False)["output"] == "second"
     assert prompts == ["first", "second"]
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_cached_completion_preserves_handler_stop_signal(stop):
+    from praisonaiagents.workflows.workflows import StepResult
+
+    calls = []
+    completions = []
+    downstream = []
+
+    def handler(context):
+        calls.append("run")
+        return StepResult(output="done", stop_workflow=stop)
+
+    flow = AgentFlow(steps=[
+        Task(name="first", handler=handler),
+        Task(name="next", handler=lambda ctx: downstream.append("run") or "next"),
+    ], cache=True, hooks={
+        "on_step_complete": lambda name, result: completions.append(
+            (name, result.output, result.stop_workflow)
+        ),
+    })
+    flow.run("same", verbose=False)
+    first_completions = list(completions)
+    completions.clear()
+    flow.run("same", verbose=False)
+
+    assert calls == ["run"]
+    assert completions == first_completions
+    assert completions[0] == ("first", "done", stop)
+    assert downstream == ([] if stop else ["run"])
