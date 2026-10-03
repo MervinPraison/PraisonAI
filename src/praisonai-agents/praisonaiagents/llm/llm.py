@@ -6794,21 +6794,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Set max_tokens here; for reasoning models this is normalized to
             # max_completion_tokens after per-call override_params are merged.
             params["max_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
-        if self.presence_penalty:
+        if self.presence_penalty is not None:
             params["presence_penalty"] = self.presence_penalty
-        if self.frequency_penalty:
+        if self.frequency_penalty is not None:
             params["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias:
             params["logit_bias"] = self.logit_bias
         if self.response_format:
             params["response_format"] = self.response_format
-        if self.seed:
+        if self.seed is not None:
             params["seed"] = self.seed
-        if self.logprobs:
+        if self.logprobs is not None:
             params["logprobs"] = self.logprobs
-        if self.top_logprobs:
+        if self.top_logprobs is not None:
             params["top_logprobs"] = self.top_logprobs
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
@@ -6874,7 +6874,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         effort = override_params.get('reasoning_effort', self.reasoning_effort)
         if effort is not None:
             from ..thinking.effort import resolve_reasoning_params
-            reasoning_params = resolve_reasoning_params(effort, self.model)
+            reasoning_params = resolve_reasoning_params(effort, params['model'])
             # Don't clobber an explicit native param the caller already set.
             for key, value in reasoning_params.items():
                 params.setdefault(key, value)
@@ -6884,7 +6884,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Normalize here (after override_params merge) so per-call overrides
         # like max_tokens/temperature cannot reintroduce rejected params.
         from .model_capabilities import is_reasoning_model
-        if is_reasoning_model(self.model):
+        if is_reasoning_model(params['model']):
             # Map max_tokens -> max_completion_tokens unless the caller already
             # provided max_completion_tokens explicitly (which takes precedence).
             if 'max_tokens' in params:
@@ -7183,7 +7183,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             params["temperature"] = temperature
         if self.max_tokens:
             params["max_output_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
         if self.base_url:
             params["base_url"] = self.base_url
@@ -7237,6 +7237,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # Match Chat Completions after merging overrides: reasoning models
+        # must not regain unsupported sampling parameters through either path.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(params["model"]):
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
 
         return params
 
