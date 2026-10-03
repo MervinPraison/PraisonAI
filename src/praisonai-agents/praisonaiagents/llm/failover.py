@@ -524,9 +524,33 @@ class FailoverManager:
             }
     
     def reset_all(self) -> None:
-        """Reset all profiles to available status."""
+        """Reset all profiles and clear their coordinated cooldowns.
+
+        Clears the shared bench so a credential benched by this manager becomes
+        selectable again fleet-wide when the coordinator supports atomic
+        conditional removal. It does NOT clobber a bench that is
+        *newer* than the local cooldown being reset (one a sibling manager /
+        replica published via an independent, still-active failure). Clearing
+        that would resume a credential others know is still rate-limited.
+        Legacy coordinators retain shared benches until expiry rather than risk
+        racing a sibling's publication. Coordinator errors still reset every
+        local profile. A missing local cooldown never authorizes shared removal.
+        """
         with self._lock:
             for profile in self._profiles:
+                recovered_from = profile.cooldown_until
+                cred_id = profile.credential_id
+                try:
+                    clear_if_not_newer = getattr(
+                        self._coordinator, "clear_if_not_newer", None
+                    )
+                    if recovered_from is not None and callable(clear_if_not_newer):
+                        clear_if_not_newer(cred_id, until=recovered_from)
+                except Exception as e:
+                    logger.warning(
+                        f"Quota coordinator clear failed for '{profile.name}': {e}; "
+                        f"resetting local cooldown only"
+                    )
                 profile.reset()
 
 

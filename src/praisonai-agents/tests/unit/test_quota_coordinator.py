@@ -172,6 +172,141 @@ class TestFailoverCoordinatorWiring:
         mgr.mark_success(p)
         assert coord.is_benched(p.credential_id) is False
 
+    def test_reset_all_clears_default_coordinator_bench(self):
+        mgr = FailoverManager()
+        primary = AuthProfile(name="primary", provider="openai", api_key="k1")
+        backup = AuthProfile(
+            name="backup", provider="openai", api_key="k2", priority=1
+        )
+        mgr.add_profile(primary)
+        mgr.add_profile(backup)
+        mgr.mark_failure(primary, "429", is_rate_limit=True)
+        assert mgr.get_next_profile() is backup
+
+        mgr.reset_all()
+
+        assert mgr.get_next_profile() is primary
+        assert primary.is_available
+
+    def test_reset_all_clears_shared_bench_for_other_manager(self):
+        coord = LocalQuotaCoordinator()
+        mgr_a = FailoverManager(coordinator=coord)
+        mgr_b = FailoverManager(coordinator=coord)
+        primary_a = AuthProfile(name="primary-a", provider="openai", api_key="k")
+        primary_b = AuthProfile(name="primary-b", provider="openai", api_key="k")
+        backup_b = AuthProfile(
+            name="backup-b", provider="openai", api_key="backup", priority=1
+        )
+        mgr_a.add_profile(primary_a)
+        mgr_b.add_profile(primary_b)
+        mgr_b.add_profile(backup_b)
+        mgr_a.mark_failure(primary_a, "429", is_rate_limit=True)
+
+        mgr_a.reset_all()
+
+        assert not coord.is_benched(primary_a.credential_id)
+        assert mgr_b.get_next_profile() is primary_b
+
+    def test_reset_all_preserves_newer_shared_bench(self):
+        # A sibling manager (same shared coordinator) publishes a NEWER bench via
+        # an independent, still-active failure while this manager resets. reset_all
+        # must not clobber that newer bench — mirrors the mark_success guard.
+        coord = LocalQuotaCoordinator()
+        mgr_a = FailoverManager(coordinator=coord)
+        primary_a = AuthProfile(name="primary-a", provider="openai", api_key="k")
+        mgr_a.add_profile(primary_a)
+
+        # mgr_a benches its credential with a short cooldown.
+        primary_a.mark_rate_limited(1.0)
+        coord.bench(primary_a.credential_id, until=primary_a.cooldown_until)
+
+        # A concurrent/other-replica failure benches the SAME credential longer.
+        newer = time.time() + 300
+        coord.bench(primary_a.credential_id, until=newer)
+
+        mgr_a.reset_all()
+
+        # Local profile still resets, but the newer shared bench survives.
+        assert primary_a.status == ProviderStatus.AVAILABLE
+        assert primary_a.cooldown_until is None
+        assert coord.is_benched(primary_a.credential_id) is True
+
+        mgr_a.reset_all()
+        assert coord.benched_until(primary_a.credential_id) == newer
+
+    def test_reset_all_preserves_bench_published_during_removal(self):
+        newer = time.time() + 300
+
+        class RacingCoordinator(LocalQuotaCoordinator):
+            armed = False
+
+            def benched_until(self, cred_id, **kwargs):
+                old = super().benched_until(cred_id, **kwargs)
+                if self.armed:
+                    self.bench(cred_id, until=newer)
+                return old
+
+            def clear_if_not_newer(self, cred_id, *, until):
+                self.bench(cred_id, until=newer)
+                return super().clear_if_not_newer(cred_id, until=until)
+
+        coord = RacingCoordinator()
+        mgr = FailoverManager(config=FailoverConfig(cooldown_on_rate_limit=1.0), coordinator=coord)
+        profile = AuthProfile(name="primary", provider="openai", api_key="k")
+        mgr.add_profile(profile)
+        mgr.mark_failure(profile, "429", is_rate_limit=True)
+        coord.armed = True
+        mgr.reset_all()
+        assert LocalQuotaCoordinator.benched_until(coord, profile.credential_id) == newer
+
+    def test_reset_all_legacy_coordinator_retains_shared_bench(self):
+        class LegacyCoordinator:
+            def __init__(self):
+                self.delegate = LocalQuotaCoordinator()
+
+            def bench(self, *args, **kwargs):
+                return self.delegate.bench(*args, **kwargs)
+
+            def benched_until(self, *args, **kwargs):
+                return self.delegate.benched_until(*args, **kwargs)
+
+            def is_benched(self, *args, **kwargs):
+                return self.delegate.is_benched(*args, **kwargs)
+
+            def clear(self, *args, **kwargs):
+                raise AssertionError("non-atomic removal must not be used")
+
+        coord = LegacyCoordinator()
+        assert isinstance(coord, QuotaCoordinatorProtocol)
+        mgr = FailoverManager(coordinator=coord)
+        profile = AuthProfile(name="primary", provider="openai", api_key="k")
+        mgr.add_profile(profile)
+        mgr.mark_failure(profile, "429", is_rate_limit=True)
+        mgr.reset_all()
+        mgr.reset_all()
+        assert profile.cooldown_until is None
+        assert coord.is_benched(profile.credential_id)
+
+    def test_reset_all_clear_failure_does_not_stop_local_resets(self):
+        class BrokenClearCoordinator(LocalQuotaCoordinator):
+            def clear_if_not_newer(self, cred_id, *, until):
+                raise RuntimeError("backend down")
+
+        mgr = FailoverManager(coordinator=BrokenClearCoordinator())
+        primary = AuthProfile(name="primary", provider="openai", api_key="k1")
+        backup = AuthProfile(name="backup", provider="openai", api_key="k2")
+        mgr.add_profile(primary)
+        mgr.add_profile(backup)
+        mgr.mark_failure(primary, "429", is_rate_limit=True)
+        mgr.mark_failure(backup, "service unavailable")
+
+        mgr.reset_all()
+
+        assert primary.status == ProviderStatus.AVAILABLE
+        assert backup.status == ProviderStatus.AVAILABLE
+        assert primary.cooldown_until is None
+        assert backup.cooldown_until is None
+
     def test_recovery_clears_shared_bench(self):
         coord = LocalQuotaCoordinator()
         mgr = FailoverManager(coordinator=coord)
