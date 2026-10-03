@@ -16,6 +16,7 @@ when explicitly enabled to avoid impacting performance.
 """
 
 import re
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
 
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from .file_memory import FileMemory
 
 logger = get_logger(__name__)
+
+_MAX_PENDING_INTERACTIONS = 1000
 
 class AutoMemoryExtractor:
     """
@@ -271,6 +274,9 @@ class AutoMemory:
         
         # Track what we've already processed to avoid duplicates
         self._processed_hashes: set = set()
+        self._processing_lock = threading.RLock()
+        self._pending_memories: Dict[str, List[Dict[str, Any]]] = {}
+        self._stored_offsets: Dict[str, int] = {}
     
     def process_interaction(
         self,
@@ -289,6 +295,32 @@ class AutoMemory:
         Returns:
             List of extracted memories
         """
+        result = self._process_interaction(user_message, assistant_response, store)
+        if not store:
+            from copy import deepcopy
+            return deepcopy(result)
+        return result
+
+    def _make_pending_room(self) -> None:
+        """Retry the oldest pending write before refusing a new interaction.
+
+        Caller holds the processing lock. Successful partial offsets are kept
+        on failure, and no pending interaction is evicted to admit new work.
+        """
+        if len(self._pending_memories) < _MAX_PENDING_INTERACTIONS:
+            return
+        pending_hash = next(iter(self._pending_memories))
+        try:
+            self._store_memories(self._pending_memories[pending_hash], pending_hash)
+        except Exception as exc:
+            raise RuntimeError("AutoMemory pending interaction limit reached; pending retry failed") from exc
+        self._processed_hashes.add(pending_hash)
+        self._pending_memories.pop(pending_hash)
+        self._stored_offsets.pop(pending_hash, None)
+
+    def _process_interaction(
+        self, user_message: str, assistant_response: Optional[str], store: bool
+    ) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
         
@@ -300,25 +332,43 @@ class AutoMemory:
         # Check if already processed
         import hashlib
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-        if text_hash in self._processed_hashes:
-            return []
-        self._processed_hashes.add(text_hash)
-        
-        # Quick filter
-        if not self.extractor.should_remember(text):
-            return []
-        
-        # Extract memories
-        memories = self.extractor.extract(text)
+        with self._processing_lock:
+            if text_hash in self._processed_hashes:
+                return []
+            memories = self._pending_memories.get(text_hash)
+
+        if memories is None:
+            # Quick filter
+            if not self.extractor.should_remember(text):
+                return []
+            memories = self.extractor.extract(text)
         
         if store and memories:
-            self._store_memories(memories)
+            with self._processing_lock:
+                # Another caller may have completed or partially stored this
+                # interaction while extraction ran outside the lock.
+                if text_hash in self._processed_hashes:
+                    return []
+                pending = self._pending_memories.get(text_hash)
+                if pending is not None:
+                    memories = pending
+                elif len(self._pending_memories) >= _MAX_PENDING_INTERACTIONS:
+                    self._make_pending_room()
+                self._pending_memories[text_hash] = memories
+                self._store_memories(memories, text_hash)
+                # Keep partial progress on failure; do not evict it to admit
+                # another interaction and duplicate its successful writes.
+                self._processed_hashes.add(text_hash)
+                self._pending_memories.pop(text_hash, None)
+                self._stored_offsets.pop(text_hash, None)
         
         return memories
     
-    def _store_memories(self, memories: List[Dict[str, Any]]):
+    def _store_memories(self, memories: List[Dict[str, Any]], text_hash: Optional[str] = None):
         """Store extracted memories in the base memory."""
-        for mem in memories:
+        for index, mem in enumerate(memories):
+            if text_hash is not None and index < self._stored_offsets.get(text_hash, 0):
+                continue
             mem_type = mem.get("type", "")
             content = mem.get("content", "")
             importance = mem.get("importance", 0.5)
@@ -344,6 +394,9 @@ class AutoMemory:
                 # Store as long-term memory
                 self.memory.add_long_term(content, importance=importance)
             
+            if text_hash is not None:
+                self._stored_offsets[text_hash] = index + 1
+
             if self.verbose:
                 logger.info(f"Auto-stored memory: {mem_type} - {content[:50]}...")
     
