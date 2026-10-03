@@ -66,9 +66,9 @@ class TestLazyImports:
         assert AutonomyConfig is Canonical
 
     def test_autonomy_config_lazy_import_matches_tool_search_pattern(self):
-        """resolve_autonomy uses the same PEP 562 lazy pattern as resolve_tool_search.
+        """resolve_autonomy / ToolSearchConfig share one PEP 562 lazy pattern.
 
-        Both back-compat resolvers keep AutonomyConfig / ToolSearchConfig out of
+        The module ``__getattr__`` keeps AutonomyConfig / ToolSearchConfig out of
         module globals until first access so `from praisonaiagents import Agent`
         does not pull agent.autonomy / escalation.types (#5056). Explicit
         attribute access must still resolve the canonical class and cache it.
