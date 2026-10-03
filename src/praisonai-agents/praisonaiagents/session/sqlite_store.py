@@ -75,10 +75,13 @@ class SqliteSessionStore(DefaultSessionStore):
             db_path = os.path.expanduser(db_path)
         self.db_path = db_path
         self._db_lock = threading.RLock()
+        self._backfill_lock = threading.RLock()
+        self._backfill_running = False
         self._conn = None
         self._fts_available = False
         self._db_ready = False
         self._backfilled = False
+        self._backfill_upgraded_files = {}
 
     # ── index lifecycle ───────────────────────────────────────────────
 
@@ -244,6 +247,7 @@ class SqliteSessionStore(DefaultSessionStore):
             with self._db_lock:
                 # A separate WAL reader must see the old or new index record,
                 # never the autocommitted gap between DELETE and INSERT.
+                owns_transaction = not conn.in_transaction
                 conn.execute("SAVEPOINT praisonai_index_refresh")
                 try:
                     conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
@@ -265,11 +269,17 @@ class SqliteSessionStore(DefaultSessionStore):
                         )
                     else:
                         conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
-                except BaseException:
-                    conn.execute("ROLLBACK TO praisonai_index_refresh")
-                    raise
-                finally:
                     conn.execute("RELEASE praisonai_index_refresh")
+                except BaseException:
+                    if conn.in_transaction:
+                        if owns_transaction:
+                            # A failed outermost RELEASE leaves the transaction
+                            # active, including its uncommitted writes and locks.
+                            conn.execute("ROLLBACK")
+                        else:
+                            conn.execute("ROLLBACK TO praisonai_index_refresh")
+                            conn.execute("RELEASE praisonai_index_refresh")
+                    raise
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
             return False
@@ -288,9 +298,9 @@ class SqliteSessionStore(DefaultSessionStore):
             logger.debug("Session de-index failed for %s: %s", session_id, exc)
 
     def _ensure_backfilled(self) -> None:
-        """Backfill the index from existing JSON transcripts exactly once.
+        """Backfill existing transcripts, retrying an incomplete pass.
 
-        Guarded by a one-time flag rather than by an empty-index check: a
+        Guarded by a successful-pass flag rather than an empty-index check: a
         single ``add_message`` on a *new* session could otherwise make the
         index non-empty and permanently skip backfilling pre-existing JSON
         transcripts, silently omitting legacy sessions from search results.
@@ -299,11 +309,18 @@ class SqliteSessionStore(DefaultSessionStore):
         """
         if self._backfilled:
             return
-        with self._db_lock:
-            if self._backfilled:
+        # Do not hold the database lock while waiting for transcript locks:
+        # imports acquire their file lock before refreshing SQLite.
+        with self._backfill_lock:
+            if self._backfilled or self._backfill_running:
                 return
-            self._backfilled = True
-            self._reindex_all()
+            # A corruption callback can query this store during the pass.
+            # It sees the index built so far; other threads wait for completion.
+            self._backfill_running = True
+            try:
+                self._backfilled = self._reindex_all()
+            finally:
+                self._backfill_running = False
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.
@@ -315,8 +332,7 @@ class SqliteSessionStore(DefaultSessionStore):
         otherwise have its already-content-indexed sessions skipped by backfill,
         leaving ``session_route`` empty and breaking gateway routing. Requiring a
         route row forces those sessions to be re-indexed so their route rows are
-        populated. Backfill runs at most once (guarded by ``_backfilled``), so
-        this stays a cheap one-time pass.
+        populated. Successful backfill runs once; incomplete passes can retry.
         """
         conn = self._connect()
         if conn is None:
@@ -335,7 +351,7 @@ class SqliteSessionStore(DefaultSessionStore):
         except Exception:
             return set()
 
-    def _reindex_all(self) -> None:
+    def _reindex_all(self) -> bool:
         """Backfill the index from existing JSON transcripts.
 
         Normally cheap: sessions already fully indexed are skipped. When the
@@ -344,18 +360,26 @@ class SqliteSessionStore(DefaultSessionStore):
         indexed, Issue #5031), every session's FTS row is rebuilt once so
         archived-only queries work immediately after upgrade rather than only
         after each session's next write. The new version is then persisted so
-        subsequent startups fall back to the cheap skip behaviour.
+        subsequent startups fall back to the cheap skip behaviour. Completed
+        upgrades are retained in memory across failed passes; retries skip
+        those sessions only while their complete index projection and locked
+        transcript generation still match.
         """
         try:
             filenames = os.listdir(self.session_dir)
         except (IOError, OSError):
-            return
+            return False
         conn = self._connect()
-        stale = (
-            conn is not None
-            and self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
-        )
-        already = set() if stale else self._indexed_ids()
+        if conn is None:
+            # No index is available; readers already use the parent JSON scan.
+            return True
+        with self._db_lock:
+            stale = self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
+        indexed = self._indexed_ids()
+        # A completed row alone cannot prove that a JSON-only peer has not
+        # replaced its transcript between upgrade attempts.
+        already = indexed if not stale else set()
+        complete = True
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
@@ -363,12 +387,32 @@ class SqliteSessionStore(DefaultSessionStore):
             if sid in already:
                 continue
             try:
-                session = self._read_session_fresh(sid)
+                filepath = self._get_session_path(sid)
+                with FileLock(filepath, self.lock_timeout):
+                    identity = self._session_file_identity(filepath)
+                    if (
+                        stale and sid in indexed and identity is not None
+                        and self._backfill_upgraded_files.get(sid) == identity
+                    ):
+                        continue
+                    # Match import's file -> database order and keep a peer
+                    # replacement from making the just-read projection stale.
+                    session = self._load_session_from_disk(sid, filepath)
+                    self._reingest_spill(sid, session)
+                    with self._lock:
+                        self._cache[sid] = session
+                    if self._index_session(session):
+                        if stale:
+                            self._backfill_upgraded_files[sid] = identity
+                    else:
+                        complete = False
             except Exception:
-                continue
-            self._index_session(session)
-        if conn is not None:
-            self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
+                complete = False
+        if complete:
+            with self._db_lock:
+                self._set_index_content_version(conn, self.INDEX_CONTENT_VERSION)
+            self._backfill_upgraded_files.clear()
+        return complete
 
     # ── write path: keep the index in sync ────────────────────────────
 
@@ -389,15 +433,76 @@ class SqliteSessionStore(DefaultSessionStore):
                     # it can restore routing fields removed by the import.
                     fresh = self._load_session_from_disk(session.session_id, filepath)
                     self._reingest_spill(session.session_id, fresh)
-                with self._lock:
-                    self._cache[session.session_id] = fresh
-                self._index_session(fresh)
+                    # Cleanup must describe the generation actually refreshed,
+                    # including a peer write that followed the durable import.
+                    session._import_file_identity = self._session_file_identity(filepath)
+                    session._import_index_session = fresh
+                    with self._lock:
+                        self._cache[session.session_id] = fresh
+                    if not self._index_session(fresh):
+                        raise RuntimeError("post-import index update failed")
             except Exception as exc:
                 # The JSON write succeeded, but the old index is no longer a
                 # trustworthy view. Fail closed until a later refresh/rebuild.
-                self._deindex_session(session.session_id)
+                self._invalidate_import_index(session)
                 logger.debug("Post-import index refresh failed for %s: %s", session.session_id, exc)
         return ok
+
+    def _invalidate_import_index(self, session: SessionData) -> None:
+        """Clear a failed import index unless it matches the current transcript."""
+        identity = getattr(session, "_import_file_identity", None)
+        conn = self._connect()
+        if conn is None:
+            return
+        try:
+            with self._db_lock:
+                # Serialize with other SQLite writers before checking the file.
+                # A peer saving afterward must index after this transaction;
+                # a peer already indexed has a different atomic file identity.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    filepath = self._get_session_path(session.session_id)
+                    current_identity = self._session_file_identity(filepath)
+                    expected = None
+                    if identity is not None and current_identity == identity:
+                        expected = getattr(session, "_import_index_session", session)
+                    elif current_identity is not None:
+                        # A JSON-only peer may replace the file without updating
+                        # SQLite. Read without FileLock while holding the DB
+                        # transaction; never quarantine or mutate that file.
+                        import json
+                        with open(filepath, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                        if self._session_file_identity(filepath) == current_identity:
+                            expected = SessionData.from_dict(data)
+                    if expected is not None:
+                        sid = session.session_id
+                        content = conn.execute("SELECT content FROM session_fts WHERE session_id = ?", (sid,)).fetchall()
+                        metadata = conn.execute("SELECT updated_at FROM session_meta WHERE session_id = ?", (sid,)).fetchall()
+                        routes = conn.execute("SELECT gateway_session_id, agent_id FROM session_route WHERE session_id = ?", (sid,)).fetchall()
+                        expected_routes = (
+                            [(expected.gateway_session_id, expected.agent_id)]
+                            if expected.gateway_session_id or expected.agent_id else []
+                        )
+                        # A peer may have successfully indexed this same file
+                        # generation after our failed update. Preserve a complete
+                        # matching projection; file identity alone cannot tell
+                        # whether those index rows are already current.
+                        current = (
+                            content == [(self._flatten(expected),)]
+                            and metadata == [(expected.updated_at,)]
+                            and routes == expected_routes
+                        )
+                        if not current:
+                            conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
+                            conn.execute("DELETE FROM session_meta WHERE session_id = ?", (sid,))
+                            conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+        except Exception as exc:
+            logger.debug("Post-import index invalidation failed for %s: %s", session.session_id, exc)
 
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
         """Refresh the index after any locked read-modify-write.
