@@ -484,9 +484,31 @@ class PermissionManager:
         """
         original_target = prefix + command
         try:
-            from .command_parser import parse_command, has_unresolvable_expansion
+            from .command_parser import (
+                parse_command,
+                has_unresolvable_expansion,
+                has_parse_error,
+            )
         except Exception:
             return None
+
+        # A command whose quoting cannot be tokenized (e.g. an unterminated
+        # quote: ``echo 'x; rm -rf x``) cannot be statically decomposed, so a
+        # specific deny can no longer be verified against its sub-operations.
+        # Escalate to ASK (an explicit deny still wins) rather than letting the
+        # flat matcher optimistically ALLOW the opaque string.
+        if has_parse_error(command):
+            flat = self._check_flat(original_target, agent)
+            if flat.action == PermissionAction.DENY:
+                return flat
+            return PermissionResult(
+                action=PermissionAction.ASK,
+                target=original_target,
+                reason=(
+                    "Command could not be parsed (unbalanced quotes?); "
+                    "requires approval"
+                ),
+            )
 
         # Shell parameter/command expansion (``${IFS}``, ``$(...)``, backticks)
         # is resolved by bash at runtime and is invisible to the static
