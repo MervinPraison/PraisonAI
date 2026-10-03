@@ -6993,9 +6993,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Default max_uses if web_fetch=True
                 web_fetch_tool['max_uses'] = 5
             
-            # Add web_fetch tool to existing tools or create tools list
+            # Add web_fetch tool to existing tools or create tools list.
+            # Copy the list first so we never mutate the caller/config list
+            # that was passed in via override_params.
             if 'tools' in params and params['tools']:
-                params['tools'].append(web_fetch_tool)
+                params['tools'] = list(params['tools']) + [web_fetch_tool]
             else:
                 params['tools'] = [web_fetch_tool]
             
@@ -7008,16 +7010,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Add the memory tool definition
                 memory_tool_def = memory_tool.get_tool_definition()
                 
-                # Add memory tool to existing tools or create tools list
+                # Add memory tool to existing tools or create tools list.
+                # Copy the list first so we never mutate the caller/config
+                # list that was passed in via override_params.
                 if 'tools' in params and params['tools']:
-                    params['tools'].append(memory_tool_def)
+                    params['tools'] = list(params['tools']) + [memory_tool_def]
                 else:
                     params['tools'] = [memory_tool_def]
                 
-                # Add the beta header for Anthropic
+                # Add the beta header for Anthropic. Copy the dict first so we
+                # never mutate the caller's extra_headers dictionary.
                 beta_header = memory_tool.get_beta_header()
-                if 'extra_headers' in params:
-                    params['extra_headers']['anthropic-beta'] = beta_header
+                if 'extra_headers' in params and params['extra_headers']:
+                    params['extra_headers'] = {
+                        **params['extra_headers'],
+                        'anthropic-beta': beta_header,
+                    }
                 else:
                     params['extra_headers'] = {'anthropic-beta': beta_header}
                 
