@@ -2284,11 +2284,18 @@ def _run_prompt(
                 agent_config.get("llm"), model, max_tokens
             )
             
-            # Resolve approval backend if specified
-            if approval:
+            # Resolve approval backend if specified. A permission policy
+            # (--allow/--deny/--permissions) with no explicit --approval derives
+            # the console backend so the patterns are enforced instead of
+            # silently dropped (same derivation the YAML path makes). On a
+            # non-TTY the backend fails closed (unmatched patterns deny).
+            effective_approval = approval
+            if effective_approval is None and permissions_config:
+                effective_approval = "console"
+            if effective_approval:
                 from praisonai_code.cli.features._approval_bridge import resolve_approval_config
                 agent_config["approval"] = resolve_approval_config(
-                    approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                    effective_approval, all_tools=approve_all_tools, timeout=approval_timeout,
                     permissions_config=permissions_config,
                 )
             

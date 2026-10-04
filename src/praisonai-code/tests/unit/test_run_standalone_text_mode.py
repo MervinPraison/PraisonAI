@@ -159,3 +159,30 @@ def test_structured_actions_run_unchanged(standalone, monkeypatch):
     run_cmd._run_prompt("hi", no_save=True, output_mode="actions")
 
     assert captured["config"]["output"] == "actions"
+
+
+def test_permission_policy_is_enforced_in_process(standalone, monkeypatch):
+    """--allow/--deny/--permissions must gate the run, not be silently dropped."""
+    captured = _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt(
+        "rm -rf build",
+        no_save=True,
+        permissions_config={"bash:rm *": "deny"},
+    )
+
+    approval = captured["config"].get("approval")
+    assert approval is not None, "a permission policy must gate the run"
+    permissions = getattr(approval, "permissions", approval)
+    assert permissions and "bash:rm *" in permissions
+
+
+def test_plain_standalone_run_install_no_approval(standalone, monkeypatch):
+    """A run without permission flags must not gain an approval backend."""
+    captured = _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True)
+
+    assert captured["config"].get("approval") is None
