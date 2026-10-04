@@ -1702,6 +1702,54 @@ class TestCompactedHistoryRecall:
             hits = store.search("XZ99-SECRETVALUE")
             assert {h.session_id for h in hits} == {"good"}
 
+    def test_invalid_utf8_transcript_does_not_abort_search(self):
+        """A transcript with invalid UTF-8 bytes must be skipped during the
+        direct JSON scan, not raise ``UnicodeDecodeError`` and abort search
+        across the remaining valid sessions (Issue #5556)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            store.add_user_message("good", "the deploy token is XZ99-SECRETVALUE")
+            store.add_user_message("bad", "the deploy token is XZ99-SECRETVALUE")
+            # Corrupt one transcript with bytes that are not valid UTF-8.
+            with open(os.path.join(tmpdir, "bad.json"), "wb") as f:
+                f.write(b"\xff\xfe")
+
+            hits = store.search("XZ99-SECRETVALUE")
+            assert {h.session_id for h in hits} == {"good"}
+
+    def test_sqlite_invalid_utf8_candidate_does_not_abort_search(self):
+        """An indexed candidate whose transcript is invalid UTF-8 must be
+        skipped during candidate loading, not raise ``UnicodeDecodeError``
+        (Issue #5556). Deterministically exercises both the FTS5 and the LIKE
+        fallback candidate branches: ``force_like`` patches ``_init_schema`` to
+        report FTS5 unavailable so the LIKE path is covered even on a SQLite
+        build that ships FTS5."""
+        from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+        for force_like in (False, True):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                store = SqliteSessionStore(session_dir=tmpdir, active_window=4)
+                if force_like:
+                    original_init = store._init_schema
+
+                    def _like_only(conn, _orig=original_init):
+                        _orig(conn)
+                        return False
+
+                    store._init_schema = _like_only
+                store.add_user_message("good", "the deploy token is XZ99-SECRETVALUE")
+                store.add_user_message("bad", "the deploy token is XZ99-SECRETVALUE")
+                # Confirm we are really exercising the intended candidate branch.
+                assert store._fts_available is (not force_like)
+                # Warm the index so both ids are indexed candidates.
+                store.search("XZ99-SECRETVALUE")
+                # Corrupt one candidate's transcript on disk.
+                with open(store._get_session_path("bad"), "wb") as f:
+                    f.write(b"\xff\xfe")
+
+                hits = store.search("XZ99-SECRETVALUE")
+                assert {h.session_id for h in hits} == {"good"}
+
     def test_sqlite_upgrade_rebuilds_stale_archived_index(self):
         """An index built by a pre-#5031 release (archived turns absent) must be
         rebuilt once on upgrade so archived-only queries work immediately,

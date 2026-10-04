@@ -60,6 +60,7 @@ class FileBackend:
         self.suffix = suffix
         self.pretty = pretty
         self._lock = threading.Lock()
+        self._unreadable_paths = set()
         
         # Create directory if needed
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +86,10 @@ class FileBackend:
         """Save data with the given key."""
         with self._lock:
             file_path = self._key_to_path(key)
+            if file_path in self._unreadable_paths:
+                if file_path.exists():
+                    raise OSError(f"Refusing to overwrite unreadable record: {file_path}")
+                self._unreadable_paths.discard(file_path)
             
             # Atomic write via temp file
             try:
@@ -112,18 +117,25 @@ class FileBackend:
                 raise
     
     def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """Load data by key."""
+        """Load data by key; failed reads protect the record from later saves.
+
+        A successful reload or deletion permits writes again. Returning None
+        for a failed read must not let a caller persist defaults over its source.
+        """
         file_path = self._key_to_path(key)
-        
-        if not file_path.exists():
-            return None
-        
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
-            logger.warning(f"Failed to load {key}: {e}")
-            return None
+        with self._lock:
+            if not file_path.exists():
+                self._unreadable_paths.discard(file_path)
+                return None
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._unreadable_paths.discard(file_path)
+                return data
+            except (UnicodeDecodeError, json.JSONDecodeError, IOError) as e:
+                self._unreadable_paths.add(file_path)
+                logger.warning(f"Failed to load {key}: {e}")
+                return None
     
     def delete(self, key: str) -> bool:
         """Delete data by key."""
@@ -133,6 +145,7 @@ class FileBackend:
             if file_path.exists():
                 try:
                     file_path.unlink()
+                    self._unreadable_paths.discard(file_path)
                     return True
                 except Exception as e:
                     logger.error(f"Failed to delete {key}: {e}")
@@ -163,6 +176,7 @@ class FileBackend:
                 if self._path_to_key(file_path) is not None:
                     try:
                         file_path.unlink()
+                        self._unreadable_paths.discard(file_path)
                         count += 1
                     except Exception:
                         pass
