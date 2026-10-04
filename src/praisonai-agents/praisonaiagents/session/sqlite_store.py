@@ -343,7 +343,13 @@ class SqliteSessionStore(DefaultSessionStore):
                     # Match the writer's file -> database order. File identity
                     # may be unavailable; the lock still protects this read.
                     with FileLock(filepath, self.lock_timeout):
+                        if not os.path.isfile(filepath):
+                            continue
                         session = self._load_session_from_disk(sid, filepath)
+                        # The loader may quarantine a corrupt transcript and
+                        # return an empty placeholder. That is not recovery.
+                        if not os.path.isfile(filepath):
+                            continue
                         self._reingest_spill(sid, session)
                         self._index_session(session)
                 except Exception as exc:
@@ -404,6 +410,16 @@ class SqliteSessionStore(DefaultSessionStore):
             return True
         with self._db_lock:
             stale = self._index_content_version(conn) != self.INDEX_CONTENT_VERSION
+            try:
+                pending = {
+                    row[0][len("import_pending:"):]
+                    for row in conn.execute(
+                        "SELECT key FROM session_index_meta WHERE key GLOB 'import_pending:*'"
+                    ).fetchall()
+                }
+            except Exception as exc:
+                logger.debug("Cannot backfill pending import indexes: %s", exc)
+                return False
         indexed = self._indexed_ids()
         # A completed row alone cannot prove that a JSON-only peer has not
         # replaced its transcript between upgrade attempts.
@@ -413,6 +429,11 @@ class SqliteSessionStore(DefaultSessionStore):
             if not filename.endswith(".json"):
                 continue
             sid = filename[:-5]
+            if sid in pending:
+                # Failed restore retries must not be bypassed by a synthetic
+                # empty transcript from the initial/upgrade backfill path.
+                complete = False
+                continue
             if sid in already:
                 continue
             try:
@@ -494,8 +515,15 @@ class SqliteSessionStore(DefaultSessionStore):
                 # Serialize with other SQLite writers before checking the file.
                 # A peer saving afterward must index after this transaction;
                 # a peer already indexed has a different atomic file identity.
-                conn.execute("BEGIN IMMEDIATE")
+                owns_transaction = not conn.in_transaction
+                conn.execute("SAVEPOINT praisonai_import_cleanup")
                 try:
+                    # SAVEPOINT alone is deferred. Acquire the SQLite writer
+                    # reservation before observing the transcript generation.
+                    conn.execute(
+                        "UPDATE session_index_meta SET value = value WHERE key = ?",
+                        ("import_pending:" + session.session_id,),
+                    )
                     filepath = self._get_session_path(session.session_id)
                     current_identity = self._session_file_identity(filepath)
                     expected = None
@@ -532,9 +560,14 @@ class SqliteSessionStore(DefaultSessionStore):
                             conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
                             conn.execute("DELETE FROM session_meta WHERE session_id = ?", (sid,))
                             conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
-                    conn.execute("COMMIT")
+                    conn.execute("RELEASE praisonai_import_cleanup")
                 except BaseException:
-                    conn.execute("ROLLBACK")
+                    if conn.in_transaction:
+                        if owns_transaction:
+                            conn.execute("ROLLBACK")
+                        else:
+                            conn.execute("ROLLBACK TO praisonai_import_cleanup")
+                            conn.execute("RELEASE praisonai_import_cleanup")
                     raise
         except Exception as exc:
             logger.debug("Post-import index invalidation failed for %s: %s", session.session_id, exc)
