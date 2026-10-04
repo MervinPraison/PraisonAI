@@ -8,6 +8,8 @@ import re
 import inspect
 import asyncio
 import threading
+from contextlib import contextmanager
+from functools import wraps
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
@@ -43,6 +45,22 @@ _TOOL_ARGUMENTS_PARSE_FAILED = object()
 # process-global lists shared by every LLM instance. Guard the read-modify-write
 # in ``_setup_event_tracking`` so concurrent instances don't corrupt them.
 _EVENT_TRACKING_LOCK = threading.Lock()
+
+
+def _request_stop_reason(method):
+    """Keep nested response calls from replacing their caller's outcome."""
+    if inspect.iscoroutinefunction(method):
+        @wraps(method)
+        async def async_call(self, *args, **kwargs):
+            with self._stop_reason_scope():
+                return await method(self, *args, **kwargs)
+        return async_call
+
+    @wraps(method)
+    def sync_call(self, *args, **kwargs):
+        with self._stop_reason_scope():
+            return method(self, *args, **kwargs)
+    return sync_call
 
 
 def _ollama_tool_result_is_successful(tool_result: Any) -> bool:
@@ -542,7 +560,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # Structured stop reason for the last tool-execution loop:
         # "completed" | "max_steps" | "error". Lets callers distinguish a finished
         # task from one truncated by the step budget (see ExecutionConfig.max_steps).
-        self._last_stop_reason = "completed"
+        self._last_stop_reason_var = contextvars.ContextVar("last_stop_reason", default=None)
+        self._stop_reason_active_var = contextvars.ContextVar("stop_reason_active", default=None)
+        self._last_stop_reason_fallback = (None, "completed")
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         # Optional Agent-supplied thread-safe append for deferred re-injection.
@@ -855,29 +875,15 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             Retry delay in seconds, or default if not found
         """
-        # Try to find retry delay patterns like "retryDelay: 58s" or "retry after 58 seconds"
-        patterns = [
-            r'"retryDelay":\s*"(\d+)s"',  # JSON format: "retryDelay": "58s"
-            r'retryDelay:\s*"?(\d+)s"?',  # retryDelay: 58s or retryDelay: "58s"
-            r'retry.{0,10}?(\d+)\s*second',  # retry after 58 seconds (non-greedy)
-            r'wait\s+(\d+)\s*second',  # wait 58 seconds
-            r'try again in (\d+)',  # try again in 58
-            r'Retry-After:\s*(\d+)',  # HTTP Retry-After header
-        ]
-
         # Max delay cap to prevent unbounded sleep (5 minutes default)
         max_delay = 300
         if self._rate_limiter is not None and hasattr(self._rate_limiter, 'max_retry_delay'):
             max_delay = self._rate_limiter.max_retry_delay
 
-        for pattern in patterns:
-            match = re.search(pattern, error_message, re.IGNORECASE)
-            if match:
-                delay = float(match.group(1))
-                # Clamp to safe bounds [0, max_delay] to prevent unbounded sleep
-                return max(0, min(delay, max_delay))
+        from .error_classifier import extract_retry_after
 
-        return self._retry_delay
+        delay = extract_retry_after(Exception(error_message), cap_seconds=max_delay)
+        return self._retry_delay if delay is None else delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if an exception is a rate limit error.
@@ -2946,6 +2952,7 @@ Respond with ONLY a valid JSON tool call in this format:
             logging.debug(f"In-loop context management skipped: {e}")
             return messages
 
+    @_request_stop_reason
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -3153,6 +3160,11 @@ Respond with ONLY a valid JSON tool call in this format:
                     # OpenAI models use the Responses API which returns text
                     # and tool calls as separate output items — no content:null.
                     if self._supports_responses_api():
+                        # A refusal belongs to one provider response. If that
+                        # response also requested tools, classify the follow-up
+                        # independently without clearing stronger loop outcomes.
+                        if iteration_count > 0 and self._last_stop_reason == "refused":
+                            self._last_stop_reason = "completed"
                         responses_params = self._build_responses_params(
                             messages=messages,
                             tools=formatted_tools,
@@ -5183,6 +5195,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Other errors are generally not recoverable
         return False
 
+    @_request_stop_reason
     async def get_response_async(
         self,
         prompt: Union[str, List[Dict]],
@@ -5384,6 +5397,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # ── Responses API path (async) ──────────────────────────
                 if self._supports_responses_api():
+                    if iteration_count > 0 and self._last_stop_reason == "refused":
+                        self._last_stop_reason = "completed"
                     responses_params = self._build_responses_params(
                         messages=messages,
                         tools=formatted_tools,
@@ -6441,8 +6456,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         truncation reason (``content_filtered | refused | length_truncated``)
         when the last completion was blocked, so a blocked/refused/truncated turn
         is surfaced as an explicit terminal reason instead of a silent empty
-        ``completed``. Only updates when the reason is still ``"completed"`` so a
-        prior ``max_steps`` (sticky truncation) is never downgraded. Absent or
+        ``completed``. A known Responses incomplete reason also replaces an
+        earlier refusal delta so tool continuation cannot clear that outcome.
+        Other prior terminal reasons, including ``max_steps``, remain sticky. Absent or
         unrecognised finish reasons are a no-op — zero overhead on success.
         """
         try:
@@ -6468,11 +6484,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not choices:
                 from .openai_client import OpenAIClient
                 finish_reason = OpenAIClient._responses_incomplete_finish_reason(response)
+                refusal = OpenAIClient._extract_responses_refusal(response)
             if finish_reason is None and not refusal:
                 return
             from ..agent.run_outcome import classify_finish_reason
-            reason = classify_finish_reason(finish_reason, refusal)
-            if reason is not None and self._last_stop_reason == "completed":
+            responses_incomplete = not choices and finish_reason is not None
+            reason = classify_finish_reason(finish_reason, None if responses_incomplete else refusal)
+            if reason is not None and (
+                self._last_stop_reason == "completed"
+                or (responses_incomplete and self._last_stop_reason == "refused")
+            ):
                 self._last_stop_reason = reason
         except Exception:
             # Never let outcome classification break the response path.
@@ -6523,6 +6544,79 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to extract token usage: {e}")
             return None
     
+    @staticmethod
+    def _stop_reason_context():
+        """Identify the calling thread and, when present, asyncio task."""
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            task = None
+        return threading.get_ident(), id(task) if task is not None else None
+
+    @contextmanager
+    def _stop_reason_scope(self):
+        """Restore an active parent's binding when a nested call returns."""
+        owner = self._stop_reason_context()
+        active = getattr(self, "_stop_reason_active_var", None)
+        if active is None:
+            active = contextvars.ContextVar("stop_reason_active", default=None)
+            self._stop_reason_active_var = active
+        nested = active.get() == owner
+        active_token = active.set(owner)
+        reason = getattr(self, "_last_stop_reason_var", None)
+        if reason is None:
+            reason = contextvars.ContextVar("last_stop_reason", default=None)
+            self._last_stop_reason_var = reason
+        reason_token = reason.set((owner, "completed"))
+        try:
+            yield
+        finally:
+            result = reason.get()
+            reason.reset(reason_token)
+            active.reset(active_token)
+            if nested:
+                self._last_stop_reason_fallback = reason.get()
+            else:
+                reason.set(result)
+                self._last_stop_reason_fallback = result
+
+    @property
+    def _last_stop_reason(self) -> str:
+        """Terminal outcome in the calling task or thread.
+
+        Concurrent request callers retain their own reason. A synchronous
+        observer after asyncio.run on the same thread reads the latest async
+        result, rather than a stale reason left in its outer context.
+        """
+        var = getattr(self, "_last_stop_reason_var", None)
+        binding = var.get() if var is not None else None
+        owner = self._stop_reason_context()
+        latest_owner, latest_reason = getattr(
+            self, "_last_stop_reason_fallback", (None, "completed")
+        )
+        if binding is None or binding[0] != owner:
+            return latest_reason
+        active = getattr(self, "_stop_reason_active_var", None)
+        if active is not None and active.get() == owner:
+            return binding[1]
+        if (
+            owner[1] is None and latest_owner is not None
+            and latest_owner[0] == owner[0] and latest_owner[1] is not None
+        ):
+            return latest_reason
+        return binding[1]
+
+    @_last_stop_reason.setter
+    def _last_stop_reason(self, reason: str) -> None:
+        """Record an outcome without changing concurrent callers' bindings."""
+        var = getattr(self, "_last_stop_reason_var", None)
+        if var is None:
+            var = contextvars.ContextVar("last_stop_reason", default=None)
+            self._last_stop_reason_var = var
+        binding = (self._stop_reason_context(), reason)
+        var.set(binding)
+        self._last_stop_reason_fallback = binding
+
     @property
     def current_agent_name(self) -> Optional[str]:
         """Task-local name of the agent currently driving this LLM.
@@ -6572,7 +6666,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self.current_agent_id = agent_id
 
     def __deepcopy__(self, memo):
-        """Deep-copy the LLM while giving the clone fresh attribution ContextVars.
+        """Deep-copy the LLM with fresh attribution and outcome ContextVars.
 
         ``contextvars.ContextVar`` has no ``__deepcopy__``/``__reduce__`` and is
         not copyable/pickleable, so ``Agent.__deepcopy__`` (which recursively
@@ -6590,6 +6684,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 clone.__dict__[key] = contextvars.ContextVar(
                     "current_agent_name", default=None
                 )
+                continue
+            if key == "_last_stop_reason_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "last_stop_reason", default=None
+                )
+                continue
+            if key == "_stop_reason_active_var":
+                clone.__dict__[key] = contextvars.ContextVar(
+                    "stop_reason_active", default=None
+                )
+                continue
+            if key == "_last_stop_reason_fallback":
+                clone.__dict__[key] = (None, "completed")
                 continue
             if key == "_current_agent_id_var":
                 clone.__dict__[key] = contextvars.ContextVar(
@@ -7329,6 +7436,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                        else getattr(event, "response", None))
                     self._record_finish_reason(_final_response)
 
+                if evt_type == "response.refusal.delta":
+                    refusal = event.get("delta", "") if isinstance(event, dict) else getattr(event, "delta", "")
+                    self._record_finish_reason({"choices": [{"message": {"refusal": refusal}}]})
+
                 # ── Text delta ──────────────────────────────────────────
                 if evt_type == "response.output_text.delta":
                     delta_text = (event.get("delta", "") if isinstance(event, dict)
@@ -7470,6 +7581,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     _final_response = (event.get("response") if isinstance(event, dict)
                                        else getattr(event, "response", None))
                     self._record_finish_reason(_final_response)
+
+                if evt_type == "response.refusal.delta":
+                    refusal = event.get("delta", "") if isinstance(event, dict) else getattr(event, "delta", "")
+                    self._record_finish_reason({"choices": [{"message": {"refusal": refusal}}]})
 
                 if evt_type == "response.output_text.delta":
                     delta_text = (event.get("delta", "") if isinstance(event, dict)
