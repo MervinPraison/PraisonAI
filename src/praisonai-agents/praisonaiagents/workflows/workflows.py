@@ -25,7 +25,6 @@ import json
 import copy
 import time
 import logging
-import threading
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -48,10 +47,7 @@ DEFAULT_MAX_PARALLEL_WORKERS = 3
 # summarisation request consumes roughly as many tokens as it saves.
 MIN_BRANCHES_FOR_LLM_SUMMARY = 3
 
-# Guards lazy creation of each Workflow's per-instance _run_lock so two threads
-# entering run()/astart() concurrently on a fresh instance cannot each create
-# and acquire a *different* lock object (which would defeat the run guard).
-_RUN_LOCK_INIT_GUARD = threading.Lock()
+from .._run_lock import ensure_run_lock
 
 
 class _WriteTrackingDict(dict):
@@ -796,14 +792,7 @@ class AgentFlow:
         first reach run()/astart() concurrently observe the *same* lock object
         (double-checked locking) rather than each minting and acquiring its own.
         """
-        lock = self._run_lock
-        if lock is None:
-            with _RUN_LOCK_INIT_GUARD:
-                lock = self._run_lock
-                if lock is None:
-                    lock = threading.Lock()
-                    self._run_lock = lock
-        return lock
+        return ensure_run_lock(self)
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
@@ -1624,14 +1613,37 @@ class AgentFlow:
             if _step_cache is not None:
                 from .step_cache import make_step_key
                 _cache_key = make_step_key(step, previous_output, input, all_variables)
-                _cached = _step_cache.get(_cache_key)
+                try:
+                    _cached = copy.deepcopy(_step_cache.get(_cache_key))
+                except Exception:
+                    _cached = None
+                    logger.warning("Could not restore cached workflow step '%s'", step.name)
                 if _cached is not None:
                     if verbose:
                         print(f"↩︎  cache hit: {step.name}")
                     previous_output = _cached.get("output")
-                    results.append({"step": step.name, "output": previous_output})
+                    # Replay the full step delta recorded on the cold run so a
+                    # hit is indistinguishable from re-executing: the step's
+                    # status/retries, any handler-supplied variables (and the
+                    # generated output variable, present only when the cold run
+                    # did not stop first), and -- crucially -- the stop signal.
+                    # A hit that only appended {step, output} and continued lost
+                    # the stop flag and the handler's variables, so a workflow
+                    # that stopped on the cold run ran on through the cached one.
+                    cached_record = _cached.get("step_record") or {
+                        "step": step.name, "output": previous_output,
+                        "status": "completed", "retries": 0,
+                    }
+                    results.append(dict(cached_record))
+                    self.step_statuses[step.name] = cached_record["status"]
+                    if hasattr(step, "status"):
+                        step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    if _cached.get("stop"):
+                        if verbose:
+                            print(f"🛑 Workflow stopped at: {step.name}")
+                        break
                     i += 1
                     continue
             
@@ -1672,6 +1684,7 @@ class AgentFlow:
             retry_count = 0
             validation_feedback = None
             guardrail_failed = False
+            cached_variable_updates = {} if _cache_key is not None else None
             
             while retry_count <= max_retries:
                 step_error = None
@@ -1688,7 +1701,14 @@ class AgentFlow:
                             output = result.output
                             stop = result.stop_workflow
                             if result.variables:
+                                # Accumulate across retries so the cached
+                                # snapshot matches the cold run: a rejected
+                                # attempt that wrote {a, b} followed by an
+                                # accepted attempt that wrote {a} leaves both
+                                # keys in the live run, so both must be cached.
                                 all_variables.update(result.variables)
+                                if cached_variable_updates is not None:
+                                    cached_variable_updates.update(result.variables)
                         else:
                             output = str(result)
                             
@@ -1985,17 +2005,26 @@ class AgentFlow:
             # Only a SUCCESSFUL step is cached. Caching a failure would serve
             # the failure again on every re-run, turning a transient error into
             # a permanent one that no retry could clear. The step's output
-            # variable is stored too: a fresh run starts with empty working
-            # variables, so a cache HIT that only restored `output` would leave
-            # `<step>_output` (or step.output_variable) missing and break the
-            # next step's substitutions. We snapshot exactly the delta this step
-            # writes below (var_name = output_variable or f"{name}_output").
+            # variables and stop signal must be stored too: a cache hit must
+            # preserve handler state and control flow, not just output text.
+            # Store only this step's variable updates, including its output
+            # variable unless it stopped before that variable was written.
             if _cache_key is not None and not step_failed:
-                _cached_var_name = step.output_variable or f"{step.name}_output"
-                _step_cache.set(
-                    _cache_key,
-                    {"output": output, "variables": {_cached_var_name: output}},
-                )
+                if not stop:
+                    _cached_var_name = step.output_variable or f"{step.name}_output"
+                    cached_variable_updates[_cached_var_name] = output
+                try:
+                    _step_cache.set(
+                        _cache_key,
+                        copy.deepcopy({
+                            "output": output, "variables": cached_variable_updates,
+                            "stop": stop, "step_record": step_record,
+                        }),
+                    )
+                except Exception:
+                    # Custom caches may only accept serializable state. Keep
+                    # the successful workflow result when storage rejects it.
+                    logger.warning("Could not cache workflow step '%s'", step.name)
             
             if verbose:
                 print(f"✅ {step.name}: {str(output)}")
@@ -2708,7 +2737,11 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             )
         from .step_cache import make_step_key
         key = make_step_key(step, previous_output, input, all_variables)
-        hit = cache.get(key)
+        try:
+            hit = copy.deepcopy(cache.get(key))
+        except Exception:
+            hit = None
+            logger.warning("Could not restore cached workflow step")
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
@@ -2724,7 +2757,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # that would replay the failure on every identical re-run and never let
         # the step retry -- turning a transient error into a permanent one.
         if isinstance(result, dict) and not result.get("error"):
-            cache.set(key, result)
+            try:
+                cache.set(key, copy.deepcopy(result))
+            except Exception:
+                logger.warning("Could not cache workflow step")
         return result
 
     def _execute_single_step_uncached(
@@ -5575,7 +5611,11 @@ class WorkflowManager:
             )
         from .step_cache import make_step_key
         key = make_step_key(step, None, original_input, all_variables)
-        hit = cache.get(key)
+        try:
+            hit = copy.deepcopy(cache.get(key))
+        except Exception:
+            hit = None
+            logger.warning("Could not restore cached workflow step")
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
@@ -5587,7 +5627,10 @@ class WorkflowManager:
         # Only cache a successful result -- a failed step must be free to retry
         # on the next run rather than replay a cached failure forever.
         if isinstance(result, dict) and not result.get("error"):
-            cache.set(key, result)
+            try:
+                cache.set(key, copy.deepcopy(result))
+            except Exception:
+                logger.warning("Could not cache workflow step")
         return result
 
     def _execute_single_step_nocache(

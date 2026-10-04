@@ -9,6 +9,7 @@ Provides both legacy API (classify_error) and new structured classification
 """
 
 import re
+import math
 import random
 from dataclasses import dataclass
 from enum import Enum
@@ -644,7 +645,9 @@ def extract_retry_after(
             retry_after = None
         if retry_after is not None:
             try:
-                return min(float(retry_after), cap_seconds)
+                delay = float(retry_after)
+                if math.isfinite(delay) and delay >= 0:
+                    return min(delay, cap_seconds)
             except (ValueError, TypeError):
                 # Not a plain delta-seconds value — RFC 7231 also permits an
                 # HTTP-date. Parse it so a provider that sends an absolute reset
@@ -658,24 +661,44 @@ def extract_retry_after(
     # 2. Some SDKs expose a numeric ``retry_after`` attribute directly.
     retry_after_attr = getattr(error, "retry_after", None)
     if isinstance(retry_after_attr, (int, float)):
-        return min(float(retry_after_attr), cap_seconds)
+        try:
+            delay = float(retry_after_attr)
+        except OverflowError:
+            delay = float("inf")
+        if math.isfinite(delay) and delay >= 0:
+            return min(delay, cap_seconds)
 
     error_str = str(error)
     
     # 3. Fall back to parsing common Retry-After patterns from the message.
+    #    Capture the full signed token so a negative hint (e.g. "-3600 seconds")
+    #    is rejected by the finite/non-negative check below instead of being
+    #    silently read as a positive delay. Match a whole numeric token so
+    #    leading-dot fractions, exponents and malformed suffixes cannot be
+    #    mistaken for an unrelated positive integer.
+    # A period may terminate a sentence, but may not split an embedded token.
+    number = (
+        r"(?<![\w.+-])([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)"
+        r"(?![\deE+-]|\.(?!\s|$|[\"')\]}])|\.\s*(?:seconds?|s)\b)"
+    )
     patterns = [
-        r"retry.?after[:\s]+(\d+)",
-        r"retry[:\s]+(\d+)",
-        r"wait[:\s]+(\d+)",
-        r"(\d+).*second",
+        # Quoted duration values must close immediately after the unit.
+        r'"?retryDelay"?\s*:\s*"' + number + r's"',
+        r'"?retryDelay"?\s*:\s*' + number + r's(?=$|[\s,;}\]])',
+        r"try again in\s+" + number,
+        r"retry.?after[:\s]+" + number,
+        r"retry[:\s]+" + number,
+        r"wait[:\s]+" + number,
+        number + r"\s*second",
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, error_str, re.IGNORECASE)
-        if match:
+        # Invalid earlier hints must not hide a later valid hint of this form.
+        for match in re.finditer(pattern, error_str, re.IGNORECASE):
             try:
                 delay = float(match.group(1))
-                return min(delay, cap_seconds)
+                if math.isfinite(delay) and delay >= 0:
+                    return min(delay, cap_seconds)
             except (ValueError, IndexError):
                 continue
     

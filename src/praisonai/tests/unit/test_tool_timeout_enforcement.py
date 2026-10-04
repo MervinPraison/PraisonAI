@@ -732,3 +732,244 @@ def test_sync_wrapper_retries_on_concurrent_cancel():
         assert wrapped(21) == 42
     finally:
         live.shutdown()
+
+
+# --- Issue #5650: native tools delegate per-tool timeout to core --------------
+
+
+def test_native_delegation_returns_plain_callable_unwrapped():
+    # On the native framework a plain callable is enforced by core's own tool
+    # executor, so the wrapper must NOT bind it to a second pool — it returns
+    # the callable unchanged (identity) rather than a timeout wrapper.
+    from praisonai.agents_generator import _wrap_with_timeout
+
+    def tool(x):
+        return x + 1
+
+    def _factory():  # must never be consulted on the native path
+        raise AssertionError("native plain callable must not build an executor")
+
+    wrapped = _wrap_with_timeout(
+        tool, 5.0, _factory, owner_key=uuid.uuid4(), native_delegates_to_core=True
+    )
+    assert wrapped is tool
+
+
+def test_native_delegation_still_wraps_framework_tool_objects():
+    # Framework tool objects (CrewAI/LangChain BaseTool) never reach core's
+    # executor, so even on the native path they must still be wrapped so their
+    # args_schema survives and the per-call timeout is enforced by the wrapper.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from praisonai.agents_generator import _wrap_with_timeout, _TimeoutBoundTool
+
+    class FrameworkTool:
+        name = "calc"
+        description = "doubles x"
+        args_schema = {"x": "int"}
+
+        def _run(self, x=1):
+            return x * 2
+
+        def run(self, x=1):
+            return self._run(x)
+
+    inner = FrameworkTool()
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        proxy = _wrap_with_timeout(
+            inner, 5.0, lambda: executor, owner_key=uuid.uuid4(),
+            native_delegates_to_core=True,
+        )
+        # Framework objects are still wrapped (schema-preserving proxy), never
+        # passed through as the bare inner object.
+        assert proxy is not inner
+        assert isinstance(proxy, _TimeoutBoundTool)
+        assert isinstance(proxy, FrameworkTool)
+        assert proxy.args_schema == {"x": "int"}
+        assert proxy.run(x=3) == 6
+    finally:
+        executor.shutdown()
+
+
+def test_native_delegation_off_by_default_wraps_everything():
+    # Backward compatibility: without the flag a plain callable is wrapped as
+    # before (crewai/autogen frameworks that never flow through core).
+    from concurrent.futures import ThreadPoolExecutor
+    from praisonai.agents_generator import _wrap_with_timeout
+
+    def tool(x):
+        return x + 1
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        wrapped = _wrap_with_timeout(
+            tool, 5.0, lambda: executor, owner_key=uuid.uuid4()
+        )
+        # A wrapper was installed (not identity), preserving existing behaviour.
+        assert wrapped is not tool
+        assert wrapped(41) == 42
+    finally:
+        executor.shutdown()
+
+
+def test_build_tools_dict_native_leaves_plain_callables_unwrapped():
+    # End-to-end on the native framework: the uniform CLI timeout no longer
+    # wraps plain callables (core enforces), and the generator exposes the raw
+    # per-agent budget so the native adapter can set the core tool_config.
+    gen = _make_generator()
+    gen.framework = "praisonai"
+    gen.cli_config = {"tool_timeout": 5}
+
+    def sentinel():
+        return "ok"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"plain": sentinel}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    try:
+        tools_dict = gen._build_tools_dict({"roles": {"a": {}}})
+        # Native path: plain callable is left unwrapped for core to enforce.
+        assert tools_dict["plain"] is sentinel
+        # The raw per-agent timeout resolver is exposed for the native adapter.
+        native_resolver = gen._run_ctx.get("_native_tool_timeout_resolver")
+        assert callable(native_resolver)
+        assert native_resolver("a") == 5.0
+    finally:
+        gen.close()
+
+
+def test_build_tools_dict_non_native_still_wraps_and_no_native_resolver():
+    # A non-native framework keeps wrapper-side wrapping and exposes no native
+    # timeout resolver (core does not own those tools).
+    gen = _make_generator()
+    gen.framework = "crewai"
+    gen.cli_config = {"tool_timeout": 5}
+
+    never = threading.Event()
+
+    def _blocking():
+        never.wait(30)
+        return "done"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"blocking": _blocking}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    try:
+        from praisonai.agents_generator import ToolTimeoutError
+        tools_dict = gen._build_tools_dict({"roles": {"a": {}}})
+        # Non-native: the plain callable is still wrapped (identity changed).
+        assert tools_dict["blocking"] is not _blocking
+        gen.cli_config = {"tool_timeout": 0.3}
+        # Re-wrap with a tight budget to assert enforcement still happens.
+        wrapped = gen._wrap_tool_with_timeout(_blocking, 0.3)
+        with pytest.raises(ToolTimeoutError):
+            wrapped()
+        assert gen._run_ctx.get("_native_tool_timeout_resolver") is None
+    finally:
+        never.set()
+        gen.close()
+
+
+def test_native_adapter_forwards_tool_timeout_to_core_tool_config():
+    # The native adapter must configure each core Agent's tool_config timeout
+    # from the generator's resolved per-agent budget so native tools keep their
+    # timeout even though the wrapper no longer wraps them (#5650).
+    try:
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+        from praisonaiagents.config.feature_configs import ToolConfig
+    except ImportError:
+        pytest.skip("PraisonAIAdapter / core ToolConfig not available")
+
+    import praisonaiagents
+    from unittest import mock
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    adapter._format_template = lambda v, topic="": v
+
+    captured = {}
+
+    # Capture Agent kwargs without constructing a real agent; patch only the
+    # Agent/Task symbols on the real core module so its submodules still import.
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    class _FakeTask:
+        def __init__(self, **kwargs):
+            pass
+
+    config = {"roles": {"a": {"role": "A", "tool_timeout": 7, "tools": []}}}
+
+    def _native_resolver(agent_key):
+        return 7.0 if agent_key == "a" else None
+
+    cli_config = {"_native_tool_timeout_resolver": _native_resolver}
+
+    with mock.patch.object(praisonaiagents, "Agent", _FakeAgent), \
+         mock.patch.object(praisonaiagents, "Task", _FakeTask):
+        adapter._build_agents_and_tasks(
+            config, "topic", {}, None, None, "gpt-4o-mini",
+            cli_config=cli_config,
+        )
+
+    tc = captured.get("tool_config")
+    assert isinstance(tc, ToolConfig)
+    assert tc.timeout == 7
+
+
+def test_native_adapter_preserves_subsecond_tool_timeout():
+    # Regression (#5650 review): a subsecond per-agent budget must survive the
+    # forward to core unrounded. Previously the adapter did int(round(budget)),
+    # collapsing 0.4 -> 0; core treats a non-positive timeout as "no timeout"
+    # and the native callable is left unwrapped, so enforcement was silently
+    # lost. The fractional budget must reach core intact.
+    try:
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+        from praisonaiagents.config.feature_configs import ToolConfig
+    except ImportError:
+        pytest.skip("PraisonAIAdapter / core ToolConfig not available")
+
+    import praisonaiagents
+    from unittest import mock
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    adapter._format_template = lambda v, topic="": v
+
+    captured = {}
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    class _FakeTask:
+        def __init__(self, **kwargs):
+            pass
+
+    config = {"roles": {"a": {"role": "A", "tool_timeout": 0.4, "tools": []}}}
+
+    def _native_resolver(agent_key):
+        return 0.4 if agent_key == "a" else None
+
+    cli_config = {"_native_tool_timeout_resolver": _native_resolver}
+
+    with mock.patch.object(praisonaiagents, "Agent", _FakeAgent), \
+         mock.patch.object(praisonaiagents, "Task", _FakeTask):
+        adapter._build_agents_and_tasks(
+            config, "topic", {}, None, None, "gpt-4o-mini",
+            cli_config=cli_config,
+        )
+
+    tc = captured.get("tool_config")
+    assert isinstance(tc, ToolConfig)
+    # Fractional budget preserved exactly (not rounded to 0, not to 1).
+    assert tc.timeout == 0.4
+    assert tc.timeout > 0
