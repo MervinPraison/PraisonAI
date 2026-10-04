@@ -14,6 +14,7 @@ def sample_tool() -> str:
 
 @pytest.fixture
 def agent():
+    """Close the local agent after each prompt assembly check."""
     instance = Agent(instructions='Answer briefly', tools=[sample_tool], context=False)
     yield instance
     instance.close()
@@ -21,6 +22,7 @@ def agent():
 
 @pytest.mark.parametrize('override', [None, [], [sample_tool]])
 def test_cache_hit_preserves_complete_prompt(agent, override):
+    """Retain full prompt contents for each explicit tool override."""
     first = agent._build_system_prompt(tools=override)
     second = agent._build_system_prompt(tools=override)
     assert second == first
@@ -51,6 +53,7 @@ def test_cache_hit_refreshes_current_default_tools(agent, monkeypatch):
 
 
 def test_cache_hit_refreshes_session_context(agent, monkeypatch):
+    """Read the current session origin instead of caching its old value."""
     import praisonaiagents.session.context as context
 
     current = SimpleNamespace(origin=SimpleNamespace(
@@ -68,6 +71,7 @@ def test_cache_hit_refreshes_session_context(agent, monkeypatch):
 
 
 def test_cache_hit_retains_prefix_reuse_and_appends_suffix_once(agent, monkeypatch):
+    """Reuse the stable prefix while adding the suffix exactly once."""
     calls = []
     agent._resolve_harness_base_prompt = lambda: calls.append('build') or 'stable prefix'
     monkeypatch.setenv('PRAISONAI_APPEND_SYSTEM_PROMPT', 'per-turn suffix')
