@@ -30,6 +30,7 @@ Usage::
 
 import os
 import threading
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
@@ -230,42 +231,49 @@ class SqliteSessionStore(DefaultSessionStore):
                 parts.append(str(content))
         return "\n".join(parts)
 
-    def _index_session(self, session: SessionData) -> None:
-        """Insert/replace a session's content in the index (best-effort)."""
+    def _index_session(self, session: SessionData) -> bool:
+        """Refresh the index best-effort, reporting whether it succeeded."""
         conn = self._connect()
         if conn is None:
-            return
+            return False
         content = self._flatten(session)
         sid = session.session_id
         gateway_session_id = getattr(session, "gateway_session_id", None)
         agent_id = getattr(session, "agent_id", None)
         try:
             with self._db_lock:
-                conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
-                conn.execute(
-                    "INSERT INTO session_fts (session_id, content) VALUES (?, ?)",
-                    (sid, content),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_meta (session_id, updated_at) "
-                    "VALUES (?, ?)",
-                    (sid, session.updated_at),
-                )
-                # Keep the gateway/agent routing index in sync so inbound
-                # routing is an indexed lookup, not a full-directory scan.
-                if gateway_session_id or agent_id:
+                # A separate WAL reader must see the old or new index record,
+                # never the autocommitted gap between DELETE and INSERT.
+                conn.execute("SAVEPOINT praisonai_index_refresh")
+                try:
+                    conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
                     conn.execute(
-                        "INSERT OR REPLACE INTO session_route "
-                        "(session_id, gateway_session_id, agent_id) "
-                        "VALUES (?, ?, ?)",
-                        (sid, gateway_session_id, agent_id),
+                        "INSERT INTO session_fts (session_id, content) VALUES (?, ?)",
+                        (sid, content),
                     )
-                else:
                     conn.execute(
-                        "DELETE FROM session_route WHERE session_id = ?", (sid,)
+                        "INSERT OR REPLACE INTO session_meta (session_id, updated_at) "
+                        "VALUES (?, ?)",
+                        (sid, session.updated_at),
                     )
+                    if gateway_session_id or agent_id:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO session_route "
+                            "(session_id, gateway_session_id, agent_id) "
+                            "VALUES (?, ?, ?)",
+                            (sid, gateway_session_id, agent_id),
+                        )
+                    else:
+                        conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
+                except BaseException:
+                    conn.execute("ROLLBACK TO praisonai_index_refresh")
+                    raise
+                finally:
+                    conn.execute("RELEASE praisonai_index_refresh")
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
+            return False
+        return True
 
     def _deindex_session(self, session_id: str) -> None:
         conn = self._connect()
@@ -464,14 +472,14 @@ class SqliteSessionStore(DefaultSessionStore):
                     match = self._to_fts_query(query)
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE session_fts "
-                        "MATCH ? ORDER BY bm25(session_fts) LIMIT ?",
+                        "MATCH ? ORDER BY bm25(session_fts), session_id LIMIT ?",
                         (match, fetch),
                     ).fetchall()
                 else:
                     like = "%" + query.replace("%", "").replace("_", "") + "%"
                     rows = conn.execute(
                         "SELECT session_id FROM session_fts WHERE content LIKE ? "
-                        "LIMIT ?",
+                        "ORDER BY session_id LIMIT ?",
                         (like, fetch),
                     ).fetchall()
         except Exception as exc:
@@ -488,6 +496,104 @@ class SqliteSessionStore(DefaultSessionStore):
         if not terms:
             return '""'
         return " OR ".join('"%s"' % t for t in terms)
+
+    @contextmanager
+    def _search_id_connection(self, conn):
+        """Keep WAL candidate enumeration off the writer connection."""
+        import sqlite3
+        from pathlib import Path
+
+        with self._db_lock:
+            journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        if self.db_path != ":memory:" and journal.lower() == "wal":
+            reader = sqlite3.connect(
+                Path(self.db_path).resolve().as_uri() + "?mode=ro",
+                uri=True, isolation_level=None,
+            )
+            try:
+                yield reader
+            finally:
+                reader.close()
+        else:
+            # Non-WAL stores retain the shared lock only for ID enumeration,
+            # never for transcript reads or corruption callbacks.
+            with self._db_lock:
+                yield conn
+
+    @contextmanager
+    def _search_candidate_ids(self, conn, query: str):
+        """Spool matching IDs in fixed batches; close SQL before file I/O.
+
+        A stable candidate set requires enumerating the matches. Spooling only
+        IDs bounds Python ID memory without copying the index or keeping a
+        SQLite read snapshot across transcript reads and corruption callbacks.
+        """
+        import json
+        import tempfile
+
+        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as spool:
+            with self._search_id_connection(conn) as reader:
+                if self._fts_available:
+                    cursor = reader.execute(
+                        "SELECT session_id FROM session_fts WHERE session_fts "
+                        "MATCH ? ORDER BY bm25(session_fts), session_id",
+                        (self._to_fts_query(query),),
+                    )
+                else:
+                    like = "%" + query.replace("%", "").replace("_", "") + "%"
+                    cursor = reader.execute(
+                        "SELECT session_id FROM session_fts WHERE content LIKE ? "
+                        "ORDER BY session_id", (like,),
+                    )
+                try:
+                    while True:
+                        rows = cursor.fetchmany(128)
+                        if not rows:
+                            break
+                        for row in rows:
+                            spool.write(json.dumps(row[0], ensure_ascii=True) + "\n")
+                finally:
+                    cursor.close()
+            spool.seek(0)
+            yield (json.loads(line) for line in spool)
+
+    def _read_search_candidates(self, query: str, limit: int, consume=None):
+        """Read usable lineages outside the SQL lock and read snapshot.
+
+        A consumer scores each payload immediately instead of retaining every
+        continuation. Without a consumer, preserve the private list interface.
+        """
+        import json
+
+        conn = self._connect()
+        if conn is None:
+            return None
+        self._ensure_backfilled()
+        allowance = max(limit * 5, limit, 1)
+        candidates = []
+        lineages = set()
+        try:
+            with self._search_candidate_ids(conn, query) as ids:
+                for sid in ids:
+                    filepath = self._get_session_path(sid)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                    except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+                        self._report_unreadable_session(sid, filepath, exc)
+                        continue
+                    if consume is None:
+                        candidates.append((sid, data))
+                    else:
+                        consume(sid, data)
+                    lineage = self._lineage_key(data)
+                    lineages.add(("lineage", lineage) if lineage is not None else ("session", sid))
+                    if len(lineages) >= allowance:
+                        break
+        except Exception as exc:
+            logger.debug("Index query failed (%s); falling back to scan.", exc)
+            return None
+        return candidates
 
     # ── gateway/agent routing: indexed key → session lookup ───────────
 
@@ -564,29 +670,19 @@ class SqliteSessionStore(DefaultSessionStore):
         if not query:
             return []
 
-        candidate_ids = self._candidate_ids(query, limit)
-        if candidate_ids is None:
-            return super().search(query, limit=limit, window=window)
-        if not candidate_ids:
-            return []
-
         needle = query.lower()
         terms = [t for t in needle.split() if t]
-        hits: List[tuple] = []
+        hits: Dict[Any, tuple] = {}
+        position = 0
 
-        for sid in candidate_ids:
-            filepath = self._get_session_path(sid)
-            try:
-                import json
-
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, IOError, OSError):
-                continue
-
+        def consume(sid, data):
+            """Retain each lineage's best hit and its original tie position."""
+            nonlocal position
+            ordinal = position
+            position += 1
             messages = self._searchable_messages(data)
             if not messages:
-                continue
+                return
 
             best_index = -1
             best_score = 0.0
@@ -608,7 +704,7 @@ class SqliteSessionStore(DefaultSessionStore):
                     best_index = idx
 
             if best_index < 0:
-                continue
+                return
 
             start = max(0, best_index - window)
             end = min(len(messages), best_index + window + 1)
@@ -639,13 +735,26 @@ class SqliteSessionStore(DefaultSessionStore):
                 messages=context,
                 bookends=self._bookends(messages, self.BOOKEND_SIZE),
             )
-            hits.append((self._lineage_key(data), hit))
+            lineage = self._lineage_key(data)
+            key = ("lineage", lineage) if lineage is not None else ("session", sid)
+            previous = hits.get(key)
+            if previous is None or (hit.score, hit.when or "") > (
+                previous[1].score, previous[1].when or ""
+            ):
+                hits[key] = (lineage, hit, ordinal)
 
-        hits.sort(key=lambda item: (item[1].score, item[1].when or ""), reverse=True)
+        candidates = self._read_search_candidates(query, limit, consume=consume)
+        if candidates is None:
+            return super().search(query, limit=limit, window=window)
+        ranked = sorted(
+            hits.values(),
+            key=lambda item: (item[1].score, item[1].when or "", -item[2]),
+            reverse=True,
+        )
 
         deduped: List[Any] = []
         seen_lineage: set = set()
-        for lineage, hit in hits:
+        for lineage, hit, _ in ranked:
             if lineage is not None:
                 if lineage in seen_lineage:
                     continue

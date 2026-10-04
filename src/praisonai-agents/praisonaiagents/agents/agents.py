@@ -24,10 +24,7 @@ try:
 except ImportError:
     get_token_collector = None
 
-# Guards lazy creation of each AgentTeam's per-instance _run_lock so two threads
-# that first reach start()/astart() concurrently observe the same lock object
-# (double-checked locking) rather than each minting and acquiring its own.
-_RUN_LOCK_INIT_GUARD = threading.Lock()
+from .._run_lock import ensure_run_lock
 
 # Task status constants
 class TaskStatus(Enum):
@@ -2088,14 +2085,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         guard (double-checked locking) so two threads racing into start()/astart()
         observe the same lock object.
         """
-        lock = getattr(self, '_run_lock', None)
-        if lock is None:
-            with _RUN_LOCK_INIT_GUARD:
-                lock = getattr(self, '_run_lock', None)
-                if lock is None:
-                    lock = threading.Lock()
-                    self._run_lock = lock
-        return lock
+        return ensure_run_lock(self)
 
     def _execution_identity(self):
         """Identity of the current execution for re-entrancy checks.

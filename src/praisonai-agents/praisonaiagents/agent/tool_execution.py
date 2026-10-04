@@ -547,6 +547,15 @@ class ToolExecutionMixin:
         so disabling or unregistering a plugin revokes its tools from this
         agent's discovery and execution paths.
         """
+        # Hot-path fast exit: when no plugins are registered (the common case)
+        # skip constructing/scanning the manager entirely on every Agent init.
+        try:
+            from ..plugins.manager import has_registered_plugins
+
+            if not has_registered_plugins():
+                return
+        except Exception:  # pragma: no cover - defensive plugin boundary
+            pass
         try:
             from ..plugins import get_plugin_manager
 
@@ -673,6 +682,15 @@ class ToolExecutionMixin:
         prevent the Agent from constructing. Zero overhead when no such plugin
         is enabled (each collector returns an empty list).
         """
+        # Hot-path fast exit: when no plugins are registered (the common case)
+        # skip constructing/scanning the manager entirely on every Agent init.
+        try:
+            from ..plugins.manager import has_registered_plugins
+
+            if not has_registered_plugins():
+                return
+        except Exception:  # pragma: no cover - defensive plugin boundary
+            pass
         try:
             from ..plugins import get_plugin_manager
 

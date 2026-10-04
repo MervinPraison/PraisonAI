@@ -477,6 +477,41 @@ class TestHierarchicalSessionStore:
         assert len(session1.messages) == len(session2.messages)
         assert session1.session_id == session2.session_id
 
+    def test_extended_cache_is_bounded_and_reloads_after_eviction(self):
+        """The extended-session cache (and its mtimes) must stay bounded.
+
+        A long-lived process using HierarchicalSessionStore previously kept
+        every loaded session in ``_extended_cache`` forever. It now shares the
+        base LRU bound, so touching more sessions than ``cache_maxsize`` evicts
+        the oldest, drops its companion mtime entry, and the next access
+        reloads from disk (the source of truth).
+        """
+        store = HierarchicalSessionStore(session_dir=self.temp_dir, cache_maxsize=2)
+
+        ids = []
+        for i in range(5):
+            sid = store.create_session(title=f"S{i}")
+            store.add_message(sid, "user", f"msg-{i}")
+            store.get_extended_session(sid)  # populate extended cache
+            ids.append(sid)
+
+        # Cache never exceeds the configured bound, and mtimes track the cache.
+        assert len(store._extended_cache) <= 2
+        assert len(store._cache_mtimes) <= 2
+        assert set(store._cache_mtimes).issubset(set(store._extended_cache))
+
+        # An evicted session still reads correctly (reloads from disk).
+        reloaded = store.get_extended_session(ids[0])
+        assert [m.content for m in reloaded.messages] == ["msg-0"]
+
+    def test_extended_cache_unbounded_when_maxsize_zero(self):
+        """cache_maxsize=0 keeps the legacy unbounded extended cache."""
+        store = HierarchicalSessionStore(session_dir=self.temp_dir, cache_maxsize=0)
+        for i in range(5):
+            sid = store.create_session(title=f"S{i}")
+            store.get_extended_session(sid)
+        assert len(store._extended_cache) == 5
+
 
 class TestGlobalHierarchicalStore:
     """Tests for global hierarchical store."""
