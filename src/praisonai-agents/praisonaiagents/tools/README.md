@@ -218,6 +218,26 @@ Ask yourself these questions:
 - Operations are related (all about stocks)
 - Manages connections efficiently
 
+### FXMacroData Tool (Class-Based)
+- Macroeconomic releases (CPI, GDP, policy rates, payrolls), release calendars,
+  FX rates, CFTC positioning and commodity prices from
+  [FXMacroData](https://fxmacrodata.com/?utm_source=github&utm_medium=referral&utm_campaign=PraisonAI&utm_content=docs)
+- USD indicators, the USD catalogue and calendar, and USD COT work without a
+  key. Keyless indicator data is delayed 15 minutes (see `freemium_delay` in
+  the response) and covers the last 90 days
+- Set `FXMACRODATA_API_KEY` for other currencies, FX rates and commodities
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import fxmacrodata_catalogue, fxmacrodata_calendar, fxmacrodata_indicator
+
+agent = Agent(
+    instructions="You answer questions about macro data releases.",
+    tools=[fxmacrodata_catalogue, fxmacrodata_indicator, fxmacrodata_calendar],
+)
+agent.start("What was the last US CPI print and when is the next one?")
+```
+
 ## Getting Started
 
 1. **Choose Your Approach** based on the guidelines above

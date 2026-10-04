@@ -38,6 +38,11 @@ EXTERNAL_TOOL_NAMES = set({
     # Web search tools
     "internet_search", "duckduckgo", "tavily_search", "exa_search",
     "searxng_search", "web_search",
+
+    # Market data APIs
+    "fxmacrodata", "fxmacrodata_indicator", "fxmacrodata_catalogue",
+    "fxmacrodata_calendar", "fxmacrodata_forex", "fxmacrodata_cot",
+    "fxmacrodata_commodity",
     
     # Web scraping tools
     "scrape_page", "crawl4ai", "web_crawl", "spider_crawl",
