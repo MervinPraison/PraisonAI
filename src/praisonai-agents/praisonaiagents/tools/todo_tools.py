@@ -53,6 +53,22 @@ class TodoTools:
             logger.warning(f"Failed to load todos: {e}")
             return []
 
+    def _save_todos(self, todos: List[Dict]) -> None:
+        """Atomically persist a full todo list.
+
+        Retained for the MCP CLI adapter
+        (``praisonai_mcp.mcp_server.adapters.cli_tools``), which does its own
+        read-modify-write via ``_load_todos`` + ``_save_todos`` and writes the
+        owner's record shape. The write goes through ``atomic_write_json`` so a
+        crash mid-write never truncates the previous good file. In-process
+        mutations (``todo_add``/``todo_update``) use the locked ``_update_todos``
+        below instead; this plain save keeps the cross-adapter contract intact.
+        """
+        from ..utils.atomic_io import atomic_write_json
+        atomic_write_json(
+            self._get_todo_file(), todos, indent=2, ensure_ascii=False
+        )
+
     def _update_todos(self, mutate) -> List[Dict]:
         """Locked atomic read-modify-write over the todo file.
 

@@ -13,10 +13,16 @@ import json
 import os
 import tempfile
 import threading
+import time
 from collections import defaultdict
 from typing import Any, Callable
 
-__all__ = ["atomic_write_json", "atomic_write_text", "update_json"]
+__all__ = [
+    "atomic_write_json",
+    "atomic_write_text",
+    "quarantine_corrupt_file",
+    "update_json",
+]
 
 # Per-path in-process mutexes so threads in one process serialise before they
 # even reach the cross-process ``FileLock``. Keyed by absolute path.
@@ -78,6 +84,22 @@ def atomic_write_json(path: str, data: Any, **dump_kwargs: Any) -> None:
         raise
 
 
+def quarantine_corrupt_file(path: str) -> str:
+    """Move a corrupt file aside to a unique ``.corrupt`` sidecar.
+
+    Each quarantine uses a distinct ``<path>.<pid>.<ns>.corrupt`` name so a
+    file that goes corrupt more than once never overwrites an earlier recovery
+    copy. The move uses :func:`os.replace` (atomic rename) and the chosen
+    destination is reported back. Raises ``OSError`` on failure so the caller
+    can stop instead of overwriting potentially recoverable bytes.
+    """
+    dest = "{path}.{pid}.{ns}.corrupt".format(
+        path=path, pid=os.getpid(), ns=time.time_ns()
+    )
+    os.replace(path, dest)
+    return dest
+
+
 def update_json(
     path: str,
     mutate: Callable[[Any], Any],
@@ -93,9 +115,11 @@ def update_json(
     :func:`atomic_write_json`, so a crash mid-write never truncates the previous
     good file.
 
-    A corrupt JSON file is *not* treated as empty: it is moved aside to
-    ``<path>.corrupt`` and the update proceeds from ``default()`` so a single
-    torn file can never silently wipe real data without leaving evidence.
+    A corrupt JSON file is *not* treated as empty: it is moved aside to a
+    unique ``<path>.<pid>.<ns>.corrupt`` sidecar and the update proceeds from
+    ``default()`` so a single torn file can never silently wipe real data
+    without leaving evidence. If the quarantine move itself fails, the error
+    propagates instead of overwriting the original file.
 
     Args:
         path: JSON file path.
@@ -117,10 +141,10 @@ def update_json(
         except FileNotFoundError:
             data = default()
         except (json.JSONDecodeError, ValueError):
-            try:
-                os.replace(path, path + ".corrupt")
-            except OSError:
-                pass
+            # Quarantine under a unique name; if the move itself fails we must
+            # NOT fall through to the atomic write, which would replace the
+            # original and destroy its potentially recoverable bytes.
+            quarantine_corrupt_file(path)
             data = default()
         result = mutate(data)
         atomic_write_json(path, data, **dump_kwargs)

@@ -81,9 +81,15 @@ class MCPAuthStorage:
     def _read(self) -> Dict[str, Any]:
         """Read all entries from storage file.
 
-        A corrupt file is moved aside to ``<path>.corrupt`` and logged rather
-        than silently treated as "no credentials", so a torn write can never
-        make every server's tokens vanish without a trace.
+        A corrupt file is moved aside to a unique ``.corrupt`` sidecar and
+        logged rather than silently treated as "no credentials", so a torn
+        write can never make every server's tokens vanish without a trace.
+
+        The quarantine happens *under the same FileLock the writers use*, and
+        the file is re-read inside the lock first: if a concurrent writer
+        repaired the store between the first decode error and acquiring the
+        lock, we return the repaired data instead of quarantining valid
+        credentials.
         """
         try:
             with open(self.filepath, 'r', encoding='utf-8') as f:
@@ -91,14 +97,37 @@ class MCPAuthStorage:
         except FileNotFoundError:
             return {}
         except (json.JSONDecodeError, ValueError):
-            try:
-                os.replace(self.filepath, self.filepath + ".corrupt")
-                logger.error(
-                    "MCP auth store was corrupt; moved aside to %s.corrupt",
-                    self.filepath,
-                )
-            except OSError:
-                pass
+            pass
+
+        # Corrupt on the optimistic (lock-free) read. Take the writer lock and
+        # re-read before quarantining so we never move a file another process
+        # just repaired.
+        from ..session.store import FileLock
+        from ..utils.atomic_io import quarantine_corrupt_file
+
+        try:
+            with FileLock(self.filepath, timeout=10):
+                try:
+                    with open(self.filepath, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except FileNotFoundError:
+                    return {}
+                except (json.JSONDecodeError, ValueError):
+                    try:
+                        dest = quarantine_corrupt_file(self.filepath)
+                        logger.error(
+                            "MCP auth store was corrupt; moved aside to %s",
+                            dest,
+                        )
+                    except OSError:
+                        logger.error(
+                            "MCP auth store at %s is corrupt and could not be "
+                            "quarantined", self.filepath,
+                        )
+                    return {}
+        except (OSError, IOError):
+            # Could not acquire the lock; fall back to the previous behaviour
+            # of reporting empty rather than blocking a read path.
             return {}
     
     def get(self, mcp_name: str) -> Optional[Dict[str, Any]]:
