@@ -377,6 +377,18 @@ def test_append_system_prompt_bypasses_warm_runtime(monkeypatch):
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
 
+    # Since #5644 a standalone text run renders in-process, so the sink here is
+    # the real praisonaiagents Agent — stub it to keep the test hermetic. The
+    # subject stays the warm-runtime bypass, not the render path.
+    class _FakeAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            return "done"
+
+    monkeypatch.setattr("praisonaiagents.Agent", _FakeAgent)
+
     run_cmd._run_prompt(
         "refactor this",
         no_save=True,

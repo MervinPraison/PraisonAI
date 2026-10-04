@@ -147,7 +147,8 @@ jobs:
         done
         echo "C7 hot-path import gate ok"
         bash "$GITHUB_WORKSPACE/scripts/check_c7_imports.sh"
-        # Standalone actions run (no wrapper); default run/chat require praisonai
+        # Standalone actions run (no wrapper); default run renders in-process
+        # since #5644; chat still requires praisonai
         set +e
         RUN_OUT=$(timeout 90 /tmp/praisonai-code-standalone/bin/praisonai-code run --output actions "Say hello in one word" 2>&1)
         RUN_CODE=$?
@@ -162,11 +163,19 @@ jobs:
         DEFAULT_RUN=$(timeout 15 /tmp/praisonai-code-standalone/bin/praisonai-code run "hi" 2>&1)
         set -e
         echo "$DEFAULT_RUN" | tail -10
-        if ! echo "$DEFAULT_RUN" | grep -qi 'install praisonai'; then
-          echo "FAIL: default run should prompt for praisonai wrapper install"
+        if echo "$DEFAULT_RUN" | grep -q "requires the praisonai wrapper"; then
+          echo "FAIL: standalone default run still gates on the wrapper (issue #5644)"
           exit 1
         fi
-        echo "default run wrapper gate ok"
+        if echo "$DEFAULT_RUN" | grep -q "No module named 'praisonai'"; then
+          echo "FAIL: standalone default run hit a wrapper import error"
+          exit 1
+        fi
+        if ! echo "$DEFAULT_RUN" | grep -qi 'praisonai setup'; then
+          echo "FAIL: standalone default run should reach the in-process credential gate"
+          exit 1
+        fi
+        echo "standalone default run in-process ok"
         set +e
         CHAT_RUN=$(timeout 10 /tmp/praisonai-code-standalone/bin/praisonai-code chat 2>&1)
         set -e

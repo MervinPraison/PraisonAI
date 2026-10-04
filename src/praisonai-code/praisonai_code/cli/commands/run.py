@@ -269,6 +269,14 @@ def _is_yaml_file(target: Optional[str]) -> bool:
 # never need the wrapper's handle_direct_prompt.
 _IN_PROCESS_OUTPUT_MODES = ("actions", "json", "stream", "stream-json")
 
+# Human-readable text output modes: the CLI default plus explicit selectors.
+_TEXT_OUTPUT_MODES = (None, "plain", "verbose", "silent")
+
+# Text modes whose Agent preset leaves the agent itself silent, so the CLI
+# prints the final answer (mirrors the wrapper text path's ``print(result)``).
+# ``verbose`` renders the response through the agent's own display instead.
+_SILENT_STYLE_TEXT_MODES = (None, "plain", "silent")
+
 
 def _direct_prompt_needs_wrapper(
     target: Optional[str],
@@ -282,13 +290,58 @@ def _direct_prompt_needs_wrapper(
     Structured modes (``_IN_PROCESS_OUTPUT_MODES``) always run in-process via the
     Agent path, so they never need the wrapper. Human-readable text modes
     (``plain``/``verbose``/``silent``/default) delegate to the wrapper's
-    ``handle_direct_prompt``; on a standalone install this gates with an install
-    hint (see ``_require_wrapper_for_default_run``) to keep the C7 hot path free
-    of the heavy Agent import for default runs.
+    ``handle_direct_prompt`` **when the wrapper is installed**; on a standalone
+    install they render in-process instead (see
+    ``_text_run_renders_in_process`` and ``_require_wrapper_for_default_run``).
     """
     if agent or command or not target or _is_yaml_file(target):
         return False
     return output_mode not in _IN_PROCESS_OUTPUT_MODES
+
+
+def _text_run_renders_in_process(
+    output_mode: Optional[str],
+    *,
+    image: Optional[List[str]],
+) -> bool:
+    """True when a human-readable text run renders in-process (issue #5644).
+
+    Text modes delegate to the wrapper's ``handle_direct_prompt`` when the
+    wrapper is installed (unchanged). On a standalone install they render
+    in-process from the same Agent loop the structured modes already use, so
+    ``pip install praisonai-code`` alone yields a working default run. The
+    ``praisonaiagents`` import is function-local, exactly like the structured
+    modes, so the C7 hot-path import gate is unaffected.
+
+    ``--image`` is the one wrapper-only feature of this path (the vision
+    handling lives in the wrapper), so an image run keeps its targeted gate.
+    """
+    if output_mode not in _TEXT_OUTPUT_MODES:
+        return False
+    if image:
+        return False
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    return not wrapper_available()
+
+
+def _agent_text_preset(output_mode: Optional[str]) -> str:
+    """Map a human-readable text mode to the core Agent output preset."""
+    if output_mode == "verbose":
+        return "verbose"
+    # default/plain/silent are silent-style: the agent prints nothing itself,
+    # so the CLI prints the final text (see ``_prints_final_text``).
+    return "minimal"
+
+
+def _prints_final_text(output_mode: Optional[str]) -> bool:
+    """True when the CLI must print the final answer itself.
+
+    Silent-style text presets leave the agent silent, so the final text is
+    printed by the CLI (as the wrapper text path does). Verbose renders the
+    response via the agent display; structured modes emit their own events.
+    """
+    return output_mode in _SILENT_STYLE_TEXT_MODES
 
 
 def _require_wrapper_for_default_run(
@@ -297,14 +350,20 @@ def _require_wrapper_for_default_run(
     agent: Optional[str],
     command: Optional[str],
     output_mode: Optional[str],
+    image: Optional[List[str]] = None,
 ) -> None:
-    """Fail fast with an install hint before credential/setup checks.
+    """Fail fast with a targeted hint before credential/setup checks.
 
-    Human-readable text runs (default/plain/verbose/silent) delegate to the
-    wrapper's ``handle_direct_prompt``. On a standalone install the wrapper is
-    absent, so gate here with an install hint that points standalone users to
-    the in-process ``--output actions`` alternative.
+    Text runs (default/plain/verbose/silent) render in-process when the wrapper
+    is absent (issue #5644), so they no longer gate here. The wrapper's vision
+    path (``--image``) is the remaining wrapper-only feature of the
+    direct-prompt flow; on a standalone install it gates with a hint that
+    points to the in-process ``--output actions`` alternative.
     """
+    if not image:
+        return
+    # agent/command/YAML/no-target image runs are rejected earlier with their
+    # own combination error, and structured modes reject --image up front.
     if not _direct_prompt_needs_wrapper(
         target, agent=agent, command=command, output_mode=output_mode
     ):
@@ -315,7 +374,7 @@ def _require_wrapper_for_default_run(
         return
     output = get_output_controller()
     output.print_error(
-        "Default run mode requires the praisonai wrapper. "
+        "--image requires the praisonai wrapper. "
         "Install with: pip install praisonai\n"
         "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
@@ -1369,7 +1428,7 @@ def run_main(
         approval = "plan"
 
     _require_wrapper_for_default_run(
-        target, agent=agent, command=command, output_mode=output_mode
+        target, agent=agent, command=command, output_mode=output_mode, image=image
     )
 
     # Validate session options before any model/credential resolution so an
@@ -2195,17 +2254,29 @@ def _run_prompt(
             return
 
         # An --image attachment is handled by the vision path in
-        # handle_direct_prompt (ImageHandler); the "actions" fast path builds a
+        # handle_direct_prompt (ImageHandler); the in-process path builds a
         # bare Agent and would silently drop it, so fall through when set.
-        if output_mode == "actions" and not image:
+        # Text modes join the in-process path when the wrapper is absent
+        # (_text_run_renders_in_process, issue #5644) so a standalone install
+        # gets a working default run instead of the wrapper install gate.
+        if (
+            output_mode == "actions"
+            or _text_run_renders_in_process(output_mode, image=image)
+        ) and not image:
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
 
             agent_config = {
                 "name": "RunAgent",
-                "role": "Assistant", 
+                "role": "Assistant",
                 "goal": "Complete the task",
-                "output": "actions",  # Use actions preset
+                # Structured actions events; text modes map to their
+                # human-readable preset.
+                "output": (
+                    "actions"
+                    if output_mode == "actions"
+                    else _agent_text_preset(output_mode)
+                ),
             }
             if model:
                 agent_config["llm"] = model
@@ -2229,6 +2300,11 @@ def _run_prompt(
             memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
+            elif memory:
+                # --memory without session flags: honour it as a plain
+                # cross-session memory rather than silently dropping the flag
+                # (the wrapper text path sets MemoryConfig for it).
+                agent_config["memory"] = True
 
             # Wire all configured MCP servers (ad-hoc --mcp + config local/remote).
             if mcp or mcp_servers:
@@ -2308,7 +2384,11 @@ def _run_prompt(
                 data={"result": str(result) if result else None}
             )
 
-            # Don't print result again - actions mode already shows output
+            # Silent-style text presets don't render the final answer
+            # themselves, so print it here (the wrapper text path does the
+            # same). Actions mode already shows its output.
+            if _prints_final_text(output_mode) and result and not output.is_json_mode:
+                print(result)
             return
         
         # Use handle_direct_prompt for other modes

@@ -1,12 +1,18 @@
-"""Regression tests for the standalone `run` wrapper gate (issue #2839).
+"""Regression tests for the standalone `run` wrapper gate (issues #5644/#2839).
 
 Structured output modes (actions/json/stream/stream-json) run in-process via the
 Agent path and never need the wrapper. Human-readable text modes
-(plain/verbose/silent/default) delegate to the wrapper's `handle_direct_prompt`;
-on a standalone install (no `praisonai` wrapper) they gate via
-`_require_wrapper_for_default_run` with an install hint. This keeps the C7 hot
-path free of the heavy Agent import for default text runs and matches the
-`smoke` job contract.
+(plain/verbose/silent/default) delegate to the wrapper's `handle_direct_prompt`
+**when the wrapper is installed**; on a standalone install (no `praisonai`
+wrapper) they render in-process instead (issue #5644), so the blanket install
+gate no longer fires for them.
+
+The one wrapper-only feature left on the direct-prompt path is ``--image`` (the
+vision handling lives in the wrapper's ``handle_direct_prompt``), so an image
+run on a standalone install keeps a targeted gate. The module-level C7 import
+gate (no wrapper imports in the hot-path files) is unaffected: the in-process
+text render imports ``praisonaiagents`` lazily inside the run, exactly like the
+structured modes already do.
 
 The valuable fix from #2839 preserved here is the corrected error hint, which
 now cites `praisonai-code run --output actions` instead of `praisonai`.
@@ -32,8 +38,8 @@ def with_wrapper(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", [None, "silent", "plain", "verbose"])
-def test_text_modes_need_wrapper(mode):
-    """Human-readable text modes always route to the wrapper text path."""
+def test_text_modes_delegate_to_wrapper_when_installed(mode):
+    """Text modes route to the wrapper text path when it is installed."""
     assert (
         run_cmd._direct_prompt_needs_wrapper(
             "hi", agent=None, command=None, output_mode=mode
@@ -74,6 +80,67 @@ def test_no_target_does_not_need_wrapper():
     )
 
 
+# --- standalone text runs render in-process (issue #5644) ------------------
+
+
+@pytest.mark.parametrize("mode", [None, "silent", "plain", "verbose"])
+def test_text_runs_render_in_process_without_wrapper(no_wrapper, mode):
+    """On a standalone install, text modes render in-process (no gate)."""
+    assert (
+        run_cmd._text_run_renders_in_process(mode, image=None)
+        is True
+    )
+
+
+@pytest.mark.parametrize("mode", [None, "silent", "plain", "verbose"])
+def test_text_runs_delegate_when_wrapper_installed(with_wrapper, mode):
+    """With the wrapper installed, behaviour is unchanged (delegation)."""
+    assert (
+        run_cmd._text_run_renders_in_process(mode, image=None)
+        is False
+    )
+
+
+@pytest.mark.parametrize("mode", ["actions", "json", "stream", "stream-json"])
+def test_structured_modes_are_not_text_runs(no_wrapper, mode):
+    """Structured modes are dispatched by their own branch, not this predicate."""
+    assert (
+        run_cmd._text_run_renders_in_process(mode, image=None)
+        is False
+    )
+
+
+def test_image_run_stays_wrapper_only(no_wrapper):
+    """--image keeps the wrapper's vision path, so it never renders in-process."""
+    assert (
+        run_cmd._text_run_renders_in_process(None, image=["bug.png"])
+        is False
+    )
+
+
+def test_agent_text_preset_mapping():
+    """Text modes map to the core Agent output presets."""
+    assert run_cmd._agent_text_preset(None) == "minimal"
+    assert run_cmd._agent_text_preset("plain") == "minimal"
+    assert run_cmd._agent_text_preset("silent") == "minimal"
+    assert run_cmd._agent_text_preset("verbose") == "verbose"
+
+
+@pytest.mark.parametrize("mode", [None, "plain", "silent"])
+def test_silent_style_modes_print_final_text(mode):
+    """Silent-style presets print the final answer from the CLI itself."""
+    assert run_cmd._prints_final_text(mode) is True
+
+
+@pytest.mark.parametrize("mode", ["verbose", "actions", "json", "stream", "stream-json"])
+def test_agent_or_structured_modes_render_themselves(mode):
+    """Verbose renders via the agent display; structured modes emit events."""
+    assert run_cmd._prints_final_text(mode) is False
+
+
+# --- the remaining targeted gate: --image -----------------------------------
+
+
 def test_require_wrapper_noop_when_wrapper_installed(with_wrapper):
     """With the wrapper installed, the gate passes through (delegation happens)."""
     run_cmd._require_wrapper_for_default_run(
@@ -89,8 +156,15 @@ def test_require_wrapper_noop_for_structured_mode(no_wrapper):
 
 
 @pytest.mark.parametrize("mode", [None, "silent", "plain", "verbose"])
-def test_require_wrapper_error_references_praisonai_code(monkeypatch, mode):
-    """Standalone text runs gate with a hint that cites praisonai-code."""
+def test_text_runs_do_not_gate_without_wrapper(no_wrapper, mode):
+    """Standalone text runs no longer gate: they render in-process (#5644)."""
+    run_cmd._require_wrapper_for_default_run(
+        "hi", agent=None, command=None, output_mode=mode
+    )
+
+
+def test_image_run_without_wrapper_gates_with_targeted_hint(monkeypatch):
+    """A standalone image run gates with a hint that cites praisonai-code."""
     monkeypatch.setattr(
         "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
     )
@@ -107,9 +181,17 @@ def test_require_wrapper_error_references_praisonai_code(monkeypatch, mode):
 
     with pytest.raises(typer.Exit):
         run_cmd._require_wrapper_for_default_run(
-            "hi", agent=None, command=None, output_mode=mode
+            "hi", agent=None, command=None, output_mode=None, image=["bug.png"]
         )
 
     assert messages
+    assert "--image" in messages[0]
     assert 'praisonai-code run --output actions "your prompt"' in messages[0]
     assert "praisonai run --output actions" not in messages[0]
+
+
+def test_image_run_with_wrapper_does_not_gate(with_wrapper):
+    """With the wrapper installed the image run proceeds to the vision path."""
+    run_cmd._require_wrapper_for_default_run(
+        "hi", agent=None, command=None, output_mode=None, image=["bug.png"]
+    )
