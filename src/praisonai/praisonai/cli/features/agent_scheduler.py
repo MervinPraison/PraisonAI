@@ -177,7 +177,7 @@ class AgentSchedulerHandler:
         for state in states:
             name = state.get('name', 'unknown')[:20]
             pid = state.get('pid', 0)
-            status = "running" if state_manager.is_process_alive(pid) else "stopped"
+            status = "running" if state_manager.is_process_alive(pid, state.get('start_time')) else "stopped"
             interval = state.get('interval', 'unknown')[:12]
             task = state.get('task', '')[:40]
             
@@ -261,7 +261,7 @@ class AgentSchedulerHandler:
             pid = state['pid']
             
             try:
-                if daemon_manager.stop_daemon(pid):
+                if daemon_manager.stop_daemon(pid, expected_start_time=state.get('start_time')):
                     state_manager.delete_state(name)
                     print(f"✅ Stopped '{name}' (PID: {pid})")
                     stopped += 1
@@ -298,7 +298,7 @@ class AgentSchedulerHandler:
         
         print(f"🛑 Stopping scheduler '{name}' (PID: {pid})...")
         
-        success = daemon_manager.stop_daemon(pid)
+        success = daemon_manager.stop_daemon(pid, expected_start_time=state.get('start_time'))
         
         if success:
             state['status'] = 'stopped'
@@ -365,8 +365,9 @@ class AgentSchedulerHandler:
         
         # Stop if running
         pid = state.get('pid')
-        if pid and state_manager.is_process_alive(pid):
-            daemon_manager.stop_daemon(pid)
+        start_time = state.get('start_time')
+        if pid and state_manager.is_process_alive(pid, start_time):
+            daemon_manager.stop_daemon(pid, expected_start_time=start_time)
             time.sleep(1)
         
         # Start again
@@ -384,6 +385,7 @@ class AgentSchedulerHandler:
         state['pid'] = new_pid
         state['status'] = 'running'
         state['started_at'] = datetime.now().isoformat()
+        state.pop('start_time', None)  # let save_state record the new process's identity
         state_manager.save_state(name, state)
         
         print(f"✅ Scheduler '{name}' restarted (PID: {new_pid})")
@@ -426,7 +428,7 @@ class AgentSchedulerHandler:
         
         # Get process status
         pid = state.get('pid', 0)
-        is_alive = state_manager.is_process_alive(pid)
+        is_alive = state_manager.is_process_alive(pid, state.get('start_time'))
         status = "🟢 running" if is_alive else "🔴 stopped"
         
         # Calculate uptime

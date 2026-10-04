@@ -372,7 +372,7 @@ def _daemon_states_payload() -> list:
                 "source": "daemon",
                 "name": s.get("name", "unknown"),
                 "pid": pid,
-                "status": "running" if state_manager.is_process_alive(pid) else "stopped",
+                "status": "running" if state_manager.is_process_alive(pid, s.get("start_time")) else "stopped",
                 "interval": s.get("interval", "unknown"),
                 "task": s.get("task", ""),
             })

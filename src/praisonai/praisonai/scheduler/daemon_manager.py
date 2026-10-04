@@ -29,6 +29,22 @@ class DaemonManager:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.max_log_size_bytes = int(max_log_size_mb * 1024 * 1024)
+
+    @staticmethod
+    def _owns_pid(pid: int, expected_start_time: Optional[float]) -> bool:
+        """Whether it's safe to signal ``pid`` as our daemon.
+
+        When ``expected_start_time`` is recorded, the process's actual start
+        time must match; a recycled PID owned by an unrelated process is refused
+        so we never SIGTERM/SIGKILL an innocent process.
+        """
+        if expected_start_time is None:
+            return True  # Backward-compatible: nothing recorded to verify.
+        from .state_manager import _process_start_time
+        actual = _process_start_time(pid)
+        if actual is None:
+            return False  # Can't prove ownership; fail safe.
+        return abs(actual - expected_start_time) < 1.0
     
     def start_daemon(
         self,
@@ -126,17 +142,23 @@ class DaemonManager:
         display_task = recipe_name or task
         return self.start_daemon(name, display_task, interval, command)
     
-    def stop_daemon(self, pid: int, timeout: int = 10) -> bool:
+    def stop_daemon(self, pid: int, timeout: int = 10, expected_start_time: Optional[float] = None) -> bool:
         """
         Stop a daemon process gracefully.
         
         Args:
             pid: Process ID
             timeout: Timeout in seconds
+            expected_start_time: Start time recorded for the daemon. When given,
+                the process is only signalled if its actual start time matches —
+                guarding against SIGTERM/SIGKILL hitting an innocent process that
+                now owns a recycled PID.
             
         Returns:
             True if stopped successfully
         """
+        if not self._owns_pid(pid, expected_start_time):
+            return False
         try:
             # Try graceful shutdown first (SIGTERM)
             os.kill(pid, signal.SIGTERM)
@@ -162,17 +184,20 @@ class DaemonManager:
         except (OSError, ProcessLookupError):
             return False
 
-    async def astop_daemon(self, pid: int, timeout: int = 10) -> bool:
+    async def astop_daemon(self, pid: int, timeout: int = 10, expected_start_time: Optional[float] = None) -> bool:
         """
         Async variant of stop_daemon — never blocks the event loop.
         
         Args:
             pid: Process ID
             timeout: Timeout in seconds
+            expected_start_time: Start time recorded for the daemon (see stop_daemon).
             
         Returns:
             True if stopped successfully
         """
+        if not self._owns_pid(pid, expected_start_time):
+            return False
         try:
             # Try graceful shutdown first (SIGTERM)
             os.kill(pid, signal.SIGTERM)

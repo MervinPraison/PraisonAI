@@ -7,6 +7,9 @@ No external dependencies required.
 
 import json
 import logging
+import os
+import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -15,6 +18,44 @@ import threading
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
 logger = logging.getLogger(__name__)
+
+# Reject ids that could escape the storage dir (path separators, ``..``) before
+# interpolating them into a filename. External ids reach here via
+# api/agent_invoke -> PraisonAIDB -> JSONConversationStore.
+_ID_RE = re.compile(r"^[A-Za-z0-9_\-:.]{1,128}$")
+
+
+def _validate_id(session_id: str) -> str:
+    """Reject a session id that is unsafe as a filesystem path component."""
+    if not isinstance(session_id, str) or ".." in session_id or not _ID_RE.match(session_id):
+        raise ValueError(f"invalid session id for filesystem storage: {session_id!r}")
+    return session_id
+
+
+def _atomic_write_json(path: Path, payload, pretty: bool = True) -> None:
+    """Write JSON to ``path`` atomically (temp file + os.replace).
+
+    A crash / Ctrl-C mid-write can never leave the file empty or truncated,
+    which would otherwise silently zero a session's conversation history on the
+    next load.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".conv-", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as f:
+            if pretty:
+                json.dump(payload, f, indent=2, default=str)
+            else:
+                json.dump(payload, f, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 class JSONConversationStore(ConversationStore):
@@ -61,16 +102,12 @@ class JSONConversationStore(ConversationStore):
             self._save_index()
     
     def _save_index(self):
-        """Save sessions index."""
-        with open(self._index_file, 'w') as f:
-            if self.pretty:
-                json.dump(self._index, f, indent=2, default=str)
-            else:
-                json.dump(self._index, f, default=str)
+        """Save sessions index atomically."""
+        _atomic_write_json(self._index_file, self._index, self.pretty)
     
     def _session_file(self, session_id: str) -> Path:
-        """Get path to session file."""
-        return self.path / f"{session_id}.json"
+        """Get path to session file (validated against traversal)."""
+        return self.path / f"{_validate_id(session_id)}.json"
     
     def _load_session_data(self, session_id: str) -> Optional[Dict]:
         """Load session data from file."""
@@ -81,13 +118,9 @@ class JSONConversationStore(ConversationStore):
         return None
     
     def _save_session_data(self, session_id: str, data: Dict):
-        """Save session data to file."""
+        """Save session data to file atomically."""
         file_path = self._session_file(session_id)
-        with open(file_path, 'w') as f:
-            if self.pretty:
-                json.dump(data, f, indent=2, default=str)
-            else:
-                json.dump(data, f, default=str)
+        _atomic_write_json(file_path, data, self.pretty)
     
     def create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session."""

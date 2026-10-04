@@ -6,6 +6,9 @@ Handles session creation, persistence, and resume functionality.
 
 import json
 import logging
+import os
+import re
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -13,6 +16,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Matches the ids minted by ``ACPSession.create`` (``sess_`` + 16 hex chars).
+# Allowing up to 32 hex chars keeps forward-compat if the id width grows.
+_SESSION_ID_RE = re.compile(r"^sess_[0-9a-f]{1,32}$")
+
+
+def _validate_session_id(session_id: str) -> str:
+    """Reject anything that is not a server-minted session id.
+
+    ``session_id`` arrives over JSON-RPC from an external peer and is
+    interpolated into a filesystem path, so an unvalidated value like
+    ``"../../tmp/secret"`` would let the peer read or delete arbitrary
+    ``*.json`` files. Only ids matching the ``create()`` format are allowed.
+    """
+    if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+        raise ValueError(f"invalid session_id: {session_id!r}")
+    return session_id
 
 
 @dataclass
@@ -124,23 +144,46 @@ class SessionStore:
         self._last_session_file = self.storage_dir / ".last_session"
     
     def _session_path(self, session_id: str) -> Path:
-        """Get path for session file."""
-        return self.storage_dir / f"{session_id}.json"
-    
+        """Get path for session file (validated against traversal)."""
+        _validate_session_id(session_id)
+        # ``resolve`` anchors the path so a future id-format change can't
+        # silently re-open the traversal hole.
+        return (self.storage_dir / f"{session_id}.json").resolve()
+
+    @staticmethod
+    def _atomic_write(path: Path, text: str) -> None:
+        """Write ``text`` to ``path`` atomically via a temp file + os.replace.
+
+        A crash or Ctrl-C mid-write can never leave the target empty or
+        half-written — the old content survives until the rename succeeds.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".sess-", suffix=".tmp", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
     def save(self, session: ACPSession) -> None:
-        """Save session to disk."""
+        """Save session to disk atomically."""
         try:
             path = self._session_path(session.session_id)
-            with open(path, "w") as f:
-                json.dump(session.to_dict(), f, indent=2)
-            
-            # Update last session pointer
-            with open(self._last_session_file, "w") as f:
-                f.write(session.session_id)
-            
+            self._atomic_write(path, json.dumps(session.to_dict(), indent=2))
+
+            # Update last session pointer ONLY after the payload is durable.
+            self._atomic_write(self._last_session_file, session.session_id)
+
             logger.debug(f"Saved session {session.session_id}")
         except Exception as e:
-            logger.error(f"Failed to save session: {e}")
+            logger.error(f"Failed to save session {session.session_id}: {e}")
     
     def load(self, session_id: str) -> Optional[ACPSession]:
         """Load session from disk."""
