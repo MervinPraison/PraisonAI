@@ -74,7 +74,18 @@ class AgentSchedulerHandler:
         
         # Parse arguments
         name = unknown_args[0]
-        
+
+        # Validate the name BEFORE launching any daemon: save_state rejects an
+        # unsafe name, and launching first would orphan a running daemon with no
+        # state file the CLI could use to stop it.
+        from praisonai.scheduler.state_manager import _validate_name
+        try:
+            _validate_name(name)
+        except ValueError:
+            print(f"❌ Error: Invalid scheduler name {name!r}")
+            print("   Use letters, digits, '_', '-', '.' (max 128 chars, no '..').")
+            return 1
+
         # Check for --recipe flag in unknown_args
         recipe_name = None
         task = None
@@ -96,9 +107,13 @@ class AgentSchedulerHandler:
         max_cost = getattr(args, 'max_cost', None)
         deliver = getattr(args, 'schedule_deliver', None) or ''
         
-        # Check if name already exists
+        # Check if name already exists. Use is_process_alive with the recorded
+        # start_time (not a PID-only probe) so a stale state whose PID was reused
+        # by an unrelated process does not falsely block a fresh start.
         existing = state_manager.load_state(name)
-        if existing and daemon_manager.get_status(existing.get('pid', 0))['is_alive']:
+        if existing and state_manager.is_process_alive(
+            existing.get('pid', 0), existing.get('start_time')
+        ):
             print(f"❌ Error: Scheduler '{name}' is already running (PID: {existing['pid']})")
             print(f"   Use 'praisonai schedule stop {name}' to stop it first")
             return 1

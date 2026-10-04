@@ -24,10 +24,20 @@ logger = logging.getLogger(__name__)
 # api/agent_invoke -> PraisonAIDB -> JSONConversationStore.
 _ID_RE = re.compile(r"^[A-Za-z0-9_\-:.]{1,128}$")
 
+# The store keeps its own index at ``_sessions_index.json``; a session id that
+# maps to the same file would let create/update silently overwrite the index
+# (and vice versa), corrupting every session's listing. Reserve it.
+_RESERVED_IDS = frozenset({"_sessions_index"})
+
 
 def _validate_id(session_id: str) -> str:
     """Reject a session id that is unsafe as a filesystem path component."""
-    if not isinstance(session_id, str) or ".." in session_id or not _ID_RE.match(session_id):
+    if (
+        not isinstance(session_id, str)
+        or ".." in session_id
+        or session_id in _RESERVED_IDS
+        or not _ID_RE.match(session_id)
+    ):
         raise ValueError(f"invalid session id for filesystem storage: {session_id!r}")
     return session_id
 

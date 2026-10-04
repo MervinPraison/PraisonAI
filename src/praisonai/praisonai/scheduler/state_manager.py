@@ -86,6 +86,10 @@ class SchedulerStateManager:
         Returns:
             State dictionary or None if not found
         """
+        try:
+            _validate_name(name)
+        except ValueError:
+            return None
         state_file = self.state_dir / f"{name}.json"
         
         if not state_file.exists():
@@ -107,6 +111,12 @@ class SchedulerStateManager:
         Returns:
             True if deleted, False if not found
         """
+        try:
+            _validate_name(name)
+        except ValueError:
+            # A crafted name must never traverse out of the state dir to
+            # unlink an arbitrary ``*.json`` file.
+            return False
         state_file = self.state_dir / f"{name}.json"
         
         if state_file.exists():

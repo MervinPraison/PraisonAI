@@ -172,6 +172,10 @@ class DaemonManager:
                 except (OSError, ProcessLookupError):
                     return True  # Process terminated
             
+            # Re-verify ownership before escalating: the daemon may have exited
+            # during the wait and its PID been reused by an unrelated process.
+            if not self._owns_pid(pid, expected_start_time):
+                return True
             # Force kill if still alive
             try:
                 os.kill(pid, signal.SIGKILL)
@@ -210,6 +214,10 @@ class DaemonManager:
                 except (OSError, ProcessLookupError):
                     return True  # Process terminated
             
+            # Re-verify ownership before escalating: the daemon may have exited
+            # during the wait and its PID been reused by an unrelated process.
+            if not self._owns_pid(pid, expected_start_time):
+                return True
             # Force kill if still alive
             try:
                 os.kill(pid, signal.SIGKILL)
