@@ -585,3 +585,65 @@ def test_upgrade_retry_reindexes_a_peer_changed_transcript(make_store, failure, 
     assert destination.list_sessions_by_gateway_agent("old-agent") == []
     assert destination.list_sessions_by_gateway_agent("new-agent") == ["healthy"]
     assert destination._index_content_version(conn) == destination.INDEX_CONTENT_VERSION
+
+
+@pytest.mark.parametrize("reader", ["gateway", "agent"])
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_unknown_import_generation_does_not_reuse_obsolete_routes(make_store, monkeypatch, reader, unreadable):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "replacement")
+    assert source.set_gateway_info("session", gateway_session_id="new-gateway", agent_id="new-agent")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old")
+    assert destination.set_gateway_info("session", gateway_session_id="old-gateway", agent_id="old-agent")
+    assert destination.get_by_gateway_session("old-gateway") is not None
+    monkeypatch.setattr(destination, "_session_file_identity", lambda *_: None)
+    monkeypatch.setattr(destination, "_index_session", lambda *_: False)
+    assert destination.import_sessions(source.export_all(), overwrite=True).imported == 1
+    assert destination._connect().execute("SELECT gateway_session_id FROM session_route WHERE session_id = ?", ("session",)).fetchone() == ("old-gateway",)
+    if unreadable:
+        import builtins
+        original_open = builtins.open
+        path = destination._get_session_path("session")
+
+        def fail_transcript_open(filename, *args, **kwargs):
+            if os.fspath(filename) == path and (not args or "r" in args[0]):
+                raise PermissionError("temporarily unreadable transcript")
+            return original_open(filename, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", fail_transcript_open)
+    if reader == "gateway":
+        assert destination.get_by_gateway_session("old-gateway") is None
+    else:
+        assert destination.list_sessions_by_gateway_agent("old-agent") == []
+
+
+def test_gateway_agent_limit_counts_verified_routes(make_store):
+    destination = make_store(SqliteSessionStore)
+    for sid in ["stale", "valid"]:
+        assert destination.add_message(sid, "user", sid)
+        assert destination.set_gateway_info(sid, agent_id="agent")
+    assert len(destination.list_sessions_by_gateway_agent("agent")) == 2
+    peer = DefaultSessionStore(session_dir=destination.session_dir)
+    assert peer.set_gateway_info("stale", agent_id="other-agent")
+    assert destination.list_sessions_by_gateway_agent("agent", limit=1) == ["valid"]
+
+
+def test_gateway_route_read_failure_does_not_use_warm_cache(make_store, monkeypatch):
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old")
+    assert destination.set_gateway_info("session", gateway_session_id="old-gateway", agent_id="old-agent")
+    assert destination.get_by_gateway_session("old-gateway") is not None
+    peer = DefaultSessionStore(session_dir=destination.session_dir)
+    assert peer.set_gateway_info("session", gateway_session_id="new-gateway", agent_id="new-agent")
+
+    def fail_read(*_):
+        raise PermissionError("transient route read failure")
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(destination, "_load_session_from_disk", fail_read)
+        assert destination.get_by_gateway_session("old-gateway") is None
+        assert destination.list_sessions_by_gateway_agent("old-agent") == []
+    assert destination.get_by_gateway_session("old-gateway") is None
+    assert destination.list_sessions_by_gateway_agent("old-agent") == []
+    assert peer.get_by_gateway_session("new-gateway").session_id == "session"

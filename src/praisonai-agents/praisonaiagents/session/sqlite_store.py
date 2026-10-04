@@ -702,12 +702,27 @@ class SqliteSessionStore(DefaultSessionStore):
 
     # ── gateway/agent routing: indexed key → session lookup ───────────
 
+    def _read_indexed_route(self, session_id: str) -> Optional[SessionData]:
+        """Verify a route from durable JSON without a stale cache fallback."""
+        filepath = self._get_session_path(session_id)
+        try:
+            with FileLock(filepath, self.lock_timeout):
+                session = self._load_session_from_disk(session_id, filepath)
+                self._reingest_spill(session_id, session)
+            with self._lock:
+                self._cache[session_id] = session
+            return session
+        except (OSError, ValueError, TypeError) as exc:
+            logger.debug("Cannot verify indexed route for %s: %s", session_id, exc)
+            return None
+
     def get_by_gateway_session(self, gateway_session_id: str) -> Optional[SessionData]:
         """Resolve a session by ``gateway_session_id`` via the indexed route.
 
         Overrides the parent's O(N) ``os.listdir`` + JSON-parse-every-file scan
         with a single indexed ``SELECT`` on ``session_route`` so inbound routing
         latency is independent of the number of stored sessions (Issue #2956).
+        The loaded binding must still match; transient reads do not use cache.
         Falls back to the parent scan if the index is unavailable.
         """
         conn = self._connect()
@@ -726,33 +741,52 @@ class SqliteSessionStore(DefaultSessionStore):
             return super().get_by_gateway_session(gateway_session_id)
         if row is None:
             return None
-        try:
-            return self._read_session_fresh(row[0])
-        except Exception:
+        session = self._read_indexed_route(row[0])
+        if session is None or session.gateway_session_id != gateway_session_id:
             return None
+        return session
 
     def list_sessions_by_gateway_agent(self, agent_id: str, limit: int = 50) -> List[str]:
         """List session IDs for a gateway agent via the indexed route.
 
         Overrides the parent's full-directory scan with an indexed ``SELECT``
-        on ``session_route`` (Issue #2956). Falls back to the parent scan if the
-        index is unavailable.
+        on ``session_route`` (Issue #2956). Matching candidates are verified
+        against JSON outside the database lock, and only verified IDs count
+        toward the limit. Falls back to the parent scan if the index is unavailable.
         """
         conn = self._connect()
         if conn is None:
             return super().list_sessions_by_gateway_agent(agent_id, limit)
         self._ensure_backfilled()
+        if limit == 0:
+            return []
+        verified = []
+        offset = 0
         try:
-            with self._db_lock:
-                rows = conn.execute(
-                    "SELECT session_id FROM session_route WHERE agent_id = ? "
-                    "LIMIT ?",
-                    (agent_id, limit),
-                ).fetchall()
+            while True:
+                with self._db_lock:
+                    rows = conn.execute(
+                        "SELECT session_id FROM session_route WHERE agent_id = ? "
+                        "LIMIT ? OFFSET ?",
+                        (agent_id, limit, offset),
+                    ).fetchall()
+                if not rows:
+                    break
+                # File I/O stays outside the database lock. Unknown generations
+                # retain their index rows, but cannot supply obsolete bindings.
+                for (sid,) in rows:
+                    session = self._read_indexed_route(sid)
+                    if session is not None and session.agent_id == agent_id:
+                        verified.append(sid)
+                        if limit > 0 and len(verified) >= limit:
+                            return verified
+                if limit < 0:
+                    break
+                offset += len(rows)
         except Exception as exc:
             logger.debug("Route lookup failed (%s); falling back to scan.", exc)
             return super().list_sessions_by_gateway_agent(agent_id, limit)
-        return [r[0] for r in rows]
+        return verified
 
     def search(
         self,
