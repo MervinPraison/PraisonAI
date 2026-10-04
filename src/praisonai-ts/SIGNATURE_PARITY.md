@@ -279,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:472`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:490`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 

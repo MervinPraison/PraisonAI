@@ -237,8 +237,8 @@ class BaseStore(ABC):
     def clear(self) -> int:
         """Clear all entries."""
         count = len(self._entries)
+        self._store._reset({})
         self._entries = {}
-        self._save()
         self._was_updated = True
         return count
     

@@ -797,7 +797,14 @@ def test_mcp_initialize_and_tools_list():
     init = asyncio.run(
         ep.mcp_jsonrpc(_FakeReq({"jsonrpc": "2.0", "id": 1, "method": "initialize"}))
     )
-    assert _body(init)["result"]["serverInfo"]["name"] == "PraisonAI Gateway"
+    server_info = _body(init)["result"]["serverInfo"]
+    assert server_info["name"] == "PraisonAI Gateway"
+    # The MCP serverInfo version must be the real installed version, not the
+    # old hardcoded "1.0.0" that misled upgrade checks (#5363, greptile P2).
+    from praisonai_bot.gateway.server import _installed_gateway_version
+
+    assert server_info["version"] == _installed_gateway_version()
+    assert server_info["version"] != "1.0.0"
 
     listed = asyncio.run(
         ep.mcp_jsonrpc(_FakeReq({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))

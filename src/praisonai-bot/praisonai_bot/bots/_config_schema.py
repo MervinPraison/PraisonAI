@@ -23,6 +23,41 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 
+#: Stable, published URL for the ``gateway.yaml`` / ``bot.yaml`` JSON Schema,
+#: mirroring the ``agents.yaml`` convention (``AGENTS_SCHEMA_URL``). Editors that
+#: speak the YAML language server use this via a leading
+#: ``# yaml-language-server: $schema=<url>`` header to provide autocomplete,
+#: inline validation, and hover docs while authoring the gateway/bot config.
+GATEWAY_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/"
+    "src/praisonai-bot/praisonai_bot/bots/gateway.schema.json"
+)
+
+#: Leading YAML comment prepended to scaffolded ``gateway.yaml`` / ``bot.yaml``
+#: files so editors wire up validation out of the box. A leading comment is
+#: ignored by ``yaml.safe_load``, so execution is unaffected.
+GATEWAY_SCHEMA_HEADER = f"# yaml-language-server: $schema={GATEWAY_SCHEMA_URL}\n"
+
+
+def resolve_model_by_provider() -> str:
+    """Resolve a default model for whichever provider credential is present.
+
+    Reuses the existing detection helper
+    (``praisonai_code.llm.env.default_model_for_available_provider``) through
+    the lazy cross-tier bridge so the gateway path leads with the provider the
+    operator already has (Anthropic/Gemini/Ollama/…) instead of assuming
+    OpenAI. Falls back to ``gpt-4o-mini`` only when no provider is detected or
+    the helper is unavailable.
+    """
+    try:
+        from praisonai_bot._code_bridge import import_code_module
+
+        env = import_code_module("praisonai_code.llm.env")
+        return env.default_model_for_available_provider()
+    except Exception:  # pragma: no cover - detection is best-effort
+        return "gpt-4o-mini"
+
+
 def _register_redaction(value: str) -> None:
     """Register a resolved secret value for log redaction (best-effort).
 
@@ -41,7 +76,12 @@ class AgentConfigSchema(BaseModel):
     """Schema for agent configuration in bot.yaml."""
     name: str = "assistant"
     instructions: str = ""
-    model: Optional[str] = "gpt-4o-mini"
+    # Provider-agnostic by default (Issue #5609). ``None`` / ``"auto"`` resolve
+    # at load time to the model for whichever provider credential is actually
+    # present (via ``resolved_model()``), so an operator with only an
+    # Anthropic/Gemini/Ollama key is not silently handed an OpenAI model. An
+    # explicit ``model:`` always wins.
+    model: Optional[str] = None
     llm: Optional[str] = None  # Alias for model
     memory: bool = False
     tools: List[str] = Field(default_factory=list)
@@ -57,6 +97,19 @@ class AgentConfigSchema(BaseModel):
         if self.llm and "model" not in self.model_fields_set:
             self.model = self.llm
         return self
+
+    def resolved_model(self) -> str:
+        """Return the effective model, detecting the provider when unset.
+
+        An explicit, non-``"auto"`` ``model`` (or ``llm`` alias) always wins.
+        When the model is unset or ``"auto"``, resolve it to the detected
+        provider's default (Issue #5609), with ``gpt-4o-mini`` as the
+        last-resort fallback handled inside ``resolve_model_by_provider``.
+        """
+        model = self.model
+        if model and model.strip().lower() != "auto":
+            return model
+        return resolve_model_by_provider()
 
 
 class SessionResetConfigSchema(BaseModel):
@@ -1504,6 +1557,184 @@ class GatewayConfigSchema(BaseModel):
 
 # Legacy alias for backward compatibility
 BotYamlSchema = GatewayConfigSchema
+
+
+def _allow_integer_owner_id(node: Any) -> None:
+    """Widen an ``owner_user_id`` property to also accept an integer (#5414).
+
+    ``GatewayConfigSchema``/``ChannelConfigSchema`` type ``owner_user_id`` as
+    ``Optional[str]`` but a ``mode="before"`` validator (``_coerce_owner_user_id``)
+    accepts an unquoted numeric YAML id (``owner_user_id: 987654321``) by casting
+    it to ``str``. Pydantic emits the schema from the *field type* only, so the
+    published schema would reject a config the runtime explicitly accepts. Mirror
+    the runtime coercion by adding ``integer`` to the allowed types so editor/CI
+    validation agrees with the gateway.
+    """
+    if not isinstance(node, dict):
+        return
+    props = node.get("properties")
+    if not isinstance(props, dict):
+        return
+    owner = props.get("owner_user_id")
+    if not isinstance(owner, dict):
+        return
+    variants = owner.get("anyOf")
+    if isinstance(variants, list):
+        has_int = any(
+            isinstance(v, dict) and v.get("type") == "integer" for v in variants
+        )
+        if not has_int:
+            variants.append({"type": "integer"})
+    elif owner.get("type") == "string":
+        owner.pop("type", None)
+        owner["anyOf"] = [{"type": "string"}, {"type": "integer"}]
+
+
+def _allow_env_ref_list(node: Any, field_names: tuple) -> None:
+    """Allow an array-typed field to also be a single ``${ENV}`` string (#5414).
+
+    ``${VAR}`` references are expanded *before* validation at load time, so an
+    operator may author ``allowed_users: ${TELEGRAM_ALLOWED_USERS}`` and have it
+    expand to a list. Editors validate the *unexpanded* YAML, so the published
+    schema must accept the string form for these fields too; otherwise it
+    false-flags a config the runtime happily accepts.
+    """
+    if not isinstance(node, dict):
+        return
+    props = node.get("properties")
+    if not isinstance(props, dict):
+        return
+    for name in field_names:
+        field = props.get(name)
+        if not isinstance(field, dict):
+            continue
+        if field.get("type") == "array":
+            array_variant = {k: v for k, v in field.items() if k not in ("default", "title")}
+            new_field: Dict[str, Any] = {
+                "anyOf": [array_variant, {"type": "string"}]
+            }
+            if "default" in field:
+                new_field["default"] = field["default"]
+            if "title" in field:
+                new_field["title"] = field["title"]
+            props[name] = new_field
+        elif isinstance(field.get("anyOf"), list):
+            variants = field["anyOf"]
+            if not any(
+                isinstance(v, dict) and v.get("type") == "string" for v in variants
+            ):
+                variants.append({"type": "string"})
+
+
+def gateway_config_json_schema() -> Dict[str, Any]:
+    """Canonical JSON Schema for ``gateway.yaml`` / ``bot.yaml`` (draft-07).
+
+    Derived directly from :class:`GatewayConfigSchema` (Pydantic's
+    ``model_json_schema``) and decorated with the standard ``$schema``/``$id``/
+    ``title`` metadata so the artefact is self-describing and mirrors the
+    ``agents.yaml`` convention (``generate_agents_schema``). This is the single
+    source of truth surfaced to editors (via the ``# yaml-language-server``
+    header) and to CI linting, so a mistyped key is flagged at author time
+    instead of only at gateway startup.
+
+    The raw ``model_json_schema()`` is post-processed so the *published* schema
+    faithfully reflects what the runtime actually validates (#5414):
+
+    - ``gateway`` / ``hooks`` are stored as opaque ``Dict``/``List[Dict]`` on the
+      model for downstream dict-style access, but validated field-by-field at
+      load time via :class:`GatewayServerSchema` / :class:`HookSchema`
+      (``extra="forbid"`` for the server block). Inline those typed schemas so a
+      misspelled server knob (``drain_timout``) or hook key is caught at author
+      time, not only at startup.
+    - ``owner_user_id`` (top-level and per-channel) also accepts an integer,
+      mirroring the runtime ``str(...)`` coercion of unquoted numeric ids.
+    - Unknown top-level keys are rejected so a typo (``auto_enable_from_en``)
+      that the runtime silently ignores is surfaced while authoring. Channel
+      configs keep ``additionalProperties`` open for plugin-declared keys.
+    """
+    base = GatewayConfigSchema.model_json_schema()
+    defs = base.setdefault("$defs", {})
+
+    # Inline the typed gateway-server + hook schemas so the published schema
+    # carries the same field-by-field constraints the runtime enforces, instead
+    # of the opaque ``{"type": "object"}`` Pydantic emits for ``Dict[str, Any]``.
+    server_schema = GatewayServerSchema.model_json_schema(
+        ref_template="#/$defs/{model}"
+    )
+    for name, definition in server_schema.pop("$defs", {}).items():
+        defs.setdefault(name, definition)
+    defs["GatewayServerSchema"] = server_schema
+
+    hook_schema = HookSchema.model_json_schema(ref_template="#/$defs/{model}")
+    for name, definition in hook_schema.pop("$defs", {}).items():
+        defs.setdefault(name, definition)
+    defs["HookSchema"] = hook_schema
+
+    props = base.get("properties", {})
+    if "gateway" in props:
+        props["gateway"] = {
+            "anyOf": [{"$ref": "#/$defs/GatewayServerSchema"}, {"type": "null"}],
+            "default": None,
+            "title": props["gateway"].get("title", "Gateway"),
+        }
+    if "hooks" in props:
+        props["hooks"] = {
+            "anyOf": [
+                {"type": "array", "items": {"$ref": "#/$defs/HookSchema"}},
+                {"type": "null"},
+            ],
+            "default": None,
+            "title": props["hooks"].get("title", "Hooks"),
+        }
+
+    # Accept unquoted numeric owner ids wherever they appear (top level +
+    # ChannelConfigSchema), matching the runtime coercion.
+    _allow_integer_owner_id(base)
+    channel_def = defs.get("ChannelConfigSchema")
+    if isinstance(channel_def, dict):
+        _allow_integer_owner_id(channel_def)
+        # ``${VAR}`` env references are substituted BEFORE validation at load time
+        # (``validate_gateway_config``), so a list-typed field may legitimately be
+        # authored as a single ``${ENV}`` string that expands to a list. The
+        # scaffolder writes ``allowed_users: ${TELEGRAM_ALLOWED_USERS}``, so an
+        # editor validating the *authored* (unexpanded) YAML must accept the
+        # string form too — otherwise the schema false-flags a config the runtime
+        # accepts. Widen the array-typed env-ref channel fields accordingly.
+        _allow_env_ref_list(channel_def, ("allowed_users", "allowlist", "blocklist"))
+
+    # Reject unknown top-level keys so an author-time typo is caught (the runtime
+    # silently ignores it, keeping the mistyped opt-out ineffective). Channels
+    # keep ``additionalProperties`` open for plugin-declared config keys.
+    #
+    # ``config_version`` is not a ``GatewayConfigSchema`` field — it is stamped at
+    # the top level by the doctor/start config-version machinery (and shipped in
+    # the sample ``gateway.yaml``). Declare it so the stricter schema accepts a
+    # stamped/migrated config instead of false-flagging it.
+    base.setdefault("properties", {}).setdefault(
+        "config_version",
+        {
+            "type": "integer",
+            "title": "Config Version",
+            "description": (
+                "Stamped by `praisonai gateway doctor --fix` / `start` to track "
+                "config migrations. Managed automatically."
+            ),
+        },
+    )
+    base.setdefault("additionalProperties", False)
+
+    schema: Dict[str, Any] = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": GATEWAY_SCHEMA_URL,
+        **base,
+        "title": "PraisonAI Gateway / Bot Configuration",
+        "description": (
+            "Schema for gateway.yaml / bot.yaml consumed by the PraisonAI "
+            "gateway and single-bot runtime (gateway server, agents, channels, "
+            "routing, schedules, hooks, streaming and delivery)."
+        ),
+    }
+    return schema
 
 
 def validate_gateway_config(raw: Dict[str, Any], apply_env_substitution: bool = True) -> GatewayConfigSchema:
