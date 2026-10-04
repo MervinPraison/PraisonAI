@@ -17,6 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .._logging import get_logger
+from ..utils.atomic_io import update_json
+
+logger = get_logger(__name__)
+
 
 def get_default_auth_filepath() -> str:
     """
@@ -74,22 +79,27 @@ class MCPAuthStorage:
         parent.mkdir(parents=True, exist_ok=True)
     
     def _read(self) -> Dict[str, Any]:
-        """Read all entries from storage file."""
+        """Read all entries from storage file.
+
+        A corrupt file is moved aside to ``<path>.corrupt`` and logged rather
+        than silently treated as "no credentials", so a torn write can never
+        make every server's tokens vanish without a trace.
+        """
         try:
-            with open(self.filepath, 'r') as f:
+            with open(self.filepath, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError:
             return {}
-    
-    def _write(self, data: Dict[str, Any]) -> None:
-        """Write all entries to storage file with secure permissions."""
-        # Write to file
-        with open(self.filepath, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        # Set file permissions to 0600 (owner read/write only)
-        if os.name != 'nt':  # Unix-like systems
-            os.chmod(self.filepath, 0o600)
+        except (json.JSONDecodeError, ValueError):
+            try:
+                os.replace(self.filepath, self.filepath + ".corrupt")
+                logger.error(
+                    "MCP auth store was corrupt; moved aside to %s.corrupt",
+                    self.filepath,
+                )
+            except OSError:
+                pass
+            return {}
     
     def get(self, mcp_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -143,20 +153,34 @@ class MCPAuthStorage:
     def _set(self, mcp_name: str, entry: Dict[str, Any], server_url: Optional[str] = None) -> None:
         """
         Set an auth entry for an MCP server.
-        
+
+        Uses a locked atomic read-modify-write so concurrent OAuth flows (across
+        threads or processes) no longer lose each other's entries, and a crash
+        mid-write leaves the previous file intact. The temp file created by
+        ``atomic_write_json`` is mode 0600, so secrets are never world-readable,
+        even for the moment between create and chmod.
+
         Args:
             mcp_name: Name of the MCP server
             entry: Auth entry dict
             server_url: Optional server URL to track
         """
-        data = self._read()
-        
-        # Update server_url if provided
         if server_url:
             entry["server_url"] = server_url
-        
-        data[mcp_name] = entry
-        self._write(data)
+
+        def mutate(data: Dict[str, Any]) -> None:
+            data[mcp_name] = entry
+
+        update_json(self.filepath, mutate, indent=2)
+
+        # Tighten to 0600 after the atomic swap. mkstemp already created the temp
+        # file as 0600 so there is no world-readable window; this keeps the mode
+        # correct across platforms and pre-existing files.
+        if os.name != 'nt':
+            try:
+                os.chmod(self.filepath, 0o600)
+            except OSError:
+                pass
     
     def set_tokens(
         self,
@@ -201,10 +225,15 @@ class MCPAuthStorage:
         Args:
             mcp_name: Name of the MCP server
         """
-        data = self._read()
-        if mcp_name in data:
-            del data[mcp_name]
-            self._write(data)
+        def mutate(data: Dict[str, Any]) -> None:
+            data.pop(mcp_name, None)
+
+        update_json(self.filepath, mutate, indent=2)
+        if os.name != 'nt':
+            try:
+                os.chmod(self.filepath, 0o600)
+            except OSError:
+                pass
     
     def set_code_verifier(self, mcp_name: str, code_verifier: str) -> None:
         """

@@ -11,6 +11,7 @@ import time
 import asyncio
 from praisonaiagents._logging import get_logger
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
 
 from .types import (
@@ -72,6 +73,22 @@ class HookRunner:
         self._registry = registry if registry is not None else HookRegistry()
         self._default_timeout = default_timeout
         self._cwd = cwd or os.getcwd()
+        # Dedicated executor for sync hooks. A hook that times out cannot be
+        # cancelled and keeps its worker slot; isolating it here means a
+        # misbehaving hook can only exhaust hook capacity, never the loop's
+        # shared default executor that guardrails/tools/locks also rely on.
+        self._hook_pool: Optional[ThreadPoolExecutor] = None
+        # hook.id -> Future that outlived its timeout. Caps the leak at one
+        # thread per hook and lets later calls fail fast without a new thread.
+        self._stuck: Dict[str, Any] = {}
+
+    def _get_hook_pool(self) -> ThreadPoolExecutor:
+        """Lazily create the dedicated sync-hook executor."""
+        if self._hook_pool is None:
+            self._hook_pool = ThreadPoolExecutor(
+                max_workers=8, thread_name_prefix="praison-hook"
+            )
+        return self._hook_pool
     
     @property
     def registry(self) -> HookRegistry:
@@ -397,12 +414,45 @@ class HookRunner:
                     timeout=timeout
                 )
             else:
-                # Execute sync function in thread pool with timeout
+                # A previous invocation of this hook is still running past its
+                # timeout; fail closed immediately instead of launching another
+                # thread that would also leak. Caps the leak at one per hook.
+                prev = self._stuck.get(hook.id)
+                if prev is not None and not prev.done():
+                    duration = (time.time() - start_time) * 1000
+                    return HookExecutionResult(
+                        hook_id=hook.id,
+                        hook_name=hook.name or "unknown",
+                        event=event,
+                        success=False,
+                        error="previous invocation still running past its timeout",
+                        duration_ms=duration,
+                        output=HookResult(
+                            decision="deny",
+                            reason=f"Hook '{hook.name}' is still running past its timeout",
+                        ),
+                    )
+                self._stuck.pop(hook.id, None)
+
+                # Execute sync function in the dedicated hook pool with timeout.
+                # ``copy_context_to_callable`` preserves trace/session
+                # contextvars across the thread, matching other executor sites.
+                from ..trace.context_events import copy_context_to_callable
                 loop = asyncio.get_event_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, hook.func, input_data),
-                    timeout=timeout
+                func = hook.func
+                data = input_data
+                fut = loop.run_in_executor(
+                    self._get_hook_pool(),
+                    copy_context_to_callable(lambda: func(data)),
                 )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(fut), timeout=timeout
+                    )
+                except asyncio.TimeoutError:
+                    # Remember the leaked future so the next call fails fast.
+                    self._stuck[hook.id] = fut
+                    raise
             
             duration = (time.time() - start_time) * 1000
             

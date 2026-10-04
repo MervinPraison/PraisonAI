@@ -12,9 +12,15 @@ new content atomically on both POSIX and Windows.
 import json
 import os
 import tempfile
-from typing import Any
+import threading
+from collections import defaultdict
+from typing import Any, Callable
 
-__all__ = ["atomic_write_json", "atomic_write_text"]
+__all__ = ["atomic_write_json", "atomic_write_text", "update_json"]
+
+# Per-path in-process mutexes so threads in one process serialise before they
+# even reach the cross-process ``FileLock``. Keyed by absolute path.
+_path_mutexes: "defaultdict[str, threading.RLock]" = defaultdict(threading.RLock)
 
 
 def atomic_write_text(path: str, text: str, encoding: str = "utf-8") -> None:
@@ -70,3 +76,52 @@ def atomic_write_json(path: str, data: Any, **dump_kwargs: Any) -> None:
         except OSError:
             pass
         raise
+
+
+def update_json(
+    path: str,
+    mutate: Callable[[Any], Any],
+    default: Callable[[], Any] = dict,
+    **dump_kwargs: Any,
+) -> Any:
+    """Locked read-modify-write for a JSON file.
+
+    Holds a per-path in-process mutex *and* the cross-process
+    :class:`~praisonaiagents.session.store.FileLock` for the whole
+    read-modify-write, so concurrent threads and processes no longer lose each
+    other's updates (last-writer-wins). The write goes through
+    :func:`atomic_write_json`, so a crash mid-write never truncates the previous
+    good file.
+
+    A corrupt JSON file is *not* treated as empty: it is moved aside to
+    ``<path>.corrupt`` and the update proceeds from ``default()`` so a single
+    torn file can never silently wipe real data without leaving evidence.
+
+    Args:
+        path: JSON file path.
+        mutate: Callable invoked with the loaded data; mutate it in place.
+        default: Factory for the initial value when the file is missing/corrupt.
+        **dump_kwargs: Passed through to :func:`json.dump` (e.g. ``indent=2``).
+
+    Returns:
+        Whatever ``mutate`` returns (useful for surfacing the new item/length).
+    """
+    # Imported lazily to avoid a package-level import cycle (session -> utils).
+    from ..session.store import FileLock
+
+    abspath = os.path.abspath(path)
+    with _path_mutexes[abspath], FileLock(path, timeout=10):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = default()
+        except (json.JSONDecodeError, ValueError):
+            try:
+                os.replace(path, path + ".corrupt")
+            except OSError:
+                pass
+            data = default()
+        result = mutate(data)
+        atomic_write_json(path, data, **dump_kwargs)
+        return result
