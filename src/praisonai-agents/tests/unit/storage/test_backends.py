@@ -42,17 +42,18 @@ class TestFileBackend:
 
         backend = FileBackend(storage_dir=str(tmp_path))
 
-        for raw in (b"\xff", b"\xe4\xb8", b"\xed\xa0\x80"):
-            backend.save("bad", {"message": "original"})
-            file_path = Path(tmp_path) / "bad.json"
+        for idx, raw in enumerate((b"\xff", b"\xe4\xb8", b"\xed\xa0\x80")):
+            key = f"bad_{idx}"
+            backend.save(key, {"message": "original"})
+            file_path = Path(tmp_path) / f"{key}.json"
             file_path.write_bytes(raw)
 
             with caplog.at_level(logging.WARNING, logger="praisonaiagents.storage.backends"):
                 caplog.clear()
-                assert backend.load("bad") is None
+                assert backend.load(key) is None
                 # A warning is emitted identifying the failed key
                 assert any(
-                    rec.levelno == logging.WARNING and "Failed to load bad" in rec.getMessage()
+                    rec.levelno == logging.WARNING and f"Failed to load {key}" in rec.getMessage()
                     for rec in caplog.records
                 )
             # Original bytes are preserved (load is non-destructive)
