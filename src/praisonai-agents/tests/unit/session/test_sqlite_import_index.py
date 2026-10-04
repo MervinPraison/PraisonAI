@@ -190,7 +190,7 @@ def test_post_import_read_failure_does_not_restore_old_routes(make_store, monkey
     assert saved.gateway_session_id is None
     assert saved.agent_id is None
     assert saved.messages[0].content == "narwhal replacement"
-    assert destination.search("narwhal") == []
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
     assert destination.add_message("session", "user", "later update")
     assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
     assert destination.get_by_gateway_session("old-gateway") is None
@@ -647,3 +647,80 @@ def test_gateway_route_read_failure_does_not_use_warm_cache(make_store, monkeypa
     assert destination.get_by_gateway_session("old-gateway") is None
     assert destination.list_sessions_by_gateway_agent("old-agent") == []
     assert peer.get_by_gateway_session("new-gateway").session_id == "session"
+
+
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("failure", ["read", "index", "unknown"])
+def test_failed_import_recovers_new_recall_and_routes(make_store, monkeypatch, restart, failure):
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "new narwhal")
+    assert source.set_gateway_info("session", gateway_session_id="new-route", agent_id="new-agent")
+    destination = make_store(SqliteSessionStore)
+    assert destination.add_message("session", "user", "old otter")
+    assert destination.set_gateway_info("session", gateway_session_id="old-route", agent_id="old-agent")
+    assert destination.get_by_gateway_session("old-route") is not None
+    with monkeypatch.context() as blocked:
+        if failure == "read":
+            def fail_read(*_):
+                raise PermissionError("temporarily unreadable")
+            blocked.setattr(destination, "_load_session_from_disk", fail_read)
+        else:
+            blocked.setattr(destination, "_index_session", lambda *_: False)
+        if failure == "unknown":
+            blocked.setattr(destination, "_session_file_identity", lambda *_: None)
+        assert destination.import_sessions(source.export_all(), overwrite=True, reset_live_fields=False).imported == 1
+        assert destination.get_by_gateway_session("old-route") is None
+    if restart:
+        reopened = SqliteSessionStore(session_dir=destination.session_dir, db_path=destination.db_path)
+        try:
+            assert [hit.session_id for hit in reopened.search("narwhal")] == ["session"]
+            assert reopened.get_by_gateway_session("new-route").session_id == "session"
+            assert reopened.list_sessions_by_gateway_agent("new-agent") == ["session"]
+            assert reopened.get_by_gateway_session("old-route") is None
+            assert reopened.search("otter") == []
+        finally:
+            reopened._conn.close()
+        return
+    assert [hit.session_id for hit in destination.search("narwhal")] == ["session"]
+    assert destination.search("otter") == []
+    assert destination.get_by_gateway_session("new-route").session_id == "session"
+    assert destination.list_sessions_by_gateway_agent("new-agent") == ["session"]
+    assert destination.get_by_gateway_session("old-route") is None
+    assert destination._connect().execute("SELECT content FROM session_fts WHERE session_id = ?", ("session",)).fetchall() == [("new narwhal",)]
+
+
+@pytest.mark.parametrize("peer_kind", [DefaultSessionStore, SqliteSessionStore])
+def test_import_retry_indexes_current_peer_and_does_not_rewrite_healthy_rows(make_store, peer_kind):
+    destination = make_store(SqliteSessionStore)
+    for sid in ("session", "healthy"):
+        assert destination.add_message(sid, "user", "old otter")
+        assert destination.set_gateway_info(sid, gateway_session_id=sid + "-route")
+    assert destination.search("otter")
+    conn = destination._connect()
+    conn.execute("CREATE TABLE observed_writes (session_id TEXT)")
+    conn.execute("CREATE TRIGGER observe_retry AFTER INSERT ON session_meta "
+                 "BEGIN INSERT INTO observed_writes VALUES (NEW.session_id); END")
+    conn.execute("CREATE TRIGGER fail_retry BEFORE INSERT ON session_meta "
+                 "WHEN NEW.session_id = 'session' BEGIN SELECT RAISE(FAIL, 'retry unavailable'); END")
+    source = make_store(DefaultSessionStore)
+    assert source.add_message("session", "user", "imported narwhal")
+    assert destination.import_sessions(source.export_all(), overwrite=True).imported == 1
+    for _ in range(2):
+        assert destination.search("narwhal") == []
+        assert destination.get_by_gateway_session("healthy-route").session_id == "healthy"
+    assert conn.execute("SELECT COUNT(*) FROM observed_writes").fetchone() == (0,)
+    conn.execute("DROP TRIGGER fail_retry")
+    kwargs = {"db_path": destination.db_path} if peer_kind is SqliteSessionStore else {}
+    peer = peer_kind(session_dir=destination.session_dir, **kwargs)
+    try:
+        assert peer.set_chat_history("session", [{"role": "user", "content": "newer penguin"}])
+        assert peer.set_gateway_info("session", gateway_session_id="peer-route", agent_id="peer-agent")
+    finally:
+        if getattr(peer, "_conn", None) is not None:
+            peer._conn.close()
+    assert destination.get_by_gateway_session("peer-route").session_id == "session"
+    assert [hit.session_id for hit in destination.search("penguin")] == ["session"]
+    assert destination.search("narwhal") == []
+    assert destination.get_by_gateway_session("session-route") is None
+    assert conn.execute("SELECT key FROM session_index_meta WHERE key = 'import_pending:session'").fetchone() is None
+    assert conn.execute("SELECT COUNT(*) FROM observed_writes WHERE session_id = 'healthy'").fetchone() == (0,)

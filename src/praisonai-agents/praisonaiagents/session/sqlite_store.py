@@ -269,6 +269,10 @@ class SqliteSessionStore(DefaultSessionStore):
                         )
                     else:
                         conn.execute("DELETE FROM session_route WHERE session_id = ?", (sid,))
+                    conn.execute(
+                        "DELETE FROM session_index_meta WHERE key = ?",
+                        ("import_pending:" + sid,),
+                    )
                     conn.execute("RELEASE praisonai_index_refresh")
                 except BaseException:
                     if conn.in_transaction:
@@ -307,20 +311,45 @@ class SqliteSessionStore(DefaultSessionStore):
         Only sessions not already present in the index are (re)indexed, so the
         pass is cheap on a warm index.
         """
-        if self._backfilled:
-            return
         # Do not hold the database lock while waiting for transcript locks:
         # imports acquire their file lock before refreshing SQLite.
         with self._backfill_lock:
-            if self._backfilled or self._backfill_running:
+            if self._backfill_running:
                 return
             # A corruption callback can query this store during the pass.
             # It sees the index built so far; other threads wait for completion.
             self._backfill_running = True
             try:
-                self._backfilled = self._reindex_all()
+                self._retry_import_indexes()
+                if not self._backfilled:
+                    self._backfilled = self._reindex_all()
             finally:
                 self._backfill_running = False
+
+    def _retry_import_indexes(self) -> None:
+        """Retry only failed restores, including after reopening the store."""
+        conn = self._connect()
+        if conn is None:
+            return
+        try:
+            with self._db_lock:
+                keys = conn.execute(
+                    "SELECT key FROM session_index_meta WHERE key GLOB 'import_pending:*'"
+                ).fetchall()
+            for (key,) in keys:
+                sid = key[len("import_pending:"):]
+                filepath = self._get_session_path(sid)
+                try:
+                    # Match the writer's file -> database order. File identity
+                    # may be unavailable; the lock still protects this read.
+                    with FileLock(filepath, self.lock_timeout):
+                        session = self._load_session_from_disk(sid, filepath)
+                        self._reingest_spill(sid, session)
+                        self._index_session(session)
+                except Exception as exc:
+                    logger.debug("Import index retry failed for %s: %s", sid, exc)
+        except Exception as exc:
+            logger.debug("Cannot enumerate pending import indexes: %s", exc)
 
     def _indexed_ids(self) -> set:
         """Return the set of session_ids already fully indexed.
@@ -456,6 +485,12 @@ class SqliteSessionStore(DefaultSessionStore):
             return
         try:
             with self._db_lock:
+                # Persist recovery separately from cleanup: unreadable or
+                # changing generations must remain retryable after restart.
+                conn.execute(
+                    "INSERT OR REPLACE INTO session_index_meta (key, value) VALUES (?, '1')",
+                    ("import_pending:" + session.session_id,),
+                )
                 # Serialize with other SQLite writers before checking the file.
                 # A peer saving afterward must index after this transaction;
                 # a peer already indexed has a different atomic file identity.
