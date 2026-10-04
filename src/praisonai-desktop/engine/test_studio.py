@@ -63,6 +63,65 @@ class StudioProjectTests(unittest.TestCase):
         full = self.mgr.get_project(p["id"])
         self.assertEqual(len(full["assets"]), 8)
 
+    def test_readers_wait_for_project_replacement(self):
+        import base64
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from unittest.mock import patch
+
+        png = base64.b64encode(b'image').decode()
+        for operation in ('get', 'list', 'upload'):
+            with self.subTest(operation=operation):
+                project = self.mgr.create_project(operation)
+                path = self.mgr.root / project['id'] / 'project.json'
+                replacing = threading.Event()
+                release = threading.Event()
+                reader_started = threading.Event()
+                original_replace = os.replace
+                original_read = Path.read_text
+                writer_ident = []
+
+                def replace(source, destination):
+                    if Path(destination) == path:
+                        writer_ident[:] = [threading.get_ident()]
+                        replacing.set()
+                        if not release.wait(5):
+                            raise AssertionError('replacement was not released')
+                    return original_replace(source, destination)
+
+                def read(candidate, *args, **kwargs):
+                    if (candidate == path and replacing.is_set()
+                            and not release.is_set()
+                            and threading.get_ident() != writer_ident[0]):
+                        raise PermissionError('project is being replaced')
+                    return original_read(candidate, *args, **kwargs)
+
+                def reader():
+                    reader_started.set()
+                    if operation == 'get':
+                        return self.mgr.get_project(project['id'])
+                    if operation == 'list':
+                        return self.mgr.list_projects()
+                    return self.mgr.add_image_asset(project['id'], 'reader.png', png)
+
+                with patch.object(studio.os, 'replace', replace), patch.object(Path, 'read_text', read):
+                    with ThreadPoolExecutor(max_workers=2) as pool:
+                        writer = pool.submit(self.mgr.add_image_asset, project['id'], 'writer.png', png)
+                        try:
+                            self.assertTrue(replacing.wait(5))
+                            future = pool.submit(reader)
+                            self.assertTrue(reader_started.wait(5))
+                            with self.assertRaises(TimeoutError):
+                                future.result(timeout=0.1)
+                        finally:
+                            release.set()
+                        writer.result(timeout=5)
+                        result = future.result(timeout=5)
+                if operation == 'list':
+                    self.assertIn(project['id'], [item['id'] for item in result])
+                expected = 2 if operation == 'upload' else 1
+                self.assertEqual(len(self.mgr.get_project(project['id'])['assets']), expected)
+
     def test_timeline_and_single_clip_export(self):
         p = self.mgr.create_project("Export")
         proj_path = self.mgr.root / p["id"] / "project.json"
