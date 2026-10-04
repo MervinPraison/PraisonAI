@@ -279,7 +279,7 @@ class StudioManager:
                         "asset_count": len(data.get("assets", [])),
                     }
                 )
-            except (json.JSONDecodeError, KeyError, OSError):
+            except (json.JSONDecodeError, KeyError, OSError, ValueError):
                 continue
         out.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return out

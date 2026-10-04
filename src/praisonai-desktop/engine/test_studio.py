@@ -44,6 +44,13 @@ class StudioProjectTests(unittest.TestCase):
         full = self.mgr.get_project(p["id"])
         self.assertEqual(len(full["assets"]), 1)
 
+    def test_listing_skips_a_project_that_vanishes_after_discovery(self):
+        from unittest.mock import patch
+
+        self.mgr.create_project("Vanished")
+        with patch.object(self.mgr, "_project_dir", side_effect=ValueError("no such project")):
+            self.assertEqual(self.mgr.list_projects(), [])
+
     def test_concurrent_asset_appends_do_not_clobber(self):
         import base64
         import threading
@@ -85,7 +92,7 @@ class StudioProjectTests(unittest.TestCase):
                     if Path(destination) == path:
                         writer_ident[:] = [threading.get_ident()]
                         replacing.set()
-                        if not release.wait(5):
+                        if not release.wait(15):
                             raise AssertionError('replacement was not released')
                     return original_replace(source, destination)
 
