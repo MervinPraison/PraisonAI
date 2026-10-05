@@ -152,6 +152,12 @@ TOOL_MAPPINGS = {
     'fxmacrodata_forex': ('.fxmacrodata_tools', None),
     'fxmacrodata_cot': ('.fxmacrodata_tools', None),
     'fxmacrodata_commodity': ('.fxmacrodata_tools', None),
+    'fxmacrodata_indicator_async': ('.fxmacrodata_tools', None),
+    'fxmacrodata_catalogue_async': ('.fxmacrodata_tools', None),
+    'fxmacrodata_calendar_async': ('.fxmacrodata_tools', None),
+    'fxmacrodata_forex_async': ('.fxmacrodata_tools', None),
+    'fxmacrodata_cot_async': ('.fxmacrodata_tools', None),
+    'fxmacrodata_commodity_async': ('.fxmacrodata_tools', None),
     'FXMacroDataTools': ('.fxmacrodata_tools', 'FXMacroDataTools'),
     'fxmacrodata_tools': ('.fxmacrodata_tools', None),
     

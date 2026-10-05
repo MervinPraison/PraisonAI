@@ -43,6 +43,9 @@ EXTERNAL_TOOL_NAMES = set({
     "fxmacrodata", "fxmacrodata_indicator", "fxmacrodata_catalogue",
     "fxmacrodata_calendar", "fxmacrodata_forex", "fxmacrodata_cot",
     "fxmacrodata_commodity",
+    "fxmacrodata_indicator_async", "fxmacrodata_catalogue_async",
+    "fxmacrodata_calendar_async", "fxmacrodata_forex_async",
+    "fxmacrodata_cot_async", "fxmacrodata_commodity_async",
     
     # Web scraping tools
     "scrape_page", "crawl4ai", "web_crawl", "spider_crawl",

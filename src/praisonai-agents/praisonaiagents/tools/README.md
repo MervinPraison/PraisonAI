@@ -238,6 +238,18 @@ agent = Agent(
 agent.start("What was the last US CPI print and when is the next one?")
 ```
 
+To pass a key or timeout in code, use the bound methods of a configured
+instance. They register under the same tool names, so the model only sees the
+endpoint arguments. Each tool has an async variant (`fxmacrodata_indicator_async`,
+`FXMacroDataTools.aindicator`, ...) for async agents.
+
+```python
+from praisonaiagents.tools import FXMacroDataTools
+
+fx = FXMacroDataTools(api_key="...", timeout=10)
+agent = Agent(tools=[fx.catalogue, fx.indicator, fx.calendar, fx.forex])
+```
+
 ## Getting Started
 
 1. **Choose Your Approach** based on the guidelines above

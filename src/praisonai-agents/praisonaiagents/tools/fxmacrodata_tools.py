@@ -20,9 +20,17 @@ Usage:
     from praisonaiagents.tools import FXMacroDataTools
     fx = FXMacroDataTools()
     slugs = fx.catalogue("usd")
+
+    # A configured instance's bound methods work as agent tools too; they are
+    # named fxmacrodata_indicator etc., the same as the module functions.
+    fx = FXMacroDataTools(api_key="...", timeout=10)
+    agent = Agent(tools=[fx.catalogue, fx.indicator, fx.calendar])
+
+    # Async agents: fxmacrodata_indicator_async(...) or await fx.aindicator(...)
 """
 
 from typing import Any, Dict, Optional
+import asyncio
 import json
 import logging
 import os
@@ -120,27 +128,35 @@ class FXMacroDataTools:
     def _paged(self, path: str, params: Dict[str, Any], limit: int, offset: int) -> Dict[str, Any]:
         """Fetch ``limit`` rows, following the API's pagination past 100 rows."""
         limit = max(1, int(limit))
-        offset = max(0, int(offset))
-        result = self._request(path, {**params, "limit": min(limit, MAX_PAGE_SIZE), "offset": offset})
+        start = max(0, int(offset))
+        result = self._request(path, {**params, "limit": min(limit, MAX_PAGE_SIZE), "offset": start})
         if "error" in result or limit <= MAX_PAGE_SIZE:
             return result
 
         rows = list(result.get("data") or [])
         pagination = result.get("pagination") or {}
+        page_offset, page_count = start, len(rows)
         while len(rows) < limit and pagination.get("has_more"):
-            offset = pagination.get("next_offset", offset + len(rows))
-            page = self._request(path, {**params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": offset})
+            next_offset = pagination.get("next_offset")
+            request_offset = next_offset if next_offset is not None else page_offset + page_count
+            page = self._request(path, {**params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": request_offset})
             if "error" in page:
                 return page
             page_rows = page.get("data") or []
             if not page_rows:
                 break
             rows.extend(page_rows)
+            page_offset, page_count = request_offset, len(page_rows)
             pagination = page.get("pagination") or {}
 
         result["data"] = rows
         if pagination:
-            result["pagination"] = pagination
+            # Describe the combined rows, not the last page that was fetched.
+            combined = {**pagination, "limit": limit, "offset": start}
+            if combined.get("has_more"):
+                next_offset = pagination.get("next_offset")
+                combined["next_offset"] = next_offset if next_offset is not None else page_offset + page_count
+            result["pagination"] = combined
         return result
 
     def indicator(
@@ -287,6 +303,88 @@ class FXMacroDataTools:
         path = f"/commodities/{_segment(indicator)}"
         params = {"start_date": start_date, "end_date": end_date}
         return self._paged(path, params, limit, offset)
+
+    # Async variants. Each runs the stdlib request in a worker thread, so an
+    # async agent's event loop is never blocked and no extra dependency is needed.
+
+    async def aindicator(
+        self,
+        currency: str,
+        indicator: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Async version of indicator(). See indicator() for documentation."""
+        return await asyncio.to_thread(self.indicator, currency, indicator, start_date, end_date, limit, offset)
+
+    async def acatalogue(self, currency: str, include_coverage: bool = False) -> Dict[str, Any]:
+        """Async version of catalogue(). See catalogue() for documentation."""
+        return await asyncio.to_thread(self.catalogue, currency, include_coverage)
+
+    async def acalendar(
+        self,
+        currency: str,
+        indicator: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Async version of calendar(). See calendar() for documentation."""
+        return await asyncio.to_thread(self.calendar, currency, indicator, start_date, end_date, timezone)
+
+    async def aforex(
+        self,
+        base: str,
+        quote: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Async version of forex(). See forex() for documentation."""
+        return await asyncio.to_thread(self.forex, base, quote, start_date, end_date, limit, offset)
+
+    async def acot(
+        self,
+        currency: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Async version of cot(). See cot() for documentation."""
+        return await asyncio.to_thread(self.cot, currency, start_date, end_date, limit, offset)
+
+    async def acommodity(
+        self,
+        indicator: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Async version of commodity(). See commodity() for documentation."""
+        return await asyncio.to_thread(self.commodity, indicator, start_date, end_date, limit, offset)
+
+
+# Agents name a callable tool by its __name__, which for a bound method such as
+# FXMacroDataTools(api_key=...).indicator would be the bare "indicator". Give the
+# methods the module tool names so a configured instance gets the same tool
+# names, and the same external-content fencing (tools/trust.py), as the module
+# functions, without marking unrelated tools that happen to share a short name.
+for _method, _tool_name in {
+    "indicator": "fxmacrodata_indicator",
+    "catalogue": "fxmacrodata_catalogue",
+    "calendar": "fxmacrodata_calendar",
+    "forex": "fxmacrodata_forex",
+    "cot": "fxmacrodata_cot",
+    "commodity": "fxmacrodata_commodity",
+}.items():
+    getattr(FXMacroDataTools, _method).__name__ = _tool_name
+    getattr(FXMacroDataTools, "a" + _method).__name__ = _tool_name + "_async"
+del _method, _tool_name
 
 
 def fxmacrodata_indicator(
@@ -448,6 +546,68 @@ def fxmacrodata_commodity(
         limit=limit,
         offset=offset,
     )
+
+
+async def fxmacrodata_indicator_async(
+    currency: str,
+    indicator: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Async version of fxmacrodata_indicator. See fxmacrodata_indicator() for documentation."""
+    return await FXMacroDataTools().aindicator(currency, indicator, start_date, end_date, limit, offset)
+
+
+async def fxmacrodata_catalogue_async(currency: str, include_coverage: bool = False) -> Dict[str, Any]:
+    """Async version of fxmacrodata_catalogue. See fxmacrodata_catalogue() for documentation."""
+    return await FXMacroDataTools().acatalogue(currency, include_coverage)
+
+
+async def fxmacrodata_calendar_async(
+    currency: str,
+    indicator: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    timezone: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Async version of fxmacrodata_calendar. See fxmacrodata_calendar() for documentation."""
+    return await FXMacroDataTools().acalendar(currency, indicator, start_date, end_date, timezone)
+
+
+async def fxmacrodata_forex_async(
+    base: str,
+    quote: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Async version of fxmacrodata_forex. See fxmacrodata_forex() for documentation."""
+    return await FXMacroDataTools().aforex(base, quote, start_date, end_date, limit, offset)
+
+
+async def fxmacrodata_cot_async(
+    currency: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Async version of fxmacrodata_cot. See fxmacrodata_cot() for documentation."""
+    return await FXMacroDataTools().acot(currency, start_date, end_date, limit, offset)
+
+
+async def fxmacrodata_commodity_async(
+    indicator: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Async version of fxmacrodata_commodity. See fxmacrodata_commodity() for documentation."""
+    return await FXMacroDataTools().acommodity(indicator, start_date, end_date, limit, offset)
 
 
 # Alias for simple usage: from praisonaiagents.tools import fxmacrodata
