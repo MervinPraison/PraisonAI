@@ -17,6 +17,8 @@ import types
 
 import pytest
 
+import typer
+
 from praisonai_code.cli.commands import run as run_cmd
 from praisonai_code.cli.output.console import OutputMode
 
@@ -80,6 +82,30 @@ def _install_fake_praisonai(monkeypatch):
     fake_main = types.ModuleType("praisonai_code.cli.main")
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+    return captured
+
+
+def _install_failing_agent(monkeypatch, **traits):
+    """Install a fake Agent whose run takes a specific terminal outcome.
+
+    ``stop_reason`` lands on the agent's ``last_stop_reason``, the core signal
+    `_run_prompt` reads: a provider block/refusal reason ("refused",
+    "content_filtered", "length_truncated"), or "max_steps" for a step-limit
+    truncation after a partial answer. ``empty`` yields no result at all, which
+    the run treats as a hard failure. Left out, the run completes cleanly.
+    """
+    captured = {}
+
+    class _FakeAgent:
+        def __init__(self, **config):
+            captured["config"] = config
+            self.last_stop_reason = traits.get("stop_reason")
+
+        def start(self, prompt):
+            captured["prompt"] = prompt
+            return "" if traits.get("empty") else "partial answer"
+
+    monkeypatch.setattr("praisonaiagents.Agent", _FakeAgent)
     return captured
 
 
@@ -386,14 +412,124 @@ def test_ndjson_framing_does_not_leak_into_a_later_run(standalone, monkeypatch, 
     assert capsys.readouterr().out == "agent answer\n"
 
 
-def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):
-    """Unlike text runs, structured modes never delegate to the wrapper.
+# --- the JSON envelope covers every terminal outcome, not just success ------
 
-    The wrapper's direct-prompt path maps every mode to the same silent Agent
-    preset, so `--output json` used to mean "print the raw text answer". Routing
-    them in-process unconditionally is what makes the README's structured-output
-    row true.
+
+@pytest.mark.parametrize(
+    "stop_reason,status,exit_code",
+    [
+        ("refused", "refused", 2),
+        ("content_filtered", "content_filtered", 2),
+        ("max_steps", "truncated", 2),
+    ],
+)
+def test_json_envelope_covers_incomplete_terminal_states(
+    standalone, monkeypatch, capsys, stop_reason, status, exit_code
+):
+    """`--output json` must not exit silently on a blocked/truncated run.
+
+    These paths raise before the success-only envelope, so a script parsing
+    stdout used to get nothing at all and only a human warning.
     """
+    import json
+
+    _install_fake_praisonai(monkeypatch)
+    _install_failing_agent(monkeypatch, stop_reason=stop_reason)
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    assert exc.value.exit_code == exit_code
+    out = capsys.readouterr()
+    # The envelope is machine-readable and is the only thing on stdout.
+    assert json.loads(out.out) == {"result": "partial answer", "status": status}
+    # The human warning goes nowhere near stdout.
+    assert "Run" not in out.out
+
+
+def test_json_envelope_covers_a_failed_run(standalone, monkeypatch, capsys):
+    """An empty result is a failure, and it must still carry a status."""
+    import json
+
+    _install_fake_praisonai(monkeypatch)
+    _install_failing_agent(monkeypatch, empty=True)
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    assert exc.value.exit_code == 1
+    assert json.loads(capsys.readouterr().out) == {"result": None, "status": "failed"}
+
+
+def test_json_envelope_under_global_json_mode(standalone, monkeypatch, capsys):
+    """`--output-format json` + `--output stream-json` must not exit silently.
+
+    The global mode keeps precedence, so the per-command selector's NDJSON
+    framing is not installed — but the envelope still has to reach stdout, which
+    is the whole point of an ordinary-JSON controller.
+    """
+    import json
+
+    from praisonai_code.cli.output.console import OutputMode
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+    controller = _RecordingOutput(mode=OutputMode.JSON)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
+
+    assert controller.mode == OutputMode.JSON
+    assert json.loads(capsys.readouterr().out) == {
+        "result": "agent answer",
+        "status": "ok",
+    }
+
+
+def test_actions_mode_keeps_its_own_rendering_under_json_mode(
+    standalone, monkeypatch, capsys
+):
+    """`actions` renders via the core status module, so no second envelope.
+
+    Adding one here would duplicate the answer on stdout.
+    """
+    from praisonai_code.cli.output.console import OutputMode
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+    controller = _RecordingOutput(mode=OutputMode.JSON)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="actions")
+
+    assert "agent answer" not in capsys.readouterr().out
+    assert '"status"' not in capsys.readouterr().out
+
+
+def test_default_run_is_untouched_by_global_json_mode(monkeypatch, capsys):
+    """A plain run under `--output-format json` keeps its pre-existing behaviour.
+
+    The controller's JSON-mode finalisation is a gap shared by every command;
+    quietly redefining it here would widen a routing fix into a cross-command
+    output change.
+    """
+    from praisonai_code.cli.output.console import OutputMode
+
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
+    )
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    controller = _RecordingOutput(mode=OutputMode.JSON)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
+    _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):
     monkeypatch.setattr(
         "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
     )

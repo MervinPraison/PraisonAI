@@ -180,7 +180,9 @@ def _run_block_reason(agent: Any) -> Optional[str]:
     return reason if reason in _BLOCK_REASON_MESSAGES else None
 
 
-def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
+def _report_run_blocked(
+    output: Any, result: Any, reason: str, *, suppress_warning: bool = False
+) -> None:
     """Report a provider-blocked/refused/truncated run distinctly and exit 2.
 
     Mirrors ``_report_run_truncated``: any partial text is preserved in the
@@ -188,6 +190,9 @@ def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
     consumers and CI can branch on *why* nothing usable came back. Exits with
     code 2 (an incomplete run), distinct from a hard failure (exit 1) and a
     clean completion (exit 0).
+
+    ``suppress_warning`` keeps the human notice off stdout when the caller has
+    already printed a machine-readable envelope there.
     """
     message, remediation = _BLOCK_REASON_MESSAGES[reason]
     text = str(result) if result else None
@@ -195,7 +200,7 @@ def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
         message=message,
         data={"status": reason, "result": text},
     )
-    if not getattr(output, "is_json_mode", False):
+    if not suppress_warning and not getattr(output, "is_json_mode", False):
         output.print_warning(f"{message} {remediation}")
     raise typer.Exit(2)
 
@@ -225,7 +230,9 @@ def _report_run_failure(output: Any) -> None:
     raise typer.Exit(1)
 
 
-def _report_run_truncated(output: Any, result: Any) -> None:
+def _report_run_truncated(
+    output: Any, result: Any, *, suppress_warning: bool = False
+) -> None:
     """Report a step-limit-truncated run distinctly from a genuine completion.
 
     The finalisation summary is a real (non-empty) answer, so it is preserved in
@@ -234,13 +241,16 @@ def _report_run_truncated(output: Any, result: Any) -> None:
     one-line stderr notice tells an interactive user the answer is a wrap-up, not
     a finished task. Exits with code 2 to distinguish truncation (exit 2) from a
     hard failure (exit 1) and a clean completion (exit 0).
+
+    ``suppress_warning`` keeps that notice off stdout when the caller has already
+    printed a machine-readable envelope there.
     """
     text = str(result) if result else None
     output.emit_result(
         message="Run truncated: hit the step/iteration limit before completing.",
         data={"status": "truncated", "result": text},
     )
-    if not getattr(output, "is_json_mode", False):
+    if not suppress_warning and not getattr(output, "is_json_mode", False):
         output.print_warning(
             "Run hit the step/iteration limit; the answer above is a summary of "
             "partial progress, not a completed task. Raise the budget with "
@@ -2430,17 +2440,57 @@ def _run_prompt(
                     result, ok=succeeded and not truncated and not block_reason
                 )
             _record_session_usage(session_id or auto_save_name, model, output)
+
+            # `--output json` is a scripting surface, so *every* terminal outcome
+            # gets one single-line `{result, status}` envelope on stdout, not
+            # just a clean completion. It applies when the per-command selector
+            # asked for json, or when a structured selector landed under an
+            # ordinary-JSON controller (`--output-format json run --output
+            # stream-json`) — the pairing the mode wiring above makes reachable.
+            # `actions` is excluded because its core status module renders the
+            # answer itself. A plain run under `--output-format json` is left
+            # alone on purpose: the controller's JSON-mode finalisation is a
+            # pre-existing gap shared by every command, not something a routing
+            # fix should redefine. When the bridge is active it already frames a
+            # result event, so no second envelope is added on top of it.
+            _json_stdout = (
+                bridge is None
+                and output_mode in _STRUCTURED_AGENT_PRESETS
+                and output_mode != "actions"
+                and (
+                    output_mode == "json"
+                    or getattr(output, "mode", None) == OutputMode.JSON
+                )
+            )
+
+            def _emit_json_outcome(status: str, value: Any) -> None:
+                if not _json_stdout:
+                    return
+                import json as _json
+
+                print(_json.dumps({
+                    "result": str(value) if value else None,
+                    "status": status,
+                }))
+
             # A provider block/refusal/truncation wins over a generic empty-result
             # failure so the specific, actionable reason is not masked.
             if block_reason:
-                _report_run_blocked(output, result, block_reason)
+                _emit_json_outcome(block_reason, result)
+                _report_run_blocked(
+                    output, result, block_reason, suppress_warning=_json_stdout
+                )
             if not succeeded:
+                _emit_json_outcome("failed", result)
                 _report_run_failure(output)
             # Report the truncated run distinctly (exit 2 + status "truncated")
             # so CI/users don't mistake wrapped-up partial work for a completed
             # task.
             if truncated:
-                _report_run_truncated(output, result)
+                _emit_json_outcome("truncated", result)
+                _report_run_truncated(
+                    output, result, suppress_warning=_json_stdout
+                )
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -2450,17 +2500,8 @@ def _run_prompt(
             # print it here (the wrapper text path does the same). Actions mode
             # already shows its output, and so does the event bridge when it is
             # active, so skip the bare print there and let the framing stand.
-            if output_mode == "json" and bridge is None:
-                # `--output json` is a scripting surface: one single-line
-                # envelope on stdout, the shape `code -p --output json` already
-                # emits, so a script reads the result from stdout instead of
-                # scraping it out of interleaved decorations.
-                import json as _json
-
-                print(_json.dumps({
-                    "result": str(result) if result else None,
-                    "status": "ok",
-                }))
+            if _json_stdout:
+                _emit_json_outcome("ok", result)
             elif _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
                 print(result)
             return
