@@ -175,6 +175,11 @@ class FXMacroDataTools:
         while len(rows) < limit and pagination.get("has_more"):
             next_offset = pagination.get("next_offset")
             request_offset = next_offset if next_offset is not None else page_offset + page_count
+            if request_offset <= page_offset:
+                # A repeated or backward offset would refetch rows already collected.
+                error_msg = "Unexpected FXMacroData response: pagination offset did not advance"
+                logging.error(error_msg)
+                return {"error": error_msg}
             page = self._request(path, {**page_params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": request_offset})
             if "error" in page:
                 return page

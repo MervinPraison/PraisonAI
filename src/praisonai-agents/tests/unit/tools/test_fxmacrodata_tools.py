@@ -262,6 +262,35 @@ def test_malformed_later_page_returns_error_dict():
     assert set(result) == {"error"}
 
 
+@pytest.mark.parametrize(
+    "first_page",
+    [
+        _page(0, 100, limit=100, offset=0, has_more=True, next_offset=0),
+        _page(50, 100, limit=100, offset=50, has_more=True, next_offset=20),
+        {"data": [], "pagination": {"limit": 100, "offset": 0, "has_more": True}},
+    ],
+    ids=["same-offset", "backward-offset", "empty-page-without-next-offset"],
+)
+def test_non_advancing_pagination_offset_returns_error_dict(first_page):
+    opener = FakeOpener(first_page)
+    start = first_page["pagination"]["offset"]
+    with patch.object(fxm, "_OPENER", opener):
+        result = fxm.fxmacrodata_forex("eur", "usd", limit=250, offset=start)
+    assert len(opener.requests) == 1
+    assert result == {"error": "Unexpected FXMacroData response: pagination offset did not advance"}
+
+
+def test_non_advancing_offset_on_later_page_returns_error_dict():
+    opener = FakeOpener(
+        _page(0, 100, limit=100, offset=0, has_more=True, next_offset=100),
+        _page(100, 100, limit=100, offset=100, has_more=True, next_offset=100),
+    )
+    with patch.object(fxm, "_OPENER", opener):
+        result = fxm.fxmacrodata_forex("eur", "usd", limit=300)
+    assert [_query(r)["offset"] for r in opener.requests] == ["0", "100"]
+    assert set(result) == {"error"}
+
+
 def test_lazy_exports():
     from praisonaiagents import tools
     from praisonaiagents.tools.trust import EXTERNAL_TOOL_NAMES
