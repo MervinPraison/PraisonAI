@@ -222,8 +222,8 @@ def test_explicit_output_mode_wins_over_verbose_flag(standalone, monkeypatch):
 @pytest.mark.parametrize(
     "mode,preset", [
         ("actions", "actions"),
-        ("json", "json"),
-        ("stream", "stream"),
+        ("json", "silent"),
+        ("stream", "silent"),
         ("stream-json", "silent"),
     ]
 )
@@ -239,15 +239,82 @@ def test_structured_modes_run_in_process(standalone, monkeypatch, mode, preset):
     assert "prompt" not in delegated, "structured modes must not delegate"
 
 
-def test_structured_modes_do_not_print_final_text(standalone, monkeypatch, capsys):
-    """Structured modes emit their own output; the CLI stays out of the stream."""
+def test_structured_modes_print_the_answer(standalone, monkeypatch, capsys):
+    """A structured run must leave the answer on stdout, not return nothing.
+
+    The core `json` preset routes its JSONL to stderr and the core `stream`
+    preset makes `Agent.start()` return a generator this path would never
+    consume, so neither preset can be used here: the CLI prints the answer and
+    every mode produces output on stdout.
+    """
     _install_fake_agent(monkeypatch)
     _install_fake_praisonai(monkeypatch)
 
     for mode in ("json", "stream", "stream-json"):
         capsys.readouterr()
         run_cmd._run_prompt("hi", no_save=True, output_mode=mode)
-        assert "agent answer" not in capsys.readouterr().out
+        assert "agent answer" in capsys.readouterr().out, mode
+
+
+def test_structured_json_mode_emits_a_single_line_envelope(standalone, monkeypatch, capsys):
+    """`--output json` is a scripting surface: one parseable envelope on stdout.
+
+    Mirrors the envelope `code -p --output json` emits, so a script can read the
+    result from stdout instead of scraping interleaved decorations.
+    """
+    import json
+
+    _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    out = capsys.readouterr().out
+    envelope = json.loads(out)
+    assert envelope == {"result": "agent answer", "status": "ok"}
+    assert out.count("\n") == 1, "the envelope must be a single line"
+
+
+def test_structured_json_envelope_yields_to_the_event_bridge(standalone, monkeypatch, capsys):
+    """With the bridge active the NDJSON framing already carries the result.
+
+    `--output-format stream-json` makes the OutputController print its own
+    result event, so printing a second envelope here would corrupt the stream.
+    """
+    import json
+
+    from praisonai_code.cli.output.console import OutputMode
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+
+    class _StreamJsonOutput(_RecordingOutput):
+        # Set in __init__: _RecordingOutput.__init__ assigns is_json_mode as an
+        # instance attribute, which would shadow a class-level override.
+        def __init__(self):
+            super().__init__()
+            self.mode = OutputMode.STREAM_JSON
+            self.is_json_mode = True
+
+        def emit_event(self, event_type, message=None, data=None, agent_id=None):
+            print(json.dumps({"event": event_type, "data": data}), flush=True)
+
+        def emit_result(self, message=None, data=None):
+            self.emit_event("result", message=message, data=data)
+
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: _StreamJsonOutput())
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    out = capsys.readouterr().out
+    events = [json.loads(line)["event"] for line in out.strip().splitlines()]
+    # The bridge framed the run; the CLI must not add a second, differently
+    # shaped envelope on top of the NDJSON stream.
+    assert "run.result" in events
+    assert not any(
+        json.loads(line).get("data", {}).get("status") == "ok"
+        for line in out.strip().splitlines()
+    ), out
 
 
 def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):

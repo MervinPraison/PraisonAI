@@ -132,10 +132,28 @@ def test_silent_style_modes_print_final_text(mode):
     assert run_cmd._prints_final_text(mode) is True
 
 
-@pytest.mark.parametrize("mode", ["verbose", "actions", "json", "stream", "stream-json"])
-def test_agent_or_structured_modes_render_themselves(mode):
-    """Verbose renders via the agent display; structured modes emit events."""
+@pytest.mark.parametrize("mode", ["verbose", "actions"])
+def test_self_rendering_modes_do_not_print_final_text(mode):
+    """Verbose renders via the agent display; actions via the core status module."""
     assert run_cmd._prints_final_text(mode) is False
+
+
+@pytest.mark.parametrize("mode", [None, "plain", "silent", "json", "stream", "stream-json"])
+def test_cli_prints_final_text_for_silent_presets(mode):
+    """Silent presets leave the rendering to the CLI, structured ones included."""
+    assert run_cmd._prints_final_text(mode) is True
+
+
+def test_structured_preset_mapping():
+    """Only `actions` maps onto a core preset; the rest stay agent-silent.
+
+    The core ``json`` preset writes JSONL to stderr and the core ``stream``
+    preset makes ``Agent.start()`` return an unconsumed generator, so the CLI
+    owns the output for those modes instead of delegating to a core preset.
+    """
+    assert run_cmd._structured_agent_preset("actions") == "actions"
+    for mode in ("json", "stream", "stream-json"):
+        assert run_cmd._structured_agent_preset(mode) == "silent"
 
 
 # --- the remaining targeted gate: --image -----------------------------------

@@ -265,16 +265,18 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
-# Structured modes map onto the core Agent output preset of the same name: the
-# ``json`` preset emits JSONL (piping/scripting) and ``stream`` streams the
-# response. ``stream-json`` has no core preset — that NDJSON framing belongs to
-# the CLI's own OutputController and reaches stdout through the event bridge
-# attached below — so its agent display stays silent rather than writing human
-# text into the event stream.
+# Structured modes and the core Agent output preset each one uses. Only
+# ``actions`` maps onto a core preset: its status module prints the final content
+# to stdout itself. The others keep the agent display silent because the CLI owns
+# their wire format, and the core presets that look like a match are not usable
+# here — the core ``json`` preset routes its JSONL to stderr
+# (praisonaiagents.output.status defaults to sys.stderr "to not interfere with
+# agent output"), and the core ``stream`` preset makes ``Agent.start()`` return a
+# generator that nothing in this path consumes.
 _STRUCTURED_AGENT_PRESETS = {
     "actions": "actions",
-    "json": "json",
-    "stream": "stream",
+    "json": "silent",
+    "stream": "silent",
     "stream-json": "silent",
 }
 
@@ -352,10 +354,15 @@ def _prints_final_text(output_mode: Optional[str]) -> bool:
     """True when the CLI must print the final answer itself.
 
     Silent-style text presets leave the agent silent, so the final text is
-    printed by the CLI (as the wrapper text path does). Verbose renders the
-    response via the agent display; structured modes emit their own events.
+    printed by the CLI (as the wrapper text path does). The structured modes
+    other than ``actions`` also keep the agent silent (see
+    ``_STRUCTURED_AGENT_PRESETS``) and reach here through the same print, while
+    ``actions`` renders via the core status module and ``verbose`` via the agent
+    display.
     """
-    return output_mode in _SILENT_STYLE_TEXT_MODES
+    return output_mode in _SILENT_STYLE_TEXT_MODES or (
+        output_mode in _STRUCTURED_AGENT_PRESETS and output_mode != "actions"
+    )
 
 
 def _structured_agent_preset(output_mode: str) -> str:
@@ -2421,10 +2428,22 @@ def _run_prompt(
                 data={"result": str(result) if result else None}
             )
 
-            # Silent-style text presets don't render the final answer
-            # themselves, so print it here (the wrapper text path does the
-            # same). Actions mode already shows its output.
-            if _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
+            # Silent-style modes don't render the final answer themselves, so
+            # print it here (the wrapper text path does the same). Actions mode
+            # already shows its output, and so does the event bridge when it is
+            # active, so skip the bare print there and let the framing stand.
+            if output_mode == "json" and bridge is None:
+                # `--output json` is a scripting surface: one single-line
+                # envelope on stdout, the shape `code -p --output json` already
+                # emits, so a script reads the result from stdout instead of
+                # scraping it out of interleaved decorations.
+                import json as _json
+
+                print(_json.dumps({
+                    "result": str(result) if result else None,
+                    "status": "ok",
+                }))
+            elif _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
                 print(result)
             return
         
