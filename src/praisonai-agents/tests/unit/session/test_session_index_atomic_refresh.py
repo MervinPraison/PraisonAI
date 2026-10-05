@@ -21,6 +21,12 @@ def test_wal_reader_retains_session_during_or_after_failed_index_refresh(tmp_pat
         conn = store._conn
         session = store._read_session_fresh("session")
         session.messages[0].content = "needle new"
+        # Refresh indexes the committed file generation, not a caller's
+        # possibly stale object. Persist the new transcript without refreshing
+        # its index so the WAL reader still starts with the old index row.
+        assert store._atomic_write_json(
+            store._get_session_path("session"), session.to_dict()
+        )
         reader = sqlite3.connect(store.db_path, isolation_level=None)
 
         class PausedConnection:
