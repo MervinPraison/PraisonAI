@@ -186,3 +186,31 @@ def test_plain_standalone_run_install_no_approval(standalone, monkeypatch):
     run_cmd._run_prompt("hi", no_save=True)
 
     assert captured["config"].get("approval") is None
+
+
+def test_verbose_flag_selects_the_verbose_preset(standalone, monkeypatch, capsys):
+    """`--verbose` folds into the Agent preset, as the wrapper text path does.
+
+    The flag is separate from `--output`, so without this a standalone default
+    run would take the silent preset and render differently from the very same
+    command on a wrapper-installed install.
+    """
+    captured = _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, verbose=True)
+
+    assert captured["config"]["output"] == "verbose"
+    # The verbose preset renders the response itself; the CLI must not print it
+    # a second time.
+    assert "agent answer" not in capsys.readouterr().out
+
+
+def test_explicit_output_mode_wins_over_verbose_flag(standalone, monkeypatch):
+    """An explicit `--output plain` is not overridden by `--verbose`."""
+    captured = _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, verbose=True, output_mode="plain")
+
+    assert captured["config"]["output"] == "minimal"

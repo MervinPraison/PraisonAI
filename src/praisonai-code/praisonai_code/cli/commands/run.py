@@ -2259,6 +2259,15 @@ def _run_prompt(
         # Text modes join the in-process path when the wrapper is absent
         # (_text_run_renders_in_process, issue #5644) so a standalone install
         # gets a working default run instead of the wrapper install gate.
+        #
+        # `--verbose` is a separate flag from `--output`, and the wrapper text
+        # path folds it into the Agent preset when no explicit mode was
+        # selected (praisonai.cli.legacy.direct_prompt). Mirror that here or the
+        # same command renders differently depending on whether the wrapper
+        # happens to be installed.
+        agent_text_mode = (
+            "verbose" if verbose and output_mode is None else output_mode
+        )
         if (
             output_mode == "actions"
             or _text_run_renders_in_process(output_mode, image=image)
@@ -2275,7 +2284,7 @@ def _run_prompt(
                 "output": (
                     "actions"
                     if output_mode == "actions"
-                    else _agent_text_preset(output_mode)
+                    else _agent_text_preset(agent_text_mode)
                 ),
             }
             if model:
@@ -2394,7 +2403,7 @@ def _run_prompt(
             # Silent-style text presets don't render the final answer
             # themselves, so print it here (the wrapper text path does the
             # same). Actions mode already shows its output.
-            if _prints_final_text(output_mode) and result and not output.is_json_mode:
+            if _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
                 print(result)
             return
         
