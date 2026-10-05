@@ -24,6 +24,10 @@ def test_wal_reader_retains_session_during_or_after_failed_index_refresh(tmp_pat
         reader = sqlite3.connect(store.db_path, isolation_level=None)
 
         class PausedConnection:
+            @property
+            def in_transaction(self):
+                return conn.in_transaction
+
             def execute(self, sql, parameters=()):
                 if failure and sql.startswith("INSERT INTO session_fts"):
                     raise sqlite3.OperationalError("injected index insert failure")

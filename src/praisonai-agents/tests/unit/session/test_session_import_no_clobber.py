@@ -11,9 +11,10 @@ from praisonaiagents.session.sqlite_store import SqliteSessionStore
 
 @pytest.mark.parametrize("kind", [DefaultSessionStore, SqliteSessionStore])
 @pytest.mark.parametrize("overwrite", [False, True])
-def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, kind, overwrite):
+@pytest.mark.parametrize("peer_kind", [DefaultSessionStore, SqliteSessionStore])
+def test_import_rechecks_new_peer_session_under_write_lock(tmp_path, monkeypatch, kind, overwrite, peer_kind):
     directory = str(tmp_path / "sessions")
-    stores = [kind(session_dir=directory), kind(session_dir=directory)]
+    stores = [kind(session_dir=directory), peer_kind(session_dir=directory)]
     importer, peer = stores
     ready, completed = Event(), Event()
     original = importer._save_imported_session
