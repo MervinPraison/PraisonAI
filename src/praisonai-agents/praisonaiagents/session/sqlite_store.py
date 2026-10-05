@@ -774,7 +774,7 @@ class SqliteSessionStore(DefaultSessionStore):
             with self._lock:
                 self._cache[session_id] = session
             return session
-        except (OSError, ValueError, TypeError) as exc:
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("Cannot verify indexed route for %s: %s", session_id, exc)
             return None
 
