@@ -11,7 +11,8 @@ Default Search Provider Priority:
 5. DuckDuckGo (requires ddgs package, no API key)
 6. SearxNG (requires requests + running SearxNG instance)
 
-Parallel Search MCP is available when explicitly selected.
+Parallel Search MCP and Keenable are available when explicitly selected; neither
+needs an API key.
 
 Usage:
     from praisonaiagents.tools import search_web
@@ -38,6 +39,16 @@ PARALLEL_MAX_RESULTS = 10
 PARALLEL_MAX_TITLE_CHARS = 256
 PARALLEL_MAX_URL_CHARS = 2048
 PARALLEL_MAX_SNIPPET_CHARS = 1200
+
+KEENABLE_SEARCH_URL = "https://api.keenable.ai/v1/search"
+KEENABLE_PUBLIC_SEARCH_URL = "https://api.keenable.ai/v1/search/public"
+KEENABLE_APP_TITLE = "PraisonAI"
+KEENABLE_SEARCH_TIMEOUT_SECONDS = 30
+KEENABLE_MAX_RESPONSE_BYTES = 1_000_000
+KEENABLE_MAX_RESULTS = 50
+KEENABLE_MAX_TITLE_CHARS = 256
+KEENABLE_MAX_URL_CHARS = 2048
+KEENABLE_MAX_SNIPPET_CHARS = 1200
 
 def _check_tavily() -> tuple[bool, Optional[str]]:
     """Check if Tavily is available."""
@@ -96,7 +107,11 @@ def _check_parallel() -> tuple[bool, Optional[str]]:
         return False, "install praisonaiagents[parallel-search] for bounded Streamable HTTP support"
     return True, None
 
-def _truncate_parallel_text(value: Any, limit: int) -> str:
+def _check_keenable() -> tuple[bool, Optional[str]]:
+    """Keenable needs no package and no key: it is called with the standard library."""
+    return True, None
+
+def _truncate_text(value: Any, limit: int) -> str:
     text = str(value or "").strip()
     if len(text) > limit:
         return text[:limit - 1] + "…"
@@ -162,10 +177,67 @@ def _search_parallel(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
             if isinstance(excerpt, str) and excerpt.strip()
         )
         results.append({
-            "title": _truncate_parallel_text(result.get("title", ""), PARALLEL_MAX_TITLE_CHARS),
+            "title": _truncate_text(result.get("title", ""), PARALLEL_MAX_TITLE_CHARS),
             "url": url,
-            "snippet": _truncate_parallel_text(snippet, PARALLEL_MAX_SNIPPET_CHARS),
+            "snippet": _truncate_text(snippet, PARALLEL_MAX_SNIPPET_CHARS),
             "provider": "parallel",
+        })
+        if len(results) >= result_limit:
+            break
+    return results
+
+def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    """Search with Keenable: the keyless public endpoint, or the keyed one when KEENABLE_API_KEY is set."""
+    result_limit = max(0, min(int(max_results), KEENABLE_MAX_RESULTS))
+    if result_limit == 0:
+        return []
+
+    from urllib.request import Request, urlopen
+
+    api_key = (os.environ.get("KEENABLE_API_KEY") or "").strip()
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "praisonaiagents",
+        # Required on keyless calls; names the app, carries no user identifier.
+        "X-Keenable-Title": KEENABLE_APP_TITLE,
+    }
+    if api_key:
+        headers["X-API-Key"] = api_key
+    body = json.dumps({
+        "query": query,
+        "max_results": result_limit,
+        "snippet_max_length": KEENABLE_MAX_SNIPPET_CHARS,
+    }).encode("utf-8")
+    request = Request(
+        KEENABLE_SEARCH_URL if api_key else KEENABLE_PUBLIC_SEARCH_URL,
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    # HTTP errors (a 429 on the shared keyless tier included) raise, so search_web moves on.
+    with urlopen(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
+        raw = response.read(KEENABLE_MAX_RESPONSE_BYTES + 1)
+    if len(raw) > KEENABLE_MAX_RESPONSE_BYTES:
+        raise ValueError("Keenable returned an oversized response")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise ValueError("Keenable returned an invalid response shape")
+
+    results = []
+    for result in payload["results"]:
+        if not isinstance(result, dict):
+            continue
+        url = result.get("url")
+        if not isinstance(url, str) or not url or len(url) > KEENABLE_MAX_URL_CHARS:
+            continue
+        # The page text is in `snippet`; `description` is usually empty.
+        snippet = " ".join(str(result.get("snippet") or result.get("description") or "").split())
+        results.append({
+            "title": _truncate_text(result.get("title", ""), KEENABLE_MAX_TITLE_CHARS),
+            "url": url,
+            "snippet": _truncate_text(snippet, KEENABLE_MAX_SNIPPET_CHARS),
+            "provider": "keenable",
         })
         if len(results) >= result_limit:
             break
@@ -373,6 +445,7 @@ SEARCH_PROVIDERS = [
 
 SELECTABLE_SEARCH_PROVIDERS = SEARCH_PROVIDERS + [
     ("parallel", _check_parallel, _search_parallel),
+    ("keenable", _check_keenable, _search_keenable),
 ]
 
 def search_web(
@@ -387,8 +460,8 @@ def search_web(
 ) -> List[Dict[str, Any]]:
     """Search the web using one or more providers with automatic fallback.
     
-    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng, parallel
-    Parallel is opt-in and does not change the existing automatic provider order.
+    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng, parallel, keenable
+    Parallel and Keenable are opt-in and do not change the existing automatic provider order.
     
     Args:
         query: Search query string
@@ -398,7 +471,8 @@ def search_web(
                    - Comma-separated: "tavily, brave" (tries in order, falls back on failure)
                    - List: ["tavily", "brave"] (same as comma-separated)
                    If not specified, tries the default providers in order until one succeeds.
-                   Select "parallel" to use the keyless Parallel Search MCP provider.
+                   Select "parallel" to use the keyless Parallel Search MCP provider,
+                   or "keenable" for Keenable (keyless; KEENABLE_API_KEY raises limits).
         
         Provider-specific options (only used by their respective provider):
         - searxng_url: [SearxNG] Custom instance URL

@@ -135,6 +135,26 @@ intended for exploration and light use; see the
 [Search MCP documentation](https://docs.parallel.ai/integrations/mcp/search-mcp)
 for access limits.
 
+### Keenable
+
+Keenable works without an API key and without an extra install: the provider
+calls Keenable's REST API with the standard library. Select it for one call with
+`providers="keenable"`, or set `WEB_SEARCH_PROVIDER=keenable`:
+
+```python
+from praisonaiagents.tools.web_search import search_web
+
+results = search_web("recent agent framework releases", providers="keenable")
+```
+
+Keenable is opt-in and does not change the automatic provider order. When you
+select it, your search query is sent to Keenable. Requests carry an
+`X-Keenable-Title: PraisonAI` header, which the keyless endpoint requires; it
+names the app and contains no user or installation ID. Keyless access is
+rate-limited per IP address. Set `KEENABLE_API_KEY` (from
+[keenable.ai](https://keenable.ai)) to use the authenticated endpoint and raise
+the limits; see the [Keenable docs](https://docs.keenable.ai) for details.
+
 ### 2. Class-Based Approach (Complex Tools)
 
 Best for tools that do multiple related things or need to remember information. Like a smart calculator that remembers your previous calculations and can do many different math operations.
