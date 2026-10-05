@@ -2187,6 +2187,27 @@ def _run_prompt(
         _prev_mode = output.mode
         output.mode = OutputMode.STREAM_JSON
 
+    # `--output json` is a scripting surface, so the machine-readable envelope is
+    # decided before anything else runs: the session footer and the terminal
+    # hosts further down both print human notices to stdout, and a notice in
+    # front of the envelope makes stdout invalid as a single JSON document.
+    # The condition is the same one the envelope uses, expressed without the
+    # event bridge so it is available at the top of the function — an attached
+    # bridge means the controller is in STREAM_JSON mode, where it frames its own
+    # result event instead. `actions` is excluded because its core status module
+    # renders the answer itself. A plain run under `--output-format json` is left
+    # alone: the controller's JSON-mode finalisation is a pre-existing gap shared
+    # by every command, not something a routing fix should redefine.
+    _json_stdout = (
+        output_mode in _STRUCTURED_AGENT_PRESETS
+        and output_mode != "actions"
+        and (
+            output_mode == "json"
+            or getattr(output, "mode", None) == OutputMode.JSON
+        )
+        and getattr(output, "mode", None) != OutputMode.STREAM_JSON
+    )
+
     # Note: Credential check already done in run_main() entry point
 
     # Scope the --allow-local-tools grant to this run so the opt-in never leaks
@@ -2439,30 +2460,18 @@ def _run_prompt(
                 bridge.emit_run_result(
                     result, ok=succeeded and not truncated and not block_reason
                 )
-            _record_session_usage(session_id or auto_save_name, model, output)
+            _record_session_usage(
+                session_id or auto_save_name,
+                model,
+                output,
+                suppress_info=_json_stdout,
+            )
 
             # `--output json` is a scripting surface, so *every* terminal outcome
             # gets one single-line `{result, status}` envelope on stdout, not
-            # just a clean completion. It applies when the per-command selector
-            # asked for json, or when a structured selector landed under an
-            # ordinary-JSON controller (`--output-format json run --output
-            # stream-json`) — the pairing the mode wiring above makes reachable.
-            # `actions` is excluded because its core status module renders the
-            # answer itself. A plain run under `--output-format json` is left
-            # alone on purpose: the controller's JSON-mode finalisation is a
-            # pre-existing gap shared by every command, not something a routing
-            # fix should redefine. When the bridge is active it already frames a
-            # result event, so no second envelope is added on top of it.
-            _json_stdout = (
-                bridge is None
-                and output_mode in _STRUCTURED_AGENT_PRESETS
-                and output_mode != "actions"
-                and (
-                    output_mode == "json"
-                    or getattr(output, "mode", None) == OutputMode.JSON
-                )
-            )
-
+            # just a clean completion: the reporters below exit before the
+            # success-only path, so a failure would otherwise carry no
+            # machine-readable status at all.
             def _emit_json_outcome(status: str, value: Any) -> None:
                 if not _json_stdout:
                     return
@@ -2596,12 +2605,15 @@ def _run_prompt(
             output.mode = _prev_mode
 
 
-def _record_session_usage(session_id, model, output) -> None:
+def _record_session_usage(session_id, model, output, *, suppress_info: bool = False) -> None:
     """Accumulate this run's token/cost usage into the active session and show
     a compact running total footer (Issue #2421).
 
     Best-effort: never let usage accounting break a completed run. Stays quiet
-    in JSON mode so machine-readable output is unaffected.
+    in JSON mode so machine-readable output is unaffected. ``suppress_info``
+    extends that to ``run --output json``, where the per-command selector is the
+    scripting contract but the controller is a human-facing one, so its
+    ``is_json_mode`` alone would not catch the footer.
     """
     if not session_id:
         return
@@ -2625,7 +2637,7 @@ def _record_session_usage(session_id, model, output) -> None:
 
     if not usage or not usage.get("total_tokens"):
         return
-    if output is not None and getattr(output, "is_json_mode", False):
+    if suppress_info or (output is not None and getattr(output, "is_json_mode", False)):
         return
     try:
         footer = format_usage_footer(usage)

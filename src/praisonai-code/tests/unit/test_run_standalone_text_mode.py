@@ -506,6 +506,67 @@ def test_actions_mode_keeps_its_own_rendering_under_json_mode(
     assert '"status"' not in capsys.readouterr().out
 
 
+def test_json_envelope_is_stdouts_only_line_with_auto_save(
+    standalone, monkeypatch, capsys
+):
+    """The session usage footer must not land in front of the envelope.
+
+    `--output json` runs with auto-save on by default, and the footer's
+    `print_info` reaches stdout because the controller is human-facing — its
+    `is_json_mode` is False. A notice in front of the envelope makes stdout
+    invalid as a single JSON document, which is the whole contract. The prior
+    tests all passed `no_save=True`, so none of them reached this path.
+    """
+    import json
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+
+    notices = []
+    monkeypatch.setattr(
+        "praisonai_code.cli.state.project_sessions.accumulate_session_usage",
+        lambda *a, **k: {"total_tokens": 42, "input_tokens": 10, "output_tokens": 32},
+    )
+    monkeypatch.setattr(
+        "praisonai_code.cli.state.project_sessions.maybe_auto_title_session",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        standalone, "print_info", lambda msg: notices.append(msg)
+    )
+
+    run_cmd._run_prompt("hi", output_mode="json")
+
+    out = capsys.readouterr().out
+    assert len(out.strip().splitlines()) == 1, out
+    assert json.loads(out) == {"result": "agent answer", "status": "ok"}
+    assert notices == []
+
+
+def test_usage_footer_still_shows_for_a_default_run(standalone, monkeypatch, capsys):
+    """The suppression is scoped to the JSON run; a human run keeps its footer."""
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.state.project_sessions.accumulate_session_usage",
+        lambda *a, **k: {"total_tokens": 42, "input_tokens": 10, "output_tokens": 32},
+    )
+    monkeypatch.setattr(
+        "praisonai_code.cli.state.project_sessions.maybe_auto_title_session",
+        lambda *a, **k: None,
+    )
+    printed = []
+    monkeypatch.setattr(
+        standalone, "print_info", lambda msg: printed.append(msg)
+    )
+
+    run_cmd._run_prompt("hi")
+
+    assert printed, "a human run must still see the usage footer"
+    assert "agent answer" in capsys.readouterr().out
+
+
 def test_default_run_is_untouched_by_global_json_mode(monkeypatch, capsys):
     """A plain run under `--output-format json` keeps its pre-existing behaviour.
 
