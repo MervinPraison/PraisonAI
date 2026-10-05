@@ -175,6 +175,10 @@ class SqliteSessionStore(DefaultSessionStore):
             "CREATE INDEX IF NOT EXISTS idx_route_agent "
             "ON session_route(agent_id)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_route_agent_session "
+            "ON session_route(agent_id, session_id)"
+        )
 
     @staticmethod
     def _init_index_meta_schema(conn) -> None:
