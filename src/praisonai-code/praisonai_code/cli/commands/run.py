@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, List
 
 import typer
 
-from ..output.console import get_output_controller
+from ..output.console import get_output_controller, OutputMode
 from ..state.identifiers import get_current_context
 from ..configuration.resolver import resolve_config
 from ..utils.env_utils import scopes_no_plugins
@@ -373,9 +373,9 @@ def _structured_agent_preset(output_mode: str) -> str:
 def _require_wrapper_for_default_run(
     target: Optional[str],
     *,
-    agent: Optional[str],
-    command: Optional[str],
-    output_mode: Optional[str],
+    agent: Optional[str] = None,
+    command: Optional[str] = None,
+    output_mode: Optional[str] = None,
     image: Optional[List[str]] = None,
 ) -> None:
     """Fail fast with a targeted hint before credential/setup checks.
@@ -385,14 +385,18 @@ def _require_wrapper_for_default_run(
     path (``--image``) is the remaining wrapper-only feature of the
     direct-prompt flow; on a standalone install it gates with a hint that
     points to the in-process ``--output actions`` alternative.
+
+    Every image run that can reach here needs the wrapper: the combinations that
+    are rejected outright (``--agent``, ``--profile``, a YAML target) fail
+    earlier with their own error, and what remains — a direct prompt or a
+    ``--command`` prompt, under any output mode — falls through to the wrapper's
+    vision handling because the in-process Agent path cannot carry an
+    attachment. Gating on ``image`` alone keeps that hint reachable for all of
+    them; the predicate that used to guard it excluded the structured modes and
+    ``--command``, whose runs then failed with the bare wrapper import error
+    instead.
     """
     if not image:
-        return
-    # agent/command/YAML/no-target image runs are rejected earlier with their
-    # own combination error, and structured modes reject --image up front.
-    if not _direct_prompt_needs_wrapper(
-        target, agent=agent, command=command, output_mode=output_mode
-    ):
         return
     from praisonai_code._wrapper_bridge import wrapper_available
 
@@ -2158,7 +2162,15 @@ def _run_prompt(
 ):
     """Run a direct prompt."""
     output = get_output_controller()
-    
+
+    # `--output stream-json` names the NDJSON wire format, so make the
+    # controller match: the event bridge only writes stdout in STREAM_JSON mode,
+    # and without this the mode is reachable only through the global
+    # `--output-format stream-json`, leaving a user who typed the per-command
+    # selector with a plain-text answer. An explicit global JSON mode still wins.
+    if output_mode == "stream-json" and not output.is_json_mode:
+        output.mode = OutputMode.STREAM_JSON
+
     # Note: Credential check already done in run_main() entry point
 
     # Scope the --allow-local-tools grant to this run so the opt-in never leaks

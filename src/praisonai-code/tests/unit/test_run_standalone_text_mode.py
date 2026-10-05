@@ -11,25 +11,48 @@ The Agent is faked so the tests never touch a provider; the wrapper is faked at
 the module boundary the way `test_run_image_attachment.py` does it.
 """
 
+import json
 import sys
 import types
 
 import pytest
 
 from praisonai_code.cli.commands import run as run_cmd
+from praisonai_code.cli.output.console import OutputMode
 
 
 class _RecordingOutput:
-    def __init__(self):
+    """Minimal stand-in for the CLI OutputController.
+
+    Mirrors the two behaviours the run path branches on: events are always
+    recorded, printed as NDJSON only in STREAM_JSON mode, and `is_json_mode`
+    follows the mode. A stub that hard-coded `is_json_mode = False` could not
+    observe the bridge, which is how the `stream-json` blind spot survived the
+    first cut of this fix.
+    """
+
+    def __init__(self, mode=OutputMode.TEXT):
         self.results = []
         self.errors = []
-        self.is_json_mode = False
+        self.events = []
+        self.mode = mode
+
+    @property
+    def is_json_mode(self):
+        return self.mode in (OutputMode.JSON, OutputMode.STREAM_JSON)
+
+    def emit_event(self, event_type, message=None, data=None, agent_id=None):
+        self.events.append((event_type, data))
+        if self.mode == OutputMode.STREAM_JSON:
+            print(json.dumps({"event": event_type, "data": data}), flush=True)
 
     def emit_result(self, message=None, data=None):
         self.results.append((message, data))
+        self.emit_event("result", message=message, data=data)
 
     def emit_error(self, message=None, data=None):
-        pass
+        self.errors.append((message, data))
+        self.emit_event("error", message=message, data=data)
 
     def print_info(self, *a, **k):
         pass
@@ -244,13 +267,15 @@ def test_structured_modes_print_the_answer(standalone, monkeypatch, capsys):
 
     The core `json` preset routes its JSONL to stderr and the core `stream`
     preset makes `Agent.start()` return a generator this path would never
-    consume, so neither preset can be used here: the CLI prints the answer and
-    every mode produces output on stdout.
+    consume, so neither preset can be used here: the CLI owns the output and
+    every mode leaves the answer on stdout — as a single-line envelope for
+    `json`, and as the answer itself for `stream`. `stream-json` frames it as
+    NDJSON events instead (see the controller test below).
     """
     _install_fake_agent(monkeypatch)
     _install_fake_praisonai(monkeypatch)
 
-    for mode in ("json", "stream", "stream-json"):
+    for mode in ("json", "stream"):
         capsys.readouterr()
         run_cmd._run_prompt("hi", no_save=True, output_mode=mode)
         assert "agent answer" in capsys.readouterr().out, mode
@@ -283,26 +308,10 @@ def test_structured_json_envelope_yields_to_the_event_bridge(standalone, monkeyp
     """
     import json
 
-    from praisonai_code.cli.output.console import OutputMode
-
     _install_fake_praisonai(monkeypatch)
     _install_fake_agent(monkeypatch)
-
-    class _StreamJsonOutput(_RecordingOutput):
-        # Set in __init__: _RecordingOutput.__init__ assigns is_json_mode as an
-        # instance attribute, which would shadow a class-level override.
-        def __init__(self):
-            super().__init__()
-            self.mode = OutputMode.STREAM_JSON
-            self.is_json_mode = True
-
-        def emit_event(self, event_type, message=None, data=None, agent_id=None):
-            print(json.dumps({"event": event_type, "data": data}), flush=True)
-
-        def emit_result(self, message=None, data=None):
-            self.emit_event("result", message=message, data=data)
-
-    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: _StreamJsonOutput())
+    stream_json = _RecordingOutput(mode=OutputMode.STREAM_JSON)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: stream_json)
 
     run_cmd._run_prompt("hi", no_save=True, output_mode="json")
 
@@ -315,6 +324,43 @@ def test_structured_json_envelope_yields_to_the_event_bridge(standalone, monkeyp
         json.loads(line).get("data", {}).get("status") == "ok"
         for line in out.strip().splitlines()
     ), out
+
+
+def test_stream_json_selects_the_ndjson_controller(standalone, monkeypatch, capsys):
+    """`--output stream-json` must activate the controller's NDJSON mode.
+
+    The event bridge only writes stdout in STREAM_JSON mode, so without this the
+    per-command selector was reachable only through the global
+    `--output-format stream-json` and a user who typed it got plain text.
+    """
+    import json
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
+
+    assert standalone.mode == OutputMode.STREAM_JSON
+    out = capsys.readouterr().out
+    # Only framed events: every line must parse as JSON, so no bare answer is
+    # mixed into the NDJSON stream.
+    lines = [json.loads(line) for line in out.strip().splitlines()]
+    assert "agent answer" not in out.split("\n")
+    assert any(line["event"] == "run.result" for line in lines), out
+
+
+def test_global_json_format_wins_over_stream_json(standalone, monkeypatch):
+    """An explicit `--output-format json` is not overridden by the run selector."""
+    from praisonai_code.cli.output.console import OutputMode
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+    json_controller = _RecordingOutput(mode=OutputMode.JSON)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: json_controller)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
+
+    assert json_controller.mode == OutputMode.JSON
 
 
 def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):
