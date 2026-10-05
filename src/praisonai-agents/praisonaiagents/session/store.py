@@ -1033,8 +1033,8 @@ class DefaultSessionStore:
             logger.debug("SESSION corruption hook failed", exc_info=True)
 
     def _report_unreadable_session(self, session_id: str, filepath: str, error: Exception) -> None:
-        """Report decode failures during scans without modifying the source file."""
-        if isinstance(error, (UnicodeDecodeError, json.JSONDecodeError)):
+        """Report malformed transcripts without modifying the source file."""
+        if isinstance(error, (UnicodeDecodeError, json.JSONDecodeError, AttributeError)):
             logger.warning("Skipping unreadable session file %s: %s", filepath, error)
             self._fire_corruption_hook(session_id, str(error), None)
 
