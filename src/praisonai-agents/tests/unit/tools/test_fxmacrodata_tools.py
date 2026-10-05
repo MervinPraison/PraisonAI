@@ -236,6 +236,32 @@ def test_malformed_200_response_returns_error_dict(payload):
     assert result["error"].startswith("Unexpected FXMacroData response")
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": [], "pagination": "bad"},
+        {"data": {"date": "2026-01-01"}, "pagination": {"has_more": True}},
+        {"data": [], "pagination": {"has_more": True, "next_offset": "100"}},
+    ],
+)
+def test_malformed_pagination_returns_error_dict(payload):
+    with patch.object(fxm, "_OPENER", FakeOpener(payload)):
+        result = fxm.fxmacrodata_indicator("usd", "inflation", limit=150)
+    assert set(result) == {"error"}
+    assert result["error"].startswith("Unexpected FXMacroData response")
+
+
+def test_malformed_later_page_returns_error_dict():
+    opener = FakeOpener(
+        _page(0, 100, limit=100, offset=0, has_more=True, next_offset=100),
+        {"data": [], "pagination": "bad"},
+    )
+    with patch.object(fxm, "_OPENER", opener):
+        result = fxm.fxmacrodata_forex("eur", "usd", limit=150)
+    assert len(opener.requests) == 2
+    assert set(result) == {"error"}
+
+
 def test_lazy_exports():
     from praisonaiagents import tools
     from praisonaiagents.tools.trust import EXTERNAL_TOOL_NAMES

@@ -139,6 +139,21 @@ class FXMacroDataTools:
             logging.error(error_msg)
             return {"error": error_msg}
 
+    @staticmethod
+    def _page_shape_error(page: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return an error dict if ``page`` lacks the shape that pagination reads."""
+        pagination = page.get("pagination")
+        next_offset = pagination.get("next_offset") if isinstance(pagination, dict) else None
+        if (
+            not isinstance(page.get("data") or [], list)
+            or not isinstance(pagination or {}, dict)
+            or (next_offset is not None and (type(next_offset) is not int or next_offset < 0))
+        ):
+            error_msg = "Unexpected FXMacroData response: malformed data or pagination"
+            logging.error(error_msg)
+            return {"error": error_msg}
+        return None
+
     def _paged(self, path: str, params: Dict[str, Any], limit: int, offset: int) -> Dict[str, Any]:
         """Fetch ``limit`` rows, following the API's pagination past 100 rows."""
         limit = max(1, int(limit))
@@ -146,6 +161,9 @@ class FXMacroDataTools:
         result = self._request(path, {**params, "limit": min(limit, MAX_PAGE_SIZE), "offset": start})
         if "error" in result or limit <= MAX_PAGE_SIZE:
             return result
+        shape_error = self._page_shape_error(result)
+        if shape_error:
+            return shape_error
 
         rows = list(result.get("data") or [])
         pagination = result.get("pagination") or {}
@@ -160,6 +178,9 @@ class FXMacroDataTools:
             page = self._request(path, {**page_params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": request_offset})
             if "error" in page:
                 return page
+            shape_error = self._page_shape_error(page)
+            if shape_error:
+                return shape_error
             page_rows = page.get("data") or []
             if not page_rows:
                 break
