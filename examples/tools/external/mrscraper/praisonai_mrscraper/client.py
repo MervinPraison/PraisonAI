@@ -60,6 +60,7 @@ class MrScraperClient:
 
     def __init__(self, token: Optional[str] = None, *, http_timeout: float = 60.0,
                  transport: Optional[httpx.BaseTransport] = None) -> None:
+        """Set HTTPX inactivity timeout, not an overall wall-clock deadline."""
         self._token = token or os.environ.get("MRSCRAPER_API_TOKEN")
         if not self._token or not self._token.strip():
             raise AuthenticationError("Set MRSCRAPER_API_TOKEN or pass token")

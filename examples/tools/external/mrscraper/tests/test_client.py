@@ -218,3 +218,17 @@ def test_agent_tool_removes_nested_image_cookie_token_fields():
     assert "base64-image" not in result
     assert "session-secret" not in result
     assert "private-token" not in result
+
+
+def test_agent_tool_redacts_json_string_response():
+    def respond(request):
+        return httpx.Response(200, text=json.dumps({
+            "markdown": "Hello", "cookieJar": "session-secret",
+            "nested": {"screenshot": "base64-image"},
+        }))
+
+    with MrScraperClient("private-token", transport=httpx.MockTransport(respond)) as client:
+        result = make_mrscraper_tools(client)[0]("https://example.com")
+    assert '"markdown": "Hello"' in result
+    assert "session-secret" not in result
+    assert "base64-image" not in result

@@ -31,6 +31,13 @@ def make_mrscraper_tools(client: MrScraperClient, *, max_chars: int = 12000,
                     if safe_key(key)}
         if isinstance(value, list):
             return [_without_sensitive(item) for item in value]
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return value
+            if isinstance(decoded, (dict, list)):
+                return _without_sensitive(decoded)
         return value
 
     def _bounded(value: object) -> str:
