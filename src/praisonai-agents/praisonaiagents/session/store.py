@@ -1972,7 +1972,7 @@ class DefaultSessionStore:
                             data = json.load(f)
                         if data.get("gateway_session_id") == gateway_session_id:
                             return SessionData.from_dict(data)
-                    except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
+                    except (UnicodeDecodeError, json.JSONDecodeError, IOError, AttributeError) as exc:
                         self._report_unreadable_session(filename[:-5], filepath, exc)
                         continue
         except (IOError, OSError):
