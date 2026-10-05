@@ -340,27 +340,50 @@ def test_stream_json_selects_the_ndjson_controller(standalone, monkeypatch, caps
 
     run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
 
-    assert standalone.mode == OutputMode.STREAM_JSON
     out = capsys.readouterr().out
     # Only framed events: every line must parse as JSON, so no bare answer is
     # mixed into the NDJSON stream.
     lines = [json.loads(line) for line in out.strip().splitlines()]
     assert "agent answer" not in out.split("\n")
     assert any(line["event"] == "run.result" for line in lines), out
+    # The framing was scoped to this run: the caller's controller is untouched.
+    assert standalone.mode == OutputMode.TEXT
 
 
-def test_global_json_format_wins_over_stream_json(standalone, monkeypatch):
-    """An explicit `--output-format json` is not overridden by the run selector."""
-    from praisonai_code.cli.output.console import OutputMode
+@pytest.mark.parametrize("mode", [OutputMode.JSON, OutputMode.QUIET, OutputMode.VERBOSE, OutputMode.SCREEN_READER])
+def test_stream_json_yields_to_an_explicit_global_mode(monkeypatch, capsys, mode):
+    """`--quiet`/`--verbose`/`--screen-reader` outrank the per-command selector.
 
+    app.py resolves quiet/verbose/screen-reader above output_format, so
+    `run --quiet --output stream-json` must not start printing NDJSON events.
+    """
     _install_fake_praisonai(monkeypatch)
     _install_fake_agent(monkeypatch)
-    json_controller = _RecordingOutput(mode=OutputMode.JSON)
-    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: json_controller)
+    controller = _RecordingOutput(mode=mode)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
 
     run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
 
-    assert json_controller.mode == OutputMode.JSON
+    assert controller.mode == mode
+    # No NDJSON framing leaked into a run whose global preference was explicit.
+    assert '"event"' not in capsys.readouterr().out
+
+
+def test_ndjson_framing_does_not_leak_into_a_later_run(standalone, monkeypatch, capsys):
+    """The controller is process-wide, so the framing must be run-scoped.
+
+    An embedded caller that runs `--output stream-json` and then a plain-text run
+    must not have the second one framed as NDJSON.
+    """
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="stream-json")
+    capsys.readouterr()
+    run_cmd._run_prompt("hi", no_save=True)
+
+    assert standalone.mode == OutputMode.TEXT
+    assert capsys.readouterr().out == "agent answer\n"
 
 
 def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):

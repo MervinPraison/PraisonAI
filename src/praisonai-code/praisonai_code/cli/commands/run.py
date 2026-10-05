@@ -2163,12 +2163,18 @@ def _run_prompt(
     """Run a direct prompt."""
     output = get_output_controller()
 
-    # `--output stream-json` names the NDJSON wire format, so make the
-    # controller match: the event bridge only writes stdout in STREAM_JSON mode,
-    # and without this the mode is reachable only through the global
+    # `--output stream-json` names the NDJSON wire format, so make the neutral
+    # controller mode match: the event bridge only writes stdout in STREAM_JSON
+    # mode, and without this the mode is reachable solely through the global
     # `--output-format stream-json`, leaving a user who typed the per-command
-    # selector with a plain-text answer. An explicit global JSON mode still wins.
-    if output_mode == "stream-json" and not output.is_json_mode:
+    # selector with a plain-text answer. Only the neutral TEXT mode is replaced
+    # — app.py already resolves quiet/verbose/screen-reader above output_format,
+    # so an explicit global preference keeps winning here too. The prior mode is
+    # restored below, because the controller is process-wide and an embedded
+    # caller making a second run must not inherit NDJSON framing.
+    _prev_mode = None
+    if output_mode == "stream-json" and output.mode == OutputMode.TEXT:
+        _prev_mode = output.mode
         output.mode = OutputMode.STREAM_JSON
 
     # Note: Credential check already done in run_main() entry point
@@ -2543,6 +2549,10 @@ def _run_prompt(
             _os.environ.pop(_ALLOW_LOCAL_TOOLS_ENV, None)
         else:
             _os.environ[_ALLOW_LOCAL_TOOLS_ENV] = _prev_allow_local_tools
+        # Restore the run-scoped output mode for the same reason: the controller
+        # is process-wide, so the NDJSON framing must not outlive this run.
+        if _prev_mode is not None:
+            output.mode = _prev_mode
 
 
 def _record_session_usage(session_id, model, output) -> None:
