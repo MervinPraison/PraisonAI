@@ -78,7 +78,8 @@ class FXMacroDataTools:
 
     def _get_api_key(self) -> Optional[str]:
         """Get API key from instance or environment."""
-        return self._api_key or os.environ.get("FXMACRODATA_API_KEY")
+        api_key = self._api_key or os.environ.get("FXMACRODATA_API_KEY")
+        return api_key.strip() if api_key else None
 
     def _request(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         query = {}
@@ -96,11 +97,24 @@ class FXMacroDataTools:
         headers = {"Accept": "application/json", "User-Agent": "praisonaiagents"}
         api_key = self._get_api_key()
         if api_key:
+            if any(ord(char) < 33 or ord(char) == 127 for char in api_key):
+                # Never echo the key: http.client's own error would include it.
+                error_msg = "FXMacroData API key contains whitespace or control characters"
+                logging.error(error_msg)
+                return {"error": error_msg}
             headers["X-API-Key"] = api_key
 
         try:
             with _OPENER.open(Request(url, headers=headers), timeout=self._timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8"))
+            if not isinstance(payload, dict) or set(payload) == {"detail"}:
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if not isinstance(detail, str):
+                    detail = type(payload).__name__
+                error_msg = f"Unexpected FXMacroData response: {detail}"
+                logging.error(error_msg)
+                return {"error": error_msg}
+            return payload
         except HTTPError as e:
             body: Any = None
             try:

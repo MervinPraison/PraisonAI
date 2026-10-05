@@ -213,6 +213,29 @@ def test_redirects_are_not_followed():
     assert fxm._NoRedirect().redirect_request(None, None, 302, "Found", {}, "https://example.com/") is None
 
 
+def test_key_is_stripped_and_never_echoed_in_errors(monkeypatch):
+    monkeypatch.setenv("FXMACRODATA_API_KEY", "test-key\n")
+    opener = FakeOpener({"data": []})
+    with patch.object(fxm, "_OPENER", opener):
+        fxm.fxmacrodata_cot("usd")
+    assert opener.requests[0].get_header("X-api-key") == "test-key"
+
+    opener = FakeOpener()
+    with patch.object(fxm, "_OPENER", opener):
+        result = FXMacroDataTools(api_key="test\nkey").cot("usd")
+    assert "error" in result
+    assert "test" not in result["error"]
+    assert opener.requests == []
+
+
+@pytest.mark.parametrize("payload", [{"detail": "Invalid API key"}, [1, 2], "oops"])
+def test_malformed_200_response_returns_error_dict(payload):
+    with patch.object(fxm, "_OPENER", FakeOpener(payload)):
+        result = fxm.fxmacrodata_forex("eur", "usd", limit=150)
+    assert set(result) == {"error"}
+    assert result["error"].startswith("Unexpected FXMacroData response")
+
+
 def test_lazy_exports():
     from praisonaiagents import tools
     from praisonaiagents.tools.trust import EXTERNAL_TOOL_NAMES
