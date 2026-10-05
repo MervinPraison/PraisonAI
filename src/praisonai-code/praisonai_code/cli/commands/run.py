@@ -265,9 +265,23 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
+# Structured modes map onto the core Agent output preset of the same name: the
+# ``json`` preset emits JSONL (piping/scripting) and ``stream`` streams the
+# response. ``stream-json`` has no core preset — that NDJSON framing belongs to
+# the CLI's own OutputController and reaches stdout through the event bridge
+# attached below — so its agent display stays silent rather than writing human
+# text into the event stream.
+_STRUCTURED_AGENT_PRESETS = {
+    "actions": "actions",
+    "json": "json",
+    "stream": "stream",
+    "stream-json": "silent",
+}
+
 # Structured output modes always run in-process via the Agent path, so they
-# never need the wrapper's handle_direct_prompt.
-_IN_PROCESS_OUTPUT_MODES = ("actions", "json", "stream", "stream-json")
+# never need the wrapper's handle_direct_prompt. Derived from the preset map so
+# the two lists cannot drift.
+_IN_PROCESS_OUTPUT_MODES = tuple(_STRUCTURED_AGENT_PRESETS)
 
 # Human-readable text output modes: the CLI default plus explicit selectors.
 _TEXT_OUTPUT_MODES = (None, "plain", "verbose", "silent")
@@ -342,6 +356,11 @@ def _prints_final_text(output_mode: Optional[str]) -> bool:
     response via the agent display; structured modes emit their own events.
     """
     return output_mode in _SILENT_STYLE_TEXT_MODES
+
+
+def _structured_agent_preset(output_mode: str) -> str:
+    """Map a structured output mode to the core Agent output preset."""
+    return _STRUCTURED_AGENT_PRESETS[output_mode]
 
 
 def _require_wrapper_for_default_run(
@@ -2256,9 +2275,11 @@ def _run_prompt(
         # An --image attachment is handled by the vision path in
         # handle_direct_prompt (ImageHandler); the in-process path builds a
         # bare Agent and would silently drop it, so fall through when set.
-        # Text modes join the in-process path when the wrapper is absent
-        # (_text_run_renders_in_process, issue #5644) so a standalone install
-        # gets a working default run instead of the wrapper install gate.
+        # Every structured mode (actions/json/stream/stream-json) and, on a
+        # standalone install, the human-readable text modes
+        # (`_text_run_renders_in_process`, issue #5644) run in-process: a
+        # standalone install gets a working run instead of the wrapper install
+        # gate, and a wrapper-installed environment keeps its delegation.
         #
         # `--verbose` is a separate flag from `--output`, and the wrapper text
         # path folds it into the Agent preset when no explicit mode was
@@ -2269,7 +2290,7 @@ def _run_prompt(
             "verbose" if verbose and output_mode is None else output_mode
         )
         if (
-            output_mode == "actions"
+            output_mode in _IN_PROCESS_OUTPUT_MODES
             or _text_run_renders_in_process(output_mode, image=image)
         ) and not image:
             from praisonaiagents import Agent
@@ -2282,8 +2303,8 @@ def _run_prompt(
                 # Structured actions events; text modes map to their
                 # human-readable preset.
                 "output": (
-                    "actions"
-                    if output_mode == "actions"
+                    _structured_agent_preset(output_mode)
+                    if output_mode in _STRUCTURED_AGENT_PRESETS
                     else _agent_text_preset(agent_text_mode)
                 ),
             }

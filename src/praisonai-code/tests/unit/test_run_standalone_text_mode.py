@@ -214,3 +214,60 @@ def test_explicit_output_mode_wins_over_verbose_flag(standalone, monkeypatch):
     run_cmd._run_prompt("hi", no_save=True, verbose=True, output_mode="plain")
 
     assert captured["config"]["output"] == "minimal"
+
+
+# --- structured output modes run in-process too (issue #5665) ---------------
+
+
+@pytest.mark.parametrize(
+    "mode,preset", [
+        ("actions", "actions"),
+        ("json", "json"),
+        ("stream", "stream"),
+        ("stream-json", "silent"),
+    ]
+)
+def test_structured_modes_run_in_process(standalone, monkeypatch, mode, preset):
+    """`--output json/stream/stream-json` no longer fall through to the wrapper."""
+    captured = _install_fake_agent(monkeypatch)
+    delegated = _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode=mode)
+
+    assert captured["prompt"] == "hi"
+    assert captured["config"]["output"] == preset
+    assert "prompt" not in delegated, "structured modes must not delegate"
+
+
+def test_structured_modes_do_not_print_final_text(standalone, monkeypatch, capsys):
+    """Structured modes emit their own output; the CLI stays out of the stream."""
+    _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    for mode in ("json", "stream", "stream-json"):
+        capsys.readouterr()
+        run_cmd._run_prompt("hi", no_save=True, output_mode=mode)
+        assert "agent answer" not in capsys.readouterr().out
+
+
+def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):
+    """Unlike text runs, structured modes never delegate to the wrapper.
+
+    The wrapper's direct-prompt path maps every mode to the same silent Agent
+    preset, so `--output json` used to mean "print the raw text answer". Routing
+    them in-process unconditionally is what makes the README's structured-output
+    row true.
+    """
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    output = _RecordingOutput()
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+    captured = _install_fake_agent(monkeypatch)
+    delegated = _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    assert captured["prompt"] == "hi"
+    assert "prompt" not in delegated
