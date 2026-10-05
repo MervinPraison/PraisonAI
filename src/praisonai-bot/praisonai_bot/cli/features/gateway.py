@@ -163,6 +163,131 @@ def load_start_flags(host: str, port: int) -> Dict:
     return {k: v for k, v in data.items() if k in _START_FLAG_KEYS}
 
 
+def resolve_effective_config(
+    host: str, port: int, config_file: Optional[str] = None
+) -> Dict:
+    """Resolve the effective gateway configuration actually in force (#5646).
+
+    Merges the declared config (``gateway.yaml`` / ``bot.yaml``) with the
+    CLI-only runtime posture persisted at ``start`` time (the hidden
+    ``gateway.start.<host>.<port>.json`` side file) so a single document
+    describes how the gateway is really running — not a partial YAML plus an
+    opaque, operator-invisible side file.
+
+    Precedence (lowest → highest): declared YAML < persisted CLI start-flags.
+    ``None`` persisted values mean "fall back to YAML" and are already dropped
+    on persist, so they never clobber a declared value here.
+
+    The persisted ``config_file`` key resolves which YAML to read when
+    ``config_file`` is not passed explicitly, so the snapshot reflects the file
+    the running process was launched against.
+
+    Returns a plain dict (NOT yet redacted): the ``declared`` YAML mapping, the
+    ``cli_overrides`` that were replayed over it, the ``resolved`` merge, plus
+    the ``host``/``port`` the snapshot was keyed by. Use
+    :func:`export_effective_config` for a secret-redacted, serialisable view.
+    """
+    import yaml
+
+    overrides = load_start_flags(host, port)
+
+    resolved_config_file = config_file or overrides.get("config_file")
+    declared: Dict = {}
+    declared_path: Optional[str] = None
+    if resolved_config_file and os.path.exists(resolved_config_file):
+        try:
+            with open(resolved_config_file) as fh:
+                loaded = yaml.safe_load(fh) or {}
+            if isinstance(loaded, dict):
+                declared = loaded
+                declared_path = resolved_config_file
+        except (OSError, yaml.YAMLError) as exc:  # pragma: no cover — advisory
+            logger.warning(
+                "Could not read gateway config %s: %s", resolved_config_file, exc
+            )
+
+    # The posture knobs ``start`` persists map onto the ``gateway.*`` block in
+    # YAML; surface them under one ``gateway`` mapping in the merge so the
+    # resolved document reads back exactly like a gateway.yaml an operator could
+    # promote into version control.
+    resolved: Dict = dict(declared)
+    gateway_section = dict(resolved.get("gateway") or {})
+    cli_overrides: Dict = {}
+    for key, value in overrides.items():
+        if key == "config_file":
+            continue
+        cli_overrides[key] = value
+        if key == "agent_file":
+            # agent_file is a top-level launch input, not a gateway.* knob.
+            resolved["agent_file"] = value
+        else:
+            gateway_section[key] = value
+    if gateway_section:
+        resolved["gateway"] = gateway_section
+
+    return {
+        "host": host,
+        "port": port,
+        "config_file": declared_path,
+        "declared": declared,
+        "cli_overrides": cli_overrides,
+        "resolved": resolved,
+    }
+
+
+def _redact_secret_values(value):
+    """Mask only secret-bearing keys, preserving every other value (#5646).
+
+    Unlike the diagnostics bundle's shape-only sanitiser (which reduces *every*
+    scalar to its type so nothing leaks), a promotable config must keep its
+    real, non-secret values — drain windows, policies, channel platforms — so an
+    operator can diff it against ``gateway.yaml`` and commit it. Only values
+    under a credential-named key (reusing the diagnostics ``_SECRET_KEYS`` set)
+    are replaced with a ``<set>``/``<empty>`` presence marker.
+    """
+    try:
+        from praisonai_bot.gateway.diagnostics import _SECRET_KEYS
+    except Exception:  # pragma: no cover — defensive
+        _SECRET_KEYS = frozenset()
+
+    if isinstance(value, dict):
+        out = {}
+        for key, val in value.items():
+            if str(key).lower() in _SECRET_KEYS:
+                out[key] = "<set>" if val not in (None, "") else "<empty>"
+            else:
+                out[key] = _redact_secret_values(val)
+        return out
+    if isinstance(value, list):
+        return [_redact_secret_values(v) for v in value]
+    return value
+
+
+def export_effective_config(
+    host: str,
+    port: int,
+    config_file: Optional[str] = None,
+    redact: bool = True,
+) -> str:
+    """Serialise the resolved effective config to YAML for diff / commit (#5646).
+
+    Produces the ``resolved`` document from :func:`resolve_effective_config`
+    as YAML so an operator can diff it against their declared ``gateway.yaml``
+    and promote the running posture back into version control. When ``redact``
+    is ``True`` (the default) only secret-bearing values are reduced to presence
+    markers (reusing the diagnostics ``_SECRET_KEYS`` set) while every other
+    value is kept, so the output stays a usable, promotable config. Pass
+    ``redact=False`` for a local, un-redacted snapshot.
+    """
+    import yaml
+
+    snapshot = resolve_effective_config(host, port, config_file=config_file)
+    resolved = snapshot["resolved"]
+    if redact:
+        resolved = _redact_secret_values(resolved)
+    return yaml.safe_dump(resolved, default_flow_style=False, sort_keys=False)
+
+
 class GatewayHandler:
     """Handler for gateway CLI commands."""
     
