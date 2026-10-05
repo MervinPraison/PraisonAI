@@ -6994,10 +6994,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 web_fetch_tool['max_uses'] = 5
             
             # Add web_fetch tool to existing tools or create tools list
-            if 'tools' in params and params['tools']:
-                params['tools'].append(web_fetch_tool)
-            else:
-                params['tools'] = [web_fetch_tool]
+            params['tools'] = list(params.get('tools') or []) + [web_fetch_tool]
             
             logging.debug(f"Web fetch enabled with tool: {web_fetch_tool}")
         
@@ -7009,17 +7006,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 memory_tool_def = memory_tool.get_tool_definition()
                 
                 # Add memory tool to existing tools or create tools list
-                if 'tools' in params and params['tools']:
-                    params['tools'].append(memory_tool_def)
-                else:
-                    params['tools'] = [memory_tool_def]
+                params['tools'] = list(params.get('tools') or []) + [memory_tool_def]
                 
                 # Add the beta header for Anthropic
                 beta_header = memory_tool.get_beta_header()
-                if 'extra_headers' in params:
-                    params['extra_headers']['anthropic-beta'] = beta_header
-                else:
-                    params['extra_headers'] = {'anthropic-beta': beta_header}
+                extra_headers = dict(params.get('extra_headers') or {})
+                extra_headers['anthropic-beta'] = beta_header
+                params['extra_headers'] = extra_headers
                 
                 logging.debug(f"Claude memory tool enabled with beta header: {beta_header}")
         
