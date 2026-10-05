@@ -823,14 +823,18 @@ class SqliteSessionStore(DefaultSessionStore):
         if limit == 0:
             return []
         verified = []
-        offset = 0
+        after = None
         try:
             while True:
                 with self._db_lock:
+                    # A peer can remove or reassign earlier rows during file
+                    # verification. Resume by identity, not a shifting offset.
+                    condition = "" if after is None else "AND session_id > ? "
+                    params = (agent_id, limit) if after is None else (agent_id, after, limit)
                     rows = conn.execute(
                         "SELECT session_id FROM session_route WHERE agent_id = ? "
-                        "LIMIT ? OFFSET ?",
-                        (agent_id, limit, offset),
+                        + condition + "ORDER BY session_id LIMIT ?",
+                        params,
                     ).fetchall()
                 if not rows:
                     break
@@ -844,7 +848,7 @@ class SqliteSessionStore(DefaultSessionStore):
                             return verified
                 if limit < 0:
                     break
-                offset += len(rows)
+                after = rows[-1][0]
         except Exception as exc:
             logger.debug("Route lookup failed (%s); falling back to scan.", exc)
             return super().list_sessions_by_gateway_agent(agent_id, limit)
