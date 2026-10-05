@@ -135,11 +135,15 @@ class FXMacroDataTools:
 
         rows = list(result.get("data") or [])
         pagination = result.get("pagination") or {}
+        # Pin later pages to the first page's dataset so a refresh between
+        # requests is rejected (409) instead of shifting the offsets.
+        version = result.get("dataset_version")
+        page_params = {**params, "dataset_version": version} if version else params
         page_offset, page_count = start, len(rows)
         while len(rows) < limit and pagination.get("has_more"):
             next_offset = pagination.get("next_offset")
             request_offset = next_offset if next_offset is not None else page_offset + page_count
-            page = self._request(path, {**params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": request_offset})
+            page = self._request(path, {**page_params, "limit": min(limit - len(rows), MAX_PAGE_SIZE), "offset": request_offset})
             if "error" in page:
                 return page
             page_rows = page.get("data") or []
@@ -152,7 +156,7 @@ class FXMacroDataTools:
         result["data"] = rows
         if pagination:
             # Describe the combined rows, not the last page that was fetched.
-            combined = {**pagination, "limit": limit, "offset": start}
+            combined = {**pagination, "limit": limit, "offset": start, "returned_count": len(rows)}
             if combined.get("has_more"):
                 next_offset = pagination.get("next_offset")
                 combined["next_offset"] = next_offset if next_offset is not None else page_offset + page_count

@@ -85,11 +85,13 @@ def test_limit_over_page_size_follows_pagination():
     first = {
         "currency": "USD",
         "freemium_delay": {"applied": True},
-        "pagination": {"limit": 100, "offset": 0, "has_more": True, "next_offset": 100},
+        "dataset_version": "v-test",
+        "pagination": {"limit": 100, "offset": 0, "returned_count": 100, "has_more": True, "next_offset": 100},
         "data": [{"date": str(i)} for i in range(100)],
     }
     second = {
-        "pagination": {"limit": 50, "offset": 100, "has_more": True, "next_offset": 150},
+        "dataset_version": "v-test",
+        "pagination": {"limit": 50, "offset": 100, "returned_count": 50, "has_more": True, "next_offset": 150},
         "data": [{"date": str(i)} for i in range(100, 150)],
     }
     opener = FakeOpener(first, second)
@@ -98,12 +100,17 @@ def test_limit_over_page_size_follows_pagination():
 
     assert [_query(r)["offset"] for r in opener.requests] == ["0", "100"]
     assert [_query(r)["limit"] for r in opener.requests] == ["100", "50"]
+    assert "dataset_version" not in _query(opener.requests[0])
+    assert _query(opener.requests[1])["dataset_version"] == "v-test"
     assert len(result["data"]) == 150
     assert result["freemium_delay"] == {"applied": True}
-    assert result["pagination"] == {"limit": 150, "offset": 0, "has_more": True, "next_offset": 150}
+    assert result["pagination"] == {
+        "limit": 150, "offset": 0, "returned_count": 150, "has_more": True, "next_offset": 150,
+    }
 
 
 def _page(start, count, **pagination):
+    pagination.setdefault("returned_count", count)
     return {"pagination": pagination, "data": [{"date": str(i)} for i in range(start, start + count)]}
 
 
@@ -118,7 +125,10 @@ def test_pagination_without_next_offset_advances_by_last_page():
 
     assert [_query(r)["offset"] for r in opener.requests] == ["0", "100", "200"]
     assert [row["date"] for row in result["data"]] == [str(i) for i in range(250)]
-    assert result["pagination"] == {"limit": 250, "offset": 0, "has_more": True, "next_offset": 250}
+    assert "dataset_version" not in _query(opener.requests[1])
+    assert result["pagination"] == {
+        "limit": 250, "offset": 0, "returned_count": 250, "has_more": True, "next_offset": 250,
+    }
 
 
 def test_combined_pagination_describes_all_rows_from_start_offset():
@@ -131,7 +141,7 @@ def test_combined_pagination_describes_all_rows_from_start_offset():
 
     assert [_query(r)["offset"] for r in opener.requests] == ["20", "120"]
     assert len(result["data"]) == 130
-    assert result["pagination"] == {"limit": 150, "offset": 20, "has_more": False}
+    assert result["pagination"] == {"limit": 150, "offset": 20, "returned_count": 130, "has_more": False}
 
 
 def test_pagination_stops_when_no_more_rows():
@@ -266,4 +276,4 @@ async def test_async_paginates_like_sync():
     with patch.object(fxm, "_OPENER", opener):
         result = await fxm.fxmacrodata_commodity_async("gold", limit=120)
     assert [_query(r)["offset"] for r in opener.requests] == ["0", "100"]
-    assert result["pagination"] == {"limit": 120, "offset": 0, "has_more": False}
+    assert result["pagination"] == {"limit": 120, "offset": 0, "returned_count": 120, "has_more": False}
