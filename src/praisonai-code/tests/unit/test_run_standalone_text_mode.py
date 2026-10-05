@@ -26,11 +26,13 @@ from praisonai_code.cli.output.console import OutputMode
 class _RecordingOutput:
     """Minimal stand-in for the CLI OutputController.
 
-    Mirrors the two behaviours the run path branches on: events are always
-    recorded, printed as NDJSON only in STREAM_JSON mode, and `is_json_mode`
-    follows the mode. A stub that hard-coded `is_json_mode = False` could not
-    observe the bridge, which is how the `stream-json` blind spot survived the
-    first cut of this fix.
+    Mirrors the three behaviours the run path branches on: events are always
+    recorded and printed as NDJSON only in STREAM_JSON mode; ``is_json_mode``
+    follows the mode; and human notices go to **stdout** when the mode is not
+    quiet, which is what the real controller does — including ``print_error``,
+    whose Rich branch renders a Panel onto stdout rather than stderr. Stubs that
+    silently dropped these are how three separate stdout-corruption blind spots
+    survived earlier rounds of this fix.
     """
 
     def __init__(self, mode=OutputMode.TEXT):
@@ -42,6 +44,10 @@ class _RecordingOutput:
     @property
     def is_json_mode(self):
         return self.mode in (OutputMode.JSON, OutputMode.STREAM_JSON)
+
+    @property
+    def is_quiet(self):
+        return self.mode == OutputMode.QUIET
 
     def emit_event(self, event_type, message=None, data=None, agent_id=None):
         self.events.append((event_type, data))
@@ -56,14 +62,23 @@ class _RecordingOutput:
         self.errors.append((message, data))
         self.emit_event("error", message=message, data=data)
 
-    def print_info(self, *a, **k):
-        pass
+    def print_info(self, message):
+        if self.is_quiet:
+            return
+        print(f"INFO: {message}")
 
-    def print_warning(self, *a, **k):
-        pass
+    def print_warning(self, message):
+        if self.is_quiet:
+            return
+        print(f"WARNING: {message}")
 
-    def print_error(self, *a, **k):
-        pass
+    def print_error(self, message, code=None, remediation=None):
+        # The real controller renders a Rich Panel onto stdout here, not stderr.
+        if self.is_quiet:
+            return
+        print(f"ERROR: {message}")
+        if remediation:
+            print(f"FIX: {remediation}")
 
 
 def _install_fake_praisonai(monkeypatch):
@@ -448,17 +463,71 @@ def test_json_envelope_covers_incomplete_terminal_states(
 
 
 def test_json_envelope_covers_a_failed_run(standalone, monkeypatch, capsys):
-    """An empty result is a failure, and it must still carry a status."""
+    """An empty result is a failure, and it must still carry a status.
+
+    The failure reporter renders a Rich error panel onto **stdout** whenever Rich
+    is available (``OutputController.print_error``'s non-stderr branch), so on the
+    JSON path that panel has to be moved to stderr — otherwise stdout is an
+    envelope followed by a panel and a script can parse neither position.
+    """
     import json
 
     _install_fake_praisonai(monkeypatch)
     _install_failing_agent(monkeypatch, empty=True)
 
-    with pytest.raises(typer.Exit) as exc:
+    with pytest.raises(typer.Exit):
         run_cmd._run_prompt("hi", no_save=True, output_mode="json")
 
-    assert exc.value.exit_code == 1
-    assert json.loads(capsys.readouterr().out) == {"result": None, "status": "failed"}
+    streams = capsys.readouterr()
+    assert json.loads(streams.out) == {"result": None, "status": "failed"}
+    assert len(streams.out.strip().splitlines()) == 1
+    assert "Run failed" in streams.err
+
+
+def test_quiet_mode_suppresses_the_json_envelope(monkeypatch, capsys):
+    """`--quiet` is an explicit request for no machine output on stdout.
+
+    app.py resolves quiet above output_format, and the ``stream-json`` wiring
+    already respects that, so the per-command ``--output json`` selector — which
+    replaces human TEXT output with machine output — must not override it. The
+    bare answer that remains is the pre-existing ``print(result)`` every text
+    mode shares (it bypasses the controller), so quiet is no worse here than a
+    plain `run`; the point is that no envelope is emitted.
+    """
+    from praisonai_code.cli.output.console import OutputMode
+
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
+    )
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    controller = _RecordingOutput(mode=OutputMode.QUIET)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
+    _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    out = capsys.readouterr().out
+    assert '"status"' not in out, "quiet must suppress the envelope"
+
+
+def test_failed_json_run_keeps_quiet_silent(monkeypatch, capsys):
+    """A failing quiet run must not start printing to stdout either."""
+    from praisonai_code.cli.output.console import OutputMode
+
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
+    )
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    controller = _RecordingOutput(mode=OutputMode.QUIET)
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: controller)
+    _install_failing_agent(monkeypatch, empty=True)
+    _install_fake_praisonai(monkeypatch)
+
+    with pytest.raises(typer.Exit):
+        run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    assert capsys.readouterr().out == ""
 
 
 def test_json_envelope_under_global_json_mode(standalone, monkeypatch, capsys):

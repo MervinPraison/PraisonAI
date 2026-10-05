@@ -181,7 +181,7 @@ def _run_block_reason(agent: Any) -> Optional[str]:
 
 
 def _report_run_blocked(
-    output: Any, result: Any, reason: str, *, suppress_warning: bool = False
+    output: Any, result: Any, reason: str, *, suppress_human: bool = False
 ) -> None:
     """Report a provider-blocked/refused/truncated run distinctly and exit 2.
 
@@ -191,7 +191,7 @@ def _report_run_blocked(
     code 2 (an incomplete run), distinct from a hard failure (exit 1) and a
     clean completion (exit 0).
 
-    ``suppress_warning`` keeps the human notice off stdout when the caller has
+    ``suppress_human`` keeps the human notice off stdout when the caller has
     already printed a machine-readable envelope there.
     """
     message, remediation = _BLOCK_REASON_MESSAGES[reason]
@@ -200,18 +200,23 @@ def _report_run_blocked(
         message=message,
         data={"status": reason, "result": text},
     )
-    if not suppress_warning and not getattr(output, "is_json_mode", False):
+    if not suppress_human and not getattr(output, "is_json_mode", False):
         output.print_warning(f"{message} {remediation}")
     raise typer.Exit(2)
 
 
-def _report_run_failure(output: Any) -> None:
+def _report_run_failure(output: Any, *, suppress_human: bool = False) -> None:
     """Report an agent-run failure and exit non-zero.
 
     Mirrors the existing arg-error exit convention (``typer.Exit(1)``) but for a
     *run* failure: emits a machine-readable outcome under ``--output json`` and
     prints a human-facing error, so CI/scripts can branch on the exit code and
     the JSON ``status`` instead of scraping stderr.
+
+    ``suppress_human`` sends the human error to stderr instead of
+    ``output.print_error``. That controller renders a Rich panel onto **stdout**
+    whenever Rich is available, which would leave a script parsing
+    ``run --output json`` with a panel behind the envelope.
     """
     message = "Run failed: the agent did not produce a result."
     output.emit_result(
@@ -219,19 +224,27 @@ def _report_run_failure(output: Any) -> None:
         data={"status": "failed", "result": None},
     )
     output.emit_error(message=message, data={"status": "failed"})
-    output.print_error(
-        message,
-        code="run_failed",
-        remediation=(
+    if suppress_human:
+        typer.echo(message, err=True)
+        typer.echo(
             "Re-run with --verbose to see the underlying error, "
-            "or check credentials with: praisonai setup"
-        ),
-    )
+            "or check credentials with: praisonai setup",
+            err=True,
+        )
+    else:
+        output.print_error(
+            message,
+            code="run_failed",
+            remediation=(
+                "Re-run with --verbose to see the underlying error, "
+                "or check credentials with: praisonai setup"
+            ),
+        )
     raise typer.Exit(1)
 
 
 def _report_run_truncated(
-    output: Any, result: Any, *, suppress_warning: bool = False
+    output: Any, result: Any, *, suppress_human: bool = False
 ) -> None:
     """Report a step-limit-truncated run distinctly from a genuine completion.
 
@@ -242,7 +255,7 @@ def _report_run_truncated(
     a finished task. Exits with code 2 to distinguish truncation (exit 2) from a
     hard failure (exit 1) and a clean completion (exit 0).
 
-    ``suppress_warning`` keeps that notice off stdout when the caller has already
+    ``suppress_human`` keeps that notice off stdout when the caller has already
     printed a machine-readable envelope there.
     """
     text = str(result) if result else None
@@ -250,7 +263,7 @@ def _report_run_truncated(
         message="Run truncated: hit the step/iteration limit before completing.",
         data={"status": "truncated", "result": text},
     )
-    if not suppress_warning and not getattr(output, "is_json_mode", False):
+    if not suppress_human and not getattr(output, "is_json_mode", False):
         output.print_warning(
             "Run hit the step/iteration limit; the answer above is a summary of "
             "partial progress, not a completed task. Raise the budget with "
@@ -2195,9 +2208,12 @@ def _run_prompt(
     # event bridge so it is available at the top of the function — an attached
     # bridge means the controller is in STREAM_JSON mode, where it frames its own
     # result event instead. `actions` is excluded because its core status module
-    # renders the answer itself. A plain run under `--output-format json` is left
-    # alone: the controller's JSON-mode finalisation is a pre-existing gap shared
-    # by every command, not something a routing fix should redefine.
+    # renders the answer itself, and QUIET is excluded because it is an explicit
+    # request for no stdout at all: the per-command selector replaces human TEXT
+    # output with machine output, it does not override "be silent". A plain run
+    # under `--output-format json` is likewise left alone — the controller's
+    # JSON-mode finalisation is a pre-existing gap shared by every command, not
+    # something a routing fix should redefine.
     _json_stdout = (
         output_mode in _STRUCTURED_AGENT_PRESETS
         and output_mode != "actions"
@@ -2205,7 +2221,10 @@ def _run_prompt(
             output_mode == "json"
             or getattr(output, "mode", None) == OutputMode.JSON
         )
-        and getattr(output, "mode", None) != OutputMode.STREAM_JSON
+        and getattr(output, "mode", None) not in (
+            OutputMode.STREAM_JSON,
+            OutputMode.QUIET,
+        )
     )
 
     # Note: Credential check already done in run_main() entry point
@@ -2487,18 +2506,18 @@ def _run_prompt(
             if block_reason:
                 _emit_json_outcome(block_reason, result)
                 _report_run_blocked(
-                    output, result, block_reason, suppress_warning=_json_stdout
+                    output, result, block_reason, suppress_human=_json_stdout
                 )
             if not succeeded:
                 _emit_json_outcome("failed", result)
-                _report_run_failure(output)
+                _report_run_failure(output, suppress_human=_json_stdout)
             # Report the truncated run distinctly (exit 2 + status "truncated")
             # so CI/users don't mistake wrapped-up partial work for a completed
             # task.
             if truncated:
                 _emit_json_outcome("truncated", result)
                 _report_run_truncated(
-                    output, result, suppress_warning=_json_stdout
+                    output, result, suppress_human=_json_stdout
                 )
             output.emit_result(
                 message="Prompt completed",
@@ -2591,7 +2610,12 @@ def _run_prompt(
         from ..output.event_bridge import StreamEventBridge
         StreamEventBridge(output).emit_run_error(str(e))
         output.emit_error(message=str(e))
-        output.print_error(str(e))
+        if _json_stdout:
+            # Same reason as _report_run_failure: a Rich error panel would land
+            # on stdout next to the envelope.
+            typer.echo(str(e), err=True)
+        else:
+            output.print_error(str(e))
         raise typer.Exit(1)
     finally:
         # Restore the prior opt-in state so the grant is strictly per-invocation.
