@@ -180,6 +180,24 @@ def _run_block_reason(agent: Any) -> Optional[str]:
     return reason if reason in _BLOCK_REASON_MESSAGES else None
 
 
+def _emit_json_outcome(json_stdout: bool, status: str, value: Any) -> None:
+    """Print the one-line ``{result, status}`` envelope for a ``--output json`` run.
+
+    ``json_stdout`` is the run-scoped decision that stdout belongs to this
+    envelope rather than to human output. It is threaded through rather than
+    recomputed so the exception handler shares one definition with the normal
+    result path, which is the only way every outcome is covered by construction.
+    """
+    if not json_stdout:
+        return
+    import json
+
+    print(json.dumps({
+        "result": str(value) if value else None,
+        "status": status,
+    }))
+
+
 def _report_run_blocked(
     output: Any, result: Any, reason: str, *, suppress_human: bool = False
 ) -> None:
@@ -2490,32 +2508,26 @@ def _run_prompt(
             # gets one single-line `{result, status}` envelope on stdout, not
             # just a clean completion: the reporters below exit before the
             # success-only path, so a failure would otherwise carry no
-            # machine-readable status at all.
-            def _emit_json_outcome(status: str, value: Any) -> None:
-                if not _json_stdout:
-                    return
-                import json as _json
-
-                print(_json.dumps({
-                    "result": str(value) if value else None,
-                    "status": status,
-                }))
+            # machine-readable status at all. The exception handler below shares
+            # the same definition so an unexpected raise is covered too.
+            def _emit(status: str, value: Any) -> None:
+                _emit_json_outcome(_json_stdout, status, value)
 
             # A provider block/refusal/truncation wins over a generic empty-result
             # failure so the specific, actionable reason is not masked.
             if block_reason:
-                _emit_json_outcome(block_reason, result)
+                _emit(block_reason, result)
                 _report_run_blocked(
                     output, result, block_reason, suppress_human=_json_stdout
                 )
             if not succeeded:
-                _emit_json_outcome("failed", result)
+                _emit("failed", result)
                 _report_run_failure(output, suppress_human=_json_stdout)
             # Report the truncated run distinctly (exit 2 + status "truncated")
             # so CI/users don't mistake wrapped-up partial work for a completed
             # task.
             if truncated:
-                _emit_json_outcome("truncated", result)
+                _emit("truncated", result)
                 _report_run_truncated(
                     output, result, suppress_human=_json_stdout
                 )
@@ -2529,7 +2541,7 @@ def _run_prompt(
             # already shows its output, and so does the event bridge when it is
             # active, so skip the bare print there and let the framing stand.
             if _json_stdout:
-                _emit_json_outcome("ok", result)
+                _emit("ok", result)
             elif _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
                 print(result)
             return
@@ -2610,6 +2622,11 @@ def _run_prompt(
         from ..output.event_bridge import StreamEventBridge
         StreamEventBridge(output).emit_run_error(str(e))
         output.emit_error(message=str(e))
+        # An unexpected raise is a terminal outcome too, so it gets the same
+        # envelope: the script reading stdout must not lose `status` because the
+        # failure happened during setup or inside the agent rather than being
+        # reported by the run itself.
+        _emit_json_outcome(_json_stdout, "failed", None)
         if _json_stdout:
             # Same reason as _report_run_failure: a Rich error panel would land
             # on stdout next to the envelope.

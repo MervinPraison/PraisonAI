@@ -511,6 +511,35 @@ def test_quiet_mode_suppresses_the_json_envelope(monkeypatch, capsys):
     assert '"status"' not in out, "quiet must suppress the envelope"
 
 
+def test_json_envelope_covers_an_unexpected_raise(standalone, monkeypatch, capsys):
+    """A raise during setup or inside the agent is a terminal outcome too.
+
+    The exception handler used to write only to stderr, so a script reading
+    stdout lost `status` for exactly the failures that are hardest to diagnose.
+    """
+    import json
+
+    _install_fake_praisonai(monkeypatch)
+
+    class _ExplodingAgent:
+        def __init__(self, **config):
+            pass
+
+        def start(self, prompt):
+            raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr("praisonaiagents.Agent", _ExplodingAgent)
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("hi", no_save=True, output_mode="json")
+
+    assert exc.value.exit_code == 1
+    streams = capsys.readouterr()
+    assert json.loads(streams.out) == {"result": None, "status": "failed"}
+    assert len(streams.out.strip().splitlines()) == 1
+    assert "provider exploded" in streams.err
+
+
 def test_failed_json_run_keeps_quiet_silent(monkeypatch, capsys):
     """A failing quiet run must not start printing to stdout either."""
     from praisonai_code.cli.output.console import OutputMode
