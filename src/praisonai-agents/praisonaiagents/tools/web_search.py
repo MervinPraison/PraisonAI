@@ -192,7 +192,14 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if result_limit == 0:
         return []
 
-    from urllib.request import Request, urlopen
+    import time
+    from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+    # Keenable never redirects. Following one would resend X-API-Key to wherever it points,
+    # so a 3xx surfaces as an HTTPError and search_web moves on to the next provider.
+    class _NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
 
     api_key = (os.environ.get("KEENABLE_API_KEY") or "").strip()
     headers = {
@@ -216,8 +223,17 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         method="POST",
     )
     # HTTP errors (a 429 on the shared keyless tier included) raise, so search_web moves on.
-    with urlopen(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
-        raw = response.read(KEENABLE_MAX_RESPONSE_BYTES + 1)
+    # The socket timeout bounds each read; the deadline bounds a body that trickles in.
+    deadline = time.monotonic() + KEENABLE_SEARCH_TIMEOUT_SECONDS
+    raw = bytearray()
+    with build_opener(_NoRedirect).open(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
+        while len(raw) <= KEENABLE_MAX_RESPONSE_BYTES:
+            if time.monotonic() > deadline:
+                raise TimeoutError("Keenable did not finish responding in time")
+            chunk = response.read1(KEENABLE_MAX_RESPONSE_BYTES + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
     if len(raw) > KEENABLE_MAX_RESPONSE_BYTES:
         raise ValueError("Keenable returned an oversized response")
     payload = json.loads(raw)

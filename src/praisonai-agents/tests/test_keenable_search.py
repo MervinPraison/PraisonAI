@@ -2,6 +2,8 @@ import importlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from threading import Thread
+import time
+from urllib.error import HTTPError
 
 import pytest
 
@@ -12,8 +14,9 @@ class KeenableHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         self.server.requests.append({
+            "method": self.command,
             "path": self.path,
-            "body": json.loads(body),
+            "body": json.loads(body) if body else None,
             "title": self.headers.get("X-Keenable-Title"),
             "api_key": self.headers.get("X-API-Key"),
             "content_type": self.headers.get("Content-Type"),
@@ -22,9 +25,21 @@ class KeenableHandler(BaseHTTPRequestHandler):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
+        for name, value in self.server.reply_headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(data) * self.server.drip_repeats))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            for _ in range(self.server.drip_repeats):
+                self.wfile.write(data)
+                self.wfile.flush()
+                if self.server.drip_repeats > 1:
+                    time.sleep(0.05)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    # A followed 302 arrives as a GET; record it the same way so a leak would show up.
+    do_GET = do_POST
 
     def log_message(self, format, *args):
         return
@@ -36,6 +51,8 @@ def keenable_server(monkeypatch):
     server.daemon_threads = True
     server.requests = []
     server.reply = (200, {"results": []})
+    server.reply_headers = {}
+    server.drip_repeats = 1
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -164,3 +181,29 @@ def test_keenable_is_selected_by_environment_variable(keenable_server, monkeypat
 
     assert result[0]["provider"] == "keenable"
     assert keenable_server.requests[0]["path"] == "/v1/search/public"
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_keenable_does_not_follow_redirects_with_the_key(keenable_server, monkeypatch, status):
+    monkeypatch.setenv("KEENABLE_API_KEY", "keen_test")
+    keenable_server.reply = (status, b"")
+    keenable_server.reply_headers = {"Location": "/collect"}
+
+    with pytest.raises(HTTPError) as excinfo:
+        web_search_module._search_keenable("q")
+
+    assert excinfo.value.code == status
+    assert [r["path"] for r in keenable_server.requests] == ["/v1/search"]
+
+
+def test_keenable_enforces_an_overall_deadline(keenable_server, monkeypatch):
+    # Each byte arrives well inside the socket timeout, so only the overall deadline stops it.
+    monkeypatch.setattr(web_search_module, "KEENABLE_SEARCH_TIMEOUT_SECONDS", 0.3)
+    keenable_server.reply = (200, b" ")
+    keenable_server.drip_repeats = 200
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="in time"):
+        web_search_module._search_keenable("q")
+
+    assert time.monotonic() - started < 2
