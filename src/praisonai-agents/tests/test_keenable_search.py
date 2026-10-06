@@ -23,18 +23,21 @@ class KeenableHandler(BaseHTTPRequestHandler):
         })
         status, payload = self.server.reply
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        for name, value in self.server.reply_headers.items():
-            self.send_header(name, value)
-        self.send_header("Content-Length", str(len(data) * self.server.drip_repeats))
-        self.end_headers()
         try:
-            for _ in range(self.server.drip_repeats):
+            time.sleep(self.server.header_delay)
+            self.send_response(status)
+            self.flush_headers()  # the status line goes out on its own
+            time.sleep(self.server.header_stall)
+            self.send_header("Content-Type", "application/json")
+            for name, value in self.server.reply_headers.items():
+                self.send_header(name, value)
+            self.send_header("Content-Length", str(len(data) * self.server.drip_repeats))
+            self.end_headers()
+            for i in range(self.server.drip_repeats):
+                if i:
+                    time.sleep(self.server.drip_gap)
                 self.wfile.write(data)
                 self.wfile.flush()
-                if self.server.drip_repeats > 1:
-                    time.sleep(0.05)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -52,7 +55,10 @@ def keenable_server(monkeypatch):
     server.requests = []
     server.reply = (200, {"results": []})
     server.reply_headers = {}
+    server.header_delay = 0
+    server.header_stall = 0
     server.drip_repeats = 1
+    server.drip_gap = 0.05
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -207,3 +213,23 @@ def test_keenable_enforces_an_overall_deadline(keenable_server, monkeypatch):
         web_search_module._search_keenable("q")
 
     assert time.monotonic() - started < 2
+
+
+# In both cases each wait stays under the socket timeout, but their sum does not:
+# 0.8 s, then a stall that only the overall 1 s deadline cuts short.
+@pytest.mark.parametrize("stall", ["headers", "body"])
+def test_keenable_deadline_covers_headers_and_a_stalled_body(keenable_server, monkeypatch, stall):
+    monkeypatch.setattr(web_search_module, "KEENABLE_SEARCH_TIMEOUT_SECONDS", 1.0)
+    keenable_server.reply = (200, b"{")
+    keenable_server.header_delay = 0.8
+    if stall == "headers":
+        keenable_server.header_stall = 5
+    else:
+        keenable_server.drip_repeats = 2
+        keenable_server.drip_gap = 5
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="in time"):
+        web_search_module._search_keenable("q")
+
+    assert time.monotonic() - started < 1.5

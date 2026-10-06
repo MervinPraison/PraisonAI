@@ -192,6 +192,7 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if result_limit == 0:
         return []
 
+    import threading
     import time
     from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -222,18 +223,36 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         headers=headers,
         method="POST",
     )
-    # HTTP errors (a 429 on the shared keyless tier included) raise, so search_web moves on.
-    # The socket timeout bounds each read; the deadline bounds a body that trickles in.
     deadline = time.monotonic() + KEENABLE_SEARCH_TIMEOUT_SECONDS
-    raw = bytearray()
-    with build_opener(_NoRedirect).open(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
-        while len(raw) <= KEENABLE_MAX_RESPONSE_BYTES:
-            if time.monotonic() > deadline:
-                raise TimeoutError("Keenable did not finish responding in time")
-            chunk = response.read1(KEENABLE_MAX_RESPONSE_BYTES + 1 - len(raw))
-            if not chunk:
-                break
-            raw += chunk
+    outcome: Dict[str, Any] = {}
+
+    def fetch() -> None:
+        # The deadline check stops a body that trickles in; the socket timeout ends a stalled read.
+        try:
+            raw = bytearray()
+            with build_opener(_NoRedirect).open(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
+                while len(raw) <= KEENABLE_MAX_RESPONSE_BYTES:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Keenable did not finish responding in time")
+                    chunk = response.read1(KEENABLE_MAX_RESPONSE_BYTES + 1 - len(raw))
+                    if not chunk:
+                        break
+                    raw += chunk
+            outcome["raw"] = raw
+        except Exception as exc:
+            outcome["error"] = exc
+
+    # Socket timeouts bound each blocking step, not their sum, so the request runs on a daemon
+    # thread and the caller waits for it only until the deadline. HTTP errors (a 429 on the
+    # shared keyless tier included) are re-raised here, so search_web moves on.
+    worker = threading.Thread(target=fetch, name="keenable-search", daemon=True)
+    worker.start()
+    worker.join(max(0.0, deadline - time.monotonic()))
+    if worker.is_alive():
+        raise TimeoutError("Keenable did not finish responding in time")
+    if "error" in outcome:
+        raise outcome["error"]
+    raw = outcome["raw"]
     if len(raw) > KEENABLE_MAX_RESPONSE_BYTES:
         raise ValueError("Keenable returned an oversized response")
     payload = json.loads(raw)
