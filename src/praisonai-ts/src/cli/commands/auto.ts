@@ -7,7 +7,7 @@ import { resolveConfig } from '../config/resolve';
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
 import { EXIT_CODES } from '../spec/cli-spec';
-import { ERROR_CODES } from '../output/errors';
+import { ERROR_CODES, handleCommandError } from '../output/errors';
 
 export interface AutoOptions {
   model?: string;
@@ -80,11 +80,6 @@ export async function execute(args: string[], options: AutoOptions): Promise<voi
       await pretty.success(`Generated in ${duration}ms`);
     }
   } catch (error) {
-    if (outputFormat === 'json') {
-      outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
-    } else {
-      await pretty.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(EXIT_CODES.RUNTIME_ERROR);
+    await handleCommandError(outputFormat, error);
   }
 }
