@@ -866,12 +866,14 @@ class OpenAIClient:
                     texts.append(part["text"])
                 else:
                     raise ValueError(
+                        "Unsupported system/developer instruction: "
                         "System/developer instructions must contain text parts; "
                         f"unsupported content part: {part!r}. Only plain strings "
                         "or text parts ({'type': 'text', 'text': ...}) are supported."
                     )
             return "\n".join(texts)
         raise ValueError(
+            "Unsupported system/developer instruction: "
             "System/developer instructions must be text or a list of text parts; "
             f"unsupported content: {content!r}"
         )
