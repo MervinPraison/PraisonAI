@@ -23,11 +23,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import secrets
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
-from ._approval_base import DEFAULT_APPROVAL_TIMEOUT, DurableApprovalMixin
+from ._approval_base import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    DurableApprovalMixin,
+    is_authorized_actor,
+    normalize_approvers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,14 @@ class HTTPApproval(DurableApprovalMixin):
         host: Bind address (default ``127.0.0.1``).
         port: Port to listen on (default ``8899``).
         timeout: Max seconds to wait for a response (default 300).
+        allowed_approvers: Optional allowlist of approver IDs permitted to
+            resolve an approval. When provided, each pending approval mints a
+            single-use token that is carried only in the per-approval URL; the
+            resolver must present that token (and, when the request supplies an
+            ``approver``, be in the allowlist) or the decision is rejected. When
+            ``None`` (default) any visitor may decide (legacy behaviour,
+            backward compatible). Falls back to a comma-separated
+            ``HTTP_APPROVERS`` env var when not passed.
 
     Example::
 
@@ -57,11 +72,18 @@ class HTTPApproval(DurableApprovalMixin):
         host: str = "127.0.0.1",
         port: int = 8899,
         timeout: float = DEFAULT_APPROVAL_TIMEOUT,
+        *,
+        allowed_approvers: Optional[Iterable[str]] = None,
         store: Optional[Any] = None,
     ):
         self._host = host
         self._port = port
         self._timeout = timeout
+        if allowed_approvers is None:
+            _env = os.environ.get("HTTP_APPROVERS", "").strip()
+            if _env:
+                allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
+        self._allowed_approvers = normalize_approvers(allowed_approvers)
         self._pending: Dict[str, Optional[Dict[str, Any]]] = {}
         self._server_started = False
         self._runner: Optional[Any] = None
@@ -91,6 +113,33 @@ class HTTPApproval(DurableApprovalMixin):
         self._server_started = True
         logger.info(f"HTTPApproval server started on http://{self._host}:{self._port}")
 
+    def _default_approver(self) -> Optional[str]:
+        """Return a deterministic approver identity from the allowlist.
+
+        Dashboard buttons post only the decision (no free-text approver). When
+        the single-use token has already authenticated the resolver, the
+        recorded approver is pinned to the allowlist. A single-entry allowlist
+        yields that entry; a multi-entry allowlist yields a stable (sorted)
+        member so the recorded identity is reproducible.
+        """
+        if not self._allowed_approvers:
+            return None
+        return sorted(self._allowed_approvers)[0]
+
+    def _token_ok(self, pending: Dict[str, Any], request) -> bool:
+        """Return whether *request* carries the per-approval token.
+
+        The token is minted per pending approval and embedded only in the URL
+        handed to the authorised approver. A constant-time comparison is used so
+        the endpoint does not leak the token via timing. When no allowlist is
+        configured there is no token, so this is a no-op (legacy behaviour).
+        """
+        expected = pending.get("token")
+        if not expected:
+            return True
+        supplied = request.query.get("token") or request.headers.get("X-Approval-Token", "")
+        return secrets.compare_digest(str(supplied), str(expected))
+
     async def _handle_page(self, request) -> Any:
         """Serve the approval page HTML."""
         from aiohttp import web
@@ -101,11 +150,18 @@ class HTTPApproval(DurableApprovalMixin):
         if pending is None:
             return web.Response(text="Approval request not found or already decided.", status=404)
 
+        if not self._token_ok(pending, request):
+            logger.warning(
+                "Unauthorised HTTP approval page access for %s", request_id,
+            )
+            return web.Response(text="Not authorized to view this approval.", status=403)
+
         if pending.get("decided"):
             return web.Response(text="This approval has already been decided.", status=200)
 
         info = pending.get("info", {})
-        html = self._build_html(request_id, info)
+        token = pending.get("token")
+        html = self._build_html(request_id, info, token=token)
         return web.Response(text=html, content_type="text/html")
 
     async def _handle_decide(self, request) -> Any:
@@ -117,6 +173,13 @@ class HTTPApproval(DurableApprovalMixin):
 
         if pending is None:
             return web.Response(text="Not found", status=404)
+
+        if not self._token_ok(pending, request):
+            logger.warning(
+                "Unauthorised HTTP approval decision attempt for %s", request_id,
+            )
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=403)
+
         if pending.get("decided"):
             return web.Response(text="Already decided", status=200)
 
@@ -125,17 +188,37 @@ class HTTPApproval(DurableApprovalMixin):
         except Exception:
             body = {}
 
+        # Authorisation boundary: when an allowlist is configured the per-approval
+        # token already proves the resolver received the private URL handed only
+        # to an authorised approver, so a token-authenticated decision is trusted.
+        # The recorded approver identity is then pinned to the allowlist: an
+        # explicit ``approver`` must be a member, and an omitted one defaults to
+        # the configured approver (so the dashboard buttons — which post only the
+        # decision — resolve correctly instead of being rejected). When no
+        # allowlist is set the legacy free-text default is kept.
+        if self._allowed_approvers is not None:
+            approver = body.get("approver") or self._default_approver()
+            if not is_authorized_actor(approver, self._allowed_approvers):
+                logger.warning(
+                    "Unauthorised HTTP approver %r for %s", approver, request_id,
+                )
+                return web.json_response({"ok": False, "error": "unauthorized"}, status=403)
+        else:
+            approver = body.get("approver", "http_user")
+
         decision = body.get("decision", "deny")
         pending["decided"] = True
         pending["approved"] = decision == "approve"
         pending["reason"] = body.get("reason", f"{'Approved' if pending['approved'] else 'Denied'} via HTTP dashboard")
-        pending["approver"] = body.get("approver", "http_user")
+        pending["approver"] = approver
 
         return web.json_response({"ok": True, "decision": decision})
 
-    def _build_html(self, request_id: str, info: Dict[str, Any]) -> str:
+    def _build_html(self, request_id: str, info: Dict[str, Any], token: Optional[str] = None) -> str:
         """Build a minimal approval page."""
         import html as html_module
+
+        token_qs = f"?token={html_module.escape(str(token))}" if token else ""
 
         tool_name = html_module.escape(str(info.get("tool_name", "unknown")))
         risk_level = html_module.escape(str(info.get("risk_level", "unknown")))
@@ -181,7 +264,7 @@ td {{ padding: 8px; border-bottom: 1px solid #333; }} code {{ background: #2a2a4
 <div class="done" id="result" style="display:none"></div>
 <script>
 async function decide(d) {{
-  const res = await fetch('/approve/{request_id}/decide', {{
+  const res = await fetch('/approve/{request_id}/decide{token_qs}', {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{decision: d}})
   }});
@@ -202,9 +285,13 @@ async function decide(d) {{
         await self._ensure_server()
 
         request_id = str(uuid.uuid4())
+        # Mint a single-use token bound to this approval when an allowlist is
+        # configured, so only the holder of the private URL can resolve it.
+        token = secrets.token_urlsafe(32) if self._allowed_approvers is not None else None
         self._pending[request_id] = {
             "decided": False,
             "approved": False,
+            "token": token,
             "info": {
                 "tool_name": request.tool_name,
                 "arguments": request.arguments,
@@ -213,8 +300,13 @@ async function decide(d) {{
             },
         }
 
-        url = f"http://{self._host}:{self._port}/approve/{request_id}"
-        logger.info(f"HTTPApproval: Waiting for decision at {url}")
+        base_url = f"http://{self._host}:{self._port}/approve/{request_id}"
+        url = f"{base_url}?token={token}" if token else base_url
+        # Never write the token-bearing URL to the general logs: anyone who can
+        # read the logs could otherwise lift the single-use token. Log only the
+        # token-free base URL; the full URL (with token) goes to stdout for the
+        # operator who is entitled to resolve the approval.
+        logger.info("HTTPApproval: Waiting for decision at %s", base_url)
         print(f"\n🔗 Open this URL to approve/deny:\n   {url}\n")
 
         # Poll for decision
@@ -230,7 +322,7 @@ async function decide(d) {{
                     approved=pending["approved"],
                     reason=pending.get("reason", ""),
                     approver=pending.get("approver"),
-                    metadata={"platform": "http", "request_id": request_id, "url": url},
+                    metadata={"platform": "http", "request_id": request_id, "url": base_url},
                 )
                 await self._resolve_pending(request, decision)
                 return decision
