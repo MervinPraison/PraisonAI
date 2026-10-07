@@ -2549,6 +2549,11 @@ def _run_prompt(
 
             # A provider block/refusal/truncation wins over a generic empty-result
             # failure so the specific, actionable reason is not masked.
+            # The reporters below raise typer.Exit, so surface the mode-specific
+            # stdout payload *first* — otherwise a `--output json | script`
+            # consumer gets empty stdout and a `--output stream` user loses the
+            # partial answer on an exit-2 run (blocked/truncated). Skipped for a
+            # hard failure (no usable result to print; keep stdout clean).
             if block_reason:
                 _emit(block_reason, result)
                 _report_run_blocked(

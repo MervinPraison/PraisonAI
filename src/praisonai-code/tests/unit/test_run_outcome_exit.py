@@ -433,3 +433,162 @@ def test_no_append_still_allows_warm_runtime(monkeypatch):
     run_cmd._run_prompt("refactor this", no_save=True)
 
     assert attach_calls, "an eligible no-save run should attach to the warm runtime"
+
+
+class _CapturingAgent:
+    """Fake core Agent that records its build config and the prompt it ran."""
+
+    last_config = None
+    last_prompt = None
+
+    def __init__(self, **cfg):
+        type(self).last_config = cfg
+
+    def start(self, prompt):
+        type(self).last_prompt = prompt
+        return "the answer"
+
+
+def _install_inprocess_agent_stubs(monkeypatch, agent_factory):
+    """Wire the minimal praisonaiagents + wrapper stubs for an in-process run.
+
+    The wrapper's ``PraisonAI`` is installed with a ``handle_direct_prompt`` that
+    *raises*, so any test asserting a mode runs in-process also proves the run
+    never fell through to the wrapper delegation path (the exact #5665 bug).
+    """
+    import sys
+    import types
+
+    pkg = types.ModuleType("praisonaiagents")
+    pkg.__path__ = []
+    pkg.Agent = agent_factory
+
+    class _MemoryConfig:  # pragma: no cover - simple record stub
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.auto_save = kwargs.get("auto_save")
+            self.session_id = kwargs.get("session_id")
+
+    pkg.MemoryConfig = _MemoryConfig
+    monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
+
+    fake_main = types.ModuleType("praisonai_code.cli.main")
+
+    class _FailingWrapper:
+        def __init__(self, *a, **k):
+            self.config_list = [{}]
+            self.args = None
+
+        def handle_direct_prompt(self, prompt):  # pragma: no cover - must not run
+            raise AssertionError(
+                "structured modes must run in-process, not via the wrapper"
+            )
+
+    fake_main.PraisonAI = _FailingWrapper
+    monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+
+
+def _make_output(monkeypatch, *, json_mode=False):
+    output = _RecordingOutput()
+    output.is_json_mode = json_mode
+    output.is_verbose = False
+    output.mode = None
+    _noop = lambda *a, **k: None
+    output.print_info = _noop
+    output.print_success = _noop
+    output.emit_start = _noop
+    output.emit_event = _noop
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+    return output
+
+
+@pytest.mark.parametrize("mode", ["actions", "json", "stream", "stream-json"])
+def test_structured_modes_run_in_process_not_wrapper(monkeypatch, mode, capsys):
+    """Regression guard for #5665: json/stream/stream-json dispatch in-process.
+
+    If the dispatch condition were reverted to ``output_mode == "actions"`` the
+    other three modes would reach the wrapper's ``handle_direct_prompt`` stub,
+    which raises — so this fails loudly on the exact bug the PR fixes. It also
+    pins the per-mode stdout contract (json envelope / stream text / no raw text
+    for stream-json).
+    """
+    _CapturingAgent.last_prompt = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=(mode == "json"))
+
+    run_cmd._run_prompt("summarise this", output_mode=mode, no_save=True)
+
+    # The in-process Agent actually ran (the model path, not the wrapper).
+    assert _CapturingAgent.last_prompt == "summarise this"
+
+    out = capsys.readouterr().out
+    if mode == "json":
+        import json as _json
+        assert _json.loads(out.strip()) == {"result": "the answer"}
+    elif mode == "stream":
+        assert out.strip() == "the answer"
+    elif mode == "actions":
+        # The core actions preset renders its own output; the CLI prints nothing.
+        assert out.strip() == ""
+    else:  # stream-json: NDJSON framing is owned by the event bridge, no raw text
+        assert "the answer" not in out
+
+
+@pytest.mark.parametrize("mode", ["json", "stream"])
+def test_truncated_run_surfaces_partial_answer_before_exit(monkeypatch, mode, capsys):
+    """Greptile P1: a truncated json/stream run must still print its partial text.
+
+    The truncated/blocked reporters raise ``typer.Exit(2)``; the mode-specific
+    stdout payload must be emitted *before* that exit so a ``--output json`` pipe
+    is not empty and a ``--output stream`` user keeps the partial answer.
+    """
+
+    class _TruncatedAgent(_CapturingAgent):
+        last_stop_reason = "max_steps"
+
+        def start(self, prompt):
+            type(self).last_prompt = prompt
+            return "partial summary"
+
+    _install_inprocess_agent_stubs(monkeypatch, _TruncatedAgent)
+    _make_output(monkeypatch, json_mode=(mode == "json"))
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("big task", output_mode=mode, no_save=True)
+
+    assert exc.value.exit_code == 2
+    out = capsys.readouterr().out
+    if mode == "json":
+        import json as _json
+        assert _json.loads(out.strip()) == {"result": "partial summary"}
+    else:
+        assert out.strip() == "partial summary"
+
+
+def test_inprocess_honors_explicit_memory_flag(monkeypatch):
+    """Greptile P1: `--memory` must reach the Agent even without a session name.
+
+    Routing json/stream/stream-json in-process previously dropped the explicit
+    memory flag (``build_cli_memory_config`` returns None without a session /
+    auto-save); the wrapper path used to set ``memory=True``. Keep that honored.
+    """
+    _CapturingAgent.last_config = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=True)
+
+    run_cmd._run_prompt(
+        "remember this", output_mode="json", memory=True, no_save=True
+    )
+
+    assert _CapturingAgent.last_config.get("memory") is True
+
+
+def test_inprocess_no_memory_flag_leaves_memory_unset(monkeypatch):
+    """Without `--memory` (and no session), the Agent is built memory-free."""
+    _CapturingAgent.last_config = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=True)
+
+    run_cmd._run_prompt("no memory", output_mode="json", no_save=True)
+
+    assert "memory" not in _CapturingAgent.last_config
