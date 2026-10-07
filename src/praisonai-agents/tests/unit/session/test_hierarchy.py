@@ -6,8 +6,11 @@ TDD: Tests for parent-child sessions, forking, snapshots, and revert.
 
 import os
 import shutil
+import sys
 import tempfile
 import time
+
+import pytest
 
 from praisonaiagents.session.hierarchy import (
     HierarchicalSessionStore,
@@ -255,7 +258,67 @@ class TestHierarchicalSessionStore:
         child1_tree = next(c for c in tree["children"] if c["session_id"] == child1_id)
         assert len(child1_tree["children"]) == 1
         assert child1_tree["children"][0]["session_id"] == grandchild_id
-    
+
+    def test_get_session_tree_deep_chain(self):
+        """Deep chains built via create_session must not raise RecursionError."""
+        depth = sys.getrecursionlimit() + 20
+        self.store.create_session(session_id="node0")
+        for index in range(1, depth):
+            self.store.create_session(
+                session_id=f"node{index}", parent_id=f"node{index - 1}"
+            )
+
+        tree = self.store.get_session_tree("node0")
+
+        node = tree
+        count = 0
+        while node["children"]:
+            assert len(node["children"]) == 1
+            node = node["children"][0]
+            count += 1
+        assert count == depth - 1
+        assert node["session_id"] == f"node{depth - 1}"
+
+    def test_get_session_tree_self_reference_cycle(self):
+        """A self-referencing child is rejected as a cycle, not RecursionError."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="loop", children_ids=["loop"])
+        )
+        with pytest.raises(ValueError, match="Cycle detected"):
+            self.store.get_session_tree("loop")
+
+    def test_get_session_tree_two_node_cycle(self):
+        """A two-node cycle is rejected as a cycle, not RecursionError."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="a", children_ids=["b"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b", children_ids=["a"])
+        )
+        with pytest.raises(ValueError, match="Cycle detected"):
+            self.store.get_session_tree("a")
+
+    def test_get_session_tree_shared_descendant(self):
+        """A descendant shared across sibling branches is preserved, not rejected."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="root", children_ids=["b1", "b2"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b1", children_ids=["shared"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b2", children_ids=["shared"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="shared")
+        )
+
+        tree = self.store.get_session_tree("root")
+
+        assert [c["session_id"] for c in tree["children"]] == ["b1", "b2"]
+        for branch in tree["children"]:
+            assert branch["children"][0]["session_id"] == "shared"
+
     def test_create_snapshot(self):
         """Test creating a snapshot."""
         session_id = self.store.create_session(title="Test")

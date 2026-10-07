@@ -700,22 +700,60 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def get_session_tree(self, session_id: str) -> Dict[str, Any]:
         """
         Get the full session tree starting from a session.
-        
+
         Returns a nested dictionary representing the tree structure.
+
+        Uses an explicit traversal stack instead of recursion so deep
+        parent-child chains built via :meth:`create_session` no longer raise
+        ``RecursionError`` once they exceed Python's recursion limit.
+
+        A repeated ID on the current ancestor path is treated as a cycle and
+        rejected with ``ValueError``; a global visited set is intentionally not
+        used so a descendant shared across different branches is preserved.
         """
-        session = self._load_extended_session(session_id)
-        
-        tree = {
-            "session_id": session.session_id,
-            "title": session.title,
-            "message_count": len(session.messages),
-            "children": []
+        root_session = self._load_extended_session(session_id)
+        root = {
+            "session_id": root_session.session_id,
+            "title": root_session.title,
+            "message_count": len(root_session.messages),
+            "children": [],
         }
-        
-        for child_id in session.children_ids:
-            tree["children"].append(self.get_session_tree(child_id))
-        
-        return tree
+
+        # Stack items: (node_dict, iterator over child ids, set of ancestor ids
+        # on the path to this node including itself).
+        stack = [
+            (root, iter(root_session.children_ids), {root_session.session_id})
+        ]
+
+        while stack:
+            node, child_iter, path = stack[-1]
+            child_id = next(child_iter, None)
+            if child_id is None:
+                stack.pop()
+                continue
+
+            if child_id in path:
+                raise ValueError(
+                    f"Cycle detected in session tree at '{child_id}'"
+                )
+
+            child_session = self._load_extended_session(child_id)
+            child_node = {
+                "session_id": child_session.session_id,
+                "title": child_session.title,
+                "message_count": len(child_session.messages),
+                "children": [],
+            }
+            node["children"].append(child_node)
+            stack.append(
+                (
+                    child_node,
+                    iter(child_session.children_ids),
+                    path | {child_id},
+                )
+            )
+
+        return root
     
     def create_snapshot(
         self,
