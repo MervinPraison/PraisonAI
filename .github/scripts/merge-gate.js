@@ -72,7 +72,9 @@ const OPTIONAL_PENDING_WHEN_CORE_GREEN = new Set([
   'main (3.11)',
   'openai-live',
   'test-summary',
-  'GitGuardian Security Checks',
+  // NOTE: Security scans (e.g. GitGuardian) must stay blocking — do not add
+  // them here. The local secretScanReasons heuristic is not an equivalent
+  // substitute (skips tests, matches a short pattern list).
 ]);
 /** PR authors eligible for claude merge-gate auto-merge (triage fleet only). */
 const AUTO_MERGE_AUTHOR_LOGINS = new Set([
@@ -107,13 +109,14 @@ function isAutoMergeAuthor(user) {
 
 function maintainerOnlyAuthorReason(pr) {
   if (!pr?.user?.login) return 'maintainer-only author (missing login)';
+  // Allowlisted automation (triage/github-actions bots) may carry an
+  // author_association of NONE/CONTRIBUTOR from GitHub — check the explicit
+  // login allowlist first so those bots are not blocked by association.
+  if (isAutoMergeAuthor(pr.user)) return null;
   if (MAINTAINER_ONLY_ASSOCIATIONS.has(pr.author_association)) {
     return `maintainer-only author (@${pr.user.login}, ${pr.author_association})`;
   }
-  if (!isAutoMergeAuthor(pr.user)) {
-    return `maintainer-only author (@${pr.user.login})`;
-  }
-  return null;
+  return `maintainer-only author (@${pr.user.login})`;
 }
 
 function isFinalClaudeTriggerComment(c) {

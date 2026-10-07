@@ -104,6 +104,25 @@ assert('maintainer login allowed', mg.maintainerOnlyAuthorReason({
   user: { login: 'MervinPraison' },
   author_association: 'OWNER',
 }) === null);
+// Allowlisted bots must NOT be blocked even when GitHub reports association NONE.
+assert('triage bot allowed with NONE association', mg.maintainerOnlyAuthorReason({
+  user: { login: 'praisonai-triage-agent[bot]' },
+  author_association: 'NONE',
+}) === null);
+assert('github-actions bot allowed with NONE association', mg.maintainerOnlyAuthorReason({
+  user: { login: 'github-actions[bot]' },
+  author_association: 'NONE',
+}) === null);
+assert('triage bot allowed with CONTRIBUTOR association', mg.maintainerOnlyAuthorReason({
+  user: { login: 'praisonai-triage-agent[bot]' },
+  author_association: 'CONTRIBUTOR',
+}) === null);
+// Security scans must remain blocking — never ignored as pending-when-core-green.
+assert('GitGuardian not in pending-ignore list', !mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('GitGuardian Security Checks'));
+assert('pending GitGuardian still blocks when core green', !mg.isIgnorablePendingCheck(
+  { name: 'GitGuardian Security Checks', status: 'in_progress', conclusion: null },
+  [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
+));
 
 const coreGreenRuns = [
   { name: 'test-core', status: 'completed', conclusion: 'success' },
