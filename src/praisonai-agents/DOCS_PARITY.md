@@ -25,9 +25,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3941 |
 | ✅ Autonomy | 3 | 7 | 2808 |
-| ✅ Bots | 7 | 39 | 16300 |
+| ✅ Bots | 7 | 39 | 16336 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39199 |
+| ✅ CLI | 5 | 124 | 39240 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
