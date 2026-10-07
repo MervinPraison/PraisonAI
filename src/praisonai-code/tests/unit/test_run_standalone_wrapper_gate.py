@@ -263,39 +263,128 @@ def test_image_command_run_gates_without_wrapper(no_wrapper, monkeypatch):
     assert "--image" in messages[0]
 
 
-def test_render_default_prompt_in_process(monkeypatch):
-    """Default text run renders from an in-process Agent (no wrapper import)."""
+def _patch_agent(monkeypatch, captured, *, stop_reason=None, result="rendered answer"):
+    """Install a fake ``praisonaiagents.Agent`` and neutralise the wiring helper.
+
+    The in-process renderer now wires the shared agent surface
+    (tools/session/instructions) before building the Agent; stub that helper so
+    these unit tests stay focused on the renderer's own contract (return shape,
+    stop-reason propagation, single print) without needing a real tool/session
+    runtime.
+    """
     import sys
     import types
 
-    captured = {}
-
     class _FakeAgent:
+        last_stop_reason = stop_reason
+
         def __init__(self, **cfg):
             captured["cfg"] = cfg
 
         def start(self, prompt):
             captured["prompt"] = prompt
-            return "rendered answer"
+            return result
 
     fake_mod = types.ModuleType("praisonaiagents")
     fake_mod.Agent = _FakeAgent
     monkeypatch.setitem(sys.modules, "praisonaiagents", fake_mod)
     # Force the status-output import to fail so the simple path is exercised.
     monkeypatch.setitem(sys.modules, "praisonaiagents.output.status", None)
+    monkeypatch.setattr(
+        run_cmd, "_wire_run_agent_config", lambda *a, **k: None
+    )
 
-    class _Args:
-        llm = None
-        max_tokens = None
-        verbose = 0
-        quiet = 0
-        thinking_budget = None
 
-    class _Output:
-        pass
+class _Args:
+    llm = None
+    max_tokens = None
+    verbose = 0
+    quiet = 0
+    thinking_budget = None
+    tools = None
+    toolset = None
+    mcp = None
+    mcp_env = None
+    mcp_servers = None
+    approval = None
+    no_rules = False
+    instructions = None
+    resume_session = None
+    auto_save = None
 
-    result = run_cmd._render_default_prompt_in_process("hello", _Args(), _Output())
+
+class _Output:
+    pass
+
+
+def test_render_default_prompt_in_process(monkeypatch):
+    """Default text run renders from an in-process Agent (no wrapper import)."""
+    captured = {}
+    _patch_agent(monkeypatch, captured)
+
+    result, agent, printed = run_cmd._render_default_prompt_in_process(
+        "hello", _Args(), _Output()
+    )
 
     assert result == "rendered answer"
     assert captured["prompt"] == "hello"
     assert captured["cfg"]["name"] == "RunAgent"
+    # The renderer must return the live Agent so the caller can consult
+    # last_stop_reason for provider/step-limit cutoffs.
+    assert getattr(agent, "last_stop_reason", "unset") is None
+    # The simple fallback path (status import failed) did not print, so the
+    # caller owns the single human-text print — no double output.
+    assert printed is False
+
+
+def test_render_passes_session_identity_to_wiring(monkeypatch):
+    """--session/--continue identity reaches the shared wiring (no lost history)."""
+    # Import the real session module before the fake praisonaiagents shadow is
+    # installed so its ``apply_cli_session_continuity`` resolves, then patch it.
+    import praisonai_code.cli.state.project_sessions as ps
+
+    captured = {}
+    _patch_agent(monkeypatch, captured)
+    seen = {}
+    monkeypatch.setattr(
+        run_cmd,
+        "_wire_run_agent_config",
+        lambda cfg, **k: seen.update(k),
+    )
+    # apply_cli_session_continuity must be invoked with the resolved session id.
+    continuity = {}
+    monkeypatch.setattr(
+        ps,
+        "apply_cli_session_continuity",
+        lambda agent, sid, auto_save=None: continuity.update(
+            sid=sid, auto_save=auto_save
+        ),
+    )
+
+    args = _Args()
+    args.resume_session = "sess-123"
+    args.auto_save = "sess-123"
+    args.tools = "web"
+    args.instructions = ["RULES.md"]
+
+    run_cmd._render_default_prompt_in_process("hi", args, _Output())
+
+    assert seen["session_id"] == "sess-123"
+    assert seen["tools"] == "web"
+    assert seen["instructions"] == ["RULES.md"]
+    assert continuity == {"sid": "sess-123", "auto_save": "sess-123"}
+
+
+def test_render_reports_stop_reason(monkeypatch):
+    """A step-limit/length cutoff is surfaced via the returned agent, not hidden."""
+    captured = {}
+    _patch_agent(monkeypatch, captured, stop_reason="max_steps")
+
+    result, agent, _printed = run_cmd._render_default_prompt_in_process(
+        "hi", _Args(), _Output()
+    )
+
+    assert result == "rendered answer"
+    # The caller uses _run_was_truncated(agent) -> exit 2; prove the signal
+    # reaches it rather than being discarded by the renderer.
+    assert run_cmd._run_was_truncated(agent) is True
