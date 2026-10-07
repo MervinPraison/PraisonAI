@@ -78,6 +78,7 @@ const OPTIONAL_PENDING_WHEN_CORE_GREEN = new Set([
 const AUTO_MERGE_AUTHOR_LOGINS = new Set([
   'MervinPraison',
   'praisonai-triage-agent',
+  'praisonai-triage-agent[bot]',
   'app/praisonai-triage-agent',
   'github-actions[bot]',
 ]);
@@ -107,13 +108,12 @@ function isAutoMergeAuthor(user) {
 
 function maintainerOnlyAuthorReason(pr) {
   if (!pr?.user?.login) return 'maintainer-only author (missing login)';
+  // Trusted automation first — GitHub often marks bots as CONTRIBUTOR.
+  if (isAutoMergeAuthor(pr.user)) return null;
   if (MAINTAINER_ONLY_ASSOCIATIONS.has(pr.author_association)) {
     return `maintainer-only author (@${pr.user.login}, ${pr.author_association})`;
   }
-  if (!isAutoMergeAuthor(pr.user)) {
-    return `maintainer-only author (@${pr.user.login})`;
-  }
-  return null;
+  return `maintainer-only author (@${pr.user.login})`;
 }
 
 function isFinalClaudeTriggerComment(c) {
