@@ -9,6 +9,7 @@ import os
 import logging
 from typing import Dict, List, Optional
 from ..approval import require_approval
+from ..utils.atomic_io import update_json
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class TodoTools:
         return self._todo_file
     
     def _load_todos(self) -> List[Dict]:
-        """Load todos from file."""
+        """Load todos from file (read-only helper used by ``todo_list``)."""
         todo_file = self._get_todo_file()
         if not os.path.exists(todo_file):
             return []
@@ -51,16 +52,40 @@ class TodoTools:
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to load todos: {e}")
             return []
-    
+
     def _save_todos(self, todos: List[Dict]) -> None:
-        """Save todos to file."""
-        todo_file = self._get_todo_file()
-        try:
-            with open(todo_file, 'w', encoding='utf-8') as f:
-                json.dump(todos, f, indent=2, ensure_ascii=False)
-        except OSError as e:
-            logger.error(f"Failed to save todos: {e}")
-            raise
+        """Atomically persist a full todo list.
+
+        Retained for the MCP CLI adapter
+        (``praisonai_mcp.mcp_server.adapters.cli_tools``), which does its own
+        read-modify-write via ``_load_todos`` + ``_save_todos`` and writes the
+        owner's record shape. The write goes through ``atomic_write_json`` so a
+        crash mid-write never truncates the previous good file. In-process
+        mutations (``todo_add``/``todo_update``) use the locked ``_update_todos``
+        below instead; this plain save keeps the cross-adapter contract intact.
+        """
+        from ..utils.atomic_io import atomic_write_json
+        atomic_write_json(
+            self._get_todo_file(), todos, indent=2, ensure_ascii=False
+        )
+
+    def _update_todos(self, mutate) -> List[Dict]:
+        """Locked atomic read-modify-write over the todo file.
+
+        Parallel tool calls and multiple agents sharing the default
+        ``~/.praisonai/todos.json`` previously raced through an unlocked
+        read-modify-write plus a truncating ``open(..., 'w')``, so most
+        concurrent adds were lost and a torn write reset the whole plan. Routing
+        every mutation through ``update_json`` serialises them and writes
+        atomically; a corrupt file is moved aside instead of silently emptied.
+        """
+        return update_json(
+            self._get_todo_file(),
+            lambda todos: (mutate(todos), todos)[1],
+            default=list,
+            indent=2,
+            ensure_ascii=False,
+        )
 
     def _emit_update(self, todos: List[Dict]) -> None:
         """Publish the full ordered list so subscribed frontends can render live.
@@ -88,19 +113,22 @@ class TodoTools:
             JSON string with result
         """
         try:
-            todos = self._load_todos()
-            
-            new_todo = {
-                "id": len(todos) + 1,
-                "task": task,
-                "priority": priority,
-                "category": category,
-                "status": "pending",
-                "created_at": self._get_timestamp()
-            }
-            
-            todos.append(new_todo)
-            self._save_todos(todos)
+            new_todo: Dict = {}
+
+            def mutate(todos: List[Dict]) -> None:
+                new_todo.update({
+                    # Derive the id from the current max inside the lock so
+                    # concurrent adds never collide on ``len(todos) + 1``.
+                    "id": max((t.get("id", 0) for t in todos), default=0) + 1,
+                    "task": task,
+                    "priority": priority,
+                    "category": category,
+                    "status": "pending",
+                    "created_at": self._get_timestamp(),
+                })
+                todos.append(dict(new_todo))
+
+            todos = self._update_todos(mutate)
             self._emit_update(todos)
             
             return json.dumps({
@@ -157,30 +185,31 @@ class TodoTools:
             JSON string with result
         """
         try:
-            todos = self._load_todos()
-            
-            todo_found = False
-            for todo in todos:
-                if todo.get("id") == todo_id:
-                    if status:
-                        # Convention: exactly one item is in_progress at a time.
-                        if status == "in_progress":
-                            for other in todos:
-                                if other is not todo and other.get("status") == "in_progress":
-                                    other["status"] = "pending"
-                        todo["status"] = status
-                    if task:
-                        todo["task"] = task
-                    if priority:
-                        todo["priority"] = priority
-                    todo["updated_at"] = self._get_timestamp()
-                    todo_found = True
-                    break
-            
-            if not todo_found:
+            found = {"value": False}
+
+            def mutate(todos: List[Dict]) -> None:
+                for todo in todos:
+                    if todo.get("id") == todo_id:
+                        if status:
+                            # Convention: exactly one item is in_progress at a time.
+                            if status == "in_progress":
+                                for other in todos:
+                                    if other is not todo and other.get("status") == "in_progress":
+                                        other["status"] = "pending"
+                            todo["status"] = status
+                        if task:
+                            todo["task"] = task
+                        if priority:
+                            todo["priority"] = priority
+                        todo["updated_at"] = self._get_timestamp()
+                        found["value"] = True
+                        break
+
+            todos = self._update_todos(mutate)
+
+            if not found["value"]:
                 return json.dumps({"success": False, "error": f"Todo {todo_id} not found"})
             
-            self._save_todos(todos)
             self._emit_update(todos)
             
             return json.dumps({

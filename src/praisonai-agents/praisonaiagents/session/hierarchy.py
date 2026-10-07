@@ -6,6 +6,7 @@ forking, and revert capabilities.
 """
 
 import copy
+import hashlib
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -13,17 +14,27 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from .store import SessionData, SessionMessage, DefaultSessionStore, FileLock
+from .store import (
+    SessionData,
+    SessionMessage,
+    DefaultSessionStore,
+    FileLock,
+    _LRUSessionCache,
+)
 
 logger = get_logger(__name__)
 
 @dataclass
 class SessionSnapshot:
-    """A snapshot of session state at a point in time."""
+    """A transcript snapshot; old records may contain only a message index.
+
+    Durable records pool repeated transcript entries; portable exports inline them.
+    Legacy records cannot recover history already discarded before upgrading.
+    """
     
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str = ""
@@ -31,9 +42,11 @@ class SessionSnapshot:
     created_at: float = field(default_factory=time.time)
     label: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    transcript: Optional[Dict[str, Any]] = None
+    invalidated: bool = False
     
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    def _header_dict(self) -> Dict[str, Any]:
+        data = {
             "id": self.id,
             "session_id": self.session_id,
             "message_index": self.message_index,
@@ -41,6 +54,15 @@ class SessionSnapshot:
             "label": self.label,
             "metadata": self.metadata,
         }
+        if self.invalidated:
+            data["invalidated"] = True
+        return data
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = self._header_dict()
+        if self.transcript is not None:
+            data["transcript"] = copy.deepcopy(self.transcript)
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionSnapshot":
@@ -51,6 +73,8 @@ class SessionSnapshot:
             created_at=data.get("created_at", time.time()),
             label=data.get("label"),
             metadata=data.get("metadata", {}),
+            transcript=copy.deepcopy(data.get("transcript")),
+            invalidated=data.get("invalidated", False),
         )
 
 @dataclass
@@ -75,30 +99,130 @@ class ExtendedSessionData(SessionData):
             "title": self.title,
         })
         return d
+
+    def _to_storage_dict(self) -> Dict[str, Any]:
+        """Pool snapshot records in the atomic session file, not portable exports."""
+        data = super().to_dict()
+        data.update({
+            "parent_id": self.parent_id,
+            "forked_from_message_id": self.forked_from_message_id,
+            "children_ids": self.children_ids,
+            "is_shared": self.is_shared,
+            "title": self.title,
+        })
+        records = {}
+        record_ids = {}
+
+        def intern(value):
+            # Most transcript records contain text plus scalar fields and empty
+            # metadata. Reuse hashes of their immutable strings rather than
+            # re-encoding every archived text for every snapshot on each write.
+            if isinstance(value, dict) and all(
+                item is None or isinstance(item, (str, bool, int, float))
+                or isinstance(item, (dict, list)) and not item
+                for item in value.values()
+            ):
+                identity = ("flat", tuple(
+                    (name, type(item), None if isinstance(item, (dict, list)) else item)
+                    for name, item in value.items()
+                ))
+            else:
+                identity = ("json", json.dumps(value, ensure_ascii=False,
+                                               separators=(",", ":")))
+            key = record_ids.get(identity)
+            if key is None:
+                key = str(len(records))
+                record_ids[identity] = key
+                records[key] = copy.deepcopy(value)
+            return key
+
+        snapshots = []
+        for snapshot in self.snapshots:
+            saved = snapshot._header_dict()
+            required = {"messages", "archived_messages", "last_compaction"}
+            if (snapshot.transcript is not None and required <= snapshot.transcript.keys()
+                    and all(isinstance(snapshot.transcript[name], list)
+                            and all(isinstance(item, dict) for item in snapshot.transcript[name])
+                            for name in ("messages", "archived_messages"))
+                    and (snapshot.transcript["last_compaction"] is None
+                         or isinstance(snapshot.transcript["last_compaction"], dict))):
+                refs = {}
+                for name, value in snapshot.transcript.items():
+                    if name in ("messages", "archived_messages") and isinstance(value, list):
+                        refs[name] = {"items": [intern(item) for item in value]}
+                    else:
+                        refs[name] = {"value": intern(value)}
+                saved["transcript_refs"] = refs
+                # Readers that only understand positional/inline snapshots
+                # must reject this record instead of restoring a stale index.
+                saved["invalidated"] = True
+                saved["transcript_invalidated"] = snapshot.invalidated
+            elif snapshot.transcript is not None:
+                # Preserve legacy inline shapes rather than encoding an
+                # incomplete transcript as a valid pooled snapshot.
+                saved["transcript"] = copy.deepcopy(snapshot.transcript)
+            snapshots.append(saved)
+        data["snapshots"] = snapshots
+        if any("transcript_refs" in snapshot for snapshot in snapshots):
+            data["snapshot_storage"] = {"version": 1, "records": records}
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExtendedSessionData":
-        messages = [
-            SessionMessage.from_dict(m) 
-            for m in data.get("messages", [])
-        ]
-        archived = [
-            SessionMessage.from_dict(m)
-            for m in (data.get("archived_messages") or [])
-        ]
-        snapshots = [
-            SessionSnapshot.from_dict(s)
-            for s in data.get("snapshots", [])
-        ]
+        base = SessionData.from_dict(data)
+        snapshots = []
+        for raw in data.get("snapshots", []):
+            if "transcript_refs" in raw:
+                storage = data.get("snapshot_storage")
+                if (not isinstance(storage, dict) or storage.get("version") != 1
+                        or not isinstance(storage.get("records"), dict)
+                        or not isinstance(raw["transcript_refs"], dict)
+                        or "transcript" in raw):
+                    raise ValueError("invalid snapshot storage")
+                records = storage["records"]
+                if not {"messages", "archived_messages", "last_compaction"} <= raw["transcript_refs"].keys():
+                    raise ValueError("incomplete snapshot transcript references")
+                transcript = {}
+
+                def clone_record(value):
+                    # JSON object keys/scalars are immutable. Copy mutable
+                    # fields without traversing every archived text again.
+                    if isinstance(value, dict):
+                        return {key: copy.deepcopy(item) if isinstance(item, (dict, list)) else item
+                                for key, item in value.items()}
+                    return copy.deepcopy(value)
+
+                try:
+                    for name, ref in raw["transcript_refs"].items():
+                        if not isinstance(ref, dict):
+                            raise ValueError("invalid snapshot reference")
+                        if name in ("messages", "archived_messages") and (
+                                set(ref) != {"items"} or not isinstance(ref["items"], list)):
+                            raise ValueError("invalid snapshot message references")
+                        if name == "last_compaction" and set(ref) != {"value"}:
+                            raise ValueError("invalid snapshot checkpoint reference")
+                        if set(ref) == {"items"} and isinstance(ref["items"], list):
+                            transcript[name] = [clone_record(records[key]) for key in ref["items"]]
+                        elif set(ref) == {"value"}:
+                            transcript[name] = clone_record(records[ref["value"]])
+                        else:
+                            raise ValueError("invalid snapshot reference")
+                        if name in ("messages", "archived_messages") and not all(
+                                isinstance(item, dict) for item in transcript[name]):
+                            raise ValueError("invalid snapshot message record")
+                        if name == "last_compaction" and transcript[name] is not None and not isinstance(transcript[name], dict):
+                            raise ValueError("invalid snapshot checkpoint record")
+                except (KeyError, TypeError) as exc:
+                    raise ValueError("missing snapshot record") from exc
+                snapshot = SessionSnapshot.from_dict({
+                    **raw, "invalidated": raw.get("transcript_invalidated", False),
+                })
+                snapshot.transcript = transcript
+            else:
+                snapshot = SessionSnapshot.from_dict(raw)
+            snapshots.append(snapshot)
         return cls(
-            session_id=data.get("session_id", ""),
-            messages=messages,
-            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
-            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
-            agent_name=data.get("agent_name"),
-            user_id=data.get("user_id"),
-            metadata=data.get("metadata", {}),
-            archived_messages=archived,
+            **{descriptor.name: getattr(base, descriptor.name) for descriptor in fields(SessionData)},
             parent_id=data.get("parent_id"),
             forked_from_message_id=data.get("forked_from_message_id"),
             children_ids=data.get("children_ids", []),
@@ -111,13 +235,7 @@ class ExtendedSessionData(SessionData):
     def from_session_data(cls, session: SessionData) -> "ExtendedSessionData":
         """Convert a basic SessionData to ExtendedSessionData."""
         return cls(
-            session_id=session.session_id,
-            messages=session.messages,
-            created_at=session.created_at,
-            updated_at=session.updated_at,
-            agent_name=session.agent_name,
-            user_id=session.user_id,
-            metadata=session.metadata,
+            **{descriptor.name: getattr(session, descriptor.name) for descriptor in fields(SessionData)},
         )
 
 class HierarchicalSessionStore(DefaultSessionStore):
@@ -148,8 +266,21 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._extended_cache: Dict[str, ExtendedSessionData] = {}
+        self._cache_fingerprints: Dict[str, Tuple[ExtendedSessionData, bytes]] = {}
+        # Bound the extended-session cache with the same LRU policy (and
+        # maxsize) as the base ``_cache`` so a long-lived process using this
+        # subclass does not retain every session it has ever loaded in RAM.
+        # Disk stays the source of truth, so an eviction just reloads on next
+        # access. When an entry is evicted its companion mtime is dropped too so
+        # ``_cache_mtimes`` stays bounded alongside the cache.
         self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
+        self._extended_cache: Dict[str, ExtendedSessionData] = _LRUSessionCache(
+            getattr(self._cache, "maxsize", 0),
+            on_evict=lambda key: (
+                self._cache_mtimes.pop(key, None),
+                self._cache_fingerprints.pop(key, None),
+            ),
+        )
 
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
@@ -171,9 +302,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
         if not os.path.exists(filepath):
             return ExtendedSessionData(session_id=session_id)
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return ExtendedSessionData.from_dict(data)
+            with open(filepath, "rb") as f:
+                raw = f.read()
+            data = json.loads(raw.decode("utf-8"))
+            session = ExtendedSessionData.from_dict(data)
+            # Bind the fingerprint to this parsed object and these exact bytes.
+            # A later writer must not certify an older payload via its stats.
+            with self._lock:
+                self._cache_fingerprints[session_id] = (session, hashlib.sha256(raw).digest())
+            return session
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Invalid UTF-8 (``UnicodeDecodeError``) is handled alongside
             # malformed JSON so a corrupt binary file is quarantined here too
@@ -194,6 +331,21 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 f"refusing to overwrite existing data: {e}"
             )
             raise
+        except ValueError as e:
+            # Unsupported/damaged references must not turn into a fresh record
+            # or a legacy positional snapshot that restores unrelated history.
+            raise OSError("invalid snapshot storage; preserving session") from e
+
+    def _session_to_storage(self, session: SessionData) -> Dict[str, Any]:
+        if isinstance(session, ExtendedSessionData):
+            return session._to_storage_dict()
+        return super()._session_to_storage(session)
+
+    def _dump_session_json(self, data: Any, stream) -> None:
+        if isinstance(data, dict) and "snapshot_storage" in data:
+            json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
+        else:
+            super()._dump_session_json(data, stream)
 
     def _modify_session_locked(
         self,
@@ -201,33 +353,81 @@ class HierarchicalSessionStore(DefaultSessionStore):
         mutator,
         *,
         error_label: str = "modify session",
+        apply_retention: bool = True,
     ) -> bool:
         """Locked read-modify-write preserving extended session fields."""
-        result = super()._modify_session_locked(
-            session_id, mutator, error_label=error_label
-        )
-        if result:
-            with self._lock:
-                cached = self._cache.get(session_id)
-                if isinstance(cached, ExtendedSessionData):
-                    self._extended_cache[session_id] = cached
-        return result
-
-    def _is_cache_valid(self, session_id: str) -> bool:
-        """Check if cached session is still valid based on file mtime."""
-        if session_id not in self._extended_cache:
-            return False
-        
         filepath = self._get_session_path(session_id)
-        if not os.path.exists(filepath):
-            return False
-        
+        with FileLock(filepath, self.lock_timeout):
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                logger.error("Failed to %s %s: could not read existing session", error_label, session_id)
+                return False
+            before = session.messages[:]
+            mutator(session)
+            self._invalidate_legacy_snapshots(session, before)
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            if apply_retention:
+                self._enforce_window(session)
+            if not self._atomic_write_json(filepath, self._session_to_storage(session)):
+                logger.error("Failed to %s %s", error_label, session_id)
+                return False
+            self._cache_written_session(session, filepath)
+            return True
+
+    def _enforce_window(self, session: SessionData) -> None:
+        before = session.messages[:]
+        super()._enforce_window(session)
+        self._invalidate_legacy_snapshots(session, before)
+
+    @staticmethod
+    def _invalidate_legacy_snapshots(session: SessionData, before: List[SessionMessage]) -> None:
+        if isinstance(session, ExtendedSessionData):
+            for snapshot in session.snapshots:
+                index = snapshot.message_index
+                if snapshot.transcript is None and index >= 0 and (
+                    index >= len(session.messages)
+                    or before[:index + 1] != session.messages[:index + 1]
+                ):
+                    snapshot.invalidated = True
+
+    def _cache_written_session(self, session: ExtendedSessionData, filepath: str) -> None:
+        """Bind the written object to exact bytes while the caller holds FileLock."""
         try:
-            current_mtime = os.path.getmtime(filepath)
-            cached_mtime = self._cache_mtimes.get(session_id, 0)
-            return current_mtime <= cached_mtime
-        except (OSError, IOError):
+            with open(filepath, "rb") as f:
+                fingerprint = hashlib.sha256(f.read()).digest()
+        except OSError:
+            # The write succeeded; unavailable validation bytes only disable reuse.
+            fingerprint = None
+        with self._lock:
+            self._cache[session.session_id] = session
+            self._extended_cache[session.session_id] = session
+            if fingerprint is None:
+                self._cache_fingerprints.pop(session.session_id, None)
+            else:
+                self._cache_fingerprints[session.session_id] = (session, fingerprint)
+
+    def _is_cache_valid(self, session_id: str) -> Optional[bool]:
+        """Validate cached bytes; None means a transient validation failure."""
+        with self._lock:
+            if session_id not in self._extended_cache:
+                return False
+        filepath = self._get_session_path(session_id)
+        try:
+            with FileLock(filepath, self.lock_timeout):
+                with open(filepath, "rb") as f:
+                    fingerprint = hashlib.sha256(f.read()).digest()
+                with self._lock:
+                    cached = self._cache_fingerprints.get(session_id)
+                    return (
+                        cached is not None
+                        and cached[0] is self._extended_cache.get(session_id)
+                        and cached[1] == fingerprint
+                    )
+        except FileNotFoundError:
             return False
+        except OSError:
+            return None
     
     def _read_session_fresh(self, session_id: str) -> ExtendedSessionData:
         """Reload from disk and keep _cache and _extended_cache in sync."""
@@ -237,16 +437,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             with self._lock:
                 self._cache[session_id] = session
         
-        # Update cache with fresh file mtime
-        filepath = self._get_session_path(session_id)
-        try:
-            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else time.time()
-        except (OSError, IOError):
-            mtime = time.time()
-        
         with self._lock:
             self._extended_cache[session_id] = session
-            self._cache_mtimes[session_id] = mtime
         
         return session
     
@@ -279,31 +471,38 @@ class HierarchicalSessionStore(DefaultSessionStore):
 
         def _apply(session: SessionData) -> None:
             session.messages.append(message)
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages :]
 
         return self._modify_session_locked(
             session_id, _apply, error_label="add message to session"
         )
     
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
-        """Load extended session with smart caching based on file modification time."""
+        """Reuse parsed extended data only when its source bytes are unchanged."""
         # Force reload bypasses cache validation
-        if force_reload or not self._is_cache_valid(session_id):
+        if force_reload:
+            return self._read_session_fresh(session_id)
+        valid = self._is_cache_valid(session_id)
+        if valid is False:
             return self._read_session_fresh(session_id)
         
-        # Cache is valid, return cached version
+        # Invalidation may have raced with the content check.
         with self._lock:
-            return self._extended_cache[session_id]
+            cached = self._extended_cache.get(session_id)
+        if cached is not None:
+            return cached
+        return self._read_session_fresh(session_id)
     
-    def _save_extended_session(self, session: ExtendedSessionData) -> bool:
+    def _save_extended_session(
+        self, session: ExtendedSessionData, *, apply_retention: bool = True
+    ) -> bool:
         """Save extended session to disk."""
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
+        # Match the inherited retention policy, including non-destructive
+        # compaction and tool-exchange-aware truncation.
+        if apply_retention:
+            self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
             try:
@@ -317,20 +516,12 @@ class HierarchicalSessionStore(DefaultSessionStore):
                     delete=False,
                     suffix=".tmp"
                 ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+                    self._dump_session_json(self._session_to_storage(session), f)
                     temp_path = f.name
                 
                 os.replace(temp_path, filepath)
                 
-                # Update cache with current file mtime after successful write
-                try:
-                    mtime = os.path.getmtime(filepath)
-                except (OSError, IOError):
-                    mtime = time.time()
-                
-                with self._lock:
-                    self._extended_cache[session.session_id] = session
-                    self._cache_mtimes[session.session_id] = mtime
+                self._cache_written_session(session, filepath)
                 
                 return True
             except (IOError, OSError) as e:
@@ -362,8 +553,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The session ID
+
+        Raises:
+            ValueError: The session would be its own parent.
+            OSError: Saving the session or registering its parent failed.
+                A saved child is retained if parent registration fails.
         """
         sid = session_id or str(uuid.uuid4())
+        if parent_id == sid:
+            raise ValueError(f"Session {sid} cannot be its own parent")
         
         session = ExtendedSessionData(
             session_id=sid,
@@ -373,15 +571,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
-        # Update parent's children list without clobbering concurrent message writes
+        if not self._save_extended_session(session):
+            raise OSError(f"Failed to save session {sid}")
+
+        # Register only after the child exists on disk.
         if parent_id:
             def _apply(parent_session: SessionData) -> None:
                 assert isinstance(parent_session, ExtendedSessionData)
                 if sid not in parent_session.children_ids:
                     parent_session.children_ids.append(sid)
-            self._modify_session_locked(parent_id, _apply, error_label="update parent children")
+            if not self._modify_session_locked(parent_id, _apply, error_label="update parent children"):
+                raise OSError(f"Session {sid} was saved but registration with parent {parent_id} failed")
         
-        self._save_extended_session(session)
         return sid
     
     def fork_session(
@@ -395,14 +596,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
         
         Args:
             session_id: The session to fork from
-            from_message_index: Message index to fork from (None = all messages)
+            from_message_index: Zero-based, inclusive message index to fork from
+                (None = all messages, including an empty session).
             title: Optional title for the forked session
             
         Returns:
             The new forked session ID
+
+        Raises:
+            ValueError: The explicit message index is outside the parent history.
+            OSError: Saving the fork or registering it with the parent failed.
+                A saved fork is retained if parent registration fails.
         """
         # Force reload to get latest messages from disk
         parent = self._load_extended_session(session_id, force_reload=True)
+
+        if from_message_index is not None and (
+            from_message_index < 0 or from_message_index >= len(parent.messages)
+        ):
+            raise ValueError(f"Invalid message index {from_message_index}")
         
         # Determine which messages to copy
         if from_message_index is None:
@@ -426,15 +638,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
-        self._save_extended_session(forked)
+        if not self._save_extended_session(forked):
+            raise OSError(f"Failed to save forked session {new_id}")
 
         def _register_fork(parent: SessionData) -> None:
             if new_id not in parent.children_ids:
                 parent.children_ids.append(new_id)
 
-        self._modify_session_locked(
+        if not self._modify_session_locked(
             session_id, _register_fork, error_label="register forked session"
-        )
+        ):
+            raise OSError(f"Forked session {new_id} was saved but registration with parent {session_id} failed")
         
         return new_id
     
@@ -476,6 +690,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
     ) -> str:
         """
         Create a snapshot of the current session state.
+
+        Persist the active messages, archive and compaction checkpoint so
+        later retention cannot move the snapshot's restore point.
         
         Args:
             session_id: The session to snapshot
@@ -484,6 +701,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The snapshot ID
+
+        Raises:
+            OSError: The snapshot could not be persisted.
         """
         snapshot = SessionSnapshot(
             session_id=session_id,
@@ -493,14 +713,30 @@ class HierarchicalSessionStore(DefaultSessionStore):
         )
 
         def _record_snapshot(session: SessionData) -> None:
-            snapshot.message_index = (
-                len(session.messages) - 1 if session.messages else -1
+            # The caller already holds the session write lock. Read the base
+            # transcript schema so existing durable checkpoint fields are not
+            # lost through the hierarchy's partial legacy field conversion.
+            captured = DefaultSessionStore._load_session_from_disk(
+                self, session_id, self._get_session_path(session_id)
             )
+            snapshot.message_index = (
+                len(captured.messages) - 1 if captured.messages else -1
+            )
+            snapshot.transcript = copy.deepcopy({
+                "messages": [message.to_dict() for message in captured.messages],
+                "archived_messages": [message.to_dict() for message in captured.archived_messages],
+                "last_compaction": captured.last_compaction.to_dict() if captured.last_compaction else None,
+            })
+            session.last_compaction = captured.last_compaction
             session.snapshots.append(snapshot)
 
-        self._modify_session_locked(
-            session_id, _record_snapshot, error_label="create snapshot"
-        )
+        # Recording a snapshot must not compact or truncate an imported live
+        # transcript, so skip retention on this write.
+        if not self._modify_session_locked(
+            session_id, _record_snapshot, error_label="create snapshot",
+            apply_retention=False,
+        ):
+            raise OSError(f"Failed to save snapshot {snapshot.id} for session {session_id}")
         
         return snapshot.id
     
@@ -518,7 +754,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
             snapshot_id: The snapshot to revert to
             
         Returns:
-            True if successful
+            True if successful; False for missing or invalidated legacy snapshots.
         """
         def _apply(session: SessionData) -> None:
             assert isinstance(session, ExtendedSessionData)
@@ -534,14 +770,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 logger.warning(f"Snapshot {snapshot_id} not found")
                 raise ValueError(f"Snapshot {snapshot_id} not found")
             
-            # Revert messages
-            if snapshot.message_index >= 0:
+            if snapshot.invalidated:
+                raise ValueError("Legacy snapshot position was invalidated by retention")
+            if snapshot.transcript is not None:
+                restored = SessionData.from_dict({"session_id": session_id, **snapshot.transcript})
+                session.messages = restored.messages
+                session.archived_messages = restored.archived_messages
+                session.last_compaction = restored.last_compaction
+            elif snapshot.message_index >= len(session.messages):
+                raise ValueError("Legacy snapshot position is outside the retained history")
+            elif snapshot.message_index >= 0:
                 session.messages = session.messages[:snapshot.message_index + 1]
             else:
                 session.messages = []
                 
         try:
-            return self._modify_session_locked(session_id, _apply, error_label="revert to snapshot")
+            return self._modify_session_locked(
+                session_id, _apply, error_label="revert to snapshot",
+                apply_retention=False,
+            )
         except ValueError:
             return False
     
@@ -673,12 +920,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def get_extended_session(self, session_id: str,
                              force_reload: bool = False) -> ExtendedSessionData:
-        """Get extended session data, using the mtime cache when it is valid.
+        """Get extended data, reusing parsed data when the JSON bytes match.
 
-        This called _read_session_fresh unconditionally, so every read went to
-        disk and re-parsed the file: _is_cache_valid, _cache_mtimes and
-        _load_extended_session were all built and never reached from the public
-        API. Pass force_reload=True to re-read regardless.
+        Pass force_reload=True to reload regardless of content validation.
         """
         return self._load_extended_session(session_id, force_reload=force_reload)
 
@@ -688,9 +932,13 @@ class HierarchicalSessionStore(DefaultSessionStore):
             if session_id:
                 self._cache.pop(session_id, None)
                 self._extended_cache.pop(session_id, None)
+                self._cache_fingerprints.pop(session_id, None)
+                self._cache_mtimes.pop(session_id, None)
             else:
                 self._cache.clear()
                 self._extended_cache.clear()
+                self._cache_fingerprints.clear()
+                self._cache_mtimes.clear()
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """
@@ -716,6 +964,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
             
         Returns:
             The imported session ID
+
+        Raises:
+            OSError: The imported session could not be persisted.
         """
         session = ExtendedSessionData.from_dict(data)
         
@@ -729,7 +980,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.children_ids = []
         session.forked_from_message_id = None
         
-        self._save_extended_session(session)
+        # Restore the exported record in full, independent of the destination
+        # window. Retention applies to subsequent ordinary writes.
+        if not self._save_extended_session(session, apply_retention=False):
+            raise OSError(f"Failed to save imported session {session.session_id}")
         return session.session_id
 
 # Global hierarchical store instance
