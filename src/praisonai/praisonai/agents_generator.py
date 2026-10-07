@@ -1649,6 +1649,11 @@ class AgentsGenerator:
                 "without running them; use generate_crew_and_kickoff()."
             )
         model_name = adapter._pick_model(self.config_list)
+        # Thread the per-agent tool_timeout wrap resolver (stashed in _run_ctx by
+        # _prepare_for_run) exactly as the real run paths do, so agents built for
+        # evaluation carry the same heterogeneous per-agent timeout guards a
+        # normal run would apply — not a different (unguarded) tool policy.
+        run_ctx = getattr(self, "_run_ctx", None) or {}
         agents, _tasks = builder(
             prep['config'],
             prep['topic'],
@@ -1656,6 +1661,7 @@ class AgentsGenerator:
             getattr(self, 'agent_callback', None),
             getattr(self, 'task_callback', None),
             model_name,
+            agent_tool_wrap_resolver=run_ctx.get("_agent_tool_wrap_resolver"),
             cli_config=self._dispatch_cli_config(),
         )
         # _build_agents_and_tasks returns a name->agent mapping; callers expect

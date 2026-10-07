@@ -152,21 +152,61 @@ class AgentOS:
             message: str
             session_id: Optional[str] = None
 
+        # Per-instance locks serialising invocations of a single team/flow.
+        # Teams and flows carry mutable run state on the stored instance, so two
+        # overlapping requests for the *same* object would corrupt each other
+        # (e.g. AgentFlow.run rejects a re-entrant run). Agents are cloned per
+        # request (see _isolate_agent); teams/flows aren't safely deep-copyable,
+        # so the safe-by-default behaviour is to run one at a time per instance.
+        # Different teams/flows still run concurrently; only same-instance calls
+        # queue. The lock is created lazily on the serving loop.
+        _target_locks: Dict[int, "asyncio.Lock"] = {}
+
         async def _invoke(target: Any, message: str) -> Any:
             """Invoke a team/flow without blocking the loop: prefer its async
-            entry point, else offload the sync call to a worker thread."""
-            for attr in ("arun", "astart"):
-                fn = getattr(target, attr, None)
-                if callable(fn):
-                    return await fn(message)
-            for attr in ("run", "start"):
-                fn = getattr(target, attr, None)
-                if callable(fn):
-                    return await asyncio.to_thread(fn, message)
+            entry point, else offload the sync call to a worker thread. Calls on
+            the same instance are serialised so concurrent requests can't trample
+            its shared run state."""
+            lock = _target_locks.get(id(target))
+            if lock is None:
+                lock = _target_locks.setdefault(id(target), asyncio.Lock())
+            async with lock:
+                for attr in ("arun", "astart"):
+                    fn = getattr(target, attr, None)
+                    if callable(fn):
+                        return await fn(message)
+                for attr in ("run", "start"):
+                    fn = getattr(target, attr, None)
+                    if callable(fn):
+                        return await asyncio.to_thread(fn, message)
             raise HTTPException(
                 status_code=501,
                 detail="target exposes no run/start entry point",
             )
+
+        def _isolate_agent(template: Any, session_id: Optional[str]) -> Any:
+            """Return a per-request agent so concurrent callers never share one
+            agent's mutable chat_history.
+
+            Reuses the wrapper's existing clone/bind helpers (api/agent_invoke.py)
+            rather than reinventing cloning. ``clone_for_channel`` intentionally
+            drops handoffs (nested Agents can't be safely deep-copied and would
+            share RLocks), so agents with handoffs stay on the shared template to
+            avoid silently losing configured delegation. Plain mocks / lightweight
+            callables that don't support isolation also fall back to the template.
+            Shared by both POST /chat and the WebSocket endpoint so they can never
+            drift apart on this safety property.
+            """
+            from praisonai.api.agent_invoke import (
+                _supports_session_isolation,
+                _clone_agent,
+                bind_session,
+            )
+            has_handoffs = bool(getattr(template, "handoffs", None))
+            if _supports_session_isolation(template) and not has_handoffs:
+                agent = _clone_agent(template)
+                return bind_session(agent, session_id)
+            return template
         
         @app.get("/")
         async def root():
@@ -333,30 +373,14 @@ class AgentOS:
                 raise HTTPException(status_code=400, detail="No agents available")
 
             # Isolate a per-request/session agent so concurrent callers never
-            # share mutable chat_history. Reuse the wrapper's existing helpers
-            # (api/agent_invoke.py) rather than reinventing cloning here. Plain
-            # mocks / lightweight callables fall back to the shared template.
-            from praisonai.api.agent_invoke import (
-                _supports_session_isolation,
-                _clone_agent,
-                bind_session,
-            )
-            # ``clone_for_channel`` intentionally drops handoffs (nested Agents
-            # can't be safely deep-copied and would share RLocks). To avoid
-            # silently losing configured delegation, agents with handoffs stay
-            # on the shared template rather than being cloned.
-            has_handoffs = bool(getattr(template, "handoffs", None))
-            if _supports_session_isolation(template) and not has_handoffs:
-                try:
-                    agent = _clone_agent(template)
-                    agent = bind_session(agent, request.session_id)
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to isolate agent for session: {e}",
-                    )
-            else:
-                agent = template
+            # share mutable chat_history (shared helper, see _isolate_agent).
+            try:
+                agent = _isolate_agent(template, request.session_id)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to isolate agent for session: {e}",
+                )
 
             # Call the agent without blocking the event loop: prefer the async
             # twin, otherwise offload the sync call to a worker thread.
@@ -415,9 +439,51 @@ class AgentOS:
         # the same agent surface as POST /chat (achat/chat) rather than a
         # fabricated streaming API the core Agent does not expose. The whole
         # response is sent as one frame followed by a terminal {"done": true}.
+        #
+        # Two invariants this endpoint must share with POST /chat:
+        #   1. Authentication — the HTTP api-key middleware does not run on the
+        #      WebSocket handshake, so when a launch token is configured the
+        #      socket must validate it itself or it would be an unauthenticated
+        #      back door to the same agents the REST surface guards.
+        #   2. Session isolation — resolve a per-request agent (clone + bind the
+        #      session) exactly like /chat so concurrent sockets never share one
+        #      agent's mutable chat_history.
+
+        launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
+
+        def _ws_token(ws: WebSocket) -> str:
+            # Accept the key via the same surfaces as the HTTP middleware
+            # (Bearer / X-API-Key header) plus an ``?api_key=`` query param,
+            # since browser WebSocket clients cannot set arbitrary headers.
+            auth = ws.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                return auth[7:]
+            return ws.headers.get("X-API-Key", "") or ws.query_params.get("api_key", "")
+
+        def _resolve_ws_agent(agent_name: Optional[str], session_id: Optional[str]):
+            template = None
+            if agent_name:
+                template = next(
+                    (a for a in self.agents if getattr(a, "name", None) == agent_name),
+                    None,
+                )
+                if template is None:
+                    return None
+            elif self.agents:
+                template = self.agents[0]
+            else:
+                return None
+            return _isolate_agent(template, session_id)
 
         @app.websocket(f"{self.config.api_prefix}/chat/stream")
         async def chat_stream(ws: WebSocket):
+            if launch_token:
+                import hmac
+                token = _ws_token(ws)
+                if not token or not hmac.compare_digest(token, launch_token):
+                    # 1008 = policy violation; reject before accepting the socket.
+                    await ws.close(code=1008)
+                    return
             await ws.accept()
             try:
                 while True:
@@ -427,19 +493,14 @@ class AgentOS:
                         await ws.send_json({"error": "message is required"})
                         continue
                     agent_name = payload.get("agent_name")
-                    agent = None
-                    if agent_name:
-                        agent = next(
-                            (a for a in self.agents
-                             if getattr(a, "name", None) == agent_name),
-                            None,
-                        )
-                        if agent is None:
-                            await ws.send_json({"error": f"Agent '{agent_name}' not found"})
-                            continue
-                    elif self.agents:
-                        agent = self.agents[0]
-                    else:
+                    session_id = payload.get("session_id")
+                    if agent_name and not any(
+                        getattr(a, "name", None) == agent_name for a in self.agents
+                    ):
+                        await ws.send_json({"error": f"Agent '{agent_name}' not found"})
+                        continue
+                    agent = _resolve_ws_agent(agent_name, session_id)
+                    if agent is None:
                         await ws.send_json({"error": "no agents available"})
                         continue
                     try:

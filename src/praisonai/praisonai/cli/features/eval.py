@@ -7,26 +7,36 @@ Provides CLI commands for running agent evaluations.
 import os
 import json
 import logging
+from contextlib import contextmanager
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 
-def _load_agents_from_yaml(agent_file: str):
-    """Build the agent(s) defined in ``agent_file`` without running them.
+@contextmanager
+def _agents_from_yaml(agent_file: str):
+    """Yield the agent(s) defined in ``agent_file`` without running them.
 
     Mirrors the one working construction pattern (``_entrypoint.run``): resolve
     a framework adapter via the registry, build the LLM config list, then
-    construct ``AgentsGenerator`` with its required args inside a ``with`` block
-    so its tool-timeout thread pool is released after use. Returns the list of
-    constructed agents (empty list if none are defined).
+    construct ``AgentsGenerator`` with its required args.
+
+    This is a **context manager** on purpose: a YAML agent with a
+    ``tool_timeout`` has its sync tools wrapped around the generator's own
+    thread-pool executor, which ``close()`` tears down. The evaluator drives
+    the agent *after* loading, so the generator must stay open for the whole
+    evaluation — otherwise the first wrapped tool call hits a closed executor.
+    Callers therefore evaluate *inside* the ``with`` block. The framework is
+    resolved from the YAML (``framework:`` key) when present so a file written
+    for another supported adapter is not silently rebuilt with the default.
     """
     from praisonai.framework_adapters.registry import get_default_registry
     from praisonai.llm.config import build_config_list
     from praisonai.agents_generator import AgentsGenerator
 
     registry = get_default_registry()
-    adapter = registry.create(registry.pick_default())
+    framework = _framework_from_yaml(agent_file) or registry.pick_default()
+    adapter = registry.create(registry.resolve_or_default(framework))
     config_list = build_config_list()
 
     with AgentsGenerator(
@@ -35,7 +45,25 @@ def _load_agents_from_yaml(agent_file: str):
         config_list=config_list,
         adapter=adapter,
     ) as gen:
-        return gen.build_agents()
+        yield gen.build_agents()
+
+
+def _framework_from_yaml(agent_file: str) -> Optional[str]:
+    """Return the ``framework`` declared in ``agent_file`` (``None`` if absent).
+
+    A YAML file may target a specific adapter (e.g. ``framework: crewai``); the
+    loader must honour that rather than always rebuilding with the registry
+    default. Best-effort: any read/parse error falls back to ``None`` so the
+    caller uses the default framework.
+    """
+    try:
+        import yaml
+        with open(agent_file, "r") as fh:
+            data = yaml.safe_load(fh) or {}
+        fw = data.get("framework") if isinstance(data, dict) else None
+        return fw if isinstance(fw, str) and fw.strip() else None
+    except Exception:  # noqa: BLE001 — best-effort; fall back to default
+        return None
 
 
 class EvalHandler:
@@ -99,19 +127,28 @@ class EvalHandler:
                 if not input_text:
                     input_text = prompt
             elif agent_file:
-                # Load from agents.yaml
+                # Load from agents.yaml and evaluate inside the generator's
+                # lifetime so tool_timeout-wrapped tools keep a live executor.
                 try:
-                    agents = _load_agents_from_yaml(agent_file)
-
-                    if not agents:
-                        return {"error": "No agents found in configuration"}
-
-                    agent = agents[0] if isinstance(agents, list) else agents
+                    with _agents_from_yaml(agent_file) as agents:
+                        if not agents:
+                            return {"error": "No agents found in configuration"}
+                        agent = agents[0] if isinstance(agents, list) else agents
+                        evaluator = AccuracyEvaluator(
+                            agent=agent,
+                            input_text=input_text,
+                            expected_output=expected_output,
+                            num_iterations=iterations,
+                            model=model,
+                            save_results_path=output_file,
+                            verbose=self.verbose
+                        )
+                        return evaluator.run(print_summary=True).to_dict()
                 except Exception as e:
                     return {"error": f"Failed to load agents from {agent_file}: {e}"}
             else:
                 return {"error": "Either --agent or --prompt must be provided"}
-            
+
             evaluator = AccuracyEvaluator(
                 agent=agent,
                 input_text=input_text,
@@ -159,26 +196,24 @@ class EvalHandler:
             return {"error": str(e)}
         
         try:
-            agents = _load_agents_from_yaml(agent_file)
+            with _agents_from_yaml(agent_file) as agents:
+                if not agents:
+                    return {"error": "No agents found in configuration"}
 
-            if not agents:
-                return {"error": "No agents found in configuration"}
+                agent = agents[0] if isinstance(agents, list) else agents
 
-            agent = agents[0] if isinstance(agents, list) else agents
-            
-            evaluator = PerformanceEvaluator(
-                agent=agent,
-                input_text=input_text,
-                num_iterations=iterations,
-                warmup_runs=warmup,
-                track_memory=track_memory,
-                save_results_path=output_file,
-                verbose=self.verbose
-            )
-            
-            result = evaluator.run(print_summary=True)
-            return result.to_dict()
-            
+                evaluator = PerformanceEvaluator(
+                    agent=agent,
+                    input_text=input_text,
+                    num_iterations=iterations,
+                    warmup_runs=warmup,
+                    track_memory=track_memory,
+                    save_results_path=output_file,
+                    verbose=self.verbose
+                )
+
+                return evaluator.run(print_summary=True).to_dict()
+
         except Exception as e:
             logger.error(f"Performance evaluation failed: {e}")
             return {"error": str(e)}
@@ -211,25 +246,23 @@ class EvalHandler:
             return {"error": str(e)}
         
         try:
-            agents = _load_agents_from_yaml(agent_file)
+            with _agents_from_yaml(agent_file) as agents:
+                if not agents:
+                    return {"error": "No agents found in configuration"}
 
-            if not agents:
-                return {"error": "No agents found in configuration"}
+                agent = agents[0] if isinstance(agents, list) else agents
 
-            agent = agents[0] if isinstance(agents, list) else agents
-            
-            evaluator = ReliabilityEvaluator(
-                agent=agent,
-                input_text=input_text,
-                expected_tools=expected_tools,
-                forbidden_tools=forbidden_tools,
-                save_results_path=output_file,
-                verbose=self.verbose
-            )
-            
-            result = evaluator.run(print_summary=True)
-            return result.to_dict()
-            
+                evaluator = ReliabilityEvaluator(
+                    agent=agent,
+                    input_text=input_text,
+                    expected_tools=expected_tools,
+                    forbidden_tools=forbidden_tools,
+                    save_results_path=output_file,
+                    verbose=self.verbose
+                )
+
+                return evaluator.run(print_summary=True).to_dict()
+
         except Exception as e:
             logger.error(f"Reliability evaluation failed: {e}")
             return {"error": str(e)}
@@ -268,28 +301,26 @@ class EvalHandler:
             return {"error": str(e)}
         
         try:
-            agents = _load_agents_from_yaml(agent_file)
+            with _agents_from_yaml(agent_file) as agents:
+                if not agents:
+                    return {"error": "No agents found in configuration"}
 
-            if not agents:
-                return {"error": "No agents found in configuration"}
+                agent = agents[0] if isinstance(agents, list) else agents
 
-            agent = agents[0] if isinstance(agents, list) else agents
-            
-            evaluator = CriteriaEvaluator(
-                criteria=criteria,
-                agent=agent,
-                input_text=input_text,
-                scoring_type=scoring_type,
-                threshold=threshold,
-                num_iterations=iterations,
-                model=model,
-                save_results_path=output_file,
-                verbose=self.verbose
-            )
-            
-            result = evaluator.run(print_summary=True)
-            return result.to_dict()
-            
+                evaluator = CriteriaEvaluator(
+                    criteria=criteria,
+                    agent=agent,
+                    input_text=input_text,
+                    scoring_type=scoring_type,
+                    threshold=threshold,
+                    num_iterations=iterations,
+                    model=model,
+                    save_results_path=output_file,
+                    verbose=self.verbose
+                )
+
+                return evaluator.run(print_summary=True).to_dict()
+
         except Exception as e:
             logger.error(f"Criteria evaluation failed: {e}")
             return {"error": str(e)}
