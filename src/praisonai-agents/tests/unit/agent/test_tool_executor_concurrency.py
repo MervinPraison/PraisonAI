@@ -10,6 +10,7 @@ from praisonaiagents.agent import async_safety
 from praisonaiagents.agent.tool_execution import ToolExecutionMixin
 from praisonaiagents.config import ExecutionConfig
 from praisonaiagents.escalation.loop_guard import LoopGuard, LoopGuardConfig
+from praisonaiagents.hooks.registry import HookRegistry
 
 
 def test_standalone_mixin_initializes_one_lock_for_concurrent_callers(monkeypatch):
@@ -46,6 +47,7 @@ def test_executor_lock_allows_tool_bodies_to_run_concurrently(monkeypatch, initi
         instructions="Test tools",
         tools=[paired_tool],
         output="silent",
+        hooks=HookRegistry(),
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
     )
     agent._loop_guard = LoopGuard(LoopGuardConfig(enabled=False))
@@ -112,6 +114,7 @@ def test_late_timeout_does_not_retire_another_calls_executor(monkeypatch, create
         instructions="Test tools",
         tools=[blocking_tool, quick_tool],
         output="silent",
+        hooks=HookRegistry(),
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
     )
     assert agent._execute_tool_with_context("quick_tool", {}, None) == "ready"
@@ -158,6 +161,7 @@ def test_close_detaches_executor_under_lock(monkeypatch):
     agent = Agent(
         instructions="Test tools",
         output="silent",
+        hooks=HookRegistry(),
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
     )
 
