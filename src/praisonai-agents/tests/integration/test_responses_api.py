@@ -852,6 +852,50 @@ class TestOpenAIClientResponsesAPI:
         assert OpenAIClient._normalise_instruction_content("plain") == "plain"
         assert OpenAIClient._normalise_instruction_content(None) == ""
 
+    def test_build_responses_input_drops_orphan_tool_output(self):
+        """A tool result whose call_id has no matching function_call must be
+        dropped so the Responses API does not 400 with "No tool call found for
+        function call output"."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {"role": "tool", "tool_call_id": "call_orphan", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        assert not any(
+            item.get("type") == "function_call_output"
+            for item in params["input"]
+        )
+
+    def test_build_responses_input_keeps_paired_tool_output(self):
+        """A tool result with a matching function_call is preserved."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":19,"b":23}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        call_items = [i for i in params["input"] if i.get("type") == "function_call"]
+        output_items = [i for i in params["input"] if i.get("type") == "function_call_output"]
+        assert len(call_items) == 1 and call_items[0]["call_id"] == "call_1"
+        assert len(output_items) == 1 and output_items[0]["call_id"] == "call_1"
+
     def test_responses_to_chat_completion(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
 
