@@ -217,14 +217,10 @@ class TrainingStorage:
     
     def clear(self) -> None:
         """Clear all stored data."""
-        self._data = {
-            "session_id": self.session_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "scenarios": [],
-            "iterations": [],
-            "report": None,
-        }
-        self._save()
+        data = self._default_data()
+        data["updated_at"] = datetime.utcnow().isoformat()
+        self._store._reset(data)
+        self._data = data
 
     def close(self) -> None:
         """

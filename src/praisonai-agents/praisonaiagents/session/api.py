@@ -333,7 +333,9 @@ class Session:
         histories = (getattr(data, "metadata", None) or {}).get(AGENT_HISTORY_KEY)
         if not isinstance(histories, dict):
             return {}
-        return {k: v for k, v in histories.items() if isinstance(v, list) and v}
+        # An empty list is an explicit clear, not a missing transcript. Keep
+        # it so current records override legacy and Memory fallback history.
+        return {k: v for k, v in histories.items() if isinstance(v, list)}
 
     def _merged_agent_histories(self, session_store) -> Dict[str, List[Dict[str, Any]]]:
         """All known sub-agent transcripts: legacy records under current ones.
@@ -537,7 +539,7 @@ class Session:
             # read and write; if the persisted map matches what we wrote, we win.
             persisted = self._stored_agent_histories(session_store)
             if persisted.get(agent_key) == messages and all(
-                persisted.get(k) == v for k, v in current.items()
+                persisted.get(k) == v for k, v in current.items() if k != agent_key
             ):
                 return True
         logger.warning(
@@ -582,12 +584,7 @@ class Session:
                         for msg in chat_history
                         if isinstance(msg, dict)
                     ]
-                    if not messages:
-                        logging.debug(
-                            f"No chat history to persist for agent {agent_key} "
-                            f"in session {self.session_id}"
-                        )
-                    elif not self._store_agent_history(
+                    if not self._store_agent_history(
                         session_store, agent_key, messages
                     ):
                         logging.warning(

@@ -238,6 +238,102 @@ class TestStructuredRetryAfter:
         # No numeric header, no message pattern -> None
         assert extract_retry_after(_ProviderError("please slow down")) is None
 
+    def test_nan_header_is_ignored(self):
+        """A ``nan`` Retry-After header must not poison the delay (issue #5424)."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "nan"}
+        # No usable header, no message pattern -> None (not NaN)
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_infinite_header_is_ignored(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "inf"}
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_negative_header_is_ignored(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "-5"}
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_zero_header_is_preserved(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "0"}
+        assert extract_retry_after(_ProviderError("rate limited")) == 0.0
+
+    def test_fractional_header_is_preserved(self):
+        class _ProviderError(Exception):
+            headers = {"retry-after": "1.5"}
+        assert extract_retry_after(_ProviderError("rate limited")) == 1.5
+
+    def test_invalid_header_falls_through_to_message(self):
+        """An invalid high-priority header must not suppress a valid message delay."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "nan"}
+        assert extract_retry_after(_ProviderError("retry after 30 seconds")) == 30.0
+
+    def test_nan_attribute_is_ignored(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.nan
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_infinite_attribute_is_ignored(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.inf
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_negative_attribute_is_ignored(self):
+        class _ProviderError(Exception):
+            retry_after = -3.0
+        assert extract_retry_after(_ProviderError("rate limited")) is None
+
+    def test_invalid_attribute_falls_through_to_message(self):
+        import math as _math
+        class _ProviderError(Exception):
+            retry_after = _math.nan
+        assert extract_retry_after(_ProviderError("retry after 12 seconds")) == 12.0
+
+    def test_negative_message_hint_is_ignored(self):
+        """An echoed negative Retry-After in the message must not become a
+        positive delay that would park a scheduler hold (issue #5424)."""
+        assert extract_retry_after(Exception("retry after -3600 seconds")) is None
+        assert extract_retry_after(Exception("Retry-After: -60")) is None
+        assert extract_retry_after(Exception("wait -120 seconds")) is None
+        assert extract_retry_after(Exception("-90 second cooldown")) is None
+
+    def test_invalid_hints_fall_through_to_valid_message_delay(self):
+        """A negative header + echoed negative seconds yields no delay; a later
+        positive number is not spuriously fabricated."""
+        class _ProviderError(Exception):
+            headers = {"retry-after": "-5"}
+        assert extract_retry_after(_ProviderError("retry after -3600 seconds")) is None
+
+    def test_loose_intervening_word_phrasing_is_not_misread(self):
+        """Phrasings with words between the number and "second" are intentionally
+        NOT honoured: a greedy match would otherwise read a status code (e.g. the
+        ``429`` in "429 Too Many Requests retry in 30 more seconds") as the delay
+        and park the job far past the real reset window. Such messages fall
+        through to None rather than producing a bogus positive delay."""
+        assert extract_retry_after(Exception("retry in 30 more seconds")) is None
+        assert (
+            extract_retry_after(
+                Exception("429 Too Many Requests retry in 30 more seconds")
+            )
+            is None
+        )
+
+    def test_fractional_message_second_delay_preserved(self):
+        """A fractional "N second" message delay is preserved, not truncated."""
+        assert extract_retry_after(Exception("cool down 2.5 seconds")) == 2.5
+
+    def test_later_valid_hint_not_shadowed_by_earlier_negative(self):
+        """An earlier echoed negative hint must not shadow a later valid one in
+        the same message (regression: re.search only saw the first match)."""
+        assert extract_retry_after(
+            Exception("retry after -5 seconds; retry after 30 seconds")
+        ) == 30.0
+
 
 class TestRetryLogic:
     

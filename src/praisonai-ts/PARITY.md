@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.7.6 | **Last Updated:** 2026-09-29
+> **Version:** 1.7.6 | **Last Updated:** 2026-10-01
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -22,15 +22,15 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 421 |
+| Python Core Features | 433 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 2087 |
-| **Gap Count** | **4** |
+| TypeScript Features | 2106 |
+| **Gap Count** | **7** |
 | Stub Exported (parity shim only) | 0 |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 4 |
+| P3 (Low) | 7 |
 
 ## Gap Matrix
 
@@ -176,14 +176,17 @@
 | `validate` | ✅ | ✅ | low | ✅ exported |
 | `validate\_metadata` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (290 exported, 0 stub, 4 missing)
+### P3_Advanced (299 exported, 0 stub, 7 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `DecisionTriageRouter` | ✅ | ❌ | high | ⏳ missing |
 | `RunTerminal` | ✅ | ❌ | high | ⏳ missing |
+| `asystem\_one` | ✅ | ❌ | low | ⏳ missing |
 | `collapse` | ✅ | ❌ | low | ⏳ missing |
 | `is\_sticky` | ✅ | ❌ | low | ⏳ missing |
 | `merge\_run\_terminal` | ✅ | ❌ | low | ⏳ missing |
+| `triage\_decision` | ✅ | ❌ | low | ⏳ missing |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `A2UI` | ✅ | ✅ | low | ✅ exported |
 | `AGGRESSIVE\_POLICY` | ✅ | ✅ | low | ✅ exported |
@@ -250,6 +253,7 @@
 | `ContextTraceSinkProtocol` | ✅ | ✅ | medium | ✅ exported |
 | `CorpusStats` | ✅ | ✅ | high | ✅ exported |
 | `CustomToolUseEvent` | ✅ | ✅ | high | ✅ exported |
+| `DecisionRoutePlan` | ✅ | ✅ | high | ✅ exported |
 | `DefaultsConfig` | ✅ | ✅ | low | ✅ exported |
 | `DictCondition` | ✅ | ✅ | high | ✅ exported |
 | `DoomLoopDetector` | ✅ | ✅ | high | ✅ exported |
@@ -368,6 +372,7 @@
 | `StopReason` | ✅ | ✅ | high | ✅ exported |
 | `StructuredFormatter` | ✅ | ✅ | high | ✅ exported |
 | `SuccessCriterion` | ✅ | ✅ | high | ✅ exported |
+| `SystemOneResult` | ✅ | ✅ | low | ✅ exported |
 | `Task` | ✅ | ✅ | high | ✅ exported |
 | `TaskOutput` | ✅ | ✅ | high | ✅ exported |
 | `TemplateConfig` | ✅ | ✅ | low | ✅ exported |
@@ -393,9 +398,11 @@
 | `allow\_model\_requests` → `allowModelRequests` | ✅ | ✅ | low | ✅ exported |
 | `apply\_config\_defaults` | ✅ | ✅ | low | ✅ exported |
 | `async\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
+| `choice\_question` → `choiceQuestion` | ✅ | ✅ | low | ✅ exported |
 | `clean\_triple\_backticks` | ✅ | ✅ | low | ✅ exported |
 | `config` | ✅ | ✅ | low | ✅ exported |
 | `configure\_structured\_logging` | ✅ | ✅ | low | ✅ exported |
+| `default\_ticket\_triage\_questions` → `defaultTicketTriageQuestions` | ✅ | ✅ | low | ✅ exported |
 | `detect\_url\_scheme` | ✅ | ✅ | low | ✅ exported |
 | `discover\_and\_load\_plugins` | ✅ | ✅ | low | ✅ exported |
 | `discover\_plugins` | ✅ | ✅ | low | ✅ exported |
@@ -427,6 +434,7 @@
 | `get\_toolset\_registry` | ✅ | ✅ | low | ✅ exported |
 | `has\_memory\_adapter` | ✅ | ✅ | low | ✅ exported |
 | `has\_toolset` | ✅ | ✅ | low | ✅ exported |
+| `is\_decision\_model` → `isDecisionModel` | ✅ | ✅ | low | ✅ exported |
 | `is\_path\_like` | ✅ | ✅ | low | ✅ exported |
 | `is\_policy\_string` | ✅ | ✅ | low | ✅ exported |
 | `list\_memory\_adapters` | ✅ | ✅ | low | ✅ exported |
@@ -435,6 +443,7 @@
 | `load\_plugin` | ✅ | ✅ | low | ✅ exported |
 | `memory` | ✅ | ✅ | low | ✅ exported |
 | `no\_model\_requests` → `noModelRequests` | ✅ | ✅ | low | ✅ exported |
+| `noul\_question` → `noulQuestion` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header` | ✅ | ✅ | low | ✅ exported |
 | `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ✅ exported |
 | `parse\_policy\_string` | ✅ | ✅ | low | ✅ exported |
@@ -464,12 +473,15 @@
 | `resolve\_toolset` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_toolsets` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_web` | ✅ | ✅ | low | ✅ exported |
+| `score\_question` → `scoreQuestion` | ✅ | ✅ | low | ✅ exported |
 | `suggest\_similar` | ✅ | ✅ | low | ✅ exported |
 | `sync\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
+| `system\_one` → `systemOne` | ✅ | ✅ | low | ✅ exported |
 | `termination\_to\_run\_status` | ✅ | ✅ | low | ✅ exported |
 | `tools` | ✅ | ✅ | low | ✅ exported |
 | `trace\_context` | ✅ | ✅ | low | ✅ exported |
 | `track\_workflow` | ✅ | ✅ | low | ✅ exported |
+| `triaged\_start` → `triagedStart` | ✅ | ✅ | low | ✅ exported |
 | `unregister\_toolset` | ✅ | ✅ | low | ✅ exported |
 | `validate\_config` | ✅ | ✅ | low | ✅ exported |
 | `validate\_decision\_string` | ✅ | ✅ | low | ✅ exported |
@@ -624,7 +636,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (115 exports)</summary>
+<summary><strong>other</strong> (127 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
@@ -907,7 +919,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
-<summary><strong>other</strong> (515 exports)</summary>
+<summary><strong>other</strong> (534 exports)</summary>
 
 ```typescript
 import { A2UI, A2UIAdapter, A2UINotInstalledError, A2UISystemPromptOptions, A2UIToolResultProtocol, A2UI_MIME_TYPE, AGENT_ERROR_KINDS, ARITY, AUTONOMY_PRESETS, ActionRecord... } from 'praisonai';

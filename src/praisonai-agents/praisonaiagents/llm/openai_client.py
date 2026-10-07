@@ -908,6 +908,24 @@ class OpenAIClient:
         reason = details.get("reason") if isinstance(details, dict) else getattr(details, "reason", None)
         return {"max_output_tokens": "length", "content_filter": "content_filter"}.get(reason)
 
+    @staticmethod
+    def _extract_responses_refusal(response) -> Optional[str]:
+        """Preserve refusal explanations separately from ordinary output text."""
+        output = response.get("output", []) if isinstance(response, dict) else getattr(response, "output", [])
+        refusals = []
+        for item in output or []:
+            item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            if item_type != "message":
+                continue
+            content = item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+            for block in content or []:
+                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if block_type == "refusal":
+                    refusal = block.get("refusal") if isinstance(block, dict) else getattr(block, "refusal", None)
+                    if isinstance(refusal, str) and refusal:
+                        refusals.append(refusal)
+        return "".join(refusals) or None
+
     def _responses_to_chat_completion(self, response) -> ChatCompletion:
         """
         Wrap a Responses API response into a ChatCompletion dataclass
@@ -975,6 +993,7 @@ class OpenAIClient:
         message = ChatCompletionMessage(
             content=response_text if response_text else None,
             role="assistant",
+            refusal=self._extract_responses_refusal(response),
             tool_calls=tool_calls_list if tool_calls_list else None,
         )
         choice = Choice(
