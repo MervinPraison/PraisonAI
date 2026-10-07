@@ -273,10 +273,18 @@ async def run_turn_test(
     # the SAME provider the live gateway will use — otherwise a valid custom
     # base_url/api_key config tests the default provider and gives a misleading
     # verdict (false abort, or invalid runtime creds passing).
+    # An unset or ``"auto"`` model resolves to the detected provider's default
+    # (Issue #5609) so the preflight tests the provider the operator actually
+    # has instead of assuming OpenAI.
+    model = acfg.get("model") or acfg.get("llm")
+    if not model or str(model).strip().lower() == "auto":
+        from praisonai_bot.bots._config_schema import resolve_model_by_provider
+
+        model = resolve_model_by_provider()
     agent_kwargs: Dict[str, Any] = {
         "name": acfg.get("name", agent_id),
         "instructions": acfg.get("instructions", ""),
-        "llm": acfg.get("model") or acfg.get("llm", "gpt-4o-mini"),
+        "llm": model,
     }
     base_url = acfg.get("base_url") or acfg.get("api_base")
     if base_url:

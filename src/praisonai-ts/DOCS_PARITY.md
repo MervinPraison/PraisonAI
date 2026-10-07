@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1143 |
-| ✅ Agent | 109 | 7 | 3043 |
+| ✅ Agent | 110 | 7 | 3043 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 18 | 1 | 290 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -60,7 +60,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Memory | 24 | 4 | 840 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 7 | 1 | 253 |
-| ✅ Observability | 12 | 28 | 2470 |
+| ✅ Observability | 12 | 28 | 2692 |
 | ✅ Optimizer | 2 | 1 | 162 |
 | ✅ Output | 4 | 1 | 220 |
 | ✅ Parallel Execution | 12 | 2 | 256 |

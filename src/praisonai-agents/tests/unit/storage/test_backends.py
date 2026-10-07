@@ -11,6 +11,8 @@ Tests cover:
 import threading
 from pathlib import Path
 
+import pytest
+
 from praisonaiagents.storage.backends import FileBackend, SQLiteBackend, get_backend
 from praisonaiagents.storage.protocols import StorageBackendProtocol
 
@@ -33,7 +35,34 @@ class TestFileBackend:
         
         loaded = backend.load("test_key")
         assert loaded == data
-    
+
+    def test_file_backend_load_invalid_utf8_returns_none(self, tmp_path, caplog):
+        """Undecodable bytes should warn and return None, not raise (Issue #5566)."""
+        import logging
+
+        backend = FileBackend(storage_dir=str(tmp_path))
+
+        for idx, raw in enumerate((b"\xff", b"\xe4\xb8", b"\xed\xa0\x80")):
+            key = f"bad_{idx}"
+            backend.save(key, {"message": "original"})
+            file_path = Path(tmp_path) / f"{key}.json"
+            file_path.write_bytes(raw)
+
+            with caplog.at_level(logging.WARNING, logger="praisonaiagents.storage.backends"):
+                caplog.clear()
+                assert backend.load(key) is None
+                # A warning is emitted identifying the failed key
+                assert any(
+                    rec.levelno == logging.WARNING and f"Failed to load {key}" in rec.getMessage()
+                    for rec in caplog.records
+                )
+            # Original bytes are preserved (load is non-destructive)
+            assert file_path.read_bytes() == raw
+
+        # Valid neighboring keys still load
+        backend.save("good", {"key": "value"})
+        assert backend.load("good") == {"key": "value"}
+
     def test_file_backend_exists(self, tmp_path):
         """Test exists check."""
         backend = FileBackend(storage_dir=str(tmp_path))
@@ -114,6 +143,29 @@ class TestFileBackend:
         """Test FileBackend implements StorageBackendProtocol."""
         backend = FileBackend(storage_dir=str(tmp_path))
         assert isinstance(backend, StorageBackendProtocol)
+
+    @pytest.mark.parametrize("pretty", [True, False])
+    def test_file_backend_save_cleans_tmp_on_serialization_error(self, tmp_path, pretty):
+        """Serialization failures must not leave partial .tmp staging files."""
+        backend = FileBackend(storage_dir=str(tmp_path), pretty=pretty)
+        backend.save("good", {"value": 1})
+
+        circular = {}
+        circular["self"] = circular
+        with pytest.raises(ValueError):
+            backend.save("circular", circular)
+
+        with pytest.raises(TypeError):
+            backend.save("tuple_key", {("a", "b"): 1})
+
+        with pytest.raises((ValueError, TypeError)):
+            backend.save("good", circular)
+
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert tmp_files == []
+        assert backend.load("good") == {"value": 1}
+        assert not backend.exists("circular")
+        assert not backend.exists("tuple_key")
 
 
 class TestSQLiteBackend:
@@ -247,6 +299,68 @@ class TestSQLiteBackend:
         backend2 = SQLiteBackend(db_path=str(db_path))
         loaded = backend2.load("key1")
         assert loaded["data"] == 1
+
+    @pytest.mark.parametrize("table_name", ["select", "123", "9table", "praison_storage"])
+    def test_sqlite_backend_keyword_and_digit_table_names(self, tmp_path, table_name):
+        """Validator-accepted names that are SQL keywords or start with a digit
+        must work across schema creation and all CRUD operations (Issue #5569)."""
+        db_path = tmp_path / "test.db"
+        backend = SQLiteBackend(db_path=str(db_path), table_name=table_name)
+
+        # save / upsert
+        backend.save("key1", {"version": 1})
+        backend.save("key1", {"version": 2})
+        assert backend.load("key1")["version"] == 2
+
+        # exists
+        assert backend.exists("key1")
+        assert not backend.exists("missing")
+
+        # list_keys (full + prefix)
+        backend.save("key2", {"data": 2})
+        backend.save("other", {"data": 3})
+        assert backend.list_keys() == ["key1", "key2", "other"]
+        assert backend.list_keys(prefix="key") == ["key1", "key2"]
+
+        # delete
+        assert backend.delete("other") is True
+        assert not backend.exists("other")
+
+        # clear
+        assert backend.clear() == 2
+        assert backend.list_keys() == []
+
+    def test_sqlite_backend_reopen_with_auto_create_false(self, tmp_path):
+        """A keyword table name persists and reopens with auto_create=False."""
+        db_path = tmp_path / "test.db"
+        backend = SQLiteBackend(db_path=str(db_path), table_name="select")
+        backend.save("key1", {"data": 1})
+        backend.close()
+
+        backend2 = SQLiteBackend(
+            db_path=str(db_path), table_name="select", auto_create=False
+        )
+        assert backend2.load("key1")["data"] == 1
+
+    def test_sqlite_backend_separate_tables_same_db(self, tmp_path):
+        """Quoted identifiers keep distinct tables isolated in one DB file."""
+        db_path = tmp_path / "test.db"
+        t1 = SQLiteBackend(db_path=str(db_path), table_name="select")
+        t2 = SQLiteBackend(db_path=str(db_path), table_name="praison_storage")
+
+        t1.save("shared", {"from": "select"})
+        t2.save("shared", {"from": "praison_storage"})
+
+        assert t1.load("shared")["from"] == "select"
+        assert t2.load("shared")["from"] == "praison_storage"
+
+    def test_sqlite_backend_invalid_table_name_rejected(self, tmp_path):
+        """Names with disallowed characters are still rejected by the validator."""
+        db_path = tmp_path / "test.db"
+        with pytest.raises(ValueError):
+            SQLiteBackend(db_path=str(db_path), table_name="bad name")
+        with pytest.raises(ValueError):
+            SQLiteBackend(db_path=str(db_path), table_name='drop";')
 
 
 class TestGetBackend:

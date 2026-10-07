@@ -11,6 +11,7 @@ import time
 import asyncio
 from praisonaiagents._logging import get_logger
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
 
 from .types import (
@@ -72,6 +73,47 @@ class HookRunner:
         self._registry = registry if registry is not None else HookRegistry()
         self._default_timeout = default_timeout
         self._cwd = cwd or os.getcwd()
+        # Dedicated executor for sync hooks. A hook that times out cannot be
+        # cancelled and keeps its worker slot; isolating it here means a
+        # misbehaving hook can only exhaust hook capacity, never the loop's
+        # shared default executor that guardrails/tools/locks also rely on.
+        self._hook_pool: Optional[ThreadPoolExecutor] = None
+        # hook.id -> in-flight Future for a sync hook. The slot is reserved
+        # before submission and only cleared when the worker finishes, so a
+        # still-running (timed-out or cancelled) hook caps new launches at one
+        # thread per hook. Guarded by ``_stuck_lock`` so concurrent invocations
+        # of the same hook cannot both reserve the slot and race past the cap.
+        self._stuck: Dict[str, Any] = {}
+        self._stuck_lock_obj: Optional[asyncio.Lock] = None
+
+    @property
+    def _stuck_lock(self) -> asyncio.Lock:
+        """Lazily create the in-flight-slot lock on first use.
+
+        Created lazily (not in ``__init__``) because a ``HookRunner`` may be
+        constructed before any event loop exists; the lock is only needed once
+        we are already inside ``async def execute`` / ``_execute_function_hook``.
+        """
+        if self._stuck_lock_obj is None:
+            self._stuck_lock_obj = asyncio.Lock()
+        return self._stuck_lock_obj
+
+    def _release_stuck(self, hook_id: str, fut: Any) -> None:
+        """Clear the in-flight slot once the worker Future completes.
+
+        Only removes the entry if it still points at *this* Future, so a newer
+        reserved invocation is never clobbered by an older worker draining.
+        """
+        if self._stuck.get(hook_id) is fut:
+            self._stuck.pop(hook_id, None)
+
+    def _get_hook_pool(self) -> ThreadPoolExecutor:
+        """Lazily create the dedicated sync-hook executor."""
+        if self._hook_pool is None:
+            self._hook_pool = ThreadPoolExecutor(
+                max_workers=8, thread_name_prefix="praison-hook"
+            )
+        return self._hook_pool
     
     @property
     def registry(self) -> HookRegistry:
@@ -167,27 +209,30 @@ class HookRunner:
         Returns:
             List of execution results
         """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            # Cannot execute sync in running event loop - would block the loop
-            # Guide users to use the async API instead
-            raise RuntimeError(
-                "execute_sync() cannot be called from within a running event loop. "
-                "Use 'await runner.execute(event, input_data, target)' instead in async contexts."
-            )
-
         # Fast path: no hooks → no loop creation needed
         # This mirrors the same check in execute() but avoids event loop creation overhead
         hooks = self._registry.get_hooks(event, target)
         if not hooks:
             return []
 
-        # No running loop and hooks exist — safe to create one
-        return asyncio.run(self.execute(event, input_data, target, _hooks=hooks))
+        # Use the canonical sync-to-async bridge so blocking policy/guardrail
+        # hooks still run (and can deny) from a running event loop — e.g. a
+        # FastAPI/aiohttp handler, Jupyter, or a bot callback invoking
+        # agent.start()/agent.chat(). Raising here would turn documented sync
+        # entry points into hard failures whenever any hook is registered.
+        #
+        # Bound the bridge wait so a hook that ignores its own per-hook timeout
+        # (e.g. a blocking C call on the worker loop) can never pin the caller's
+        # thread forever. Each hook already enforces ``default_timeout``
+        # internally; we give the whole chain headroom of one timeout per hook
+        # so legitimately slow sequential chains are not cut short, while still
+        # providing a hard backstop instead of ``timeout=None``.
+        from ..utils.async_bridge import run_coroutine_from_any_context
+        bridge_timeout = max(self._default_timeout, 1.0) * (len(hooks) + 1)
+        return run_coroutine_from_any_context(
+            self.execute(event, input_data, target, _hooks=hooks),
+            timeout=bridge_timeout,
+        )
     
     async def _execute_parallel(
         self,
@@ -394,11 +439,52 @@ class HookRunner:
                     timeout=timeout
                 )
             else:
-                # Execute sync function in thread pool with timeout
-                loop = asyncio.get_event_loop()
+                # Reserve the single in-flight slot for this hook *under a lock*
+                # and *before* submitting, so two concurrent invocations can't
+                # both see an empty ``_stuck`` and both launch a worker (which
+                # would exceed the intended one-worker-per-hook cap and double
+                # the side effects). The slot is only cleared once the worker
+                # finishes; a still-running previous worker fails this one
+                # closed immediately instead of leaking another thread.
+                async with self._stuck_lock:
+                    prev = self._stuck.get(hook.id)
+                    if prev is not None and not prev.done():
+                        duration = (time.time() - start_time) * 1000
+                        return HookExecutionResult(
+                            hook_id=hook.id,
+                            hook_name=hook.name or "unknown",
+                            event=event,
+                            success=False,
+                            error="previous invocation still running past its timeout",
+                            duration_ms=duration,
+                            output=HookResult(
+                                decision="deny",
+                                reason=f"Hook '{hook.name}' is still running past its timeout",
+                            ),
+                        )
+
+                    # Execute sync function in the dedicated hook pool with
+                    # timeout. ``copy_context_to_callable`` preserves
+                    # trace/session contextvars across the thread, matching
+                    # other executor sites.
+                    from ..trace.context_events import copy_context_to_callable
+                    loop = asyncio.get_event_loop()
+                    func = hook.func
+                    data = input_data
+                    fut = loop.run_in_executor(
+                        self._get_hook_pool(),
+                        copy_context_to_callable(lambda: func(data)),
+                    )
+                    # Reserve the slot now; a completion callback clears it only
+                    # when the worker actually finishes, so a timeout *or* a
+                    # cancellation leaves the slot held until the thread drains.
+                    self._stuck[hook.id] = fut
+                    fut.add_done_callback(
+                        lambda f, hid=hook.id: self._release_stuck(hid, f)
+                    )
+
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(None, hook.func, input_data),
-                    timeout=timeout
+                    asyncio.shield(fut), timeout=timeout
                 )
             
             duration = (time.time() - start_time) * 1000

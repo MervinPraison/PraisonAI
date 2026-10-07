@@ -93,7 +93,7 @@ jobs:
           # a CI-shaped environment rather than trusting a developer machine
           # where every sibling is already installed.
           pip install -e src/praisonai
-          pip install pytest pytest-asyncio pytest-timeout
+          pip install pytest pytest-asyncio pytest-timeout aiofiles
       - name: Run the unit suite
         working-directory: src/praisonai-agents
         env:

@@ -30,12 +30,9 @@ __all__ = ["StepCacheProtocol", "InMemoryStepCache", "make_step_key", "resolve_s
 def _snapshot(value: Any) -> Any:
     # Deep copy so a cached value cannot be mutated in place by later execution
     # (or a caller) and corrupt a future hit. Some step outputs hold objects a
-    # deepcopy cannot handle (locks, live clients); a cache must never crash the
-    # workflow, so fall back to the original reference in that rare case.
-    try:
-        return copy.deepcopy(value)
-    except Exception:
-        return value
+    # deepcopy cannot handle (locks, live clients). The caller must treat a
+    # failed snapshot as uncacheable, never retain a mutable original reference.
+    return copy.deepcopy(value)
 
 
 def _identify(step: Any) -> str:
@@ -109,20 +106,33 @@ class InMemoryStepCache:
         with self._lock:
             entry = self._entries.get(key)
             if entry is not None:
+                try:
+                    snapshot = _snapshot(entry)
+                except Exception:
+                    del self._entries[key]
+                    self.misses += 1
+                    return None
                 self._entries.move_to_end(key)
                 self.hits += 1
                 # Snapshot out: a cached value contains live mutable objects
                 # (e.g. the workflow's variables dict) that later execution
                 # mutates. Handing back the stored object would let one run's
                 # later mutations corrupt a future hit.
-                return _snapshot(entry)
+                return snapshot
             self.misses += 1
             return None
 
     def set(self, key: str, value: Dict[str, Any]) -> None:
         # Snapshot in for the same reason: freeze the value at store time so
         # the caller mutating it afterwards cannot alter what is cached.
-        snapshot = _snapshot(value)
+        try:
+            snapshot = _snapshot(value)
+        except Exception:
+            # An optional cache must not fail the workflow or serve stale data
+            # if an existing key is replaced with an uncacheable value.
+            with self._lock:
+                self._entries.pop(key, None)
+            return
         with self._lock:
             self._entries[key] = snapshot
             self._entries.move_to_end(key)

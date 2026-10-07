@@ -158,7 +158,9 @@ class SqliteTranscriptStore(DefaultSessionStore):
         if not session_dir or not os.path.isdir(session_dir):
             return
         try:
-            filenames = [f for f in os.listdir(session_dir) if f.endswith(".json")]
+            filenames = sorted(
+                f for f in os.listdir(session_dir) if f.endswith(".json")
+            )
         except OSError:
             return
         if not filenames:
@@ -175,7 +177,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (OSError, json.JSONDecodeError, TypeError):
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
                 continue
             if not isinstance(data, dict):
                 continue
@@ -214,7 +216,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
         except (json.JSONDecodeError, TypeError):
             return None
 
-    def _write_row(self, session: SessionData, conn=None) -> bool:
+    def _write_row(self, session: SessionData, conn=None, *, overwrite: bool = True) -> bool:
         own_lock = conn is None
         if conn is None:
             conn = self._connect()
@@ -233,17 +235,21 @@ class SqliteTranscriptStore(DefaultSessionStore):
             getattr(session, "updated_at", None),
         )
         sql = (
-            "INSERT OR REPLACE INTO sessions "
+            ("INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE") + " INTO sessions "
             "(session_id, data, agent_name, gateway_session_id, agent_id, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?)"
         )
         try:
             if own_lock:
                 with self._db_lock:
-                    conn.execute(sql, params)
+                    cursor = conn.execute(sql, params)
             else:
-                conn.execute(sql, params)
+                cursor = conn.execute(sql, params)
+            if not overwrite and cursor.rowcount == 0:
+                raise FileExistsError(session.session_id)
             return True
+        except FileExistsError:
+            raise
         except Exception as exc:
             logger.error("Failed to write session %s: %s", session.session_id, exc)
             return False
@@ -285,6 +291,52 @@ class SqliteTranscriptStore(DefaultSessionStore):
             with self._lock:
                 self._cache[session.session_id] = session
             return True
+
+    def _save_imported_session(self, session: SessionData, *, overwrite: bool = True) -> bool:
+        """Restore to the database without applying the destination's window."""
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        with self._db_lock:
+            # INSERT OR IGNORE makes no-clobber atomic across store instances;
+            # checking session_exists before a replace would still race.
+            if not self._write_row(session, overwrite=overwrite):
+                return False
+            with self._lock:
+                self._cache[session.session_id] = session
+            return True
+
+    def export_all(self) -> Dict[str, Any]:
+        """Export durable database rows, not legacy JSON sidecar files."""
+        return {
+            "version": self.PORTABLE_VERSION,
+            "sessions": [data for data in self._all_rows() if isinstance(data, dict)],
+        }
+
+    def _collect_lineage(
+        self, session: SessionData, *, exclude: str
+    ) -> List[Dict[str, Any]]:
+        """Collect persisted database records from the same conversation chain."""
+        lineage = self._lineage_key(session.to_dict())
+        if not lineage:
+            return []
+
+        def record_lineage(raw):
+            # Preserve the writer's Python JSON semantics (including NaN)
+            # and the shared lineage precedence, without retaining other rows.
+            try:
+                data = json.loads(raw)
+                return self._lineage_key(data) if isinstance(data, dict) else None
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                return None
+
+        conn = self._connect()
+        with self._db_lock:
+            conn.create_function("portable_session_lineage", 1, record_lineage)
+            rows = conn.execute(
+                "SELECT data FROM sessions WHERE session_id != ? "
+                "AND portable_session_lineage(data) = ? ORDER BY updated_at DESC",
+                (exclude, lineage),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
 
     def _modify_session_locked(
         self,

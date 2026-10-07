@@ -46,7 +46,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:621`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:618`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:196` (ctor `src/praisonai-ts/src/agent/simple.ts:1018`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
@@ -99,7 +99,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 
 ### `AgentTeam.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:816`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:813`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:93` (ctor `src/praisonai-ts/src/agent/team.ts:381`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
@@ -219,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3096`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3133`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3588`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -247,7 +247,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2473`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2463`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1125`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -279,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:472`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:490`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 
@@ -315,7 +315,7 @@ TS-only members: `config`
 
 ### `Session.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/session/api.py:66`
+- Python: `src/praisonai-agents/praisonaiagents/session/api.py:67`
 - TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:132`)
 - Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 5 TS-only of 12
 

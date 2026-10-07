@@ -115,12 +115,17 @@ class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
         import inspect
         availability = {}
         
-        # Get snapshot of all items from parent class
+        # Snapshot the registered loader names (the authoritative set). The
+        # resolved-item cache (_items) is only populated as a side effect of
+        # resolve(), so iterating it would return {} on a fresh registry.
         with self._lock:
-            snapshot = list(self._items.items())
+            names = list(self._loaders.keys())
         
-        for name, integration_class in snapshot:
+        for name in names:
             try:
+                # Resolve lazily; this also populates the _items cache.
+                integration_class = self.resolve(name)
+                
                 # Check if constructor requires parameters beyond self
                 sig = inspect.signature(integration_class.__init__)
                 params = [p for p_name, p in sig.parameters.items() if p_name != 'self' and p.default is inspect.Parameter.empty]

@@ -16,11 +16,12 @@ Supported backends:
 
 __all__ = [
     "KnowledgeStore",
+    "AsyncKnowledgeStore",
     "KnowledgeDocument",
 ]
 
 def __getattr__(name: str):
-    if name in ("KnowledgeStore", "KnowledgeDocument"):
-        from .base import KnowledgeStore, KnowledgeDocument
+    if name in ("KnowledgeStore", "AsyncKnowledgeStore", "KnowledgeDocument"):
+        from .base import KnowledgeStore, AsyncKnowledgeStore, KnowledgeDocument
         return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

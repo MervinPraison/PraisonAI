@@ -74,7 +74,18 @@ class AgentSchedulerHandler:
         
         # Parse arguments
         name = unknown_args[0]
-        
+
+        # Validate the name BEFORE launching any daemon: save_state rejects an
+        # unsafe name, and launching first would orphan a running daemon with no
+        # state file the CLI could use to stop it.
+        from praisonai.scheduler.state_manager import _validate_name
+        try:
+            _validate_name(name)
+        except ValueError:
+            print(f"❌ Error: Invalid scheduler name {name!r}")
+            print("   Use letters, digits, '_', '-', '.' (max 128 chars, no '..').")
+            return 1
+
         # Check for --recipe flag in unknown_args
         recipe_name = None
         task = None
@@ -96,9 +107,13 @@ class AgentSchedulerHandler:
         max_cost = getattr(args, 'max_cost', None)
         deliver = getattr(args, 'schedule_deliver', None) or ''
         
-        # Check if name already exists
+        # Check if name already exists. Use is_process_alive with the recorded
+        # start_time (not a PID-only probe) so a stale state whose PID was reused
+        # by an unrelated process does not falsely block a fresh start.
         existing = state_manager.load_state(name)
-        if existing and daemon_manager.get_status(existing.get('pid', 0))['is_alive']:
+        if existing and state_manager.is_process_alive(
+            existing.get('pid', 0), existing.get('start_time')
+        ):
             print(f"❌ Error: Scheduler '{name}' is already running (PID: {existing['pid']})")
             print(f"   Use 'praisonai schedule stop {name}' to stop it first")
             return 1
@@ -177,7 +192,7 @@ class AgentSchedulerHandler:
         for state in states:
             name = state.get('name', 'unknown')[:20]
             pid = state.get('pid', 0)
-            status = "running" if state_manager.is_process_alive(pid) else "stopped"
+            status = "running" if state_manager.is_process_alive(pid, state.get('start_time')) else "stopped"
             interval = state.get('interval', 'unknown')[:12]
             task = state.get('task', '')[:40]
             
@@ -261,7 +276,7 @@ class AgentSchedulerHandler:
             pid = state['pid']
             
             try:
-                if daemon_manager.stop_daemon(pid):
+                if daemon_manager.stop_daemon(pid, expected_start_time=state.get('start_time')):
                     state_manager.delete_state(name)
                     print(f"✅ Stopped '{name}' (PID: {pid})")
                     stopped += 1
@@ -298,7 +313,7 @@ class AgentSchedulerHandler:
         
         print(f"🛑 Stopping scheduler '{name}' (PID: {pid})...")
         
-        success = daemon_manager.stop_daemon(pid)
+        success = daemon_manager.stop_daemon(pid, expected_start_time=state.get('start_time'))
         
         if success:
             state['status'] = 'stopped'
@@ -365,8 +380,9 @@ class AgentSchedulerHandler:
         
         # Stop if running
         pid = state.get('pid')
-        if pid and state_manager.is_process_alive(pid):
-            daemon_manager.stop_daemon(pid)
+        start_time = state.get('start_time')
+        if pid and state_manager.is_process_alive(pid, start_time):
+            daemon_manager.stop_daemon(pid, expected_start_time=start_time)
             time.sleep(1)
         
         # Start again
@@ -384,6 +400,7 @@ class AgentSchedulerHandler:
         state['pid'] = new_pid
         state['status'] = 'running'
         state['started_at'] = datetime.now().isoformat()
+        state.pop('start_time', None)  # let save_state record the new process's identity
         state_manager.save_state(name, state)
         
         print(f"✅ Scheduler '{name}' restarted (PID: {new_pid})")
@@ -426,7 +443,7 @@ class AgentSchedulerHandler:
         
         # Get process status
         pid = state.get('pid', 0)
-        is_alive = state_manager.is_process_alive(pid)
+        is_alive = state_manager.is_process_alive(pid, state.get('start_time'))
         status = "🟢 running" if is_alive else "🔴 stopped"
         
         # Calculate uptime

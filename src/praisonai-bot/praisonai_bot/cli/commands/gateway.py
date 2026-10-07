@@ -570,6 +570,7 @@ def gateway_status(
     daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
     deep: bool = typer.Option(False, "--deep", help="Extended diagnostics (health + log tail)"),
     probe: bool = typer.Option(False, "--probe", help="Live credential probe per channel"),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable status snapshot"),
 ):
     """Check gateway status and daemon service status.
 
@@ -579,6 +580,7 @@ def gateway_status(
         praisonai gateway status --deep --config bot.yaml
         praisonai gateway status --probe --config bot.yaml
         praisonai gateway status --daemon-only
+        praisonai gateway status --json
     """
     import os
     from ..features.gateway import GatewayHandler
@@ -596,6 +598,17 @@ def gateway_status(
     # the file onboarding wrote instead of nothing (#3880).
     if config is None:
         config = _resolve_gateway_config_path(None)
+
+    # Machine-readable path (#5363): sibling commands (doctor/test) support
+    # --json; status did not, so scripts/health-checks/dashboards could not
+    # consume its state. Emit a single stable snapshot built from /health +
+    # /info and the daemon status, then return before any human-only text.
+    if json_output:
+        import json as _json
+
+        snapshot = _build_status_snapshot(host, port)
+        typer.echo(_json.dumps(snapshot, default=str))
+        raise typer.Exit(0 if snapshot.get("reachable") else 1)
 
     output = get_output_controller()
     
@@ -871,6 +884,122 @@ def _print_secret_availability(report: dict) -> None:
             mark = "✓" if status == "available" else "✗"
             print(f"{name:<12} {f:<13} {mark}  {status}")
     print()
+
+
+def _resolve_gateway_auth_token() -> str:
+    """Resolve the loopback ``GATEWAY_AUTH_TOKEN`` from env or persisted ``.env``.
+
+    ``praisonai onboard`` / the daemon persist the auto-generated token to
+    ``~/.praisonai/.env`` rather than exporting it into every shell. Without
+    reading that file, an authenticated gateway answers ``/health`` (public)
+    but 401s ``/info`` (authenticated), so ``status --json`` would report
+    ``reachable: true`` while silently omitting ``version`` (#5363, greptile
+    P1). Prefer an already-exported env value; otherwise fall back to the
+    persisted file. Returns ``""`` when no token is available.
+    """
+    import os
+
+    token = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+    if token:
+        return token
+    env_path = os.environ.get("PRAISONAI_ENV_FILE") or os.path.expanduser(
+        "~/.praisonai/.env"
+    )
+    try:
+        with open(env_path, encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                s = raw.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                key, _, val = s.partition("=")
+                if key.strip() == "GATEWAY_AUTH_TOKEN":
+                    return val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _fetch_gateway_json(host: str, port: int, path: str, timeout: float = 5.0):
+    """GET a JSON gateway endpoint over loopback, returning None on failure.
+
+    Attaches the loopback-only bearer token (resolved from the environment or
+    the persisted ``~/.praisonai/.env``) so authenticated gateways still
+    answer, without leaking the credential onto a remote plaintext hop.
+    """
+    import json
+    import urllib.request
+
+    url = f"http://{host}:{port}{path}"
+    try:
+        req = urllib.request.Request(url)
+        token = _resolve_gateway_auth_token()
+        if token and host in ("127.0.0.1", "localhost", "::1"):
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode())
+    except Exception:
+        return None
+
+
+def _build_status_snapshot(host: str, port: int) -> dict:
+    """Assemble one machine-readable gateway status snapshot (#5363).
+
+    Combines the daemon service state with the rich ``/health`` payload
+    (uptime, sessions, clients, per-channel supervision, degraded owners,
+    delivery back-pressure, applied/on-disk config revision + drift) and the
+    version/protocol_version from ``/info`` so a single ``--json`` call answers
+    "is my gateway healthy, on the right config, and what version".
+    """
+    from praisonai_bot.daemon import get_daemon_status
+
+    snapshot: dict = {"host": host, "port": port, "reachable": False}
+
+    try:
+        daemon_status = get_daemon_status()
+        snapshot["daemon"] = {
+            "platform": daemon_status.get("platform", "unknown"),
+            "installed": bool(daemon_status.get("installed", False)),
+            "running": bool(daemon_status.get("running", False)),
+            "pid": daemon_status.get("pid"),
+            "error": daemon_status.get("error"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        snapshot["daemon"] = {"error": str(exc)}
+
+    health = _fetch_gateway_json(host, port, "/health")
+    info = _fetch_gateway_json(host, port, "/info")
+
+    if info:
+        snapshot["version"] = info.get("version")
+        snapshot["protocol_version"] = info.get("protocol_version")
+
+    if health:
+        snapshot["reachable"] = True
+        snapshot["status"] = health.get("status")
+        snapshot["uptime_s"] = health.get("uptime")
+        snapshot["active_sessions"] = health.get("sessions")
+        snapshot["clients"] = health.get("clients")
+        snapshot["agents"] = health.get("agents")
+        snapshot["channels"] = health.get("channels") or {}
+        snapshot["degraded"] = health.get("degraded_owners") or []
+        snapshot["applied_config_revision"] = health.get("applied_config_revision")
+        snapshot["on_disk_config_revision"] = health.get("on_disk_config_revision")
+        snapshot["config_drift"] = health.get("config_drift")
+        snapshot["last_inbound_at"] = health.get("last_inbound_at")
+        if "pressure" in health:
+            snapshot["delivery"] = health.get("pressure")
+        elif "delivery" in health:
+            snapshot["delivery"] = health.get("delivery")
+        if snapshot.get("version") is None and health.get("version") is not None:
+            snapshot["version"] = health.get("version")
+        # Reachable but /info didn't answer (typically an authenticated gateway
+        # whose token isn't available to this CLI) — surface it explicitly so
+        # consumers don't misread a silent missing "version" as "unversioned"
+        # (#5363, greptile P1).
+        if info is None and snapshot.get("version") is None:
+            snapshot["version_unavailable"] = "info_unreachable"
+
+    return snapshot
 
 
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:
@@ -1854,6 +1983,120 @@ def gateway_send(
         raise typer.Exit(1)
 
 
+@app.command("schema")
+def gateway_schema(
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the JSON Schema to a file instead of stdout "
+        "(e.g. gateway.schema.json for editor config / CI linting).",
+    ),
+):
+    """Emit the gateway.yaml / bot.yaml JSON Schema (for editors / CI).
+
+    Derived from the canonical Pydantic ``GatewayConfigSchema`` so a mistyped
+    key is flagged at author time instead of only at gateway startup. Point your
+    editor's YAML language server at the output, or lint configs in CI:
+
+        praisonai gateway schema                     # print to stdout
+        praisonai gateway schema -o gateway.schema.json  # write to a file
+    """
+    import json
+
+    from praisonai_bot.bots._config_schema import gateway_config_json_schema
+
+    schema_json = json.dumps(gateway_config_json_schema(), indent=2)
+    if output:
+        from pathlib import Path
+
+        out_path = Path(output)
+        try:
+            out_path.write_text(schema_json + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"Failed to write {out_path}: {exc}")
+            raise typer.Exit(1)
+        print(f"Wrote gateway JSON Schema to {out_path}")
+    else:
+        sys.stdout.write(schema_json + "\n")
+
+
+@app.command("config")
+def gateway_config(
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host (keys the persisted start-flags)"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port (keys the persisted start-flags)"),
+    config: Optional[str] = typer.Option(
+        None, "--config", "-c",
+        help="Declared gateway.yaml to merge (default: the file the running "
+        "gateway was started with, else auto-discovered)",
+    ),
+    resolved: bool = typer.Option(
+        False, "--resolved",
+        help="Print the resolved effective config (declared YAML ⊕ CLI "
+        "overrides), secret-redacted",
+    ),
+    export: Optional[str] = typer.Option(
+        None, "--export",
+        help="Write the resolved effective config to a YAML file for diff / "
+        "version control",
+    ),
+    no_redact: bool = typer.Option(
+        False, "--no-redact",
+        help="Do not redact secrets (local inspection only — never share)",
+    ),
+):
+    """Show or export the gateway's resolved effective configuration (#5646).
+
+    The running gateway's posture is split between the declared ``gateway.yaml``
+    and a hidden per-host:port start-flags side file that stores the CLI-only
+    runtime knobs so ``restart`` can replay them. This command merges both into
+    ONE inspectable document — the configuration actually in force — so the YAML
+    can be the single source of truth. Secrets are redacted by default, so the
+    output is safe to diff, review, and commit.
+
+    Examples:
+        praisonai gateway config --resolved
+        praisonai gateway config --export gateway.resolved.yaml
+        praisonai gateway config --resolved --port 9000
+    """
+    import os
+
+    from ..features.gateway import export_effective_config
+
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
+
+    # Discover the same onboarded config start/status use when none is passed so
+    # the merge reflects the declared file the operator actually maintains.
+    if config is None:
+        config = _resolve_gateway_config_path(None)
+
+    # Default action is --resolved so a bare ``gateway config`` is useful.
+    if not resolved and not export:
+        resolved = True
+
+    text = export_effective_config(
+        host, port, config_file=config, redact=not no_redact
+    )
+
+    if export:
+        from pathlib import Path
+
+        out_path = Path(export)
+        try:
+            out_path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            print(f"Failed to write {out_path}: {exc}")
+            raise typer.Exit(1)
+        print(f"Wrote resolved gateway config to {out_path}")
+
+    if resolved:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+
+
 hooks_app = typer.Typer(
     help="Manage inbound trigger hooks (POST /hooks/<path>) in gateway.yaml",
     no_args_is_help=True,
@@ -2389,6 +2632,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]restart[/green]     Gracefully drain + relaunch (daemon-aware)
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
+  [green]config[/green]      Show/export the resolved effective config (--resolved | --export)
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
   [green]test[/green]        One-shot readiness (probes + shell + optional turn)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)

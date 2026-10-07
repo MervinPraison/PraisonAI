@@ -781,7 +781,9 @@ class OpenAIClient:
                         "output": msg.get("content", ""),
                     })
                 else:
-                    item = dict(msg)
+                    # Persisted history may carry local metadata/provider fields.
+                    # Responses message items accept role/content, not that record.
+                    item = {"role": role}
                     item["content"] = self._build_responses_content(
                         msg.get("content", "")
                     )
@@ -896,16 +898,52 @@ class OpenAIClient:
                 responses_content.append(part)
         return responses_content
 
+    @staticmethod
+    def _responses_incomplete_finish_reason(response) -> Optional[str]:
+        """Map known incomplete reasons to existing Chat Completions outcomes."""
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status != "incomplete":
+            return None
+        details = response.get("incomplete_details") if isinstance(response, dict) else getattr(response, "incomplete_details", None)
+        reason = details.get("reason") if isinstance(details, dict) else getattr(details, "reason", None)
+        return {"max_output_tokens": "length", "content_filter": "content_filter"}.get(reason)
+
+    @staticmethod
+    def _extract_responses_refusal(response) -> Optional[str]:
+        """Preserve refusal explanations separately from ordinary output text."""
+        output = response.get("output", []) if isinstance(response, dict) else getattr(response, "output", [])
+        refusals = []
+        for item in output or []:
+            item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            if item_type != "message":
+                continue
+            content = item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+            for block in content or []:
+                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if block_type == "refusal":
+                    refusal = block.get("refusal") if isinstance(block, dict) else getattr(block, "refusal", None)
+                    if isinstance(refusal, str) and refusal:
+                        refusals.append(refusal)
+        return "".join(refusals) or None
+
     def _responses_to_chat_completion(self, response) -> ChatCompletion:
         """
         Wrap a Responses API response into a ChatCompletion dataclass
         so that all downstream code (tool loop, display, callbacks)
         works without modification.
         """
+        status = response.get("status") if isinstance(response, dict) else getattr(response, "status", None)
+        if status == "failed":
+            from .llm import LLMResponseError
+            error = response.get("error") if isinstance(response, dict) else getattr(response, "error", None)
+            code = error.get("code") if isinstance(error, dict) else getattr(error, "code", None)
+            message = error.get("message") if isinstance(error, dict) else getattr(error, "message", None)
+            label = f"Responses API failed ({code})" if code else "Responses API failed"
+            raise LLMResponseError(f"{label}: {message or 'Provider returned a failed response.'}")
         response_text = ""
         tool_calls_list: List[ToolCall] = []
 
-        output_items = getattr(response, 'output', None) or []
+        output_items = (response.get('output') if isinstance(response, dict) else getattr(response, 'output', None)) or []
         for item in output_items:
             item_type = getattr(item, "type", "") if not isinstance(item, dict) else item.get("type", "")
 
@@ -940,22 +978,26 @@ class OpenAIClient:
                 ))
 
         # Build usage
-        raw_usage = getattr(response, 'usage', None)
+        raw_usage = response.get('usage') if isinstance(response, dict) else getattr(response, 'usage', None)
         usage = None
         if raw_usage:
+            def usage_value(name):
+                return raw_usage.get(name, 0) if isinstance(raw_usage, dict) else getattr(raw_usage, name, 0)
+
             usage = CompletionUsage(
-                prompt_tokens=getattr(raw_usage, 'input_tokens', 0),
-                completion_tokens=getattr(raw_usage, 'output_tokens', 0),
-                total_tokens=getattr(raw_usage, 'total_tokens', 0),
+                prompt_tokens=usage_value('input_tokens'),
+                completion_tokens=usage_value('output_tokens'),
+                total_tokens=usage_value('total_tokens'),
             )
 
         message = ChatCompletionMessage(
             content=response_text if response_text else None,
             role="assistant",
+            refusal=self._extract_responses_refusal(response),
             tool_calls=tool_calls_list if tool_calls_list else None,
         )
         choice = Choice(
-            finish_reason="tool_calls" if tool_calls_list else "stop",
+            finish_reason=self._responses_incomplete_finish_reason(response) or ("tool_calls" if tool_calls_list else "stop"),
             index=0,
             message=message,
         )
@@ -1053,6 +1095,7 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or None if error
         """
+        raw = None
         # Lazy import StreamEvent types only when needed
         _emit = emit_events and stream_callback is not None
         if _emit:
@@ -1112,6 +1155,9 @@ class OpenAIClient:
                 except (FileNotFoundError, ValueError):
                     raise
                 except Exception as e:
+                    status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                    if status == "failed":
+                        raise
                     self.logger.warning(f"Responses API streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
@@ -1282,6 +1328,9 @@ class OpenAIClient:
             return final_response
             
         except Exception as e:
+            status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+            if status == "failed":
+                raise
             self.logger.error(f"Error in stream processing: {e}")
             return None
     
@@ -1318,6 +1367,7 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or None if error
         """
+        raw = None
         # Lazy import StreamEvent types only when needed
         _emit = emit_events and stream_callback is not None
         if _emit:
@@ -1386,6 +1436,9 @@ class OpenAIClient:
                 except (FileNotFoundError, ValueError):
                     raise
                 except Exception as e:
+                    status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                    if status == "failed":
+                        raise
                     self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
@@ -1548,6 +1601,9 @@ class OpenAIClient:
             return final_response
             
         except Exception as e:
+            status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+            if status == "failed":
+                raise
             self.logger.error(f"Error in async stream processing: {e}")
             return None
 
@@ -1652,6 +1708,7 @@ class OpenAIClient:
         """
         # ── Responses API path (non-streaming only) ────────────────────
         if not stream and self._use_responses_api(model):
+            raw = None
             try:
                 resp_params = self._build_responses_input(
                     messages, model, temperature, tools,
@@ -1662,6 +1719,9 @@ class OpenAIClient:
             except (FileNotFoundError, ValueError):
                 raise
             except Exception as e:
+                status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                if status == "failed":
+                    raise
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
 
@@ -1716,6 +1776,7 @@ class OpenAIClient:
         """
         # ── Responses API path (non-streaming only) ────────────────────
         if not stream and self._use_responses_api(model):
+            raw = None
             try:
                 resp_params = self._build_responses_input(
                     messages, model, temperature, tools,
@@ -1726,6 +1787,9 @@ class OpenAIClient:
             except (FileNotFoundError, ValueError):
                 raise
             except Exception as e:
+                status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+                if status == "failed":
+                    raise
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
 
