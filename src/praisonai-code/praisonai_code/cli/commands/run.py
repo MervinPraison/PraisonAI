@@ -2553,7 +2553,12 @@ def _run_prompt(
             # (the json envelope is covered by ``_emit``; stream-json keeps its
             # NDJSON framing, so neither prints raw text).
             def _emit_partial(value: Any) -> None:
-                if output_mode == "stream" and value and not output.is_json_mode:
+                if (
+                    output_mode == "stream"
+                    and value
+                    and not output.is_json_mode
+                    and not output.is_quiet
+                ):
                     print(value)
 
             # A provider block/refusal/truncation wins over a generic empty-result

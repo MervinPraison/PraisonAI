@@ -22,6 +22,7 @@ class _RecordingOutput:
         self.printed_errors = []
         self.warnings = []
         self.is_json_mode = False
+        self.is_quiet = False
 
     def emit_result(self, message=None, data=None):
         self.results.append((message, data))
@@ -595,6 +596,32 @@ def test_truncated_run_surfaces_partial_answer_before_exit(monkeypatch, mode, ca
         }
     else:
         assert out.strip() == "partial summary"
+
+
+def test_quiet_stream_truncated_run_suppresses_partial_answer(monkeypatch, capsys):
+    """Greptile P2: a quiet `--output stream` run must honour quiet on exit-2.
+
+    ``_emit_partial`` prints the partial stream text directly, bypassing the
+    normal output controller. In QUIET mode ``is_json_mode`` is False, so it
+    would leak the answer unless it also checks ``is_quiet`` — this pins that.
+    """
+
+    class _TruncatedAgent(_CapturingAgent):
+        last_stop_reason = "max_steps"
+
+        def start(self, prompt):
+            type(self).last_prompt = prompt
+            return "partial summary"
+
+    _install_inprocess_agent_stubs(monkeypatch, _TruncatedAgent)
+    output = _make_output(monkeypatch, json_mode=False)
+    output.is_quiet = True
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("big task", output_mode="stream", no_save=True)
+
+    assert exc.value.exit_code == 2
+    assert capsys.readouterr().out.strip() == ""
 
 
 def test_inprocess_honors_explicit_memory_flag(monkeypatch):
