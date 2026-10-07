@@ -178,6 +178,65 @@ def test_permission_policy_is_enforced_in_process(standalone, monkeypatch):
     assert permissions and "bash:rm *" in permissions
 
 
+def test_implicit_console_fails_closed_on_non_tty(standalone, monkeypatch):
+    """An implicitly-derived console backend must be non-interactive off a TTY.
+
+    A permission policy with no explicit --approval derives the console
+    backend. On a non-TTY (CI/pipeline) an unmatched ``ask`` rule must deny
+    rather than block on input() or read piped stdin as operator consent.
+    """
+    captured = _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    seen = {}
+
+    def _fake_resolve(backend_name=None, **kwargs):
+        seen["backend_name"] = backend_name
+        seen["non_interactive"] = kwargs.get("non_interactive")
+        return {"backend": backend_name}
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.features._approval_bridge.resolve_approval_config",
+        _fake_resolve,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    run_cmd._run_prompt(
+        "rm -rf build",
+        no_save=True,
+        permissions_config={"bash:rm *": "ask"},
+    )
+
+    assert seen["backend_name"] == "console"
+    assert seen["non_interactive"] is True
+
+
+def test_explicit_approval_not_forced_non_interactive(standalone, monkeypatch):
+    """An explicit --approval console keeps the backend's own interactivity.
+
+    Only the implicitly-derived backend fails closed off a TTY; an explicit
+    choice is left to the backend so interactive prompting is preserved.
+    """
+    _install_fake_agent(monkeypatch)
+    _install_fake_praisonai(monkeypatch)
+
+    seen = {}
+
+    def _fake_resolve(backend_name=None, **kwargs):
+        seen["non_interactive"] = kwargs.get("non_interactive")
+        return {"backend": backend_name}
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.features._approval_bridge.resolve_approval_config",
+        _fake_resolve,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    run_cmd._run_prompt("hi", no_save=True, approval="console")
+
+    assert seen["non_interactive"] is False
+
+
 def test_plain_standalone_run_install_no_approval(standalone, monkeypatch):
     """A run without permission flags must not gain an approval backend."""
     captured = _install_fake_agent(monkeypatch)

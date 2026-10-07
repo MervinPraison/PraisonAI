@@ -2296,15 +2296,24 @@ def _run_prompt(
             # Resolve approval backend if specified. A permission policy
             # (--allow/--deny/--permissions) with no explicit --approval derives
             # the console backend so the patterns are enforced instead of
-            # silently dropped (same derivation the YAML path makes). On a
-            # non-TTY the backend fails closed (unmatched patterns deny).
+            # silently dropped (same derivation the YAML path makes).
             effective_approval = approval
+            implicit_console = False
             if effective_approval is None and permissions_config:
                 effective_approval = "console"
+                implicit_console = True
             if effective_approval:
+                import sys as _sys
                 from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+                # When the console backend is derived implicitly (no explicit
+                # --approval) on a non-TTY, fail closed: an unmatched ``ask``
+                # rule must deny rather than block on input()/read a piped
+                # stdin as if it were operator consent. An explicit --approval
+                # is left to the backend's own interactive handling.
+                non_interactive = implicit_console and not _sys.stdin.isatty()
                 agent_config["approval"] = resolve_approval_config(
                     effective_approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                    non_interactive=non_interactive,
                     permissions_config=permissions_config,
                 )
             
