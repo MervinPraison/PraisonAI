@@ -4,8 +4,10 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import studio  # noqa: E402
@@ -62,6 +64,52 @@ class StudioProjectTests(unittest.TestCase):
 
         full = self.mgr.get_project(p["id"])
         self.assertEqual(len(full["assets"]), 8)
+
+    def test_reader_serialized_against_concurrent_replacement(self):
+        """Models the Windows PermissionError: a reader must not touch project.json
+        while a writer is mid-replacement. Readers and writers share one reentrant
+        lock, so an unlocked read window can no longer exist."""
+        import threading
+
+        p = self.mgr.create_project("Race")
+        pid = p["id"]
+
+        real_read_text = Path.read_text
+        replacement_in_progress = threading.Event()
+        reader_may_proceed = threading.Event()
+
+        def guarded_read_text(self, *args, **kwargs):
+            if self.name == "project.json" and replacement_in_progress.is_set():
+                raise PermissionError(
+                    "[WinError 32] project.json is being replaced"
+                )
+            return real_read_text(self, *args, **kwargs)
+
+        def hold_write():
+            with self.mgr._project_lock:
+                replacement_in_progress.set()
+                reader_may_proceed.set()
+                time.sleep(0.2)
+                replacement_in_progress.clear()
+
+        errors: list = []
+
+        def do_read():
+            reader_may_proceed.wait(2)
+            try:
+                self.mgr.get_project(pid)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        with mock.patch.object(Path, "read_text", guarded_read_text):
+            writer = threading.Thread(target=hold_write)
+            reader = threading.Thread(target=do_read)
+            writer.start()
+            reader.start()
+            writer.join()
+            reader.join()
+
+        self.assertEqual(errors, [], f"reader raced the replacement: {errors}")
 
     def test_timeline_and_single_clip_export(self):
         p = self.mgr.create_project("Export")

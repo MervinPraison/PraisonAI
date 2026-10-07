@@ -251,7 +251,7 @@ class StudioManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self._log = log_fn or (lambda _msg: None)
         self._lock = threading.Lock()
-        self._project_lock = threading.Lock()
+        self._project_lock = threading.RLock()
         self._jobs: Dict[str, StudioJob] = {}
         self._active = 0
 
@@ -270,7 +270,8 @@ class StudioManager:
         out: List[Dict[str, Any]] = []
         for path in sorted(self.root.glob("*/project.json")):
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+                with self._project_lock:
+                    data = json.loads(path.read_text(encoding="utf-8"))
                 out.append(
                     {
                         "id": data["id"],
@@ -292,14 +293,16 @@ class StudioManager:
 
     def _load_project(self, project_id: str) -> Dict[str, Any]:
         path = self._project_dir(project_id) / "project.json"
-        return json.loads(path.read_text(encoding="utf-8"))
+        with self._project_lock:
+            return json.loads(path.read_text(encoding="utf-8"))
 
     def _save_project(self, project: Dict[str, Any]) -> None:
         project["updated_at"] = _now()
         path = self._project_dir(project["id"]) / "project.json"
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
-        tmp.write_text(json.dumps(project, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        with self._project_lock:
+            tmp.write_text(json.dumps(project, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
 
     def _append_assets(
         self,
