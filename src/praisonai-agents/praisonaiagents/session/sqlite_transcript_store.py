@@ -626,3 +626,8 @@ class SqliteTranscriptStore(DefaultSessionStore):
             if len(deduped) >= limit:
                 break
         return deduped
+
+    # Portable export/import overrides for DB-backed transcripts (Issue #5517)
+    # live above on ``export_all``, ``_collect_lineage``, and
+    # ``_save_imported_session`` — do not redeclare them here (would shadow
+    # ``overwrite`` and break import restore tests).
