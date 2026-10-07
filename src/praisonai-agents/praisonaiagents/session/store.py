@@ -293,14 +293,24 @@ class SessionData:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionData":
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        Transcript entries that are not JSON objects (``null``, a string, a
+        number, …) cannot become a ``SessionMessage`` and would otherwise raise
+        ``AttributeError`` from ``SessionMessage.from_dict``'s ``.get`` calls,
+        crashing gateway routing on a single malformed turn. Such entries are
+        skipped so a healthy session stays loadable; the original on-disk
+        transcript and its index record are left untouched (Issue #5672).
+        """
         messages = [
-            SessionMessage.from_dict(m) 
+            SessionMessage.from_dict(m)
             for m in data.get("messages", [])
+            if isinstance(m, dict)
         ]
         archived = [
             SessionMessage.from_dict(m)
             for m in (data.get("archived_messages") or [])
+            if isinstance(m, dict)
         ]
         last_compaction_data = data.get("last_compaction")
         last_compaction = (
