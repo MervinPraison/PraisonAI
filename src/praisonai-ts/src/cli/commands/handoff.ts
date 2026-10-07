@@ -42,7 +42,7 @@ async function showInfo(outputFormat: string): Promise<void> {
       'Chain multiple agent handoffs'
     ],
     sdkUsage: `
-import { Handoff, handoff } from 'praisonai';
+import { Handoff, handoff, handoffFilters } from 'praisonai';
 
 // Create a handoff
 const myHandoff = handoff({
