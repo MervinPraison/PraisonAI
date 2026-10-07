@@ -2021,6 +2021,110 @@ def gateway_schema(
         sys.stdout.write(schema_json + "\n")
 
 
+@app.command("config")
+def gateway_config(
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host (keys the persisted start-flags)"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port (keys the persisted start-flags)"),
+    config: Optional[str] = typer.Option(
+        None, "--config", "-c",
+        help="Declared gateway.yaml to merge (default: the file the running "
+        "gateway was started with, else auto-discovered)",
+    ),
+    resolved: bool = typer.Option(
+        False, "--resolved",
+        help="Print the resolved effective config (declared YAML ⊕ CLI "
+        "overrides), secret-redacted",
+    ),
+    export: Optional[str] = typer.Option(
+        None, "--export",
+        help="Write the resolved effective config to a YAML file for diff / "
+        "version control",
+    ),
+    no_redact: bool = typer.Option(
+        False, "--no-redact",
+        help="Do not redact secrets (local inspection only — never share)",
+    ),
+):
+    """Show or export the gateway's resolved effective configuration (#5646).
+
+    The running gateway's posture is split between the declared ``gateway.yaml``
+    and a hidden per-host:port start-flags side file that stores the CLI-only
+    runtime knobs so ``restart`` can replay them. This command merges both into
+    ONE inspectable document — the configuration actually in force — so the YAML
+    can be the single source of truth. Secrets are redacted by default, so the
+    output is safe to diff, review, and commit.
+
+    Examples:
+        praisonai gateway config --resolved
+        praisonai gateway config --export gateway.resolved.yaml
+        praisonai gateway config --resolved --port 9000
+    """
+    import os
+    import stat
+
+    from ..features.gateway import export_effective_config
+
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
+
+    # Only fall back to cwd/home discovery when the operator did NOT pass
+    # ``--config``. The persisted launch ``config_file`` (resolved inside
+    # ``resolve_effective_config``) still wins over this discovered path, so the
+    # merge reflects the file the running gateway was actually launched against
+    # rather than whatever sits in the current directory (Greptile P1 — "Wrong
+    # config file selected").
+    if config is None:
+        config = _resolve_gateway_config_path(None)
+
+    # Default action is --resolved so a bare ``gateway config`` is useful.
+    if not resolved and not export:
+        resolved = True
+
+    try:
+        text = export_effective_config(
+            host, port, config_file=config, redact=not no_redact
+        )
+    except ValueError as exc:
+        # Declared config missing / empty / unreadable / not a mapping: refuse
+        # to emit a successful-looking but incomplete snapshot (Greptile P1 —
+        # "Incomplete export succeeds").
+        print(f"Error: {exc}")
+        raise typer.Exit(1)
+    except RuntimeError as exc:
+        # Fail-closed redaction: secret-key set unavailable (Greptile P2).
+        print(f"Error: {exc}")
+        raise typer.Exit(1)
+
+    if export:
+        from pathlib import Path
+
+        out_path = Path(export)
+        try:
+            out_path.write_text(text, encoding="utf-8")
+            # An un-redacted export contains plaintext credentials; restrict it
+            # to owner-only so a 022 umask does not leave it world-readable
+            # (Greptile P1 — "Unredacted export exposes credentials").
+            if no_redact:
+                try:
+                    os.chmod(out_path, stat.S_IRUSR | stat.S_IWUSR)
+                except OSError as exc:  # pragma: no cover — best effort
+                    print(
+                        f"Warning: could not restrict permissions on {out_path}: "
+                        f"{exc}"
+                    )
+        except OSError as exc:
+            print(f"Failed to write {out_path}: {exc}")
+            raise typer.Exit(1)
+        suffix = " (owner-only, contains secrets)" if no_redact else ""
+        print(f"Wrote resolved gateway config to {out_path}{suffix}")
+
+    if resolved:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+
+
 hooks_app = typer.Typer(
     help="Manage inbound trigger hooks (POST /hooks/<path>) in gateway.yaml",
     no_args_is_help=True,
@@ -2556,6 +2660,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]restart[/green]     Gracefully drain + relaunch (daemon-aware)
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
+  [green]config[/green]      Show/export the resolved effective config (--resolved | --export)
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
   [green]test[/green]        One-shot readiness (probes + shell + optional turn)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)

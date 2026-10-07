@@ -163,6 +163,232 @@ def load_start_flags(host: str, port: int) -> Dict:
     return {k: v for k, v in data.items() if k in _START_FLAG_KEYS}
 
 
+# Where each persisted CLI start-flag actually lives in a promotable
+# ``gateway.yaml`` (Greptile P1 — "Exported settings are ignored"). The hidden
+# start-flags side file keys everything flat, but the gateway loader reads
+# OpenAI/MCP + reliability + admission knobs from ``gateway.*``, lifecycle knobs
+# from a ``lifecycle:`` block, and identity from a top-level ``identity:`` block.
+# Writing each knob into its real home means the exported YAML, once promoted,
+# reproduces the running posture instead of being silently ignored.
+_START_FLAG_YAML_HOME = {
+    # top-level launch input (not a gateway.* key)
+    "agent_file": ("agent_file",),
+    # gateway.* knobs
+    "drain_timeout": ("gateway", "drain_timeout"),
+    "max_concurrent_runs": ("gateway", "max_concurrent_runs"),
+    "queue_depth": ("gateway", "queue_depth"),
+    "overflow_policy": ("gateway", "overflow_policy"),
+    "reliability": ("gateway", "reliability"),
+    "trusted_proxies": ("gateway", "trusted_proxies"),
+    # OpenAI-compat / MCP surface lives under gateway.api.*
+    "openai_api": ("gateway", "api", "openai"),
+    "mcp": ("gateway", "api", "mcp"),
+    # lifecycle (scale-to-zero) block
+    "scale_to_zero": ("lifecycle", "scale_to_zero"),
+    "idle_minutes": ("lifecycle", "idle_minutes"),
+    "drain_marker": ("lifecycle", "drain_marker"),
+    # watchdog block
+    "watchdog": ("gateway", "watchdog", "enabled"),
+    "watchdog_timeout": ("gateway", "watchdog", "timeout"),
+    # cross-platform identity store
+    "identity_store": ("identity", "store"),
+}
+
+
+def _assign_nested(root: Dict, path: tuple, value) -> None:
+    """Set ``value`` at the nested ``path`` inside ``root`` (creating maps)."""
+    node = root
+    for key in path[:-1]:
+        child = node.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            node[key] = child
+        node = child
+    node[path[-1]] = value
+
+
+def resolve_effective_config(
+    host: str, port: int, config_file: Optional[str] = None
+) -> Dict:
+    """Resolve the effective gateway configuration actually in force (#5646).
+
+    Merges the declared config (``gateway.yaml`` / ``bot.yaml``) with the
+    CLI-only runtime posture persisted at ``start`` time (the hidden
+    ``gateway.start.<host>.<port>.json`` side file) so a single document
+    describes how the gateway is really running — not a partial YAML plus an
+    opaque, operator-invisible side file.
+
+    Precedence (lowest → highest): declared YAML < persisted CLI start-flags.
+    ``None`` persisted values mean "fall back to YAML" and are already dropped
+    on persist, so they never clobber a declared value here.
+
+    The persisted ``config_file`` key resolves which YAML to read when
+    ``config_file`` is not passed explicitly, so the snapshot reflects the file
+    the running process was launched against (Greptile P1 — "Wrong config file
+    selected").
+
+    Each CLI knob is written into its real ``gateway.yaml`` home
+    (``_START_FLAG_YAML_HOME``) so the resolved document, once promoted, actually
+    reproduces the running posture (Greptile P1 — "Exported settings are
+    ignored").
+
+    Returns a plain dict (NOT yet redacted) with ``declared`` / ``cli_overrides``
+    / ``resolved`` plus the ``host`` / ``port`` / ``config_file`` the snapshot was
+    keyed by, and a ``declared_error`` string when the declared YAML was
+    requested but could not be loaded (Greptile P1 — "Incomplete export
+    succeeds"). Use :func:`export_effective_config` for a secret-redacted,
+    serialisable view.
+    """
+    import yaml
+
+    overrides = load_start_flags(host, port)
+
+    # The file the running process was launched against wins over any file
+    # discovered relative to the current working directory, so a ``config``
+    # invoked from a different cwd (or after ``start --config X``) still reflects
+    # the real posture (Greptile P1 — "Wrong config file selected").
+    resolved_config_file = overrides.get("config_file") or config_file
+    declared: Dict = {}
+    declared_path: Optional[str] = None
+    declared_error: Optional[str] = None
+    if resolved_config_file:
+        if not os.path.exists(resolved_config_file):
+            declared_error = f"declared config not found: {resolved_config_file}"
+        else:
+            try:
+                with open(resolved_config_file) as fh:
+                    loaded = yaml.safe_load(fh)
+                if loaded is None:
+                    declared_error = (
+                        f"declared config is empty: {resolved_config_file}"
+                    )
+                elif not isinstance(loaded, dict):
+                    declared_error = (
+                        f"declared config is not a YAML mapping: "
+                        f"{resolved_config_file}"
+                    )
+                else:
+                    declared = loaded
+                    declared_path = resolved_config_file
+            except (OSError, yaml.YAMLError) as exc:
+                declared_error = (
+                    f"could not read declared config {resolved_config_file}: {exc}"
+                )
+        if declared_error:
+            logger.warning("%s", declared_error)
+
+    # Merge each persisted knob into its real YAML home so the resolved document
+    # reads back exactly like a gateway.yaml an operator could promote.
+    resolved: Dict = dict(declared)
+    cli_overrides: Dict = {}
+    for key, value in overrides.items():
+        if key == "config_file":
+            continue
+        cli_overrides[key] = value
+        home = _START_FLAG_YAML_HOME.get(key)
+        if home is None:
+            # Unknown future knob: fall back to a flat gateway.* placement so it
+            # is at least visible rather than dropped.
+            home = ("gateway", key)
+        _assign_nested(resolved, home, value)
+
+    return {
+        "host": host,
+        "port": port,
+        "config_file": declared_path,
+        "declared": declared,
+        "declared_error": declared_error,
+        "cli_overrides": cli_overrides,
+        "resolved": resolved,
+    }
+
+
+def _is_secret_key(key, secret_keys) -> bool:
+    """True when ``key`` names a credential.
+
+    Matches the diagnostics ``_SECRET_KEYS`` by substring, not exact equality,
+    so plugin-defined fields like ``nickserv_password`` or ``bot_api_key`` are
+    redacted too (Greptile P1 — "Plugin secrets remain visible"). The base set
+    holds the credential *tokens* (``token``, ``password``, ``secret``,
+    ``api_key`` …); any key containing one of them is treated as secret-bearing.
+    """
+    lname = str(key).lower()
+    return any(token in lname for token in secret_keys)
+
+
+def _redact_secret_values(value, *, _require_keys: bool = True):
+    """Mask only secret-bearing keys, preserving every other value (#5646).
+
+    Unlike the diagnostics bundle's shape-only sanitiser (which reduces *every*
+    scalar to its type so nothing leaks), a promotable config must keep its
+    real, non-secret values — drain windows, policies, channel platforms — so an
+    operator can diff it against ``gateway.yaml`` and commit it. Only values
+    under a credential-named key (reusing the diagnostics ``_SECRET_KEYS`` set,
+    matched by substring) are replaced with a ``<set>``/``<empty>`` marker.
+
+    Fails closed: if the diagnostics secret-key set cannot be imported we raise
+    rather than return an unredacted document that looks redacted (Greptile P2 —
+    "Redaction failure exposes secrets").
+    """
+    try:
+        from praisonai_bot.gateway.diagnostics import _SECRET_KEYS
+    except Exception as exc:  # pragma: no cover — defensive
+        if _require_keys:
+            raise RuntimeError(
+                "Cannot redact gateway config: the diagnostics secret-key set "
+                "is unavailable, so secrets cannot be masked. Re-run with "
+                "--no-redact for an explicitly un-redacted local snapshot."
+            ) from exc
+        _SECRET_KEYS = frozenset()
+
+    def _walk(node):
+        if isinstance(node, dict):
+            out = {}
+            for key, val in node.items():
+                if _is_secret_key(key, _SECRET_KEYS):
+                    out[key] = "<set>" if val not in (None, "") else "<empty>"
+                else:
+                    out[key] = _walk(val)
+            return out
+        if isinstance(node, list):
+            return [_walk(v) for v in node]
+        return node
+
+    return _walk(value)
+
+
+def export_effective_config(
+    host: str,
+    port: int,
+    config_file: Optional[str] = None,
+    redact: bool = True,
+) -> str:
+    """Serialise the resolved effective config to YAML for diff / commit (#5646).
+
+    Produces the ``resolved`` document from :func:`resolve_effective_config`
+    as YAML so an operator can diff it against their declared ``gateway.yaml``
+    and promote the running posture back into version control. When ``redact``
+    is ``True`` (the default) only secret-bearing values are reduced to presence
+    markers (reusing the diagnostics ``_SECRET_KEYS`` set, matched by substring)
+    while every other value is kept, so the output stays a usable, promotable
+    config. Pass ``redact=False`` for a local, un-redacted snapshot.
+
+    Raises ``ValueError`` when a declared config was requested but could not be
+    loaded (missing / empty / unreadable / not a mapping), so an operator never
+    receives a successful-looking snapshot that silently omits the gateway's
+    declared channels and agents (Greptile P1 — "Incomplete export succeeds").
+    """
+    import yaml
+
+    snapshot = resolve_effective_config(host, port, config_file=config_file)
+    if snapshot.get("declared_error"):
+        raise ValueError(snapshot["declared_error"])
+    resolved = snapshot["resolved"]
+    if redact:
+        resolved = _redact_secret_values(resolved)
+    return yaml.safe_dump(resolved, default_flow_style=False, sort_keys=False)
+
+
 class GatewayHandler:
     """Handler for gateway CLI commands."""
     
