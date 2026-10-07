@@ -79,6 +79,44 @@ def test_failed_parent_registration_reports_retained_child(store, monkeypatch, o
     assert store.get_parent(children[0]) == "parent"
 
 
+@pytest.mark.parametrize("operation", ["create", "fork"])
+def test_parent_lock_failure_reports_retained_child(store, monkeypatch, operation):
+    from praisonaiagents.session import hierarchy
+
+    original_enter = hierarchy.FileLock.__enter__
+    session_dir = store.session_dir
+
+    def existing_children():
+        return {
+            name[:-5]
+            for name in os.listdir(session_dir)
+            if name.endswith(".json") and name != "parent.json"
+        }
+
+    def fail_parent_lock(self):
+        if os.path.basename(self.filepath) == "parent.json" and existing_children():
+            raise OSError("injected parent lock acquisition failure")
+        return original_enter(self)
+
+    monkeypatch.setattr(hierarchy.FileLock, "__enter__", fail_parent_lock)
+    with pytest.raises(OSError) as excinfo:
+        if operation == "create":
+            store.create_session("child", parent_id="parent")
+        else:
+            store.fork_session("parent")
+    message = str(excinfo.value)
+    assert "registration with parent" in message
+    assert "parent" in message
+    if operation == "create":
+        assert "child" in message
+    assert excinfo.value.__cause__ is not None
+    store.invalidate_cache()
+    children = [row["session_id"] for row in store.list_sessions() if row["session_id"] != "parent"]
+    assert len(children) == 1
+    assert store.session_exists(children[0])
+    assert store.get_parent(children[0]) == "parent"
+
+
 @pytest.mark.parametrize("operation", ["create", "fork", "snapshot", "import"])
 def test_successful_operation_returns_persisted_id(store, operation):
     identifier = invoke(store, operation)
