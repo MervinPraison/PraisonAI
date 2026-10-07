@@ -659,9 +659,20 @@ class TestCreationPersistenceFailures:
 
     def test_create_session_parent_lock_failure_surfaces_child_id(self):
         """A parent-lock OSError must still report the saved child ID (P1)."""
+        import unittest.mock as mock
+
         parent = self.store.create_session(session_id="parent")
         self.store.add_user_message(parent, "seed")
-        with self._fail_parent_lock_for(parent):
+        real_modify = self.store._modify_session_locked
+
+        def _fail_parent_register(session_id, *args, **kwargs):
+            if session_id == parent:
+                raise OSError("simulated lock failure")
+            return real_modify(session_id, *args, **kwargs)
+
+        with mock.patch.object(
+            self.store, "_modify_session_locked", side_effect=_fail_parent_register
+        ):
             try:
                 self.store.create_session(session_id="child", parent_id=parent)
                 assert False, "expected OSError"
@@ -717,22 +728,18 @@ class TestCreationPersistenceFailures:
             return result
 
         import unittest.mock as mock
-        from praisonaiagents.session import store as store_mod
 
-        parent_lock = self.store._get_session_path(parent) + ".lock"
-        real_acquire = store_mod.FileLock.acquire
+        real_modify = self.store._modify_session_locked
 
-        def _maybe_boom(lock_self):
-            if (
-                saved["done"]
-                and os.path.abspath(lock_self._lock_path)
-                == os.path.abspath(parent_lock)
-            ):
+        def _fail_parent_register(session_id, *args, **kwargs):
+            if session_id == parent and saved["done"]:
                 raise OSError("simulated lock failure")
-            return real_acquire(lock_self)
+            return real_modify(session_id, *args, **kwargs)
 
         with mock.patch.object(self.store, "_save_extended_session", _capture):
-            with mock.patch.object(store_mod.FileLock, "acquire", _maybe_boom):
+            with mock.patch.object(
+                self.store, "_modify_session_locked", side_effect=_fail_parent_register
+            ):
                 try:
                     self.store.fork_session(parent)
                     assert False, "expected OSError"
