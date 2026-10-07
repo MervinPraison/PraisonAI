@@ -209,3 +209,18 @@ def test_same_id_replacement_during_summary_is_not_deleted(tmp_path):
     summaries = reopened.export()["long_term"]
     assert len(summaries) == 1
     assert summaries[0]["metadata"]["items_compressed"] == 2
+
+
+@pytest.mark.parametrize("contents,keep", [(["first", "second"], 0), (["first", "second"], 1), (["same", "same"], 1)])
+def test_duplicate_import_ids_preserve_each_compression_record(tmp_path, contents, keep):
+    """Compression consumes only the selected occurrences of duplicate IDs."""
+    memory = FileMemory(user_id="duplicates", base_path=tmp_path)
+    memory.add_short_term("seed")
+    seed = memory.export()["short_term"][0]
+    memory.import_data({"short_term": [dict(seed, content=value) for value in contents]})
+    summary = memory.compress(max_items=keep)
+    reopened = FileMemory(user_id="duplicates", base_path=tmp_path)
+    selected = contents[:-keep] if keep else contents
+    assert summary == "Compressed context: " + " | ".join(selected) + "..."
+    assert [item["content"] for item in reopened.export()["short_term"]] == (contents[-keep:] if keep else [])
+    assert reopened.export()["long_term"][0]["metadata"]["items_compressed"] == len(selected)

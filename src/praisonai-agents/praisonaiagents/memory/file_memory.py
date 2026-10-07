@@ -25,6 +25,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import threading
 import weakref
+from collections import Counter
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -1542,11 +1543,6 @@ class FileMemory:
             
             # Gather content to compress while holding lock
             items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
-            compressed_ids = {item.id for item in items_to_compress}
-            # Remember each selected record's content so a same-id replacement
-            # (e.g. import_data during the unlocked summarization) is detected
-            # and excluded instead of being summarized stale and then deleted.
-            compressed_content = {item.id: item.content for item in items_to_compress}
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
         while items_to_compress:
@@ -1573,21 +1569,19 @@ Summary:"""
                 # content. Evicted records (turnover) and same-id replacements
                 # (import_data) are both excluded so we never summarize stale
                 # content and then delete the record that replaced it.
-                survivors = [
-                    MemoryItem.from_dict(item) for item in current
-                    if item["id"] in compressed_ids
-                    and item["content"] == compressed_content[item["id"]]
-                ]
+                available = Counter((item["id"], item["content"]) for item in current)
+                survivors = []
+                for item in items_to_compress:
+                    key = (item.id, item.content)
+                    if available[key]:
+                        survivors.append(item)
+                        available[key] -= 1
                 if len(survivors) != len(items_to_compress):
                     # Summarize the survivors afresh, never records added during
-                    # this call. Every retry drops at least one id, so retries
+                    # this call. Every retry drops at least one record, so retries
                     # are finite; a peer that consumed the whole snapshot
                     # produces no duplicate.
                     items_to_compress = survivors
-                    compressed_ids = {item.id for item in items_to_compress}
-                    compressed_content = {
-                        item.id: item.content for item in items_to_compress
-                    }
                     continue
                 summary_id = self.add_long_term(
                     content=f"[Session Summary] {summary}",
@@ -1598,11 +1592,14 @@ Summary:"""
                 if not any(item["id"] == summary_id for item in retained):
                     return ""
                 # Remove sources only after verifying their summary survived retention.
-                self._short_term = [
-                    MemoryItem.from_dict(item)
-                    for item in self._read_json(self.short_term_file, [])
-                    if item["id"] not in compressed_ids
-                ]
+                remaining = Counter((item.id, item.content) for item in items_to_compress)
+                self._short_term = []
+                for item in self._read_json(self.short_term_file, []):
+                    key = (item["id"], item["content"])
+                    if remaining[key]:
+                        remaining[key] -= 1
+                    else:
+                        self._short_term.append(MemoryItem.from_dict(item))
                 self._save_short_term()
         
             self._log(f"Compressed {len(items_to_compress)} items into summary")
