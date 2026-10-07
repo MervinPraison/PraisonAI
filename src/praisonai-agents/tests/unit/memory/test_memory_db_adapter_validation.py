@@ -21,14 +21,35 @@ from praisonaiagents.config.feature_configs import MemoryConfig
 
 
 class _FakeAdapter:
-    """Minimal object exposing the DbAdapter entry hook."""
+    """Minimal object exposing the DbAdapter lifecycle hooks the bridge calls."""
 
     def on_agent_start(self, *args, **kwargs):
         return []
 
+    def on_user_message(self, *args, **kwargs):
+        return None
 
-class _FakeDbInstance:
-    """Minimal object shaped like a db(...) backend instance."""
+    def on_agent_message(self, *args, **kwargs):
+        return None
+
+
+class _FakeDbInstance(_FakeAdapter):
+    """Minimal object shaped like a db(...) backend instance.
+
+    A real ``db(...)`` instance implements the DbAdapter hooks *and* carries a
+    ``database_url``; it inherits the hooks here so it stays a valid adapter.
+    """
+
+    database_url = "sqlite:///tmp/x.db"
+
+
+class _UrlOnlyDbInstance:
+    """Half-built object exposing ``database_url`` but none of the hooks.
+
+    ``database_url`` alone is not enough: the memory bridge still calls
+    ``on_agent_start``/``on_user_message``/``on_agent_message`` and would drop
+    every message. Such an object must be rejected (Issue #5668 hardening).
+    """
 
     database_url = "sqlite:///tmp/x.db"
 
@@ -68,6 +89,14 @@ def test_adapter_db_is_accepted():
 def test_db_instance_is_accepted():
     cfg = MemoryConfig(db=_FakeDbInstance())
     assert cfg.db.database_url
+    assert callable(cfg.db.on_agent_start)
+
+
+def test_url_only_object_without_hooks_is_rejected():
+    # database_url alone would pass a weaker check but still drop every message.
+    with pytest.raises(TypeError) as exc:
+        MemoryConfig(db=_UrlOnlyDbInstance())
+    assert "on_agent_start" in str(exc.value)
 
 
 def test_none_db_is_accepted():
