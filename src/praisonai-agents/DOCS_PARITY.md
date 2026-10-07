@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2808 |
 | ✅ Bots | 7 | 39 | 16336 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39240 |
+| ✅ CLI | 5 | 124 | 39310 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
@@ -52,7 +52,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5958 |
 | ✅ Loops | 4 | 5 | 1478 |
 | ✅ MCP | 1 | 64 | 15116 |
-| ✅ Memory | 6 | 21 | 8286 |
+| ✅ Memory | 6 | 21 | 8386 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3720 |
 | ✅ Security | 1 | 3 | 3642 |
-| ✅ Sessions | 4 | 21 | 8473 |
+| ✅ Sessions | 4 | 21 | 8477 |
 | ✅ Skills | 6 | 16 | 6045 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (44 docs, 8359 lines)
+- ℹ️ Database (44 docs, 8363 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 
