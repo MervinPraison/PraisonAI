@@ -14,8 +14,11 @@ gate (no wrapper imports in the hot-path files) is unaffected: the in-process
 text render imports ``praisonaiagents`` lazily inside the run, exactly like the
 structured modes already do.
 
-The valuable fix from #2839 preserved here is the corrected error hint, which
-now cites `praisonai-code run --output actions` instead of `praisonai`.
+`_require_wrapper_for_default_run` therefore only fails for genuinely
+wrapper-only features (currently `--image`, which routes through the wrapper's
+vision ImageHandler). `_direct_prompt_needs_wrapper` still reports that text
+modes use the wrapper *path* (so an installed wrapper keeps delegating to its
+richer `handle_direct_prompt`).
 """
 
 import pytest
@@ -258,3 +261,41 @@ def test_image_command_run_gates_without_wrapper(no_wrapper, monkeypatch):
 
     assert messages
     assert "--image" in messages[0]
+
+
+def test_render_default_prompt_in_process(monkeypatch):
+    """Default text run renders from an in-process Agent (no wrapper import)."""
+    import sys
+    import types
+
+    captured = {}
+
+    class _FakeAgent:
+        def __init__(self, **cfg):
+            captured["cfg"] = cfg
+
+        def start(self, prompt):
+            captured["prompt"] = prompt
+            return "rendered answer"
+
+    fake_mod = types.ModuleType("praisonaiagents")
+    fake_mod.Agent = _FakeAgent
+    monkeypatch.setitem(sys.modules, "praisonaiagents", fake_mod)
+    # Force the status-output import to fail so the simple path is exercised.
+    monkeypatch.setitem(sys.modules, "praisonaiagents.output.status", None)
+
+    class _Args:
+        llm = None
+        max_tokens = None
+        verbose = 0
+        quiet = 0
+        thinking_budget = None
+
+    class _Output:
+        pass
+
+    result = run_cmd._render_default_prompt_in_process("hello", _Args(), _Output())
+
+    assert result == "rendered answer"
+    assert captured["prompt"] == "hello"
+    assert captured["cfg"]["name"] == "RunAgent"

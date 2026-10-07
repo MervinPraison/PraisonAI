@@ -387,6 +387,12 @@ def test_append_system_prompt_bypasses_warm_runtime(monkeypatch):
     fake_main = types.ModuleType("praisonai_code.cli.main")
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+    # This test asserts routing (no warm-runtime forwarding), not the standalone
+    # render path; pretend the wrapper is installed so the text run delegates to
+    # the fake handle_direct_prompt instead of the real in-process Agent.
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
 
     # Since #5644 a standalone text run renders in-process, so the sink here is
     # the real praisonaiagents Agent — stub it to keep the test hermetic. The

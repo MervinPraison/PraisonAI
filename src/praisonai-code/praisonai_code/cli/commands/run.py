@@ -342,7 +342,7 @@ def _direct_prompt_needs_wrapper(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> bool:
-    """True when a text prompt run uses the wrapper-only handle_direct_prompt path.
+    """True when a text prompt run takes the wrapper's handle_direct_prompt path.
 
     Structured modes (``_IN_PROCESS_OUTPUT_MODES``) always run in-process via the
     Agent path, so they never need the wrapper. Human-readable text modes
@@ -450,6 +450,81 @@ def _require_wrapper_for_default_run(
         "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
     raise typer.Exit(1)
+
+
+def _render_default_prompt_in_process(prompt, args, output) -> object:
+    """Run a default/plain/verbose/silent text prompt without the wrapper.
+
+    Reuses the same in-process ``Agent`` the ``--output actions`` fast path
+    already builds so a standalone ``praisonai-code`` install delivers the
+    default human-readable run on its own — no ``pip install praisonai``
+    required. ``praisonaiagents`` is imported function-locally to keep the C7
+    hot path free of a module-level Agent import.
+
+    The verbosity ladder mirrors the wrapper renderer: ``-qq`` is silent
+    (exit code only), ``-q`` prints the result text only, ``-v``/``-vv`` enable
+    the SDK status/trace output, and the default shows clean inline status.
+    """
+    from praisonaiagents import Agent
+
+    agent_config = {
+        "name": "RunAgent",
+        "role": "Assistant",
+        "goal": "Complete the given task",
+        "backstory": "You are a helpful AI assistant",
+    }
+    if getattr(args, "llm", None):
+        agent_config["llm"] = _llm_spec_with_max_tokens(
+            args.llm, args.llm, getattr(args, "max_tokens", None)
+        )
+
+    verbose = getattr(args, "verbose", 0) or 0
+    quiet = getattr(args, "quiet", 0) or 0
+    agent_config["output"] = "verbose" if verbose >= 1 else "minimal"
+
+    agent = Agent(**agent_config)
+    if getattr(args, "thinking_budget", None) is not None:
+        agent.thinking_budget = args.thinking_budget
+
+    run = agent.start if hasattr(agent, "start") else agent.chat
+
+    if quiet >= 2:
+        return run(prompt)
+    if quiet >= 1:
+        result = run(prompt)
+        text = getattr(result, "output", None) or (str(result) if result else None)
+        if text:
+            print(text)
+        return result
+    if verbose >= 2:
+        try:
+            from praisonaiagents.output.trace import (
+                enable_trace_output,
+                disable_trace_output,
+            )
+
+            enable_trace_output(use_markdown=True)
+            try:
+                return run(prompt)
+            finally:
+                disable_trace_output()
+        except ImportError:
+            return run(prompt)
+    try:
+        from praisonaiagents.output.status import (
+            enable_status_output,
+            disable_status_output,
+        )
+
+        enable_status_output(
+            show_timestamps=verbose >= 1, show_metrics=verbose >= 1
+        )
+        try:
+            return run(prompt)
+        finally:
+            disable_status_output()
+    except ImportError:
+        return run(prompt)
 
 
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
@@ -2658,8 +2733,19 @@ def _run_prompt(
         
         praison.args = args
 
-        result = praison.handle_direct_prompt(prompt)
-        
+        # When the wrapper is installed, delegate to its richer
+        # handle_direct_prompt (full feature surface) so existing users see no
+        # change. On a standalone install the wrapper is absent; render the
+        # default human-readable run in-process from the same Agent the
+        # structured modes already use, so `pip install praisonai-code` alone
+        # delivers the default run. --image already gated above as wrapper-only.
+        from praisonai_code._wrapper_bridge import wrapper_available
+
+        if wrapper_available():
+            result = praison.handle_direct_prompt(prompt)
+        else:
+            result = _render_default_prompt_in_process(prompt, args, output)
+
         _record_session_usage(session_id or auto_save_name, model, output)
         if not _run_succeeded(result):
             _report_run_failure(output)
