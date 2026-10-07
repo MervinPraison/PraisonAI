@@ -72,6 +72,7 @@ const OPTIONAL_PENDING_WHEN_CORE_GREEN = new Set([
   'main (3.11)',
   'openai-live',
   'test-summary',
+  'GitGuardian Security Checks',
 ]);
 /** PR authors eligible for claude merge-gate auto-merge (triage fleet only). */
 const AUTO_MERGE_AUTHOR_LOGINS = new Set([
