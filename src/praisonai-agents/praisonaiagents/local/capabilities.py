@@ -53,6 +53,7 @@ class Cap(str, Enum):
     STREAMING_WITH_TOOLS = "streaming_with_tools"
     PARALLEL_TOOL_CALLS = "parallel_tool_calls"
     EMBEDDINGS_ENDPOINT = "embeddings_endpoint"
+    SYSTEM_ONE = "system_one"
 
 
 class Evidence(str, Enum):
@@ -105,6 +106,9 @@ _OLLAMA_CAP_MAP = {
     "thinking": (Cap.THINKING,),
     "embedding": (Cap.EMBEDDINGS_ENDPOINT,),
     "audio": (Cap.AUDIO_IN,),
+    "decision": (Cap.SYSTEM_ONE,),
+    "systemone": (Cap.SYSTEM_ONE,),
+    "system_one": (Cap.SYSTEM_ONE,),
 }
 
 
