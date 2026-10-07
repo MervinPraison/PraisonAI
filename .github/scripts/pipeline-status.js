@@ -66,6 +66,7 @@ function reasonToBlockerLabel(reason) {
   if (
     r.includes('manual') ||
     r.includes('requires manual') ||
+    r.includes('maintainer-only author') ||
     r.includes('sensitive path') ||
     r.includes('no-auto-merge') ||
     r.includes('manual-only label') ||
@@ -221,6 +222,12 @@ function isUpstreamHeadRepo(pr, owner, repo) {
 
 async function syncOpenPullRequests(github, owner, repo, options, core) {
   const { maxPrs = 20, dispatchMergeGate = true } = options || {};
+  const mergeGate = require('./merge-gate.js');
+  const remaining = await mergeGate.getCoreRateLimitRemaining(github);
+  if (remaining !== null && remaining < mergeGate.MIN_CORE_RATE_LIMIT_REMAINING) {
+    core?.warning?.(`Skip pipeline sync: rate limit low (${remaining} core remaining)`);
+    return 0;
+  }
   await ensurePipelineLabels(github, owner, repo, core);
   let prs;
   if (maxPrs <= 100) {

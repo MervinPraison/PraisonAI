@@ -749,11 +749,11 @@ class OpenAIClient:
         for msg in messages:
             role = msg.get("role", "")
             if role in ("system", "developer"):
-                content = msg.get("content", "")
+                content = self._normalise_instruction_content(msg.get("content", ""))
                 if instructions is None:
                     instructions = content
                 else:
-                    instructions += "\n" + content
+                    instructions = instructions + "\n" + content
             else:
                 # Handle Chat Completions → Responses API format transforms
                 if role == "assistant" and msg.get("tool_calls"):
@@ -841,6 +841,35 @@ class OpenAIClient:
             raise ValueError(f"Unsupported local image type: {image_path}")
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
+
+    @staticmethod
+    def _normalise_instruction_content(content: Any) -> str:
+        """Normalise system/developer content into a plain instruction string.
+
+        Accepts a plain string or a Chat Completions-style list of text parts
+        (``[{"type": "text", "text": "..."}]``) and returns the concatenated
+        text. Non-text parts are rejected explicitly rather than silently
+        discarded. The caller-owned content is never mutated.
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts: List[str] = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    texts.append(part.get("text", ""))
+                else:
+                    raise ValueError(
+                        "Unsupported system/developer instruction content part: "
+                        f"{part!r}. Only plain strings or text parts "
+                        "({'type': 'text', 'text': ...}) are supported."
+                    )
+            return "\n".join(texts)
+        raise ValueError(
+            f"Unsupported system/developer instruction content: {content!r}"
+        )
 
     @classmethod
     def _build_responses_content(cls, content: Any) -> Any:

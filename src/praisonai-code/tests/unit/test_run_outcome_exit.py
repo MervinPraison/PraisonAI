@@ -22,6 +22,7 @@ class _RecordingOutput:
         self.printed_errors = []
         self.warnings = []
         self.is_json_mode = False
+        self.is_quiet = False
 
     def emit_result(self, message=None, data=None):
         self.results.append((message, data))
@@ -267,6 +268,16 @@ def test_actions_stream_reports_truncated_run_not_ok(monkeypatch):
             pass
 
     hierarchy_mod.HierarchicalSessionStore = _HierarchicalSessionStore
+
+    # ``..state.project_sessions`` binds ``DefaultSessionStore`` by *name* at
+    # import time. If it first loads while these stubs are active it keeps the
+    # stub class even after monkeypatch restores ``sys.modules`` — leaking a
+    # store without ``get_chat_history`` into later tests that build a real
+    # session (Greptile #5685 isolation finding). Import it *now*, against the
+    # real modules, so the stub swap below can never be the module's first load.
+    import importlib
+    importlib.import_module("praisonai_code.cli.state.project_sessions")
+
     monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
     monkeypatch.setitem(sys.modules, "praisonaiagents.session", session_pkg)
     monkeypatch.setitem(sys.modules, "praisonaiagents.session.store", store_mod)
@@ -377,6 +388,18 @@ def test_append_system_prompt_bypasses_warm_runtime(monkeypatch):
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
 
+    # Since #5644 a standalone text run renders in-process, so the sink here is
+    # the real praisonaiagents Agent — stub it to keep the test hermetic. The
+    # subject stays the warm-runtime bypass, not the render path.
+    class _FakeAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            return "done"
+
+    monkeypatch.setattr("praisonaiagents.Agent", _FakeAgent)
+
     run_cmd._run_prompt(
         "refactor this",
         no_save=True,
@@ -421,3 +444,210 @@ def test_no_append_still_allows_warm_runtime(monkeypatch):
     run_cmd._run_prompt("refactor this", no_save=True)
 
     assert attach_calls, "an eligible no-save run should attach to the warm runtime"
+
+
+class _CapturingAgent:
+    """Fake core Agent that records its build config and the prompt it ran."""
+
+    last_config = None
+    last_prompt = None
+
+    def __init__(self, **cfg):
+        type(self).last_config = cfg
+
+    def start(self, prompt):
+        type(self).last_prompt = prompt
+        return "the answer"
+
+
+def _install_inprocess_agent_stubs(monkeypatch, agent_factory):
+    """Wire the minimal praisonaiagents + wrapper stubs for an in-process run.
+
+    The wrapper's ``PraisonAI`` is installed with a ``handle_direct_prompt`` that
+    *raises*, so any test asserting a mode runs in-process also proves the run
+    never fell through to the wrapper delegation path (the exact #5665 bug).
+    """
+    import importlib
+    import sys
+    import types
+
+    class _MemoryConfig:  # pragma: no cover - simple record stub
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.auto_save = kwargs.get("auto_save")
+            self.session_id = kwargs.get("session_id")
+
+    # Prefer patching ``Agent``/``MemoryConfig`` *on the real package* rather
+    # than swapping ``sys.modules["praisonaiagents"]`` for an empty stub:
+    # ``..state.project_sessions`` imports real submodules
+    # (``praisonaiagents.session.store``) at load time, and a bare stub left a
+    # corrupted ``praisonaiagents`` behind for later tests that build a genuine
+    # session store (Greptile #5685 isolation finding). monkeypatch.setattr
+    # restores the originals automatically.
+    try:
+        real_pkg = importlib.import_module("praisonaiagents")
+    except Exception:  # pragma: no cover - standalone env without the core pkg
+        real_pkg = None
+
+    if real_pkg is not None:
+        monkeypatch.setattr(real_pkg, "Agent", agent_factory, raising=False)
+        monkeypatch.setattr(real_pkg, "MemoryConfig", _MemoryConfig, raising=False)
+    else:
+        pkg = types.ModuleType("praisonaiagents")
+        pkg.__path__ = []
+        pkg.Agent = agent_factory
+        pkg.MemoryConfig = _MemoryConfig
+        monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
+
+    fake_main = types.ModuleType("praisonai_code.cli.main")
+
+    class _FailingWrapper:
+        def __init__(self, *a, **k):
+            self.config_list = [{}]
+            self.args = None
+
+        def handle_direct_prompt(self, prompt):  # pragma: no cover - must not run
+            raise AssertionError(
+                "structured modes must run in-process, not via the wrapper"
+            )
+
+    fake_main.PraisonAI = _FailingWrapper
+    monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+
+
+def _make_output(monkeypatch, *, json_mode=False):
+    output = _RecordingOutput()
+    output.is_json_mode = json_mode
+    output.is_verbose = False
+    output.mode = None
+    _noop = lambda *a, **k: None
+    output.print_info = _noop
+    output.print_success = _noop
+    output.emit_start = _noop
+    output.emit_event = _noop
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+    return output
+
+
+@pytest.mark.parametrize("mode", ["actions", "json", "stream", "stream-json"])
+def test_structured_modes_run_in_process_not_wrapper(monkeypatch, mode, capsys):
+    """Regression guard for #5665: json/stream/stream-json dispatch in-process.
+
+    If the dispatch condition were reverted to ``output_mode == "actions"`` the
+    other three modes would reach the wrapper's ``handle_direct_prompt`` stub,
+    which raises — so this fails loudly on the exact bug the PR fixes. It also
+    pins the per-mode stdout contract (json envelope / stream text / no raw text
+    for stream-json).
+    """
+    _CapturingAgent.last_prompt = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=(mode == "json"))
+
+    run_cmd._run_prompt("summarise this", output_mode=mode, no_save=True)
+
+    # The in-process Agent actually ran (the model path, not the wrapper).
+    assert _CapturingAgent.last_prompt == "summarise this"
+
+    out = capsys.readouterr().out
+    if mode == "json":
+        import json as _json
+        # Every terminal outcome carries a machine-readable {result, status}
+        # envelope on stdout (the scripting contract).
+        assert _json.loads(out.strip()) == {"result": "the answer", "status": "ok"}
+    elif mode == "stream":
+        assert out.strip() == "the answer"
+    elif mode == "actions":
+        # The core actions preset renders its own output; the CLI prints nothing.
+        assert out.strip() == ""
+    else:  # stream-json: a non-JSON silent preset, so the CLI prints the answer;
+        # genuine NDJSON event framing is added by the bridge in JSON mode.
+        assert out.strip() == "the answer"
+
+
+@pytest.mark.parametrize("mode", ["json", "stream"])
+def test_truncated_run_surfaces_partial_answer_before_exit(monkeypatch, mode, capsys):
+    """Greptile P1: a truncated json/stream run must still print its partial text.
+
+    The truncated/blocked reporters raise ``typer.Exit(2)``; the mode-specific
+    stdout payload must be emitted *before* that exit so a ``--output json`` pipe
+    is not empty and a ``--output stream`` user keeps the partial answer.
+    """
+
+    class _TruncatedAgent(_CapturingAgent):
+        last_stop_reason = "max_steps"
+
+        def start(self, prompt):
+            type(self).last_prompt = prompt
+            return "partial summary"
+
+    _install_inprocess_agent_stubs(monkeypatch, _TruncatedAgent)
+    _make_output(monkeypatch, json_mode=(mode == "json"))
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("big task", output_mode=mode, no_save=True)
+
+    assert exc.value.exit_code == 2
+    out = capsys.readouterr().out
+    if mode == "json":
+        import json as _json
+        assert _json.loads(out.strip()) == {
+            "result": "partial summary",
+            "status": "truncated",
+        }
+    else:
+        assert out.strip() == "partial summary"
+
+
+def test_quiet_stream_truncated_run_suppresses_partial_answer(monkeypatch, capsys):
+    """Greptile P2: a quiet `--output stream` run must honour quiet on exit-2.
+
+    ``_emit_partial`` prints the partial stream text directly, bypassing the
+    normal output controller. In QUIET mode ``is_json_mode`` is False, so it
+    would leak the answer unless it also checks ``is_quiet`` — this pins that.
+    """
+
+    class _TruncatedAgent(_CapturingAgent):
+        last_stop_reason = "max_steps"
+
+        def start(self, prompt):
+            type(self).last_prompt = prompt
+            return "partial summary"
+
+    _install_inprocess_agent_stubs(monkeypatch, _TruncatedAgent)
+    output = _make_output(monkeypatch, json_mode=False)
+    output.is_quiet = True
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("big task", output_mode="stream", no_save=True)
+
+    assert exc.value.exit_code == 2
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_inprocess_honors_explicit_memory_flag(monkeypatch):
+    """Greptile P1: `--memory` must reach the Agent even without a session name.
+
+    Routing json/stream/stream-json in-process previously dropped the explicit
+    memory flag (``build_cli_memory_config`` returns None without a session /
+    auto-save); the wrapper path used to set ``memory=True``. Keep that honored.
+    """
+    _CapturingAgent.last_config = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=True)
+
+    run_cmd._run_prompt(
+        "remember this", output_mode="json", memory=True, no_save=True
+    )
+
+    assert _CapturingAgent.last_config.get("memory") is True
+
+
+def test_inprocess_no_memory_flag_leaves_memory_unset(monkeypatch):
+    """Without `--memory` (and no session), the Agent is built memory-free."""
+    _CapturingAgent.last_config = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    _make_output(monkeypatch, json_mode=True)
+
+    run_cmd._run_prompt("no memory", output_mode="json", no_save=True)
+
+    assert "memory" not in _CapturingAgent.last_config

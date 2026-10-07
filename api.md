@@ -1001,6 +1001,8 @@ export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from "./db";
 export { MemoryPostgresAdapter, NeonPostgresAdapter, PostgresSessionStorage, createMemoryPostgres, createNeonPostgres, createPostgresSessionStorage } from "./db/postgres";
 export { MemoryRedisAdapter, UpstashRedisAdapter, createMemoryRedis, createUpstashRedis } from "./db/redis";
 export { SQLiteAdapter, createSQLiteAdapter } from "./db/sqlite";
+export { KNOWN_DECISION_MODELS, choiceQuestion, defaultTicketTriageQuestions, getChoice, getNoul, getScore, isDecisionModel, noulQuestion, resolveSystemOneBaseUrl, scoreQuestion, systemOne, triagedStart } from "./decisions";
+export type { DecisionAgentLike, DecisionRoutePlan, QuestionSpec, RouteTarget, SystemOneAnswer, SystemOneOptions, SystemOneResult } from "./decisions";
 export { // Functions
   // NB: the unaliased registerDisplayCallback name belongs to the per-type
   // callback registry (callbacks module, // Types

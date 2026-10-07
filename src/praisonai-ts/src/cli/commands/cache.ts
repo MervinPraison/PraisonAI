@@ -8,7 +8,8 @@ import * as os from 'os';
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
 import { EXIT_CODES } from '../spec/cli-spec';
-import { ERROR_CODES } from '../output/errors';
+import { ERROR_CODES, handleCommandError } from '../output/errors';
+import { printCommandHelp } from '../output/help';
 
 export interface CacheOptions {
   verbose?: boolean;
@@ -75,12 +76,7 @@ export async function execute(args: string[], options: CacheOptions): Promise<vo
         break;
     }
   } catch (error) {
-    if (outputFormat === 'json') {
-      outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
-    } else {
-      await pretty.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(EXIT_CODES.RUNTIME_ERROR);
+    await handleCommandError(outputFormat, error);
   }
 }
 
@@ -320,25 +316,12 @@ async function showHelp(outputFormat: string): Promise<void> {
     ]
   };
 
-  if (outputFormat === 'json') {
-    outputJson(formatSuccess(help));
-  } else {
-    await pretty.heading('Cache Command');
-    await pretty.plain(help.description);
-    await pretty.newline();
-    await pretty.plain('Subcommands:');
-    for (const cmd of help.subcommands) {
-      await pretty.plain(`  ${cmd.name.padEnd(25)} ${cmd.description}`);
-    }
-    await pretty.newline();
-    await pretty.plain('Flags:');
-    for (const flag of help.flags) {
-      await pretty.plain(`  ${flag.name.padEnd(20)} ${flag.description}`);
-    }
-    await pretty.newline();
-    await pretty.dim('Examples:');
-    await pretty.dim('  praisonai-ts cache set mykey "Hello World"');
-    await pretty.dim('  praisonai-ts cache get mykey');
-    await pretty.dim('  praisonai-ts cache list');
-  }
+  await printCommandHelp(outputFormat, help, {
+    heading: 'Cache Command',
+    examples: [
+      'praisonai-ts cache set mykey "Hello World"',
+      'praisonai-ts cache get mykey',
+      'praisonai-ts cache list'
+    ]
+  });
 }

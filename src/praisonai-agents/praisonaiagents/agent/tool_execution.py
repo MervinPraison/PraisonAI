@@ -1953,14 +1953,14 @@ class ToolExecutionMixin:
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
             if getattr(self, "_auto_memory", False):
                 self._process_auto_memory(prompt_str, str(response))
-            else:
-                # When memory is enabled but auto_memory extraction is off, still
-                # persist the raw turn so a later Agent sharing the same memory
-                # (e.g. memory={"user_id": uid}) can recall it. Without this the
-                # sync chat/run/start path wrote nothing and cross-session recall
-                # silently returned empty (issue #5595). Mirrors the write already
-                # done on the async unified path.
-                self._persist_memory_turn(prompt_str, str(response))
+            # Persist the raw turn whenever memory is enabled so a later Agent
+            # sharing the same store (e.g. memory={"user_id": uid}) can recall it.
+            # Runs even with auto_memory on: the pattern extractor is best-effort
+            # and misses arbitrary facts (e.g. "codename ORANGE-PANDA"), so it
+            # must augment — not replace — durable turn storage. Without this,
+            # cross-instance recall silently returned empty (issues #5595, #5667).
+            # No-op when _memory_instance is None.
+            self._persist_memory_turn(prompt_str, str(response))
 
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()

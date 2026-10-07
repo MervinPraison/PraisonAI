@@ -35,10 +35,79 @@ const withClaudeReply = [
     created_at: '2026-06-12T08:30:00Z',
   },
 ];
-assert('not stale when Claude replied after FINAL', !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z'));
+assert(
+  'not stale when Claude finished on HEAD',
+  !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T08:25:00Z')
+);
 assert('claude final reply detected', mg.isClaudeFinalReplyComment(withClaudeReply[1]));
 
+const finishedBeforeHead = [
+  ...finals,
+  {
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: "**Claude finished @MervinPraison's task**",
+    created_at: '2026-06-12T08:30:00Z',
+  },
+];
+assert(
+  'stale when head after Claude finished (no reply on HEAD)',
+  mg.isStaleFinalAfterPush(finishedBeforeHead, '2026-06-12T09:00:00Z')
+);
+const finishedOnHead = [
+  ...finals,
+  {
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: "**Claude finished @MervinPraison's task**",
+    created_at: '2026-06-12T09:30:00Z',
+  },
+];
+assert(
+  'not stale when Claude finished after head',
+  !mg.isStaleFinalAfterPush(finishedOnHead, '2026-06-12T09:00:00Z')
+);
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
+assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
+assert('ignorable pending when core green', mg.isIgnorablePendingCheck(
+  { name: 'claude-review-recovery', status: 'queued', conclusion: null },
+  [
+    { name: 'test-core', status: 'completed', conclusion: 'success' },
+    { name: 'test-core (cli)', status: 'completed', conclusion: 'success' },
+  ]
+));
+assert('non-optional pending still blocks', !mg.isIgnorablePendingCheck(
+  { name: 'test-core (root)', status: 'queued', conclusion: null },
+  [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
+));
+assert('pending smoke ignorable when test-core green', mg.isIgnorablePendingCheck(
+  { name: 'smoke', status: 'in_progress', conclusion: null },
+  [
+    { name: 'test-core', status: 'completed', conclusion: 'success' },
+    { name: 'test-core (agents-core)', status: 'completed', conclusion: 'success' },
+  ]
+));
+assert('pending main (3.11) ignorable when test-core green', mg.isIgnorablePendingCheck(
+  { name: 'main (3.11)', status: 'queued', conclusion: null },
+  [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
+));
+
+assert('triage bot is auto-merge author', mg.isAutoMergeAuthor({ login: 'praisonai-triage-agent[bot]' }));
+assert('triage bot CONTRIBUTOR association still allowed', mg.maintainerOnlyAuthorReason({
+  user: { login: 'praisonai-triage-agent[bot]' },
+  author_association: 'CONTRIBUTOR',
+}) === null);
+assert('external contributor blocked', mg.maintainerOnlyAuthorReason({
+  user: { login: 'dajiaohuang' },
+  author_association: 'CONTRIBUTOR',
+})?.includes('maintainer-only author'));
+assert('first-time contributor blocked', mg.maintainerOnlyAuthorReason({
+  user: { login: 'new-dev' },
+  author_association: 'FIRST_TIME_CONTRIBUTOR',
+})?.includes('FIRST_TIME_CONTRIBUTOR'));
+assert('maintainer login allowed', mg.maintainerOnlyAuthorReason({
+  user: { login: 'MervinPraison' },
+  author_association: 'OWNER',
+}) === null);
 
 const coreGreenRuns = [
   { name: 'test-core', status: 'completed', conclusion: 'success' },
@@ -252,6 +321,40 @@ assert('final trigger alone is incomplete', !mg.finalClaudeCompletedOnSha(
   [{ user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' }],
   '2026-06-27T09:55:00Z'
 ));
+
+// FINAL started before HEAD, Claude pushed a fix (new HEAD), then replied on HEAD.
+// The reply after HEAD must count as complete even though the FINAL trigger
+// predates HEAD by >1min (regression: previously blocked).
+const finalThenPushThenReply = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:40:00Z' },
+];
+assert(
+  'final complete when reply follows a later HEAD (fix-commit sequence)',
+  mg.finalClaudeCompletedOnSha(finalThenPushThenReply, '2026-06-27T10:30:00Z')
+);
+
+// Old finished reply follows HEAD but predates a NEW FINAL trigger — must NOT
+// count the old completion as satisfying the newer review.
+const oldReplyBeforeNewFinal = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T09:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T09:10:00Z' },
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+];
+assert(
+  'old reply before new FINAL does not count as complete',
+  !mg.finalClaudeCompletedOnSha(oldReplyBeforeNewFinal, '2026-06-27T08:55:00Z')
+);
+assert(
+  'stale-FINAL recovery not suppressed by reply predating HEAD',
+  mg.isStaleFinalAfterPush(
+    [
+      { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T08:00:00Z' },
+      { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T08:30:00Z' },
+    ],
+    '2026-06-27T09:00:00Z'
+  )
+);
 
 assert('recent scan comment detected', mg.hasRecentMergeGateScanComment([
   { body: '**Merge gate scan** — eligible', created_at: new Date().toISOString() },

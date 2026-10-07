@@ -1,0 +1,80 @@
+name: Rotate Claude OAuth
+
+# Shift: tertiary ← old secondary, secondary ← old primary, primary ← NEXT.
+# Before dispatch: set CLAUDE_CODE_OAUTH_TOKEN_NEXT on this repo (see claude-oauth-token-refresh skill).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rotate-and-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rotate hub OAuth chain and sync fleet
+        env:
+          GH_TOKEN: ${{ secrets.SECRETS_ADMIN_PAT }}
+          OLD_PRIMARY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OLD_SECONDARY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          NEW_PRIMARY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_NEXT }}
+          CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
+          CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN_B: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          CLAUDE_CODE_OAUTH_TOKEN_C: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_C }}
+          GH_TOKEN_VALUE: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "SECRETS_ADMIN_PAT is not configured"
+            exit 1
+          fi
+          if [ -z "${NEW_PRIMARY:-}" ]; then
+            echo "Set CLAUDE_CODE_OAUTH_TOKEN_NEXT on MervinPraison/PraisonAI first (refresh-claude-oauth.sh --rotate-primary)"
+            exit 1
+          fi
+
+          HUB=MervinPraison/PraisonAI
+          echo "Rotating on ${HUB}: C←B, B←P, P←NEXT"
+          if [ -n "${OLD_SECONDARY:-}" ]; then
+            echo -n "$OLD_SECONDARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN_C --repo "$HUB"
+          fi
+          if [ -n "${OLD_PRIMARY:-}" ]; then
+            echo -n "$OLD_PRIMARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN_B --repo "$HUB"
+          fi
+          echo -n "$NEW_PRIMARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo "$HUB"
+          gh secret delete CLAUDE_CODE_OAUTH_TOKEN_NEXT --repo "$HUB" 2>/dev/null || true
+
+          gh variable set CLAUDE_OAUTH_ACTIVE --body primary --repo "$HUB"
+
+          sync_repo() {
+            local target=$1
+            echo "Syncing → ${target}"
+            echo -n "$CLAUDE_APP_ID" | gh secret set CLAUDE_APP_ID --repo "$target"
+            echo -n "$CLAUDE_APP_PRIVATE_KEY" | gh secret set CLAUDE_APP_PRIVATE_KEY --repo "$target"
+            # Re-read after rotate — use env from this step (already updated on hub in gh; refresh from NEW chain)
+            echo -n "$NEW_PRIMARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo "$target"
+            if [ -n "${OLD_PRIMARY:-}" ]; then
+              echo -n "$OLD_PRIMARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN_B --repo "$target"
+            fi
+            if [ -n "${OLD_SECONDARY:-}" ]; then
+              echo -n "$OLD_SECONDARY" | gh secret set CLAUDE_CODE_OAUTH_TOKEN_C --repo "$target"
+            fi
+            echo -n "$GH_TOKEN_VALUE" | gh secret set GH_TOKEN --repo "$target"
+            gh variable set CLAUDE_OAUTH_ACTIVE --body primary --repo "$target"
+          }
+
+          FLEET=(
+            MervinPraison/github-automation-template
+            MervinPraison/PraisonAIUI
+            MervinPraison/PraisonAIDocs
+            MervinPraison/PraisonAI-Tools
+            MervinPraison/PraisonAI-Plugins
+            MervinPraison/praisonai-js
+          )
+          for repo in "${FLEET[@]}"; do
+            sync_repo "$repo"
+          done
+          echo "Rotate + fleet sync complete. CLAUDE_OAUTH_ACTIVE=primary on all targets."

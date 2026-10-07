@@ -590,8 +590,14 @@ class FileMemory:
             # Enforce limit
             limit = self.config["long_term_limit"]
             if len(self._long_term) > limit:
-                # Remove lowest importance items
-                self._long_term.sort(key=lambda x: x.importance, reverse=True)
+                # Remove lowest importance items. Break equal-importance ties by
+                # recency (newer first) so a freshly appended turn is not
+                # discarded in favour of an older equally-weighted one — raw
+                # conversation turns all share the default importance, and a
+                # later agent must still be able to prefetch the newest facts.
+                self._long_term.sort(
+                    key=lambda x: (x.importance, x.created_at), reverse=True
+                )
                 self._long_term = self._long_term[:limit]
             
             self._save_long_term()

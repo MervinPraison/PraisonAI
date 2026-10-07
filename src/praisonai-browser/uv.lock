@@ -932,7 +932,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-browser"
-version = "0.1.9"
+version = "0.1.10"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -976,7 +976,7 @@ provides-extras = ["server", "playwright", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.10"
+version = "1.7.11"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1024,6 +1024,7 @@ requires-dist = [
     { name = "praisonaiagents", extras = ["auth"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["autonomy"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["crawl"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["decisions"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["graph"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["knowledge"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["llm"], marker = "extra == 'all'" },
@@ -1043,12 +1044,13 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'auth'", specifier = ">=0.0.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
+    { name = "typesafe-sdk", marker = "extra == 'decisions'", specifier = ">=0.7.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'mcp'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["sandbox", "mcp", "parallel-search", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
+provides-extras = ["sandbox", "mcp", "parallel-search", "memory", "knowledge", "graph", "llm", "decisions", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "propcache"

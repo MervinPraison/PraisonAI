@@ -59,9 +59,9 @@ importing the wrapper. Only commands in `_WRAPPER_RESIDENT_COMMANDS` (see
 | `praisonai-code --version` | Yes | |
 | `run --help`, `config`, `doctor` | Yes | |
 | `run --output actions "…"` | Yes | In-process `Agent` (structured events). `run` modes: `silent` (default), `plain`, `actions`, `verbose`, `json`, `stream`, `stream-json` |
-| `run --output json/stream/stream-json "…"` | Yes | In-process `Agent` (structured output) |
-| `run "…"` (default) | Needs `praisonai` | Human-readable text run delegates to the wrapper's `handle_direct_prompt`; standalone gates with an install hint pointing to `--output actions` |
-| `run --output plain/verbose/silent "…"` | Needs `praisonai` | Same text path as default; standalone gates with an install hint |
+| `run --output json/stream/stream-json "…"` | Yes | In-process `Agent`. `json` prints one single-line `{result, status}` envelope on stdout for every outcome (ok, failed, blocked, truncated); `stream` prints the answer; `stream-json` activates NDJSON events on stdout |
+| `run "…"` (default) | Yes | Standalone renders in-process (human-readable text, exit-code contract as `--output actions`); delegates to the wrapper's `handle_direct_prompt` when it is installed. `--image` still needs `praisonai` |
+| `run --output plain/verbose/silent "…"` | Yes | Same in-process text render when standalone; wrapper delegation when installed |
 | `chat --output plain "…"` | Yes | One-shot; interactive REPL also in code package. `chat` modes: `actions` (default), `plain`, `verbose`, `json`, `silent` |
 | `code --help` | Yes | Full code assistant command registered |
 | `daemon start` (foreground) | Yes | |

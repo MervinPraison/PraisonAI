@@ -4,6 +4,7 @@
  */
 
 import { AutonomyManager, createAutonomyManager, MODE_POLICIES, type AutonomyMode } from '../features/autonomy-mode';
+import { printPlainHelp } from '../output/help';
 
 let manager: AutonomyManager | null = null;
 
@@ -143,21 +144,9 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  if (isJson) {
-    console.log(JSON.stringify(help, null, 2));
-  } else {
-    console.log('Autonomy - Agent action approval management\n');
-    console.log('Subcommands:');
-    for (const [cmd, desc] of Object.entries(help.subcommands)) {
-      console.log(`  ${cmd.padEnd(12)} ${desc}`);
-    }
-    console.log('\nModes:');
-    for (const [mode, desc] of Object.entries(help.modes)) {
-      console.log(`  ${mode.padEnd(12)} ${desc}`);
-    }
-    console.log('\nExamples:');
-    for (const ex of help.examples) {
-      console.log(`  ${ex}`);
-    }
-  }
+  printPlainHelp(isJson, help, 'Autonomy - Agent action approval management', [
+    { label: 'Subcommands:', entries: help.subcommands },
+    { label: 'Modes:', entries: help.modes },
+    { label: 'Examples:', items: help.examples }
+  ]);
 }

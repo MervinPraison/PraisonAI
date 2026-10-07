@@ -4,6 +4,7 @@
  */
 
 import { JobQueue, createJobQueue, createFileJobStorage } from '../features/background-jobs';
+import { printPlainHelp } from '../output/help';
 
 let globalQueue: JobQueue | null = null;
 
@@ -275,21 +276,9 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  if (isJson) {
-    console.log(JSON.stringify(help, null, 2));
-  } else {
-    console.log('Jobs - Background job queue management\n');
-    console.log('Subcommands:');
-    for (const [cmd, desc] of Object.entries(help.subcommands)) {
-      console.log(`  ${cmd.padEnd(12)} ${desc}`);
-    }
-    console.log('\nFlags:');
-    for (const [flag, desc] of Object.entries(help.flags)) {
-      console.log(`  ${flag.padEnd(12)} ${desc}`);
-    }
-    console.log('\nExamples:');
-    for (const ex of help.examples) {
-      console.log(`  ${ex}`);
-    }
-  }
+  printPlainHelp(isJson, help, 'Jobs - Background job queue management', [
+    { label: 'Subcommands:', entries: help.subcommands },
+    { label: 'Flags:', entries: help.flags },
+    { label: 'Examples:', items: help.examples }
+  ]);
 }
