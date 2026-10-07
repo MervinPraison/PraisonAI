@@ -252,7 +252,11 @@ class TestSqliteUserIdFilter(unittest.TestCase):
         from praisonaiagents.memory import Memory
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            mem = Memory(config={"provider": "sqlite", "db_path": f"{tmpdir}/mem.db"})
+            mem = Memory(config={
+                "provider": "sqlite",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
             mem.store_long_term(
                 "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
                 metadata={"user_id": "sess-user", "session_id": "sess-1"},
