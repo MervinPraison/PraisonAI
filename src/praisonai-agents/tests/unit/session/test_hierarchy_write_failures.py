@@ -107,14 +107,13 @@ def test_parent_lock_failure_reports_retained_child(store, monkeypatch, operatio
     message = str(excinfo.value)
     assert "registration with parent" in message
     assert "parent" in message
-    if operation == "create":
-        assert "child" in message
     assert excinfo.value.__cause__ is not None
     store.invalidate_cache()
     children = [row["session_id"] for row in store.list_sessions() if row["session_id"] != "parent"]
     assert len(children) == 1
     assert store.session_exists(children[0])
     assert store.get_parent(children[0]) == "parent"
+    assert children[0] in message
 
 
 @pytest.mark.parametrize("operation", ["create", "fork", "snapshot", "import"])
