@@ -719,17 +719,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
             "children": [],
         }
 
-        # Stack items: (node_dict, iterator over child ids, set of ancestor ids
-        # on the path to this node including itself).
-        stack = [
-            (root, iter(root_session.children_ids), {root_session.session_id})
-        ]
+        # A single active-path set holds the ancestor ids on the branch
+        # currently being descended. Ids are added when a frame is pushed and
+        # removed when it is popped, so the set only ever reflects the current
+        # root-to-node path (O(depth) memory, not O(depth^2)). This still lets a
+        # descendant shared across sibling branches be visited more than once,
+        # while a repeat on the active path is reported as a cycle.
+        path = {root_session.session_id}
+        # Stack items: (node_dict, iterator over child ids, own session id).
+        stack = [(root, iter(root_session.children_ids), root_session.session_id)]
 
         while stack:
-            node, child_iter, path = stack[-1]
+            node, child_iter, node_id = stack[-1]
             child_id = next(child_iter, None)
             if child_id is None:
                 stack.pop()
+                path.discard(node_id)
                 continue
 
             if child_id in path:
@@ -745,12 +750,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 "children": [],
             }
             node["children"].append(child_node)
+            path.add(child_id)
             stack.append(
-                (
-                    child_node,
-                    iter(child_session.children_ids),
-                    path | {child_id},
-                )
+                (child_node, iter(child_session.children_ids), child_id)
             )
 
         return root
