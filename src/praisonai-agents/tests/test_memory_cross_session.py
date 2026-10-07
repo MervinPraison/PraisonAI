@@ -132,5 +132,64 @@ class TestCrossSessionMemoryRecall(unittest.TestCase):
             self.assertIn("GREEN-HAWK", context)
 
 
+class TestCrossInstancePrefetchRecall(unittest.TestCase):
+    """Issue #5667: turn-start prefetch must recall a persisted turn on a
+    second Agent instance sharing the same ``user_id``.
+
+    The persist path writes to long-term memory (where prefetch queries) and
+    stamps ``user_id`` into the record metadata (so the prefetch scope filter
+    matches). Exercises the pipeline directly — no LLM / OPENAI_API_KEY.
+    """
+
+    def _agent(self, user_id, base_path, auto_memory):
+        from praisonaiagents.config.feature_configs import MemoryConfig
+
+        memory = FileMemory(user_id=user_id, base_path=base_path)
+        agent = Agent(
+            name="Assistant",
+            instructions="You are a helpful assistant.",
+            memory=memory,
+        )
+        # Attach a prefetch-enabled, user-scoped config so the chat-mixin
+        # prefetch helpers resolve the same scope the Agent would at runtime.
+        agent._memory_config = MemoryConfig(
+            user_id=user_id, auto_memory=auto_memory, prefetch=True
+        )
+        agent._auto_memory = auto_memory
+        return agent
+
+    def test_prefetch_recalls_persisted_turn_across_instances(self):
+        """A fact persisted by instance A is recalled by instance B's prefetch.
+
+        auto_memory=True: the raw turn must still be persisted durably even
+        though the pattern extractor cannot extract an arbitrary codename.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = f"{tmpdir}/memory"
+            agent_a = self._agent("recall-5667", base, auto_memory=True)
+            agent_a._after_agent_side_effects(
+                "Remember codename ORANGE-PANDA for this user.",
+                "Acknowledged. Your codename is ORANGE-PANDA.",
+            )
+
+            agent_b = self._agent("recall-5667", base, auto_memory=True)
+            recalled = agent_b._prefetch_memory("codename ORANGE-PANDA")
+            self.assertIn("ORANGE-PANDA", recalled)
+
+    def test_prefetch_isolated_by_user_id(self):
+        """A different user_id must not recall another user's persisted turn."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = f"{tmpdir}/memory"
+            agent_a = self._agent("recall-user-a", base, auto_memory=True)
+            agent_a._after_agent_side_effects(
+                "Remember codename ORANGE-PANDA for this user.",
+                "Acknowledged. Your codename is ORANGE-PANDA.",
+            )
+
+            agent_b = self._agent("recall-user-b", base, auto_memory=True)
+            recalled = agent_b._prefetch_memory("codename ORANGE-PANDA")
+            self.assertNotIn("ORANGE-PANDA", recalled)
+
+
 if __name__ == "__main__":
     unittest.main()
