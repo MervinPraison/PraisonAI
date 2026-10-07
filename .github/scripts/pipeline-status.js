@@ -66,6 +66,7 @@ function reasonToBlockerLabel(reason) {
   if (
     r.includes('manual') ||
     r.includes('requires manual') ||
+    r.includes('maintainer-only author') ||
     r.includes('sensitive path') ||
     r.includes('no-auto-merge') ||
     r.includes('manual-only label') ||

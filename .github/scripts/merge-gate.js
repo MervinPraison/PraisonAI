@@ -67,6 +67,24 @@ const OPTIONAL_PENDING_WHEN_CORE_GREEN = new Set([
   'claude-fallback-timeout',
   'post-missing-claude-final',
   'bot-pr-trigger-reviews',
+  // Optimized suite jobs often outlive the test-core aggregator on busy fleet days.
+  'smoke',
+  'main (3.11)',
+  'openai-live',
+  'test-summary',
+]);
+/** PR authors eligible for claude merge-gate auto-merge (triage fleet only). */
+const AUTO_MERGE_AUTHOR_LOGINS = new Set([
+  'MervinPraison',
+  'praisonai-triage-agent',
+  'app/praisonai-triage-agent',
+  'github-actions[bot]',
+]);
+/** GitHub author_association values that always require maintainer merge. */
+const MAINTAINER_ONLY_ASSOCIATIONS = new Set([
+  'FIRST_TIME_CONTRIBUTOR',
+  'CONTRIBUTOR',
+  'NONE',
 ]);
 const BOT_REVIEWER_PATTERNS = [
   'coderabbit',
@@ -77,6 +95,25 @@ const BOT_REVIEWER_PATTERNS = [
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function isAutoMergeAuthor(user) {
+  const login = (user?.login || '').trim();
+  if (!login) return false;
+  if (AUTO_MERGE_AUTHOR_LOGINS.has(login)) return true;
+  if (login.startsWith('app/') && login.includes('praisonai-triage')) return true;
+  return login.endsWith('[bot]') && login.toLowerCase().includes('praisonai-triage');
+}
+
+function maintainerOnlyAuthorReason(pr) {
+  if (!pr?.user?.login) return 'maintainer-only author (missing login)';
+  if (MAINTAINER_ONLY_ASSOCIATIONS.has(pr.author_association)) {
+    return `maintainer-only author (@${pr.user.login}, ${pr.author_association})`;
+  }
+  if (!isAutoMergeAuthor(pr.user)) {
+    return `maintainer-only author (@${pr.user.login})`;
+  }
+  return null;
+}
 
 function isFinalClaudeTriggerComment(c) {
   const body = (c.body || '').toLowerCase();
@@ -997,6 +1034,9 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons.push('fork PR');
   }
 
+  const maintainerAuthorReason = maintainerOnlyAuthorReason(ctx.pr);
+  if (maintainerAuthorReason) reasons.push(maintainerAuthorReason);
+
   if (hasRecentConflictComment(ctx.comments, ctx.headPushedAt)) {
     reasons.push('recent merge-conflict @claude');
   }
@@ -1209,6 +1249,10 @@ module.exports = {
   OPTIONAL_CANCELLED_CHECKS,
   OPTIONAL_CANCELLED_WHEN_CORE_GREEN,
   OPTIONAL_PENDING_WHEN_CORE_GREEN,
+  AUTO_MERGE_AUTHOR_LOGINS,
+  MAINTAINER_ONLY_ASSOCIATIONS,
+  isAutoMergeAuthor,
+  maintainerOnlyAuthorReason,
   isIgnorablePendingCheck,
   isCoreTestRun,
   coreTestsGreenOnRuns,

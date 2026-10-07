@@ -79,6 +79,31 @@ assert('non-optional pending still blocks', !mg.isIgnorablePendingCheck(
   { name: 'test-core (root)', status: 'queued', conclusion: null },
   [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
 ));
+assert('pending smoke ignorable when test-core green', mg.isIgnorablePendingCheck(
+  { name: 'smoke', status: 'in_progress', conclusion: null },
+  [
+    { name: 'test-core', status: 'completed', conclusion: 'success' },
+    { name: 'test-core (agents-core)', status: 'completed', conclusion: 'success' },
+  ]
+));
+assert('pending main (3.11) ignorable when test-core green', mg.isIgnorablePendingCheck(
+  { name: 'main (3.11)', status: 'queued', conclusion: null },
+  [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
+));
+
+assert('triage bot is auto-merge author', mg.isAutoMergeAuthor({ login: 'praisonai-triage-agent[bot]' }));
+assert('external contributor blocked', mg.maintainerOnlyAuthorReason({
+  user: { login: 'dajiaohuang' },
+  author_association: 'CONTRIBUTOR',
+})?.includes('maintainer-only author'));
+assert('first-time contributor blocked', mg.maintainerOnlyAuthorReason({
+  user: { login: 'new-dev' },
+  author_association: 'FIRST_TIME_CONTRIBUTOR',
+})?.includes('FIRST_TIME_CONTRIBUTOR'));
+assert('maintainer login allowed', mg.maintainerOnlyAuthorReason({
+  user: { login: 'MervinPraison' },
+  author_association: 'OWNER',
+}) === null);
 
 const coreGreenRuns = [
   { name: 'test-core', status: 'completed', conclusion: 'success' },
