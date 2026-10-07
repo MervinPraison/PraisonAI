@@ -155,13 +155,12 @@ class SqliteMemoryAdapter:
     ) -> str:
         """Store content in short-term memory."""
         conn = self._get_stm_conn()
-        with self._write_lock:
+        with self._write_lock, conn:
             cursor = conn.execute(
                 "INSERT INTO short_term_memory (content, metadata) VALUES (?, ?)",
                 (text, json.dumps(metadata or {}))
             )
-            conn.commit()
-            return str(cursor.lastrowid)
+        return str(cursor.lastrowid)
     
     def search_short_term(
         self, 
@@ -200,13 +199,12 @@ class SqliteMemoryAdapter:
     ) -> str:
         """Store content in long-term memory."""
         conn = self._get_ltm_conn()
-        with self._write_lock:
+        with self._write_lock, conn:
             cursor = conn.execute(
                 "INSERT INTO long_term_memory (content, metadata) VALUES (?, ?)",
                 (text, json.dumps(metadata or {}))
             )
-            conn.commit()
-            return str(cursor.lastrowid)
+        return str(cursor.lastrowid)
     
     def search_long_term(
         self, 
@@ -251,23 +249,23 @@ class SqliteMemoryAdapter:
             if tier in (None, "short"):
                 try:
                     stm = self._get_stm_conn()
-                    cur = stm.execute(
-                        "DELETE FROM short_term_memory WHERE id = ?", (memory_id,)
-                    )
+                    with stm:
+                        cur = stm.execute(
+                            "DELETE FROM short_term_memory WHERE id = ?", (memory_id,)
+                        )
                     if cur.rowcount > 0:
                         deleted = True
-                    stm.commit()
                 except Exception as e:
                     logger.warning(f"Adapter delete_memory (short_term) failed: {e}")
             if tier in (None, "long"):
                 try:
                     ltm = self._get_ltm_conn()
-                    cur = ltm.execute(
-                        "DELETE FROM long_term_memory WHERE id = ?", (memory_id,)
-                    )
+                    with ltm:
+                        cur = ltm.execute(
+                            "DELETE FROM long_term_memory WHERE id = ?", (memory_id,)
+                        )
                     if cur.rowcount > 0:
                         deleted = True
-                    ltm.commit()
                 except Exception as e:
                     logger.warning(f"Adapter delete_memory (long_term) failed: {e}")
         return deleted
@@ -275,16 +273,14 @@ class SqliteMemoryAdapter:
     def reset_short_term(self) -> None:
         """Clear all short-term memories."""
         conn = self._get_stm_conn()
-        with self._write_lock:
+        with self._write_lock, conn:
             conn.execute("DELETE FROM short_term_memory")
-            conn.commit()
 
     def reset_long_term(self) -> None:
         """Clear all long-term memories."""
         conn = self._get_ltm_conn()
-        with self._write_lock:
+        with self._write_lock, conn:
             conn.execute("DELETE FROM long_term_memory")
-            conn.commit()
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from both short-term and long-term."""
