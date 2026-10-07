@@ -767,10 +767,18 @@ class MemoryMixin:
     def _persist_memory_turn(self, user_message: str, assistant_response: str):
         """Persist a raw conversation turn to the memory store.
 
-        Called after each response when ``_memory_instance`` is set but
-        ``auto_memory`` extraction is off. Stores the turn to short-term memory
-        so a later Agent sharing the same store (e.g. ``memory={"user_id": uid}``)
-        recalls it via ``get_memory_context()``. Best-effort: never raises.
+        Called after each response when ``_memory_instance`` is set. Stores the
+        turn so a later Agent sharing the same store (e.g. a second ``Agent``
+        with the same ``user_id``) recalls it. Best-effort: never raises.
+
+        The turn is written to **long-term** memory because turn-start prefetch
+        (``_prefetch_memory``) queries ``search_long_term``; a short-term-only
+        write was invisible to prefetch, so cross-instance recall returned empty
+        (issue #5667). ``user_id`` is stamped into the record metadata so the
+        prefetch scope filter — which post-filters on ``metadata.user_id`` —
+        matches records written here (they otherwise carry no ``user_id`` and
+        were silently dropped). A short-term copy is kept so the inline
+        ``get_memory_context()`` path still sees the turn.
 
         Async-safe: a memory store write is blocking file/DB I/O. When this runs
         inside a live event loop (the async ``achat``/``astart`` after-agent path),
@@ -780,17 +788,41 @@ class MemoryMixin:
         memory = getattr(self, "_memory_instance", None)
         if memory is None or not assistant_response:
             return
-        store = getattr(memory, "store_short_term", None) or getattr(memory, "add_short_term", None)
-        if store is None:
+        long_store = getattr(memory, "store_long_term", None) or getattr(memory, "add_long_term", None)
+        short_store = getattr(memory, "store_short_term", None) or getattr(memory, "add_short_term", None)
+        if long_store is None and short_store is None:
             return
         text = f"User: {user_message}\nAssistant: {assistant_response}"
         metadata = {"agent_id": getattr(self, "agent_id", getattr(self, "name", None))}
+        # Stamp the scoping identity so turn-start prefetch can find this record
+        # on a different Agent instance. Prefetch (_memory_prefetch_scope) sends
+        # user_id AND, when configured, a session_id metadata_filter; both are
+        # post-filtered against record metadata by Memory.search_long_term, so a
+        # turn missing either key is silently dropped on recall.
+        config = getattr(self, "_memory_config", None)
+        user_id = getattr(config, "user_id", None)
+        if user_id:
+            metadata["user_id"] = user_id
+        session_id = getattr(config, "session_id", None)
+        if session_id:
+            metadata["session_id"] = session_id
 
         def _do_store():
-            try:
-                store(text, metadata=metadata)
-            except Exception as e:
-                logging.debug(f"Memory turn persistence failed: {e}")
+            # Write each tier under its own guard. The two tiers are independent
+            # stores; a long-term failure (e.g. a locked DB) must not skip the
+            # short-term copy that powers the inline get_memory_context() path,
+            # and vice versa. Sharing one try would have removed the existing
+            # short-term fallback the moment durable recall was added.
+            if long_store is not None:
+                try:
+                    long_store(text, metadata=metadata)
+                except Exception as e:
+                    logging.debug(f"Long-term memory turn persistence failed: {e}")
+            if short_store is not None:
+                try:
+                    short_store(text, metadata=metadata)
+                except Exception as e:
+                    logging.debug(f"Short-term memory turn persistence failed: {e}")
 
         try:
             import asyncio

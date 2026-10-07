@@ -132,5 +132,158 @@ class TestCrossSessionMemoryRecall(unittest.TestCase):
             self.assertIn("GREEN-HAWK", context)
 
 
+class TestCrossInstancePrefetchRecall(unittest.TestCase):
+    """Issue #5667: turn-start prefetch must recall a persisted turn on a
+    second Agent instance sharing the same ``user_id``.
+
+    The persist path writes to long-term memory (where prefetch queries) and
+    stamps ``user_id`` into the record metadata (so the prefetch scope filter
+    matches). Exercises the pipeline directly — no LLM / OPENAI_API_KEY.
+    """
+
+    def _agent(self, user_id, base_path, auto_memory):
+        from praisonaiagents.config.feature_configs import MemoryConfig
+
+        memory = FileMemory(user_id=user_id, base_path=base_path)
+        agent = Agent(
+            name="Assistant",
+            instructions="You are a helpful assistant.",
+            memory=memory,
+        )
+        # Attach a prefetch-enabled, user-scoped config so the chat-mixin
+        # prefetch helpers resolve the same scope the Agent would at runtime.
+        agent._memory_config = MemoryConfig(
+            user_id=user_id, auto_memory=auto_memory, prefetch=True
+        )
+        agent._auto_memory = auto_memory
+        return agent
+
+    def test_prefetch_recalls_persisted_turn_across_instances(self):
+        """A fact persisted by instance A is recalled by instance B's prefetch.
+
+        auto_memory=True: the raw turn must still be persisted durably even
+        though the pattern extractor cannot extract an arbitrary codename.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = f"{tmpdir}/memory"
+            agent_a = self._agent("recall-5667", base, auto_memory=True)
+            agent_a._after_agent_side_effects(
+                "Remember codename ORANGE-PANDA for this user.",
+                "Acknowledged. Your codename is ORANGE-PANDA.",
+            )
+
+            agent_b = self._agent("recall-5667", base, auto_memory=True)
+            recalled = agent_b._prefetch_memory("codename ORANGE-PANDA")
+            self.assertIn("ORANGE-PANDA", recalled)
+
+    def test_prefetch_isolated_by_user_id(self):
+        """A different user_id must not recall another user's persisted turn."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = f"{tmpdir}/memory"
+            agent_a = self._agent("recall-user-a", base, auto_memory=True)
+            agent_a._after_agent_side_effects(
+                "Remember codename ORANGE-PANDA for this user.",
+                "Acknowledged. Your codename is ORANGE-PANDA.",
+            )
+
+            agent_b = self._agent("recall-user-b", base, auto_memory=True)
+            recalled = agent_b._prefetch_memory("codename ORANGE-PANDA")
+            self.assertNotIn("ORANGE-PANDA", recalled)
+
+
+class TestSqliteUserIdFilter(unittest.TestCase):
+    """Issue #5667: the ``user_id`` metadata stamp must drive SQLite's
+    ``metadata.user_id`` long-term filter.
+
+    ``FileMemory.search_long_term`` ignores the supplied scope and keeps each
+    user in a separate file, so the FileMemory tests above could still pass if
+    the metadata stamp were removed. The SQLite adapter, by contrast, shares one
+    long-term table across users and filters on ``memory_user_id(metadata)`` —
+    so recall there depends entirely on the stamp this PR writes. A shared store
+    with two users proves matching-user recall and different-user exclusion.
+    """
+
+    def _store(self, tmpdir):
+        from praisonaiagents.memory.adapters.sqlite_adapter import SqliteMemoryAdapter
+
+        return SqliteMemoryAdapter(
+            short_db=f"{tmpdir}/short.db",
+            long_db=f"{tmpdir}/long.db",
+        )
+
+    def test_matching_user_recalls_and_other_user_excluded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self._store(tmpdir)
+            # Persist a turn stamped with user_id, exactly as
+            # Agent._persist_memory_turn does for the durable long-term write.
+            store.store_long_term(
+                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                metadata={"user_id": "sqlite-user-a"},
+            )
+
+            matching = store.search_long_term(
+                "codename", limit=5, user_id="sqlite-user-a"
+            )
+            self.assertTrue(
+                any("ORANGE-PANDA" in r.get("text", "") for r in matching)
+            )
+
+            other = store.search_long_term(
+                "codename", limit=5, user_id="sqlite-user-b"
+            )
+            self.assertFalse(
+                any("ORANGE-PANDA" in r.get("text", "") for r in other),
+                "a different user_id must not recall another user's turn",
+            )
+
+    def test_session_id_stamp_matches_prefetch_session_filter(self):
+        """Issue #5667: when ``MemoryConfig.session_id`` is set, prefetch sends a
+        ``metadata.session_id`` filter. ``_persist_memory_turn`` must stamp that
+        session_id or the saved turn is dropped on recall even for the same user.
+
+        Driven through ``Memory`` (SQLite long-term backend) because the
+        ``session_id`` post-filter lives in ``Memory.search_long_term`` — the raw
+        adapter only filters ``user_id``. Persists with the same metadata the
+        Agent stamps (user_id + session_id) and recalls through the exact
+        ``metadata_filter={"session_id": ...}`` scope ``_memory_prefetch_scope``
+        builds. A mismatched session_id is excluded — removing the stamp would
+        break the matching case, so this genuinely guards the fix.
+        """
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mem = Memory(config={
+                "provider": "sqlite",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
+            mem.store_long_term(
+                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                metadata={"user_id": "sess-user", "session_id": "sess-1"},
+            )
+
+            matching = mem.search_long_term(
+                "codename",
+                limit=5,
+                user_id="sess-user",
+                metadata_filter={"session_id": "sess-1"},
+            )
+            self.assertTrue(
+                any("ORANGE-PANDA" in r.get("text", "") for r in matching),
+                "same user+session must recall the stamped turn",
+            )
+
+            other_session = mem.search_long_term(
+                "codename",
+                limit=5,
+                user_id="sess-user",
+                metadata_filter={"session_id": "sess-2"},
+            )
+            self.assertFalse(
+                any("ORANGE-PANDA" in r.get("text", "") for r in other_session),
+                "a different session_id must not recall the turn",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
