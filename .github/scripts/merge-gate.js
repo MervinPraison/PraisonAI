@@ -245,9 +245,12 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   const finalTime = new Date(latestFinal.created_at).getTime();
   if (headTime <= finalTime + 60000) return false;
 
+  // The finished reply must follow BOTH the latest FINAL trigger and HEAD, so
+  // a reply predating HEAD (stale completion) cannot suppress recovery.
+  const finishedFloor = Math.max(finalTime, headTime - 60000);
   const claudeFinishedOnHead = comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= headTime - 60000;
+    return new Date(c.created_at).getTime() >= finishedFloor;
   });
   if (claudeFinishedOnHead) return false;
 
@@ -344,10 +347,16 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
     });
   }
   const headTime = new Date(headPushedAt).getTime();
-  if (finalTime < headTime - 60000) return false;
+  // The Claude "finished" reply must follow BOTH the latest FINAL trigger and
+  // HEAD. We do NOT reject solely because the FINAL trigger predates HEAD:
+  // Claude may start a FINAL review, push a fix commit (new HEAD), then reply.
+  // The reply timestamp is the real completion signal. Requiring the reply to
+  // follow the latest FINAL also prevents an older reply from satisfying a
+  // newer FINAL trigger.
+  const replyFloor = Math.max(finalTime, headTime - 60000);
   return comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= headTime - 60000;
+    return new Date(c.created_at).getTime() >= replyFloor;
   });
 }
 

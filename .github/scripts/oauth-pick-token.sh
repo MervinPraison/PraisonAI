@@ -78,19 +78,23 @@ case "$PREFERRED" in
 esac
 
 if [[ -z "$SELECTED_TOKEN" ]]; then
-  if [[ "$PREFERRED" == "primary" && -n "$PRIMARY" ]]; then
-    SELECTED_TOKEN="$PRIMARY"
-    SELECTED_SLOT="primary-unprobed"
-  elif [[ -n "$SECONDARY" ]]; then
-    SELECTED_TOKEN="$SECONDARY"
-    SELECTED_SLOT="secondary-unprobed"
-  elif [[ -n "$TERTIARY" ]]; then
-    SELECTED_TOKEN="$TERTIARY"
-    SELECTED_SLOT="tertiary-unprobed"
-  elif [[ -n "$PRIMARY" ]]; then
-    SELECTED_TOKEN="$PRIMARY"
-    SELECTED_SLOT="primary-unprobed"
-  else
+  # Honor the operator-selected preference first, then fall back in
+  # preference order across the remaining configured tokens.
+  case "$PREFERRED" in
+    tertiary) FALLBACK_ORDER=("tertiary:$TERTIARY" "secondary:$SECONDARY" "primary:$PRIMARY") ;;
+    secondary) FALLBACK_ORDER=("secondary:$SECONDARY" "primary:$PRIMARY" "tertiary:$TERTIARY") ;;
+    *) FALLBACK_ORDER=("primary:$PRIMARY" "secondary:$SECONDARY" "tertiary:$TERTIARY") ;;
+  esac
+  for entry in "${FALLBACK_ORDER[@]}"; do
+    slot="${entry%%:*}"
+    token="${entry#*:}"
+    if [[ -n "$token" ]]; then
+      SELECTED_TOKEN="$token"
+      SELECTED_SLOT="${slot}-unprobed"
+      break
+    fi
+  done
+  if [[ -z "$SELECTED_TOKEN" ]]; then
     echo "::error::No Claude OAuth token configured"
     exit 1
   fi

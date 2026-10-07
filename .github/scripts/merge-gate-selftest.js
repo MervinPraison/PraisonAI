@@ -293,6 +293,40 @@ assert('final trigger alone is incomplete', !mg.finalClaudeCompletedOnSha(
   '2026-06-27T09:55:00Z'
 ));
 
+// FINAL started before HEAD, Claude pushed a fix (new HEAD), then replied on HEAD.
+// The reply after HEAD must count as complete even though the FINAL trigger
+// predates HEAD by >1min (regression: previously blocked).
+const finalThenPushThenReply = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:40:00Z' },
+];
+assert(
+  'final complete when reply follows a later HEAD (fix-commit sequence)',
+  mg.finalClaudeCompletedOnSha(finalThenPushThenReply, '2026-06-27T10:30:00Z')
+);
+
+// Old finished reply follows HEAD but predates a NEW FINAL trigger — must NOT
+// count the old completion as satisfying the newer review.
+const oldReplyBeforeNewFinal = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T09:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T09:10:00Z' },
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+];
+assert(
+  'old reply before new FINAL does not count as complete',
+  !mg.finalClaudeCompletedOnSha(oldReplyBeforeNewFinal, '2026-06-27T08:55:00Z')
+);
+assert(
+  'stale-FINAL recovery not suppressed by reply predating HEAD',
+  mg.isStaleFinalAfterPush(
+    [
+      { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T08:00:00Z' },
+      { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T08:30:00Z' },
+    ],
+    '2026-06-27T09:00:00Z'
+  )
+);
+
 assert('recent scan comment detected', mg.hasRecentMergeGateScanComment([
   { body: '**Merge gate scan** — eligible', created_at: new Date().toISOString() },
 ]));
