@@ -625,38 +625,6 @@ class TestCreationPersistenceFailures:
                 assert "child" in str(e)
         assert os.path.exists(self.store._get_session_path("child"))
 
-    def _fail_parent_lock_for(self, target_id, *, only_after_exists=None):
-        """Raise OSError from FileLock.acquire for target_id's lock only.
-
-        Mirrors the production path where ``_modify_session_locked`` fails by
-        the ``FileLock`` context manager *raising* (lock contention/timeout),
-        not by returning ``False`` — the branch that would otherwise leak a raw
-        lock error without the saved child ID (Issue #5527, Greptile P1).
-
-        ``only_after_exists`` restricts the injected failure to acquisitions
-        that happen *after* the given session file exists on disk, so a fork's
-        pre-save reload of the parent is left untouched and the failure lands on
-        the post-save parent-registration lock instead.
-        """
-        import unittest.mock as mock
-        from praisonaiagents.session import store as store_mod
-
-        target_lock = self.store._get_session_path(target_id) + ".lock"
-        guard_path = (
-            self.store._get_session_path(only_after_exists)
-            if only_after_exists is not None
-            else None
-        )
-        real_acquire = store_mod.FileLock.acquire
-
-        def _maybe_boom(lock_self):
-            if os.path.abspath(lock_self._lock_path) == os.path.abspath(target_lock):
-                if guard_path is None or os.path.exists(guard_path):
-                    raise OSError("simulated lock failure")
-            return real_acquire(lock_self)
-
-        return mock.patch.object(store_mod.FileLock, "acquire", _maybe_boom)
-
     def test_create_session_parent_lock_failure_surfaces_child_id(self):
         """A parent-lock OSError must still report the saved child ID (P1)."""
         import unittest.mock as mock
