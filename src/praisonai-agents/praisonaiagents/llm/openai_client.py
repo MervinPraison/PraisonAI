@@ -469,6 +469,11 @@ class OpenAIClient:
                 client_kwargs["max_retries"] = self.max_retries
             self._async_client = AsyncOpenAI(**client_kwargs)
             self._async_client_loop = running_loop
+        elif running_loop is not None and self._async_client_loop is None:
+            # The client was first built with no running loop (e.g. sync-path
+            # construction). Bind it to the first loop that actually uses it so
+            # a later loop change is detected and the stale client is dropped.
+            self._async_client_loop = running_loop
         return self._async_client
     
     def build_messages(
