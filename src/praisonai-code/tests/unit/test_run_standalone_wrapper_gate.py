@@ -20,6 +20,8 @@ now cites `praisonai-code run --output actions` instead of `praisonai`.
 
 import pytest
 
+import typer
+
 from praisonai_code.cli.commands import run as run_cmd
 
 
@@ -132,10 +134,28 @@ def test_silent_style_modes_print_final_text(mode):
     assert run_cmd._prints_final_text(mode) is True
 
 
-@pytest.mark.parametrize("mode", ["verbose", "actions", "json", "stream", "stream-json"])
-def test_agent_or_structured_modes_render_themselves(mode):
-    """Verbose renders via the agent display; structured modes emit events."""
+@pytest.mark.parametrize("mode", ["verbose", "actions"])
+def test_self_rendering_modes_do_not_print_final_text(mode):
+    """Verbose renders via the agent display; actions via the core status module."""
     assert run_cmd._prints_final_text(mode) is False
+
+
+@pytest.mark.parametrize("mode", [None, "plain", "silent", "json", "stream", "stream-json"])
+def test_cli_prints_final_text_for_silent_presets(mode):
+    """Silent presets leave the rendering to the CLI, structured ones included."""
+    assert run_cmd._prints_final_text(mode) is True
+
+
+def test_structured_preset_mapping():
+    """Only `actions` maps onto a core preset; the rest stay agent-silent.
+
+    The core ``json`` preset writes JSONL to stderr and the core ``stream``
+    preset makes ``Agent.start()`` return an unconsumed generator, so the CLI
+    owns the output for those modes instead of delegating to a core preset.
+    """
+    assert run_cmd._structured_agent_preset("actions") == "actions"
+    for mode in ("json", "stream", "stream-json"):
+        assert run_cmd._structured_agent_preset(mode) == "silent"
 
 
 # --- the remaining targeted gate: --image -----------------------------------
@@ -177,8 +197,6 @@ def test_image_run_without_wrapper_gates_with_targeted_hint(monkeypatch):
 
     monkeypatch.setattr(run_cmd, "get_output_controller", lambda: _Output())
 
-    import typer
-
     with pytest.raises(typer.Exit):
         run_cmd._require_wrapper_for_default_run(
             "hi", agent=None, command=None, output_mode=None, image=["bug.png"]
@@ -195,3 +213,48 @@ def test_image_run_with_wrapper_does_not_gate(with_wrapper):
     run_cmd._require_wrapper_for_default_run(
         "hi", agent=None, command=None, output_mode=None, image=["bug.png"]
     )
+
+
+@pytest.mark.parametrize("mode", [None, "plain", "verbose", "silent", "json", "stream", "stream-json"])
+def test_every_image_output_mode_gates_without_wrapper(no_wrapper, monkeypatch, mode):
+    """Any remaining image run must get the targeted hint, not a bare import error.
+
+    The gate used to skip modes `_direct_prompt_needs_wrapper` excludes — the
+    structured ones and `--command` — so those runs fell through to the wrapper
+    path and failed with "praisonai.cli.legacy.direct_prompt requires the
+    praisonai wrapper" instead of the actionable hint.
+    """
+    messages = []
+
+    class _Output:
+        def print_error(self, msg):
+            messages.append(msg)
+
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: _Output())
+
+    with pytest.raises(typer.Exit):
+        run_cmd._require_wrapper_for_default_run(
+            "hi", agent=None, command=None, output_mode=mode, image=["bug.png"]
+        )
+
+    assert messages
+    assert "--image" in messages[0]
+
+
+def test_image_command_run_gates_without_wrapper(no_wrapper, monkeypatch):
+    """`--command` prompts can reach this flow too, and also need the wrapper."""
+    messages = []
+
+    class _Output:
+        def print_error(self, msg):
+            messages.append(msg)
+
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: _Output())
+
+    with pytest.raises(typer.Exit):
+        run_cmd._require_wrapper_for_default_run(
+            "hi", agent=None, command="deploy", output_mode=None, image=["bug.png"]
+        )
+
+    assert messages
+    assert "--image" in messages[0]
