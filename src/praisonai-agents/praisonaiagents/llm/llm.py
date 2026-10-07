@@ -7126,6 +7126,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
                         fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
                         tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                        # Skip items with empty name — API rejects them
+                        if not fn_name:
+                            continue
                         input_items.append({
                             "type": "function_call",
                             "call_id": tc_id,
