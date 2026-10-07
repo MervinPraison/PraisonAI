@@ -1,5 +1,6 @@
 """One SQLite adapter must expose the same records to all its worker threads."""
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -45,12 +46,27 @@ def test_memory_database_isolated_between_adapters_and_tiers():
 
 def test_parallel_memory_writes_keep_all_rows_and_unique_ids():
     adapter = SqliteMemoryAdapter(':memory:', ':memory:')
+    workers = 4
+    per_worker = 10
+    # A barrier guarantees every worker's first write races the others on the
+    # shared in-memory database, so the unique-ID assertion actually exercises
+    # the cross-thread ID-collision scenario this regression test guards.
+    start = threading.Barrier(workers)
+
+    def write_batch(worker):
+        start.wait()
+        return [
+            adapter.store_short_term(f'entry {worker}-{index}')
+            for index in range(per_worker)
+        ]
+
     try:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            ids = list(pool.map(adapter.store_short_term, [f'entry {index}' for index in range(40)]))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            ids = [i for batch in pool.map(write_batch, range(workers)) for i in batch]
             counts = list(pool.map(lambda _: len(adapter.search_short_term('', limit=100)), range(8)))
-        assert len(set(ids)) == 40
-        assert counts == [40] * 8
-        assert len(adapter.search_short_term('', limit=100)) == 40
+        total = workers * per_worker
+        assert len(set(ids)) == total
+        assert counts == [total] * 8
+        assert len(adapter.search_short_term('', limit=100)) == total
     finally:
         adapter.close_connections()
