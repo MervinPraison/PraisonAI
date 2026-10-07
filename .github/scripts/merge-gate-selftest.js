@@ -92,6 +92,10 @@ assert('pending main (3.11) ignorable when test-core green', mg.isIgnorablePendi
 ));
 
 assert('triage bot is auto-merge author', mg.isAutoMergeAuthor({ login: 'praisonai-triage-agent[bot]' }));
+assert('triage bot CONTRIBUTOR association still allowed', mg.maintainerOnlyAuthorReason({
+  user: { login: 'praisonai-triage-agent[bot]' },
+  author_association: 'CONTRIBUTOR',
+}) === null);
 assert('external contributor blocked', mg.maintainerOnlyAuthorReason({
   user: { login: 'dajiaohuang' },
   author_association: 'CONTRIBUTOR',
