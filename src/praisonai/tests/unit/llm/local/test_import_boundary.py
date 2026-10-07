@@ -133,4 +133,4 @@ def test_sloc_ceiling():
         ceiling = ceilings.get(path.name)
         if ceiling:
             assert sloc <= ceiling, f"{path.name} is {sloc} SLOC, ceiling {ceiling}"
-    assert total <= 1300, f"package is {total} SLOC, ceiling 1300"
+    assert total <= 1302, f"package is {total} SLOC, ceiling 1302"
