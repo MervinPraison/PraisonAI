@@ -17,6 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .._logging import get_logger
+from ..utils.atomic_io import update_json
+
+logger = get_logger(__name__)
+
 
 def get_default_auth_filepath() -> str:
     """
@@ -74,22 +79,56 @@ class MCPAuthStorage:
         parent.mkdir(parents=True, exist_ok=True)
     
     def _read(self) -> Dict[str, Any]:
-        """Read all entries from storage file."""
+        """Read all entries from storage file.
+
+        A corrupt file is moved aside to a unique ``.corrupt`` sidecar and
+        logged rather than silently treated as "no credentials", so a torn
+        write can never make every server's tokens vanish without a trace.
+
+        The quarantine happens *under the same FileLock the writers use*, and
+        the file is re-read inside the lock first: if a concurrent writer
+        repaired the store between the first decode error and acquiring the
+        lock, we return the repaired data instead of quarantining valid
+        credentials.
+        """
         try:
-            with open(self.filepath, 'r') as f:
+            with open(self.filepath, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError:
             return {}
-    
-    def _write(self, data: Dict[str, Any]) -> None:
-        """Write all entries to storage file with secure permissions."""
-        # Write to file
-        with open(self.filepath, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        # Set file permissions to 0600 (owner read/write only)
-        if os.name != 'nt':  # Unix-like systems
-            os.chmod(self.filepath, 0o600)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Corrupt on the optimistic (lock-free) read. Take the writer lock and
+        # re-read before quarantining so we never move a file another process
+        # just repaired.
+        from ..session.store import FileLock
+        from ..utils.atomic_io import quarantine_corrupt_file
+
+        try:
+            with FileLock(self.filepath, timeout=10):
+                try:
+                    with open(self.filepath, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except FileNotFoundError:
+                    return {}
+                except (json.JSONDecodeError, ValueError):
+                    try:
+                        dest = quarantine_corrupt_file(self.filepath)
+                        logger.error(
+                            "MCP auth store was corrupt; moved aside to %s",
+                            dest,
+                        )
+                    except OSError:
+                        logger.error(
+                            "MCP auth store at %s is corrupt and could not be "
+                            "quarantined", self.filepath,
+                        )
+                    return {}
+        except (OSError, IOError):
+            # Could not acquire the lock; fall back to the previous behaviour
+            # of reporting empty rather than blocking a read path.
+            return {}
     
     def get(self, mcp_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -143,20 +182,34 @@ class MCPAuthStorage:
     def _set(self, mcp_name: str, entry: Dict[str, Any], server_url: Optional[str] = None) -> None:
         """
         Set an auth entry for an MCP server.
-        
+
+        Uses a locked atomic read-modify-write so concurrent OAuth flows (across
+        threads or processes) no longer lose each other's entries, and a crash
+        mid-write leaves the previous file intact. The temp file created by
+        ``atomic_write_json`` is mode 0600, so secrets are never world-readable,
+        even for the moment between create and chmod.
+
         Args:
             mcp_name: Name of the MCP server
             entry: Auth entry dict
             server_url: Optional server URL to track
         """
-        data = self._read()
-        
-        # Update server_url if provided
         if server_url:
             entry["server_url"] = server_url
-        
-        data[mcp_name] = entry
-        self._write(data)
+
+        def mutate(data: Dict[str, Any]) -> None:
+            data[mcp_name] = entry
+
+        update_json(self.filepath, mutate, indent=2)
+
+        # Tighten to 0600 after the atomic swap. mkstemp already created the temp
+        # file as 0600 so there is no world-readable window; this keeps the mode
+        # correct across platforms and pre-existing files.
+        if os.name != 'nt':
+            try:
+                os.chmod(self.filepath, 0o600)
+            except OSError:
+                pass
     
     def set_tokens(
         self,
@@ -201,10 +254,15 @@ class MCPAuthStorage:
         Args:
             mcp_name: Name of the MCP server
         """
-        data = self._read()
-        if mcp_name in data:
-            del data[mcp_name]
-            self._write(data)
+        def mutate(data: Dict[str, Any]) -> None:
+            data.pop(mcp_name, None)
+
+        update_json(self.filepath, mutate, indent=2)
+        if os.name != 'nt':
+            try:
+                os.chmod(self.filepath, 0o600)
+            except OSError:
+                pass
     
     def set_code_verifier(self, mcp_name: str, code_verifier: str) -> None:
         """
