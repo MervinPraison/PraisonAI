@@ -60,6 +60,14 @@ const MERGE_READY_LABEL = 'pipeline/merge-ready';
 const OPTIONAL_CANCELLED_CHECKS = new Set(['detect-and-trigger']);
 /** Cancelled smoke/windows after timeout are non-blocking when core shards passed on HEAD. */
 const OPTIONAL_CANCELLED_WHEN_CORE_GREEN = new Set(['smoke', 'test-windows']);
+/** Auto PR Comment jobs — queued/pending must not block merge when test-core is green on HEAD. */
+const OPTIONAL_PENDING_WHEN_CORE_GREEN = new Set([
+  'claude-review-recovery',
+  'claude-after-prior-reviewers',
+  'claude-fallback-timeout',
+  'post-missing-claude-final',
+  'bot-pr-trigger-reviews',
+]);
 const BOT_REVIEWER_PATTERNS = [
   'coderabbit',
   'qodo',
@@ -236,11 +244,16 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
   if (headTime <= finalTime + 60000) return false;
-  const claudeRepliedAfterFinal = comments.some((c) => {
+
+  // The finished reply must follow BOTH the latest FINAL trigger and HEAD, so
+  // a reply predating HEAD (stale completion) cannot suppress recovery.
+  const finishedFloor = Math.max(finalTime, headTime - 60000);
+  const claudeFinishedOnHead = comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= finalTime - 60000;
+    return new Date(c.created_at).getTime() >= finishedFloor;
   });
-  if (claudeRepliedAfterFinal) return false;
+  if (claudeFinishedOnHead) return false;
+
   const claudeSinceHead = comments.some((c) => {
     if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
     if (isClaudeTriggerNoise(c)) return false;
@@ -292,8 +305,11 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   if (!isStaleFinalAfterPush(comments, headPushedAt)) {
     return { skip: true, reason: 'not stale' };
   }
-  if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin)) {
-    return { skip: true, reason: 'head pushed by Claude automation' };
+  if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin) && isPushSoonAfterLatestFinal(comments, headPushedAt)) {
+    return {
+      skip: true,
+      reason: 'head pushed by Claude automation soon after FINAL (wait for CI)',
+    };
   }
   if (needsFinalReReviewAfterConflictRebase(comments, headPushedAt)) {
     return { skip: false, reason: '' };
@@ -324,9 +340,23 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
     new Date(a.created_at) > new Date(b.created_at) ? a : b
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
+  if (!headPushedAt) {
+    return comments.some((c) => {
+      if (!isClaudeFinalReplyComment(c)) return false;
+      return new Date(c.created_at).getTime() >= finalTime - 60000;
+    });
+  }
+  const headTime = new Date(headPushedAt).getTime();
+  // The Claude "finished" reply must follow BOTH the latest FINAL trigger and
+  // HEAD. We do NOT reject solely because the FINAL trigger predates HEAD:
+  // Claude may start a FINAL review, push a fix commit (new HEAD), then reply.
+  // The reply timestamp is the real completion signal. Requiring the reply to
+  // follow the latest FINAL also prevents an older reply from satisfying a
+  // newer FINAL trigger.
+  const replyFloor = Math.max(finalTime, headTime - 60000);
   return comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= finalTime - 60000;
+    return new Date(c.created_at).getTime() >= replyFloor;
   });
 }
 
@@ -451,6 +481,12 @@ function isAcceptableCheckConclusion(run, runs) {
   return false;
 }
 
+function isIgnorablePendingCheck(run, runs) {
+  if (!isPendingRun(run)) return false;
+  if (!OPTIONAL_PENDING_WHEN_CORE_GREEN.has(run.name)) return false;
+  return coreTestsGreenOnRuns(runs);
+}
+
 async function allChecksGreenOnSha(github, owner, repo, sha, core) {
   const runs = bestRunsByName(await listChecksOnSha(github, owner, repo, sha));
   if (runs.length === 0) {
@@ -459,6 +495,10 @@ async function allChecksGreenOnSha(github, owner, repo, sha, core) {
   }
   for (const run of runs) {
     if (run.status !== 'completed') {
+      if (isIgnorablePendingCheck(run, runs)) {
+        core?.info?.(`Ignoring pending optional check ${run.name} — test-core green on HEAD`);
+        continue;
+      }
       core?.info?.(`Check pending: ${run.name} (${run.status})`);
       return false;
     }
@@ -534,6 +574,16 @@ async function getCoreRateLimitRemaining(github) {
   } catch {
     return null;
   }
+}
+
+async function shouldSkipMergeGateScan(github, core, options = {}) {
+  const minCoreRemaining = options.minCoreRemaining ?? MIN_CORE_RATE_LIMIT_REMAINING;
+  const remaining = await getCoreRateLimitRemaining(github);
+  if (remaining !== null && remaining < minCoreRemaining) {
+    core?.info?.(`Skip merge gate scan: rate limit low (${remaining} core remaining)`);
+    return true;
+  }
+  return false;
 }
 
 async function shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core, options = {}) {
@@ -1158,6 +1208,8 @@ module.exports = {
   getMergeState,
   OPTIONAL_CANCELLED_CHECKS,
   OPTIONAL_CANCELLED_WHEN_CORE_GREEN,
+  OPTIONAL_PENDING_WHEN_CORE_GREEN,
+  isIgnorablePendingCheck,
   isCoreTestRun,
   coreTestsGreenOnRuns,
   isPendingRun,
@@ -1223,4 +1275,5 @@ module.exports = {
   countSubstantiveMergeGateRuns,
   countPendingMergeGateRuns,
   shouldSkipMergeGateDispatch,
+  shouldSkipMergeGateScan,
 };

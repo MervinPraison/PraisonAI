@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Pick a working Claude Code OAuth token (primary/secondary with failover).
-# Env: CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN_B, CLAUDE_OAUTH_ACTIVE
+# Pick a working Claude Code OAuth token (primary / secondary / tertiary failover).
+# Env: CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN_B, CLAUDE_CODE_OAUTH_TOKEN_C, CLAUDE_OAUTH_ACTIVE
 # Out: GITHUB_OUTPUT token, slot
 set -euo pipefail
 
 PRIMARY="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 SECONDARY="${CLAUDE_CODE_OAUTH_TOKEN_B:-}"
+TERTIARY="${CLAUDE_CODE_OAUTH_TOKEN_C:-}"
 ACTIVE="${CLAUDE_OAUTH_ACTIVE:-primary}"
 
 ACTIVE_LC=$(echo "$ACTIVE" | tr '[:upper:]' '[:lower:]')
 case "$ACTIVE_LC" in
+  tertiary|c|3) PREFERRED=tertiary ;;
   secondary|b|2) PREFERRED=secondary ;;
   *) PREFERRED=primary ;;
 esac
@@ -63,23 +65,36 @@ try_token() {
 SELECTED_SLOT=""
 SELECTED_TOKEN=""
 
-if [[ "$PREFERRED" == "primary" ]]; then
-  try_token primary "$PRIMARY" || try_token secondary "$SECONDARY" || true
-else
-  try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || true
-fi
+case "$PREFERRED" in
+  tertiary)
+    try_token tertiary "$TERTIARY" || try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || true
+    ;;
+  secondary)
+    try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || try_token tertiary "$TERTIARY" || true
+    ;;
+  *)
+    try_token primary "$PRIMARY" || try_token secondary "$SECONDARY" || try_token tertiary "$TERTIARY" || true
+    ;;
+esac
 
 if [[ -z "$SELECTED_TOKEN" ]]; then
-  if [[ "$PREFERRED" == "primary" && -n "$PRIMARY" ]]; then
-    SELECTED_TOKEN="$PRIMARY"
-    SELECTED_SLOT="primary-unprobed"
-  elif [[ -n "$SECONDARY" ]]; then
-    SELECTED_TOKEN="$SECONDARY"
-    SELECTED_SLOT="secondary-unprobed"
-  elif [[ -n "$PRIMARY" ]]; then
-    SELECTED_TOKEN="$PRIMARY"
-    SELECTED_SLOT="primary-unprobed"
-  else
+  # Honor the operator-selected preference first, then fall back in
+  # preference order across the remaining configured tokens.
+  case "$PREFERRED" in
+    tertiary) FALLBACK_ORDER=("tertiary:$TERTIARY" "secondary:$SECONDARY" "primary:$PRIMARY") ;;
+    secondary) FALLBACK_ORDER=("secondary:$SECONDARY" "primary:$PRIMARY" "tertiary:$TERTIARY") ;;
+    *) FALLBACK_ORDER=("primary:$PRIMARY" "secondary:$SECONDARY" "tertiary:$TERTIARY") ;;
+  esac
+  for entry in "${FALLBACK_ORDER[@]}"; do
+    slot="${entry%%:*}"
+    token="${entry#*:}"
+    if [[ -n "$token" ]]; then
+      SELECTED_TOKEN="$token"
+      SELECTED_SLOT="${slot}-unprobed"
+      break
+    fi
+  done
+  if [[ -z "$SELECTED_TOKEN" ]]; then
     echo "::error::No Claude OAuth token configured"
     exit 1
   fi

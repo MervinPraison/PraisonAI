@@ -38,5 +38,5 @@ jobs:
             const ps = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pipeline-status.js'));
             await ps.syncOpenPullRequests(
               github, context.repo.owner, context.repo.repo,
-              { maxPrs: 30, dispatchMergeGate: true }, core
+              { maxPrs: 10, dispatchMergeGate: true }, core
             );

@@ -160,6 +160,12 @@ jobs:
             const candidates = [];
             const skipped = [];
 
+            if (await mergeGate.shouldSkipMergeGateScan(github, core)) {
+              core.setOutput('matrix', JSON.stringify({ include: [] }));
+              core.setOutput('has_candidates', 'false');
+              return;
+            }
+
             if (inputPr) {
               const n = parseInt(inputPr, 10);
               if (Number.isNaN(n)) {
@@ -269,10 +275,11 @@ jobs:
 
       - name: Pick Claude OAuth token
         id: oauth
-        uses: MervinPraison/github-automation-template/.github/actions/pick-oauth-token@v1.1.9
+        uses: ./.github/actions/pick-oauth-token
         with:
           token_primary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           token_secondary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_B }}
+          token_tertiary: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_C }}
           active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE != '' && vars.CLAUDE_OAUTH_ACTIVE || 'primary' }}
 
       - name: Fetch PR branch
