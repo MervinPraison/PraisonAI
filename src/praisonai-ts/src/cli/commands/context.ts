@@ -4,8 +4,7 @@
 
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
-import { EXIT_CODES } from '../spec/cli-spec';
-import { ERROR_CODES } from '../output/errors';
+import { ERROR_CODES, handleCommandError } from '../output/errors';
 
 export interface ContextOptions {
   verbose?: boolean;
@@ -56,12 +55,7 @@ export async function execute(args: string[], options: ContextOptions): Promise<
         break;
     }
   } catch (error) {
-    if (outputFormat === 'json') {
-      outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
-    } else {
-      await pretty.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(EXIT_CODES.RUNTIME_ERROR);
+    await handleCommandError(outputFormat, error);
   }
 }
 

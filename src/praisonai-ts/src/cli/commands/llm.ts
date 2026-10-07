@@ -11,6 +11,7 @@
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
 import { ERROR_CODES } from '../output/errors';
+import { printCommandHelp } from '../output/help';
 
 export interface LLMOptions {
   verbose?: boolean;
@@ -761,26 +762,15 @@ async function helpCommand(outputFormat: string): Promise<void> {
     ]
   };
 
-  if (outputFormat === 'json') {
-    outputJson(formatSuccess(help));
-  } else {
-    await pretty.heading('LLM Command');
-    await pretty.plain(help.description + '\n');
-    await pretty.plain('Subcommands:');
-    for (const cmd of help.subcommands) {
-      await pretty.plain(`  ${cmd.name.padEnd(25)} ${cmd.description}`);
-    }
-    await pretty.newline();
-    await pretty.plain('Flags:');
-    for (const flag of help.flags) {
-      await pretty.plain(`  ${flag.name.padEnd(20)} ${flag.description}`);
-    }
-    await pretty.newline();
-    await pretty.dim('Examples:');
-    await pretty.dim('  praisonai-ts llm providers');
-    await pretty.dim('  praisonai-ts llm test openai');
-    await pretty.dim('  praisonai-ts llm run "Hello" --model openai/gpt-4o-mini');
-  }
+  await printCommandHelp(outputFormat, help, {
+    heading: 'LLM Command',
+    description: `${help.description}\n`,
+    examples: [
+      'praisonai-ts llm providers',
+      'praisonai-ts llm test openai',
+      'praisonai-ts llm run "Hello" --model openai/gpt-4o-mini'
+    ]
+  });
 }
 
 /**
