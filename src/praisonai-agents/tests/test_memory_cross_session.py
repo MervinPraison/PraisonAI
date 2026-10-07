@@ -236,6 +236,50 @@ class TestSqliteUserIdFilter(unittest.TestCase):
                 "a different user_id must not recall another user's turn",
             )
 
+    def test_session_id_stamp_matches_prefetch_session_filter(self):
+        """Issue #5667: when ``MemoryConfig.session_id`` is set, prefetch sends a
+        ``metadata.session_id`` filter. ``_persist_memory_turn`` must stamp that
+        session_id or the saved turn is dropped on recall even for the same user.
+
+        Driven through ``Memory`` (SQLite long-term backend) because the
+        ``session_id`` post-filter lives in ``Memory.search_long_term`` — the raw
+        adapter only filters ``user_id``. Persists with the same metadata the
+        Agent stamps (user_id + session_id) and recalls through the exact
+        ``metadata_filter={"session_id": ...}`` scope ``_memory_prefetch_scope``
+        builds. A mismatched session_id is excluded — removing the stamp would
+        break the matching case, so this genuinely guards the fix.
+        """
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mem = Memory(config={"provider": "sqlite", "db_path": f"{tmpdir}/mem.db"})
+            mem.store_long_term(
+                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                metadata={"user_id": "sess-user", "session_id": "sess-1"},
+            )
+
+            matching = mem.search_long_term(
+                "codename",
+                limit=5,
+                user_id="sess-user",
+                metadata_filter={"session_id": "sess-1"},
+            )
+            self.assertTrue(
+                any("ORANGE-PANDA" in r.get("text", "") for r in matching),
+                "same user+session must recall the stamped turn",
+            )
+
+            other_session = mem.search_long_term(
+                "codename",
+                limit=5,
+                user_id="sess-user",
+                metadata_filter={"session_id": "sess-2"},
+            )
+            self.assertFalse(
+                any("ORANGE-PANDA" in r.get("text", "") for r in other_session),
+                "a different session_id must not recall the turn",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

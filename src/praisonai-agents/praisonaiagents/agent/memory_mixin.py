@@ -794,12 +794,18 @@ class MemoryMixin:
             return
         text = f"User: {user_message}\nAssistant: {assistant_response}"
         metadata = {"agent_id": getattr(self, "agent_id", getattr(self, "name", None))}
-        # Stamp the scoping user_id so turn-start prefetch (which filters by
-        # metadata.user_id) can find this record on a different Agent instance.
+        # Stamp the scoping identity so turn-start prefetch can find this record
+        # on a different Agent instance. Prefetch (_memory_prefetch_scope) sends
+        # user_id AND, when configured, a session_id metadata_filter; both are
+        # post-filtered against record metadata by Memory.search_long_term, so a
+        # turn missing either key is silently dropped on recall.
         config = getattr(self, "_memory_config", None)
         user_id = getattr(config, "user_id", None)
         if user_id:
             metadata["user_id"] = user_id
+        session_id = getattr(config, "session_id", None)
+        if session_id:
+            metadata["session_id"] = session_id
 
         def _do_store():
             # Write each tier under its own guard. The two tiers are independent
