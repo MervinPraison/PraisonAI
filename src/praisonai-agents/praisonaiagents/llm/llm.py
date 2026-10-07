@@ -7089,12 +7089,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for msg in messages:
             role = msg.get("role", "")
             if role in ("system", "developer"):
-                # Accumulate system / developer messages as instructions
-                content = msg.get("content", "")
+                # Accumulate system / developer messages as instructions.
+                # Normalise Chat Completions-style text-part content into a
+                # plain string before combining so we never mutate the
+                # caller-owned list nor send raw parts as instructions.
+                from .openai_client import OpenAIClient
+                content = OpenAIClient._normalise_instruction_content(
+                    msg.get("content", "")
+                )
                 if instructions is None:
                     instructions = content
                 else:
-                    instructions += "\n" + content
+                    instructions = instructions + "\n" + content
             else:
                 # user / assistant / tool messages become input items
                 # Special handling for Chat Completions→Responses API format:
