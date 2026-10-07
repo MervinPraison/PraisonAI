@@ -627,56 +627,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 break
         return deduped
 
-    # ── portable export / import over DB rows (Issue #5517) ───────────
-    #
-    # The parent's export/import portability reads and writes per-session JSON
-    # files on disk. This store keeps transcripts as SQLite rows, so those
-    # inherited operations address the wrong backend: ``export_all`` would miss
-    # every DB session (and leak unrelated JSON sidecars), ``_collect_lineage``
-    # would never find a DB continuation, and ``_save_imported_session`` would
-    # write a sidecar that ``session_exists`` / load can't see. These overrides
-    # redirect all three to the database while preserving the inherited import
-    # validation, live-field reset and no-window-truncation restore contract
-    # (``import_sessions`` / ``export_session`` are reused verbatim).
-
-    def export_all(self) -> Dict[str, Any]:
-        """Export every stored session to a portable, versioned payload.
-
-        Reads the durable SQLite rows (not JSON sidecars) so the backup
-        reflects the actual transcript backend.
-        """
-        return {"version": self.PORTABLE_VERSION, "sessions": list(self._all_rows())}
-
-    def _collect_lineage(
-        self, session: SessionData, *, exclude: str
-    ) -> List[Dict[str, Any]]:
-        """Return other DB sessions sharing this session's lineage id.
-
-        Mirrors the parent's lineage collection but scans SQLite rows so a
-        compacted/rotated continuation stored in the database exports alongside
-        its logical session.
-        """
-        lineage = self._lineage_key(session.to_dict())
-        if not lineage:
-            return []
-        out: List[Dict[str, Any]] = []
-        for data in self._all_rows():
-            if data.get("session_id") == exclude:
-                continue
-            if self._lineage_key(data) == lineage:
-                out.append(data)
-        return out
-
-    def _save_imported_session(self, session: SessionData) -> bool:
-        """Persist a restored session verbatim into the DB (no window enforced).
-
-        Mirrors the parent's import-restore contract (fresh timestamp, no
-        ``_enforce_window`` so a valid larger export is not truncated/compacted)
-        but writes a SQLite row instead of a JSON sidecar, so the restore is
-        visible to ``session_exists`` and loadable. A read-only database
-        (``PRAGMA query_only=ON``) surfaces as a failed write rather than a
-        false success.
-        """
-        session.updated_at = datetime.now(timezone.utc).isoformat()
-        with self._db_lock:
-            return self._write_row(session)
+    # Portable export/import overrides for DB-backed transcripts (Issue #5517)
+    # live above on ``export_all``, ``_collect_lineage``, and
+    # ``_save_imported_session`` — do not redeclare them here (would shadow
+    # ``overwrite`` and break import restore tests).
