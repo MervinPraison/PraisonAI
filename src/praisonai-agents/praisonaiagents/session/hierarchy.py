@@ -571,17 +571,35 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
+        # Persist the child first so the parent never lists a child that was
+        # never written to disk (Issue #5527).
         if not self._save_extended_session(session):
             raise OSError(f"Failed to save session {sid}")
 
-        # Register only after the child exists on disk.
+        # Register only after the child exists on disk. The child is already
+        # persisted, so any parent-registration failure — a ``False`` return or
+        # an ``OSError`` raised while acquiring the parent's lock — must surface
+        # the saved child's ID rather than leak a raw lock error (Issue #5527),
+        # so a retry recovers the existing child instead of creating a duplicate.
         if parent_id:
             def _apply(parent_session: SessionData) -> None:
                 assert isinstance(parent_session, ExtendedSessionData)
                 if sid not in parent_session.children_ids:
                     parent_session.children_ids.append(sid)
-            if not self._modify_session_locked(parent_id, _apply, error_label="update parent children"):
-                raise OSError(f"Session {sid} was saved but registration with parent {parent_id} failed")
+            try:
+                registered = self._modify_session_locked(
+                    parent_id, _apply, error_label="update parent children"
+                )
+            except OSError as exc:
+                raise OSError(
+                    f"Session {sid} was saved but registration with parent "
+                    f"{parent_id} failed"
+                ) from exc
+            if not registered:
+                raise OSError(
+                    f"Session {sid} was saved but registration with parent "
+                    f"{parent_id} failed"
+                )
         
         return sid
     
@@ -638,6 +656,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
+        # Persist the fork first so the parent never lists a child that was
+        # never written to disk (Issue #5527).
         if not self._save_extended_session(forked):
             raise OSError(f"Failed to save forked session {new_id}")
 
@@ -645,10 +665,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
             if new_id not in parent.children_ids:
                 parent.children_ids.append(new_id)
 
-        if not self._modify_session_locked(
-            session_id, _register_fork, error_label="register forked session"
-        ):
-            raise OSError(f"Forked session {new_id} was saved but registration with parent {session_id} failed")
+        # The fork is already persisted, so any parent-registration failure —
+        # a ``False`` return or an ``OSError`` raised while acquiring the
+        # parent's lock — must surface the saved fork's ID rather than leak a
+        # raw lock error (Issue #5527), so a retry recovers the existing fork
+        # instead of creating a duplicate.
+        try:
+            registered = self._modify_session_locked(
+                session_id, _register_fork, error_label="register forked session"
+            )
+        except OSError as exc:
+            raise OSError(
+                f"Forked session {new_id} was saved but registration with "
+                f"parent {session_id} failed"
+            ) from exc
+        if not registered:
+            raise OSError(
+                f"Forked session {new_id} was saved but registration with "
+                f"parent {session_id} failed"
+            )
         
         return new_id
     
@@ -731,7 +766,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             session.snapshots.append(snapshot)
 
         # Recording a snapshot must not compact or truncate an imported live
-        # transcript, so skip retention on this write.
+        # transcript, so skip retention on this write. Raise on a failed
+        # durable write instead of returning a success-shaped ID (Issue #5527).
         if not self._modify_session_locked(
             session_id, _record_snapshot, error_label="create snapshot",
             apply_retention=False,
@@ -981,7 +1017,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.forked_from_message_id = None
         
         # Restore the exported record in full, independent of the destination
-        # window. Retention applies to subsequent ordinary writes.
+        # window. Retention applies to subsequent ordinary writes. Raise on a
+        # failed durable write rather than returning a success ID (Issue #5527).
         if not self._save_extended_session(session, apply_retention=False):
             raise OSError(f"Failed to save imported session {session.session_id}")
         return session.session_id
