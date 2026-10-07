@@ -48,7 +48,9 @@ def test_failed_mutation_releases_transaction_for_peer(tmp_path, tier, backend, 
                 adapter.close_thread_connections()
 
         with ThreadPoolExecutor(max_workers=1) as pool:
-            before, peer_id, after = pool.submit(peer_round_trip).result(timeout=3)
+            # Allow scheduling contention and SQLite's 10-second busy timeout;
+            # this is a hang guard, not a three-second performance assertion.
+            before, peer_id, after = pool.submit(peer_round_trip).result(timeout=60)
         assert [record['id'] for record in before] == [memory_id]
         assert [record['id'] for record in after] == [peer_id]
         assert search('failed') == []
