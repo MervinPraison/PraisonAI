@@ -68,15 +68,23 @@ class StudioProjectTests(unittest.TestCase):
     def test_reader_serialized_against_concurrent_replacement(self):
         """Models the Windows PermissionError: a reader must not touch project.json
         while a writer is mid-replacement. Readers and writers share one reentrant
-        lock, so an unlocked read window can no longer exist."""
+        lock, so an unlocked read window can no longer exist.
+
+        The writer runs a *real* ``_save_project`` paused at ``os.replace`` (the
+        exact WinError-32 window), and the reader is released by an event the
+        instant the replacement window opens — so there is no fixed-sleep gap,
+        and dropping the write lock in production would re-expose the race.
+        """
         import threading
 
         p = self.mgr.create_project("Race")
         pid = p["id"]
+        project = self.mgr._load_project(pid)
 
         real_read_text = Path.read_text
+        real_replace = os.replace
         replacement_in_progress = threading.Event()
-        reader_may_proceed = threading.Event()
+        reader_entered = threading.Event()
 
         def guarded_read_text(self, *args, **kwargs):
             if self.name == "project.json" and replacement_in_progress.is_set():
@@ -85,23 +93,38 @@ class StudioProjectTests(unittest.TestCase):
                 )
             return real_read_text(self, *args, **kwargs)
 
-        def hold_write():
-            with self.mgr._project_lock:
+        def guarded_replace(src, dst, *args, **kwargs):
+            # Open the replacement window, release the reader, and hold it open
+            # until the reader has actually reached its guarded read — proving
+            # serialization rather than relying on a timing margin.
+            if str(dst).endswith("project.json"):
                 replacement_in_progress.set()
-                reader_may_proceed.set()
-                time.sleep(0.2)
-                replacement_in_progress.clear()
+                reader_entered.wait(2)
+                try:
+                    return real_replace(src, dst, *args, **kwargs)
+                finally:
+                    replacement_in_progress.clear()
+            return real_replace(src, dst, *args, **kwargs)
 
         errors: list = []
 
+        def hold_write():
+            # Real production write path: serialized under the write lock.
+            self.mgr._save_project(dict(project))
+
         def do_read():
-            reader_may_proceed.wait(2)
+            # Wait for the replacement window, then mark entry and read. If the
+            # reader is serialized it blocks on the shared lock until replace
+            # finishes; if not, guarded_read_text raises the WinError-32 model.
+            replacement_in_progress.wait(2)
+            reader_entered.set()
             try:
                 self.mgr.get_project(pid)
             except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
 
-        with mock.patch.object(Path, "read_text", guarded_read_text):
+        with mock.patch.object(Path, "read_text", guarded_read_text), \
+                mock.patch.object(os, "replace", guarded_replace):
             writer = threading.Thread(target=hold_write)
             reader = threading.Thread(target=do_read)
             writer.start()
