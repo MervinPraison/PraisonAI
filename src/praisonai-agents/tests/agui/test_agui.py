@@ -150,11 +150,13 @@ class TestAGUIIntegration:
         app.include_router(router)
         
         # Starlette nests included routers, so app.routes may expose an
-        # internal router wrapper rather than flat child paths. Inspect the
-        # router's own routes to verify the AG-UI endpoints are registered.
-        route_paths = [getattr(route, "path", "") for route in router.routes]
-        assert "/agui" in route_paths
-        assert "/status" in route_paths
+        # internal router wrapper rather than flat child paths. Exercise the
+        # app directly to verify the included AG-UI endpoints are reachable.
+        from fastapi.testclient import TestClient
+        
+        client = TestClient(app)
+        assert client.get("/status").status_code == 200
+        assert client.post("/agui", json={"message": "hi"}).status_code != 404
 
 
 class TestAGUIName:
