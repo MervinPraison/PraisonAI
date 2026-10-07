@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Pick a working Claude Code OAuth token (primary/secondary with failover).
-# Env: CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN_B, CLAUDE_OAUTH_ACTIVE
+# Pick a working Claude Code OAuth token (primary / secondary / tertiary failover).
+# Env: CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN_B, CLAUDE_CODE_OAUTH_TOKEN_C, CLAUDE_OAUTH_ACTIVE
 # Out: GITHUB_OUTPUT token, slot
 set -euo pipefail
 
 PRIMARY="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 SECONDARY="${CLAUDE_CODE_OAUTH_TOKEN_B:-}"
+TERTIARY="${CLAUDE_CODE_OAUTH_TOKEN_C:-}"
 ACTIVE="${CLAUDE_OAUTH_ACTIVE:-primary}"
 
 ACTIVE_LC=$(echo "$ACTIVE" | tr '[:upper:]' '[:lower:]')
 case "$ACTIVE_LC" in
+  tertiary|c|3) PREFERRED=tertiary ;;
   secondary|b|2) PREFERRED=secondary ;;
   *) PREFERRED=primary ;;
 esac
@@ -63,11 +65,17 @@ try_token() {
 SELECTED_SLOT=""
 SELECTED_TOKEN=""
 
-if [[ "$PREFERRED" == "primary" ]]; then
-  try_token primary "$PRIMARY" || try_token secondary "$SECONDARY" || true
-else
-  try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || true
-fi
+case "$PREFERRED" in
+  tertiary)
+    try_token tertiary "$TERTIARY" || try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || true
+    ;;
+  secondary)
+    try_token secondary "$SECONDARY" || try_token primary "$PRIMARY" || try_token tertiary "$TERTIARY" || true
+    ;;
+  *)
+    try_token primary "$PRIMARY" || try_token secondary "$SECONDARY" || try_token tertiary "$TERTIARY" || true
+    ;;
+esac
 
 if [[ -z "$SELECTED_TOKEN" ]]; then
   if [[ "$PREFERRED" == "primary" && -n "$PRIMARY" ]]; then
@@ -76,6 +84,9 @@ if [[ -z "$SELECTED_TOKEN" ]]; then
   elif [[ -n "$SECONDARY" ]]; then
     SELECTED_TOKEN="$SECONDARY"
     SELECTED_SLOT="secondary-unprobed"
+  elif [[ -n "$TERTIARY" ]]; then
+    SELECTED_TOKEN="$TERTIARY"
+    SELECTED_SLOT="tertiary-unprobed"
   elif [[ -n "$PRIMARY" ]]; then
     SELECTED_TOKEN="$PRIMARY"
     SELECTED_SLOT="primary-unprobed"

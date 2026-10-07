@@ -35,10 +35,50 @@ const withClaudeReply = [
     created_at: '2026-06-12T08:30:00Z',
   },
 ];
-assert('not stale when Claude replied after FINAL', !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z'));
+assert(
+  'not stale when Claude finished on HEAD',
+  !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T08:25:00Z')
+);
 assert('claude final reply detected', mg.isClaudeFinalReplyComment(withClaudeReply[1]));
 
+const finishedBeforeHead = [
+  ...finals,
+  {
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: "**Claude finished @MervinPraison's task**",
+    created_at: '2026-06-12T08:30:00Z',
+  },
+];
+assert(
+  'stale when head after Claude finished (no reply on HEAD)',
+  mg.isStaleFinalAfterPush(finishedBeforeHead, '2026-06-12T09:00:00Z')
+);
+const finishedOnHead = [
+  ...finals,
+  {
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: "**Claude finished @MervinPraison's task**",
+    created_at: '2026-06-12T09:30:00Z',
+  },
+];
+assert(
+  'not stale when Claude finished after head',
+  !mg.isStaleFinalAfterPush(finishedOnHead, '2026-06-12T09:00:00Z')
+);
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
+assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
+assert('ignorable pending when core green', mg.isIgnorablePendingCheck(
+  { name: 'claude-review-recovery', status: 'queued', conclusion: null },
+  [
+    { name: 'test-core', status: 'completed', conclusion: 'success' },
+    { name: 'test-core (cli)', status: 'completed', conclusion: 'success' },
+  ]
+));
+assert('non-optional pending still blocks', !mg.isIgnorablePendingCheck(
+  { name: 'test-core (root)', status: 'queued', conclusion: null },
+  [{ name: 'test-core', status: 'completed', conclusion: 'success' }]
+));
 
 const coreGreenRuns = [
   { name: 'test-core', status: 'completed', conclusion: 'success' },
