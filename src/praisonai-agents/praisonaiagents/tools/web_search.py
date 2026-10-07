@@ -192,6 +192,7 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if result_limit == 0:
         return []
 
+    import socket
     import threading
     import time
     from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -225,19 +226,28 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     )
     deadline = time.monotonic() + KEENABLE_SEARCH_TIMEOUT_SECONDS
     outcome: Dict[str, Any] = {}
+    # Guards outcome["response"], so the caller never shuts down a socket the worker has closed.
+    lock = threading.Lock()
 
     def fetch() -> None:
         # The deadline check stops a body that trickles in; the socket timeout ends a stalled read.
         try:
             raw = bytearray()
-            with build_opener(_NoRedirect).open(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS) as response:
-                while len(raw) <= KEENABLE_MAX_RESPONSE_BYTES:
+            response = build_opener(_NoRedirect).open(request, timeout=KEENABLE_SEARCH_TIMEOUT_SECONDS)
+            with lock:
+                outcome["response"] = response
+            try:
+                while len(raw) <= KEENABLE_MAX_RESPONSE_BYTES and not outcome.get("abandoned"):
                     if time.monotonic() > deadline:
                         raise TimeoutError("Keenable did not finish responding in time")
                     chunk = response.read1(KEENABLE_MAX_RESPONSE_BYTES + 1 - len(raw))
                     if not chunk:
                         break
                     raw += chunk
+            finally:
+                with lock:
+                    del outcome["response"]
+                    response.close()
             outcome["raw"] = raw
         except Exception as exc:
             outcome["error"] = exc
@@ -249,6 +259,20 @@ def _search_keenable(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     worker.start()
     worker.join(max(0.0, deadline - time.monotonic()))
     if worker.is_alive():
+        # Shut the connection down so a read blocked on a stalled body returns now rather than
+        # at its socket timeout, and the worker exits instead of holding the socket open.
+        with lock:
+            outcome["abandoned"] = True
+            response = outcome.get("response")
+            if response is not None:
+                try:
+                    stalled = socket.socket(fileno=response.fileno())
+                    try:
+                        stalled.shutdown(socket.SHUT_RDWR)
+                    finally:
+                        stalled.detach()
+                except (OSError, ValueError):
+                    pass
         raise TimeoutError("Keenable did not finish responding in time")
     if "error" in outcome:
         raise outcome["error"]

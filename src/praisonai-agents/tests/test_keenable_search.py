@@ -1,6 +1,7 @@
 import importlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import threading
 from threading import Thread
 import time
 from urllib.error import HTTPError
@@ -233,3 +234,22 @@ def test_keenable_deadline_covers_headers_and_a_stalled_body(keenable_server, mo
         web_search_module._search_keenable("q")
 
     assert time.monotonic() - started < 1.5
+
+
+def test_keenable_timeout_releases_a_stalled_body_read(keenable_server, monkeypatch):
+    # The first chunk arrives just before the deadline, so the worker's next read would block
+    # for a whole socket timeout (until ~1.8 s) unless the timeout shuts the connection down.
+    monkeypatch.setattr(web_search_module, "KEENABLE_SEARCH_TIMEOUT_SECONDS", 1.0)
+    keenable_server.reply = (200, b"{")
+    keenable_server.header_delay = 0.8
+    keenable_server.drip_repeats = 2
+    keenable_server.drip_gap = 5
+    before = set(threading.enumerate())
+
+    with pytest.raises(TimeoutError, match="in time"):
+        web_search_module._search_keenable("q")
+
+    workers = [t for t in threading.enumerate() if t not in before and t.name == "keenable-search"]
+    for worker in workers:
+        worker.join(0.3)
+    assert not any(worker.is_alive() for worker in workers)
