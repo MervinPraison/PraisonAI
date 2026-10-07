@@ -153,6 +153,46 @@ class TestQuietHours:
         assert evaluate(NotificationCategory.AGENT_FINISHED, prefs, now=now).send
 
 
+    def test_unknown_timezone_falls_back_to_utc(self):
+        # A bad IANA name must not leave the aware ``now`` on its original clock;
+        # it falls back to UTC so quiet hours stay deterministic. 23:00 UTC is
+        # inside the 22:00-07:30 window, so this is suppressed.
+        now = datetime(2026, 1, 1, 23, 0, tzinfo=timezone.utc)
+        d = evaluate(
+            NotificationCategory.AGENT_FINISHED,
+            self._prefs(timezone="Not/AZone"),
+            now=now,
+        )
+        assert d.send is False
+        assert d.reason == "quiet_hours"
+
+    def test_default_now_uses_recipient_timezone_not_host(self):
+        # With now omitted, the recipient's zone must drive the decision rather
+        # than the host clock. Build a window that is always "now" in Tokyo so
+        # the result is independent of where the test runs.
+        tokyo_now = datetime.now(timezone(timedelta(hours=9)))
+        start = (tokyo_now - timedelta(hours=1)).time()
+        end = (tokyo_now + timedelta(hours=1)).time()
+        prefs = NotificationPreference(
+            categories={NotificationCategory.AGENT_FINISHED},
+            quiet_hours=(start, end),
+            timezone="Asia/Tokyo",
+        )
+        assert evaluate(NotificationCategory.AGENT_FINISHED, prefs).send is False
+
+
+class TestDefaultPreferenceIsolation:
+    def test_mutating_active_prefs_does_not_leak_into_default(self):
+        before = set(DEFAULT_PREFERENCE.categories)
+        # Evaluate with default prefs, then a separate caller mutating their own
+        # copy must never change the shared DEFAULT_PREFERENCE.
+        evaluate(NotificationCategory.APPROVAL_REQUESTED)
+        rogue = NotificationPreference(categories=set(DEFAULT_PREFERENCE.categories))
+        rogue.categories.add(NotificationCategory.AGENT_FINISHED)
+        assert DEFAULT_PREFERENCE.categories == before
+        assert NotificationCategory.AGENT_FINISHED not in DEFAULT_PREFERENCE.categories
+
+
 class TestPreferenceHelpers:
     def test_allows(self):
         prefs = NotificationPreference(categories={NotificationCategory.AGENT_QUESTION})

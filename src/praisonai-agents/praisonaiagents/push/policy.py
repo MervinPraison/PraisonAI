@@ -26,8 +26,9 @@ imports and is trivially testable.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from enum import Enum
 from typing import Optional, Set
 
@@ -173,7 +174,10 @@ def evaluate(
         when the category is not subscribed or quiet hours suppress it.
     """
     if prefs is None:
-        prefs = DEFAULT_PREFERENCE
+        # Defensive copy so a caller mutating the returned/active preference
+        # (e.g. its ``categories`` set) can never bleed into the shared default
+        # used by every other default-preference recipient.
+        prefs = copy.deepcopy(DEFAULT_PREFERENCE)
 
     if not prefs.allows(category):
         return NotificationDecision(send=False, reason="category_not_subscribed")
@@ -192,21 +196,33 @@ def evaluate(
     )
 
 
+def _resolve_zone(tz_name: str):
+    """Load ``tz_name`` as a ``tzinfo``, falling back to UTC.
+
+    ``zoneinfo`` is stdlib (3.9+) so this stays dependency-free. A missing zone
+    (bad IANA name, or an installation without the system tz database) must not
+    silently leave ``now`` on the wrong clock — we fall back to UTC so the
+    quiet-hours decision stays deterministic rather than host-dependent.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(tz_name)
+    except Exception:
+        return timezone.utc
+
+
 def _localised_time(now: Optional[datetime], tz_name: str) -> time:
     """Return the wall-clock ``time`` at ``now`` in ``tz_name``.
 
-    A ``None`` ``now`` uses the current time. An aware ``now`` is converted to
-    ``tz_name``; a naive ``now`` is assumed to already be local. ``zoneinfo`` is
-    stdlib (3.9+) so this stays dependency-free; an unknown zone falls back to
-    the naive time rather than raising.
+    A ``None`` ``now`` uses the current instant (as aware UTC) so the recipient
+    timezone conversion always applies — never the host's local clock. An aware
+    ``now`` is converted to ``tz_name``; a naive ``now`` is assumed to already
+    be in the recipient's local zone and used as-is.
     """
     if now is None:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
     if now.tzinfo is not None:
-        try:
-            from zoneinfo import ZoneInfo
-
-            now = now.astimezone(ZoneInfo(tz_name))
-        except Exception:
-            pass
-    return now.timetz().replace(tzinfo=None) if now.tzinfo else now.time()
+        now = now.astimezone(_resolve_zone(tz_name))
+        return now.time()
+    return now.time()
