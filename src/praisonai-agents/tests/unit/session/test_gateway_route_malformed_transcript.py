@@ -18,7 +18,7 @@ import tempfile
 import pytest
 
 from praisonaiagents.session.store import DefaultSessionStore, SessionData
-from praisonaiagents.session import SqliteTranscriptStore
+from praisonaiagents.session import SqliteSessionStore, SqliteTranscriptStore
 
 
 @pytest.fixture
@@ -89,6 +89,41 @@ def test_sqlite_indexed_route_survives_malformed_turn(tmp_dir, label, field):
             "SELECT data FROM sessions WHERE session_id = ?", ("s1",)
         ).fetchone()
     assert MALFORMED[label] in json.loads(raw[0])[field]
+
+
+@pytest.mark.parametrize("label", list(MALFORMED))
+@pytest.mark.parametrize("field", ["messages", "archived_messages"])
+def test_sqlite_indexed_route_on_disk_survives_malformed_turn(tmp_dir, label, field):
+    """The originally reported crash path: ``SqliteSessionStore._read_indexed_route``.
+
+    Unlike ``SqliteTranscriptStore`` (which stores turns in the ``sessions``
+    table), ``SqliteSessionStore`` keeps the transcript as an on-disk JSON file
+    and routes via the ``session_route`` index. Issue #5672's ``AttributeError``
+    surfaced here, so corrupt the durable JSON directly and confirm the indexed
+    lookup still resolves without touching the file or its route record.
+    """
+    store = SqliteSessionStore(
+        session_dir=tmp_dir, db_path=os.path.join(tmp_dir, "sessions_index.db")
+    )
+    store.add_message("s1", "user", "hi")
+    store.set_gateway_info("s1", gateway_session_id="gw-1", agent_id="agent-x")
+
+    filepath = store._get_session_path("s1")  # noqa: SLF001
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.setdefault("archived_messages", [{"role": "assistant", "content": "a"}])
+    data[field] = [MALFORMED[label]] + data.get(field, [])
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    found = store.get_by_gateway_session("gw-1")
+    assert found is not None
+    assert found.session_id == "s1"
+
+    # Index record and raw on-disk transcript are preserved, not quarantined.
+    assert store.list_sessions_by_gateway_agent("agent-x") == ["s1"]
+    with open(filepath, "r", encoding="utf-8") as f:
+        assert MALFORMED[label] in json.load(f)[field]
 
 
 @pytest.mark.parametrize("label", list(MALFORMED))
