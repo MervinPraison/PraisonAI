@@ -195,6 +195,63 @@ class TestResponsesAPIParamBuilder:
                 }],
             }])
 
+    def test_text_part_instruction_list_joined(self):
+        """A lone text-part system list must become joined instruction text."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[
+            {"role": "system", "content": [
+                {"type": "text", "text": "Line one"},
+                {"type": "text", "text": "Line two"},
+            ]},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert params["instructions"] == "Line one\nLine two"
+
+    def test_mixed_string_then_list_instructions(self):
+        """String instruction followed by a text-part list must concatenate."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[
+            {"role": "system", "content": "First"},
+            {"role": "developer", "content": [{"type": "text", "text": "Second"}]},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert params["instructions"] == "First\nSecond"
+
+    def test_mixed_list_then_string_instructions_no_mutation(self):
+        """List instruction then string must concatenate without mutating caller history."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        system_content = [{"type": "text", "text": "First"}]
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "developer", "content": "Second"},
+            {"role": "user", "content": "hi"},
+        ]
+        params = llm._build_responses_params(messages=messages)
+
+        assert params["instructions"] == "First\nSecond"
+        assert system_content == [{"type": "text", "text": "First"}]
+
+    def test_unsupported_instruction_part_rejected(self):
+        """Non-text instruction parts must raise, not be silently discarded."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        with pytest.raises(ValueError, match="Unsupported system/developer instruction"):
+            llm._build_responses_params(messages=[
+                {"role": "system", "content": [
+                    {"type": "image_url", "image_url": {"url": "x"}},
+                ]},
+                {"role": "user", "content": "hi"},
+            ])
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -526,6 +583,64 @@ class TestOpenAIClientResponsesAPI:
                     "image_url": {"url": str(missing_path)},
                 }],
             }], "gpt-4o-mini")
+
+    def test_build_responses_input_text_part_instruction_list_joined(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([
+            {"role": "system", "content": [
+                {"type": "text", "text": "Line one"},
+                {"type": "text", "text": "Line two"},
+            ]},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "Line one\nLine two"
+
+    def test_build_responses_input_mixed_string_then_list(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([
+            {"role": "system", "content": "First"},
+            {"role": "developer", "content": [{"type": "text", "text": "Second"}]},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "First\nSecond"
+
+    def test_build_responses_input_mixed_list_then_string_no_mutation(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        system_content = [{"type": "text", "text": "First"}]
+        params = client._build_responses_input([
+            {"role": "system", "content": system_content},
+            {"role": "developer", "content": "Second"},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "First\nSecond"
+        assert system_content == [{"type": "text", "text": "First"}]
+
+    def test_build_responses_input_unsupported_instruction_part_rejected(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        with pytest.raises(ValueError, match="Unsupported system/developer instruction"):
+            client._build_responses_input([
+                {"role": "system", "content": [
+                    {"type": "image_url", "image_url": {"url": "x"}},
+                ]},
+                {"role": "user", "content": "hi"},
+            ], "gpt-4o-mini")
+
+    def test_normalise_instruction_content_string_passthrough(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        assert OpenAIClient._normalise_instruction_content("plain") == "plain"
+        assert OpenAIClient._normalise_instruction_content(None) == ""
 
     def test_responses_to_chat_completion(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
