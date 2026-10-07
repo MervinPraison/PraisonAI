@@ -394,6 +394,34 @@ class TestIndexedSessionRoute:
         store.delete_session("s1")
         assert store.get_by_gateway_session("gw-1") is None
 
+    def test_route_retained_on_clear(self, tmp_dir):
+        # Issue #5521: clearing active turns must NOT deindex the retained
+        # session. The JSON transcript, gateway/agent bindings and archive all
+        # survive a clear, so the warm route index must survive too. Deindexing
+        # belongs to delete_session, not clear_session.
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        store.add_message("s", "user", "pelican notes")
+        store.set_gateway_info("s", gateway_session_id="gateway", agent_id="agent")
+        assert store.get_by_gateway_session("gateway") is not None  # warm index
+
+        assert store.clear_session("s")
+        assert store.get_session("s").gateway_session_id == "gateway"
+        assert store.get_by_gateway_session("gateway") is not None
+        assert store.list_sessions_by_gateway_agent("agent") == ["s"]
+
+    def test_archived_recall_retained_on_clear(self, tmp_dir):
+        # Issue #5521: an actual compaction archives early turns; clearing the
+        # active window afterwards must leave archived recall intact, matching
+        # DefaultSessionStore (which keeps the archive on clear).
+        store = SqliteSessionStore(session_dir=tmp_dir, active_window=3)
+        store.add_message("s", "user", "the special value was zx-9271-alpha")
+        for i in range(8):
+            store.add_message("s", "user", f"later message {i}")
+        assert [h.session_id for h in store.search("zx-9271-alpha")] == ["s"]
+
+        assert store.clear_session("s")
+        assert [h.session_id for h in store.search("zx-9271-alpha")] == ["s"]
+
     def test_route_backfills_content_indexed_but_unrouted(self, tmp_dir):
         # Migration case: a store upgraded from a prior release already has the
         # content index (session_meta) populated for a gateway session, but the
