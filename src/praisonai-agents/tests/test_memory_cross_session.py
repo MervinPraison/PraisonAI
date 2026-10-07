@@ -191,5 +191,51 @@ class TestCrossInstancePrefetchRecall(unittest.TestCase):
             self.assertNotIn("ORANGE-PANDA", recalled)
 
 
+class TestSqliteUserIdFilter(unittest.TestCase):
+    """Issue #5667: the ``user_id`` metadata stamp must drive SQLite's
+    ``metadata.user_id`` long-term filter.
+
+    ``FileMemory.search_long_term`` ignores the supplied scope and keeps each
+    user in a separate file, so the FileMemory tests above could still pass if
+    the metadata stamp were removed. The SQLite adapter, by contrast, shares one
+    long-term table across users and filters on ``memory_user_id(metadata)`` —
+    so recall there depends entirely on the stamp this PR writes. A shared store
+    with two users proves matching-user recall and different-user exclusion.
+    """
+
+    def _store(self, tmpdir):
+        from praisonaiagents.memory.adapters.sqlite_adapter import SqliteMemoryAdapter
+
+        return SqliteMemoryAdapter(
+            short_db=f"{tmpdir}/short.db",
+            long_db=f"{tmpdir}/long.db",
+        )
+
+    def test_matching_user_recalls_and_other_user_excluded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self._store(tmpdir)
+            # Persist a turn stamped with user_id, exactly as
+            # Agent._persist_memory_turn does for the durable long-term write.
+            store.store_long_term(
+                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                metadata={"user_id": "sqlite-user-a"},
+            )
+
+            matching = store.search_long_term(
+                "codename", limit=5, user_id="sqlite-user-a"
+            )
+            self.assertTrue(
+                any("ORANGE-PANDA" in r.get("text", "") for r in matching)
+            )
+
+            other = store.search_long_term(
+                "codename", limit=5, user_id="sqlite-user-b"
+            )
+            self.assertFalse(
+                any("ORANGE-PANDA" in r.get("text", "") for r in other),
+                "a different user_id must not recall another user's turn",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

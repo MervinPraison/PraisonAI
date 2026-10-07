@@ -802,13 +802,21 @@ class MemoryMixin:
             metadata["user_id"] = user_id
 
         def _do_store():
-            try:
-                if long_store is not None:
+            # Write each tier under its own guard. The two tiers are independent
+            # stores; a long-term failure (e.g. a locked DB) must not skip the
+            # short-term copy that powers the inline get_memory_context() path,
+            # and vice versa. Sharing one try would have removed the existing
+            # short-term fallback the moment durable recall was added.
+            if long_store is not None:
+                try:
                     long_store(text, metadata=metadata)
-                if short_store is not None:
+                except Exception as e:
+                    logging.debug(f"Long-term memory turn persistence failed: {e}")
+            if short_store is not None:
+                try:
                     short_store(text, metadata=metadata)
-            except Exception as e:
-                logging.debug(f"Memory turn persistence failed: {e}")
+                except Exception as e:
+                    logging.debug(f"Short-term memory turn persistence failed: {e}")
 
         try:
             import asyncio
