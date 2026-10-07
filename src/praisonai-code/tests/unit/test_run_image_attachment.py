@@ -87,10 +87,18 @@ def test_multiple_images_are_comma_joined(monkeypatch):
 
 
 def test_text_only_run_leaves_image_none(monkeypatch):
-    """A run without `--image` keeps `args.image` None (unchanged behaviour)."""
+    """A run without `--image` keeps `args.image` None (unchanged behaviour).
+
+    The subject is the wrapper vision path's ``args`` plumbing, which only runs
+    when the wrapper is installed: since #5644 a standalone text run renders
+    in-process instead of delegating, so this test declares the wrapper present.
+    """
     output = _RecordingOutput()
     monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
     monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
 
     captured = _install_fake_praisonai(monkeypatch)
 
