@@ -252,6 +252,70 @@ class TestResponsesAPIParamBuilder:
                 {"role": "user", "content": "hi"},
             ])
 
+    def test_assistant_list_content_with_tool_calls(self):
+        """List content alongside tool_calls must convert, not crash on .strip() (issue #5469)."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        messages = [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Checking"}],
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":1,"b":2}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "3"},
+        ]
+
+        params = llm._build_responses_params(messages=messages)
+        items = params["input"]
+
+        assert items[0] == {
+            "role": "assistant",
+            "content": [{"type": "input_text", "text": "Checking"}],
+        }
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_1"
+        assert items[1]["name"] == "add"
+        assert items[2] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "3",
+        }
+
+    def test_assistant_string_content_with_tool_calls_unchanged(self):
+        """String content alongside tool_calls stays a string before the function_call."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+        }])
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+
+    def test_assistant_empty_content_with_tool_calls_emits_only_call(self):
+        """Whitespace, None, and empty-list content emit only the function_call."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        for empty in ("   ", None, []):
+            params = llm._build_responses_params(messages=[{
+                "role": "assistant",
+                "content": empty,
+                "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+            }])
+            items = params["input"]
+
+            assert len(items) == 1, f"content={empty!r} should emit only the call"
+            assert items[0]["type"] == "function_call"
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -518,6 +582,70 @@ class TestOpenAIClientResponsesAPI:
         assert params["temperature"] == 0.5
         # Tools should be in Responses API format (flattened)
         assert params["tools"] == [{"type": "function", "name": "add", "description": "Add", "parameters": {}}]
+
+    def test_build_responses_input_assistant_list_content_with_tool_calls(self):
+        """List content alongside tool_calls must convert, not crash on .strip() (issue #5469)."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Checking"}],
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":1,"b":2}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "3"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {
+            "role": "assistant",
+            "content": [{"type": "input_text", "text": "Checking"}],
+        }
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_1"
+        assert items[1]["name"] == "add"
+        assert items[2] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "3",
+        }
+
+    def test_build_responses_input_assistant_string_content_with_tool_calls(self):
+        """String content alongside tool_calls stays a string before the function_call."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+
+    def test_build_responses_input_assistant_empty_content_with_tool_calls(self):
+        """Whitespace, None, and empty-list content emit only the function_call."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        for empty in ("   ", None, []):
+            params = client._build_responses_input([{
+                "role": "assistant",
+                "content": empty,
+                "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+            }], "gpt-4o-mini")
+            items = params["input"]
+
+            assert len(items) == 1, f"content={empty!r} should emit only the call"
+            assert items[0]["type"] == "function_call"
 
     def test_build_responses_input_maps_chat_multimodal_parts(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
