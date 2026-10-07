@@ -345,6 +345,30 @@ class TestTranscriptPortability:
         assert dest.session_exists("s1")
         assert dest.session_exists("s2")
 
+    def test_import_preserves_history_over_destination_window(self, tmp_dir):
+        # Guards the no-window-truncation restore contract on the SQLite
+        # backend: a destination with a small truncating window must not drop
+        # exported history on import (regression guard if the restore path ever
+        # switched from _save_imported_session to _save_session).
+        src = SqliteTranscriptStore(session_dir=tmp_dir)
+        for i in range(6):
+            src.add_message("s1", "user", f"m{i}")
+        payload = src.export_all()
+
+        db = os.path.join(tmp_dir, "dest.db")
+        dst = SqliteTranscriptStore(
+            session_dir=tmp_dir + "2",
+            db_path=db,
+            active_window=2,
+            retention="truncate",
+        )
+        assert dst.import_sessions(payload).imported == 1
+
+        reader = SqliteTranscriptStore(session_dir=tmp_dir + "2", db_path=db)
+        session = reader.get_session("s1")
+        restored = session.archived_messages + session.messages
+        assert [m.content for m in restored] == [f"m{i}" for i in range(6)]
+
 
 class TestTranscriptArchivedRecall:
     """Issue #5031: transcript store must recall compacted (archived) turns."""
