@@ -295,6 +295,24 @@ class MemoryConfig:
     def __post_init__(self):
         # Reject a backend we cannot provide instead of substituting another.
         self.backend = validate_memory_backend(self.backend)
+        # Fail fast on a non-adapter ``db``. The agent calls adapter hooks
+        # (``on_agent_start``/``on_user_message``/``on_agent_message``) directly
+        # on this object. A bare path string or other non-adapter used to flow
+        # through to the mixin, where each hook raised ``'str' object has no
+        # attribute 'on_agent_start'`` and was swallowed as a warning -- memory
+        # looked enabled while every message was silently dropped (Issue #5668).
+        # A valid ``db`` is a DbAdapter (exposes ``on_agent_start``) or a
+        # ``db(...)`` backend instance (exposes ``database_url``).
+        if self.db is not None and not (
+            hasattr(self.db, "on_agent_start") or hasattr(self.db, "database_url")
+        ):
+            raise TypeError(
+                "MemoryConfig.db must be a DbAdapter instance (e.g. db(...) / "
+                "db.SQLiteDB(path=...)), not "
+                f"{type(self.db).__name__}. For a SQLite file use "
+                'db(database_url="sqlite:///path/to.db") or '
+                'MemoryConfig(backend="sqlite", config={"path": "path/to.db"}).'
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
