@@ -329,7 +329,7 @@ class AutoMemory:
         if assistant_response:
             text += "\n" + assistant_response
         
-        # Check if already processed
+        # Check if already processed (previews must not consume dedup)
         import hashlib
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         with self._processing_lock:
