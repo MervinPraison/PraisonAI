@@ -181,3 +181,31 @@ def test_builtin_summary_preserves_all_selected_records(tmp_path, keep):
         assert f"record {i}" in summary
     if keep:
         assert memory.export()["short_term"][0]["content"] == "record 7"
+
+
+def test_same_id_replacement_during_summary_is_not_deleted(tmp_path):
+    memory = FileMemory(user_id="same-id", base_path=tmp_path)
+    for i in range(3):
+        memory.add_short_term(f"original {i}")
+    snapshot = list(memory.export()["short_term"])
+    replaced_id = snapshot[0]["id"]
+
+    def summarize(prompt):
+        # A concurrent import replaces a selected record's content but keeps its
+        # id while summarization runs outside the lock.
+        replaced = [dict(item) for item in snapshot]
+        replaced[0]["content"] = "replacement content"
+        memory.import_data({"short_term": replaced})
+        return prompt
+
+    summary = memory.compress(llm_func=summarize, max_items=0)
+    reopened = FileMemory(user_id="same-id", base_path=tmp_path)
+    retained = {item["id"]: item["content"] for item in reopened.export()["short_term"]}
+    # The replacement must survive; its stale original content must not appear
+    # in the committed summary.
+    assert retained.get(replaced_id) == "replacement content"
+    assert "original 0" not in summary
+    assert "original 1" in summary and "original 2" in summary
+    summaries = reopened.export()["long_term"]
+    assert len(summaries) == 1
+    assert summaries[0]["metadata"]["items_compressed"] == 2

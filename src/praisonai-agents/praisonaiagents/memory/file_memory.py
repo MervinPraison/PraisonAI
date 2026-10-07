@@ -1543,6 +1543,10 @@ class FileMemory:
             # Gather content to compress while holding lock
             items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
             compressed_ids = {item.id for item in items_to_compress}
+            # Remember each selected record's content so a same-id replacement
+            # (e.g. import_data during the unlocked summarization) is detected
+            # and excluded instead of being summarized stale and then deleted.
+            compressed_content = {item.id: item.content for item in items_to_compress}
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
         while items_to_compress:
@@ -1565,16 +1569,25 @@ Summary:"""
             # stays outside it; overlapping calls must not commit duplicate summaries.
             with self._lock:
                 current = self._read_json(self.short_term_file, [])
-                if not compressed_ids.issubset({item["id"] for item in current}):
-                    # Turnover may evict only part of the snapshot. Summarize
-                    # its survivors afresh, never records added during this call.
-                    # Every retry loses at least one ID, so retries are finite;
-                    # a peer that consumed the whole snapshot produces no duplicate.
-                    items_to_compress = [
-                        MemoryItem.from_dict(item) for item in current
-                        if item["id"] in compressed_ids
-                    ]
+                # A survivor is a selected record still present with unchanged
+                # content. Evicted records (turnover) and same-id replacements
+                # (import_data) are both excluded so we never summarize stale
+                # content and then delete the record that replaced it.
+                survivors = [
+                    MemoryItem.from_dict(item) for item in current
+                    if item["id"] in compressed_ids
+                    and item["content"] == compressed_content[item["id"]]
+                ]
+                if len(survivors) != len(items_to_compress):
+                    # Summarize the survivors afresh, never records added during
+                    # this call. Every retry drops at least one id, so retries
+                    # are finite; a peer that consumed the whole snapshot
+                    # produces no duplicate.
+                    items_to_compress = survivors
                     compressed_ids = {item.id for item in items_to_compress}
+                    compressed_content = {
+                        item.id: item.content for item in items_to_compress
+                    }
                     continue
                 summary_id = self.add_long_term(
                     content=f"[Session Summary] {summary}",
