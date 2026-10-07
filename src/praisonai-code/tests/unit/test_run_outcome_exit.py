@@ -267,6 +267,16 @@ def test_actions_stream_reports_truncated_run_not_ok(monkeypatch):
             pass
 
     hierarchy_mod.HierarchicalSessionStore = _HierarchicalSessionStore
+
+    # ``..state.project_sessions`` binds ``DefaultSessionStore`` by *name* at
+    # import time. If it first loads while these stubs are active it keeps the
+    # stub class even after monkeypatch restores ``sys.modules`` — leaking a
+    # store without ``get_chat_history`` into later tests that build a real
+    # session (Greptile #5685 isolation finding). Import it *now*, against the
+    # real modules, so the stub swap below can never be the module's first load.
+    import importlib
+    importlib.import_module("praisonai_code.cli.state.project_sessions")
+
     monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
     monkeypatch.setitem(sys.modules, "praisonaiagents.session", session_pkg)
     monkeypatch.setitem(sys.modules, "praisonaiagents.session.store", store_mod)
@@ -456,12 +466,9 @@ def _install_inprocess_agent_stubs(monkeypatch, agent_factory):
     *raises*, so any test asserting a mode runs in-process also proves the run
     never fell through to the wrapper delegation path (the exact #5665 bug).
     """
+    import importlib
     import sys
     import types
-
-    pkg = types.ModuleType("praisonaiagents")
-    pkg.__path__ = []
-    pkg.Agent = agent_factory
 
     class _MemoryConfig:  # pragma: no cover - simple record stub
         def __init__(self, **kwargs):
@@ -469,8 +476,27 @@ def _install_inprocess_agent_stubs(monkeypatch, agent_factory):
             self.auto_save = kwargs.get("auto_save")
             self.session_id = kwargs.get("session_id")
 
-    pkg.MemoryConfig = _MemoryConfig
-    monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
+    # Prefer patching ``Agent``/``MemoryConfig`` *on the real package* rather
+    # than swapping ``sys.modules["praisonaiagents"]`` for an empty stub:
+    # ``..state.project_sessions`` imports real submodules
+    # (``praisonaiagents.session.store``) at load time, and a bare stub left a
+    # corrupted ``praisonaiagents`` behind for later tests that build a genuine
+    # session store (Greptile #5685 isolation finding). monkeypatch.setattr
+    # restores the originals automatically.
+    try:
+        real_pkg = importlib.import_module("praisonaiagents")
+    except Exception:  # pragma: no cover - standalone env without the core pkg
+        real_pkg = None
+
+    if real_pkg is not None:
+        monkeypatch.setattr(real_pkg, "Agent", agent_factory, raising=False)
+        monkeypatch.setattr(real_pkg, "MemoryConfig", _MemoryConfig, raising=False)
+    else:
+        pkg = types.ModuleType("praisonaiagents")
+        pkg.__path__ = []
+        pkg.Agent = agent_factory
+        pkg.MemoryConfig = _MemoryConfig
+        monkeypatch.setitem(sys.modules, "praisonaiagents", pkg)
 
     fake_main = types.ModuleType("praisonai_code.cli.main")
 
@@ -524,14 +550,17 @@ def test_structured_modes_run_in_process_not_wrapper(monkeypatch, mode, capsys):
     out = capsys.readouterr().out
     if mode == "json":
         import json as _json
-        assert _json.loads(out.strip()) == {"result": "the answer"}
+        # Every terminal outcome carries a machine-readable {result, status}
+        # envelope on stdout (the scripting contract).
+        assert _json.loads(out.strip()) == {"result": "the answer", "status": "ok"}
     elif mode == "stream":
         assert out.strip() == "the answer"
     elif mode == "actions":
         # The core actions preset renders its own output; the CLI prints nothing.
         assert out.strip() == ""
-    else:  # stream-json: NDJSON framing is owned by the event bridge, no raw text
-        assert "the answer" not in out
+    else:  # stream-json: a non-JSON silent preset, so the CLI prints the answer;
+        # genuine NDJSON event framing is added by the bridge in JSON mode.
+        assert out.strip() == "the answer"
 
 
 @pytest.mark.parametrize("mode", ["json", "stream"])
@@ -560,7 +589,10 @@ def test_truncated_run_surfaces_partial_answer_before_exit(monkeypatch, mode, ca
     out = capsys.readouterr().out
     if mode == "json":
         import json as _json
-        assert _json.loads(out.strip()) == {"result": "partial summary"}
+        assert _json.loads(out.strip()) == {
+            "result": "partial summary",
+            "status": "truncated",
+        }
     else:
         assert out.strip() == "partial summary"
 

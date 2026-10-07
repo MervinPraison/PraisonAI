@@ -2547,6 +2547,15 @@ def _run_prompt(
             def _emit(status: str, value: Any) -> None:
                 _emit_json_outcome(_json_stdout, status, value)
 
+            # `--output stream` renders only on the clean-completion path below,
+            # which the exit-2 reporters jump over. Print the partial answer here
+            # so a blocked/truncated stream run still surfaces its wrap-up text
+            # (the json envelope is covered by ``_emit``; stream-json keeps its
+            # NDJSON framing, so neither prints raw text).
+            def _emit_partial(value: Any) -> None:
+                if output_mode == "stream" and value and not output.is_json_mode:
+                    print(value)
+
             # A provider block/refusal/truncation wins over a generic empty-result
             # failure so the specific, actionable reason is not masked.
             # The reporters below raise typer.Exit, so surface the mode-specific
@@ -2556,6 +2565,7 @@ def _run_prompt(
             # hard failure (no usable result to print; keep stdout clean).
             if block_reason:
                 _emit(block_reason, result)
+                _emit_partial(result)
                 _report_run_blocked(
                     output, result, block_reason, suppress_human=_json_stdout
                 )
@@ -2567,6 +2577,7 @@ def _run_prompt(
             # task.
             if truncated:
                 _emit("truncated", result)
+                _emit_partial(result)
                 _report_run_truncated(
                     output, result, suppress_human=_json_stdout
                 )
