@@ -1843,17 +1843,42 @@ def run_main(
         )
         return
     
-    # Emit start event
+    # `--output stream-json` names the NDJSON wire format, but ``emit_start``
+    # only *frames* ``start``/``run.start`` on stdout when the controller is
+    # already in STREAM_JSON mode (otherwise the events are merely recorded).
+    # ``_run_prompt`` performs that mode switch, but only *after* this point —
+    # so a direct-prompt run selected purely via the per-command selector would
+    # emit its lead-in event to a TEXT controller and the NDJSON stream would
+    # lose its documented first event and target metadata. Frame the start event
+    # here by switching the mode across just the ``emit_start`` call, then
+    # restore immediately so ``_run_prompt`` owns the mode for the run itself
+    # (and its own restore). The guard mirrors ``_run_prompt``'s — only the
+    # neutral TEXT controller is upgraded, so an explicit global
+    # quiet/verbose/screen-reader/json keeps winning, and only the direct-prompt
+    # path (which reaches ``_run_prompt``) is affected.
     from ..output.event_bridge import SCHEMA_VERSION
-    output.emit_start(
-        message=f"Starting run: {target[:50]}..." if len(target) > 50 else f"Starting run: {target}",
-        data={
-            "schema_version": SCHEMA_VERSION,
-            "target": target,
-            "model": model,
-            "framework": framework,
-        }
+    _frame_start_as_ndjson = (
+        output_mode == "stream-json"
+        and not _is_yaml_file(target)
+        and not (agent or command)
+        and output.mode == OutputMode.TEXT
     )
+    if _frame_start_as_ndjson:
+        output.mode = OutputMode.STREAM_JSON
+    try:
+        # Emit start event
+        output.emit_start(
+            message=f"Starting run: {target[:50]}..." if len(target) > 50 else f"Starting run: {target}",
+            data={
+                "schema_version": SCHEMA_VERSION,
+                "target": target,
+                "model": model,
+                "framework": framework,
+            }
+        )
+    finally:
+        if _frame_start_as_ndjson:
+            output.mode = OutputMode.TEXT
     
     # Check if target is a file or prompt (case-insensitive extension, shared
     # with the stdin-ingestion gate above so both decisions stay consistent).

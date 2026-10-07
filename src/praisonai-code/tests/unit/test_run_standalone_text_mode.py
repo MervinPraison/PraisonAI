@@ -54,6 +54,13 @@ class _RecordingOutput:
         if self.mode == OutputMode.STREAM_JSON:
             print(json.dumps({"event": event_type, "data": data}), flush=True)
 
+    def emit_start(self, message=None, data=None):
+        # Mirror the real controller: the canonical ``run.start`` is framed only
+        # in STREAM_JSON mode, alongside the legacy ``start`` event.
+        self.emit_event("start", message=message, data=data)
+        if self.mode == OutputMode.STREAM_JSON:
+            self.emit_event("run.start", message=message, data=data)
+
     def emit_result(self, message=None, data=None):
         self.results.append((message, data))
         self.emit_event("result", message=message, data=data)
@@ -702,3 +709,43 @@ def test_structured_mode_with_wrapper_installed_stays_in_process(monkeypatch):
 
     assert captured["prompt"] == "hi"
     assert "prompt" not in delegated
+
+
+def test_stream_json_run_frames_the_start_event(standalone, monkeypatch):
+    """`run --output stream-json "hi"` must frame ``run.start`` on stdout.
+
+    ``run_main`` emits the start event before ``_run_prompt`` switches the
+    controller into STREAM_JSON mode, so a direct-prompt run selected purely via
+    the per-command selector used to record ``start``/``run.start`` without
+    printing them — the NDJSON stream lost its documented first event and its
+    target metadata. Driven through the real Typer app so every option default
+    resolves normally; pins that the start event is framed and that the
+    run-scoped framing is torn down afterwards.
+    """
+    from typer.testing import CliRunner
+
+    _install_fake_praisonai(monkeypatch)
+    _install_fake_agent(monkeypatch)
+    # Keep run_main's credential/config preamble inert so the test drives only
+    # the start-event framing, not provider or filesystem resolution.
+    monkeypatch.setattr(
+        "praisonai_code.llm.credentials.ensure_configured_or_onboard",
+        lambda *a, **k: "gpt-4o",
+    )
+    monkeypatch.setattr(
+        run_cmd, "resolve_config", lambda: (_ for _ in ()).throw(ValueError())
+    )
+
+    result = CliRunner().invoke(
+        run_cmd.app, ["--output", "stream-json", "--no-save", "hi"]
+    )
+
+    out = result.output
+    events = [
+        json.loads(line)["event"]
+        for line in out.strip().splitlines()
+        if line.startswith("{")
+    ]
+    assert "run.start" in events, out
+    # The framing was scoped to the run: the controller is back to TEXT.
+    assert standalone.mode == OutputMode.TEXT
