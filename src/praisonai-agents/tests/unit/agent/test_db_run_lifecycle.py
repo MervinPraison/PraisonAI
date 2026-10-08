@@ -150,8 +150,11 @@ def test_before_agent_hook_receives_prompt_and_finalizes_block(recorded_agent):
         seen.append(data.prompt)
         return HookResult.block("not approved")
 
-    agent._hook_runner.registry.register_function(HookEvent.BEFORE_AGENT, block)
-    assert agent.chat("review this prompt") is None
+    hook_id = agent._hook_runner.registry.register_function(HookEvent.BEFORE_AGENT, block)
+    try:
+        assert agent.chat("review this prompt") is None
+    finally:
+        agent._hook_runner.registry.unregister(hook_id)
     assert seen == ["review this prompt"]
     assert len(db.starts) == len(db.ends) == 1
     assert db.ends[0]["status"] == "error"
