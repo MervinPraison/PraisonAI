@@ -716,3 +716,78 @@ class TestDrainWatchdogParity:
             {"gateway": {"watchdog": False}}
         )
         assert m.gateway.watchdog is False
+
+
+class TestStrictKeyValidation:
+    """Strict unknown/typo key validation on load (#5723)."""
+
+    def test_unknown_gateway_key_strict_raises_with_suggestion(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"gateway": {"prt": 9000}}, strict=True
+            )
+        assert exc.value.path == "gateway"
+        assert "prt" in exc.value.keys
+        assert exc.value.suggestion == "port"
+
+    def test_unknown_top_level_key_strict_raises(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError):
+            MultiChannelGatewayConfig.from_dict(
+                {"channelz": {}}, strict=True
+            )
+
+    def test_channel_token_typo_strict_raises(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"channels": {"telegram": {"tokenn": "x"}}}, strict=True
+            )
+        assert exc.value.path == "channels.telegram"
+        assert exc.value.suggestion == "token"
+
+    def test_channel_legit_metadata_passes_through(self):
+        """Genuine channel-specific keys are not flagged as typos."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"channels": {"telegram": {"token": "x", "allowed_updates": ["msg"]}}},
+            strict=True,
+        )
+        assert m.channels["telegram"].metadata["allowed_updates"] == ["msg"]
+
+    def test_non_strict_default_tolerates_unknown_keys(self):
+        """Default (non-strict) stays backward-compatible: no raise."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"prt": 9000}, "channels": {"telegram": {"tokenn": "x"}}}
+        )
+        assert m.gateway.port == 8765
+
+    def test_round_trip_to_dict_is_strict_clean(self):
+        """A config produced by ``to_dict`` re-parses cleanly under strict."""
+        from praisonaiagents.gateway.config import (
+            GatewayConfig,
+            MultiChannelGatewayConfig,
+        )
+
+        payload = {"gateway": GatewayConfig(port=9100).to_dict()}
+        m = MultiChannelGatewayConfig.from_dict(payload, strict=True)
+        assert m.gateway.port == 9100

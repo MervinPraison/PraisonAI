@@ -50,6 +50,102 @@ class ConfigVersionError(ValueError):
     """
 
 
+class ConfigValidationError(ValueError):
+    """Raised when gateway config contains an unknown/misspelled key.
+
+    Carries the dotted ``path`` to the offending section plus the offending
+    ``keys`` and (when a near match exists) a ``suggestion`` so the error is
+    actionable — e.g. ``channels.telegram.tokenn: unknown key (did you mean
+    'token'?)`` — rather than the silent no-op a typo produces today (#5723).
+    """
+
+    def __init__(
+        self,
+        path: str,
+        keys: List[str],
+        suggestion: Optional[str] = None,
+    ) -> None:
+        self.path = path
+        self.keys = list(keys)
+        self.suggestion = suggestion
+        shown = ", ".join(sorted(self.keys))
+        msg = f"{path}: unknown key(s): {shown}"
+        if suggestion:
+            msg += f" (did you mean '{suggestion}'?)"
+        super().__init__(msg)
+
+
+def _closest_known_key(unknown: str, known: Set[str]) -> Optional[str]:
+    """Return the closest known key to ``unknown`` for a "did you mean" hint."""
+    import difflib
+
+    matches = difflib.get_close_matches(unknown, sorted(known), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _check_unknown_keys(
+    data: Mapping[str, Any],
+    known: Set[str],
+    path: str,
+    strict: bool,
+) -> None:
+    """Reject (strict) or warn about keys in ``data`` not present in ``known``.
+
+    When ``strict`` is False (the default, preserving today's fail-open
+    behaviour) a prominent warning is logged for each unknown key so the
+    misconfiguration surfaces before a future release makes it a hard failure.
+    """
+    unknown = sorted(set(data) - known)
+    if not unknown:
+        return
+    suggestion = _closest_known_key(unknown[0], known)
+    if strict:
+        raise ConfigValidationError(path, unknown, suggestion)
+    import logging
+
+    hint = f" (did you mean '{suggestion}'?)" if suggestion else ""
+    logging.getLogger(__name__).warning(
+        "Ignoring unknown %s key(s) %s%s; valid keys are %s",
+        path,
+        unknown,
+        hint,
+        sorted(known),
+    )
+
+
+def _check_typo_keys(
+    data: Mapping[str, Any],
+    reserved: Set[str],
+    path: str,
+    strict: bool,
+) -> None:
+    """Flag keys that look like typos of ``reserved`` keys.
+
+    Unlike :func:`_check_unknown_keys` this does *not* reject every extra key —
+    it only fires on a close misspelling of a reserved key (e.g. ``tokenn`` for
+    ``token``), so sections that legitimately accept pass-through keys (channel
+    metadata) keep working while the #5723 footgun still surfaces.
+    """
+    import difflib
+
+    for key in data:
+        if key in reserved:
+            continue
+        match = difflib.get_close_matches(key, sorted(reserved), n=1, cutoff=0.8)
+        if match:
+            if strict:
+                raise ConfigValidationError(path, [key], match[0])
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Ignoring %s key %r which looks like a typo of %r; "
+                "if intentional this is passed through as metadata",
+                path,
+                key,
+                match[0],
+            )
+
+
 @dataclass
 class LegacyConfigRule:
     """A single declarative config-migration rule.
@@ -1367,8 +1463,33 @@ class MultiChannelGatewayConfig:
     channels: Dict[str, ChannelRouteConfig] = field(default_factory=dict)
     hooks: List[Any] = field(default_factory=list)
     
+    # Known top-level and nested keys for strict unknown-key validation
+    # (#5723). Kept here as the single source of truth consumed by all three
+    # surfaces (YAML, CLI, Python) — ``gateway doctor`` reuses the same sets.
+    _KNOWN_TOP_KEYS = frozenset({"gateway", "agents", "channels", "hooks", "config_version"})
+    _KNOWN_GATEWAY_KEYS = frozenset({
+        "host", "port", "trusted_proxies", "cors_origins", "allowed_origins",
+        "auth_token", "auth", "auth_scopes", "max_connections",
+        "max_sessions_per_agent", "session_config", "heartbeat_interval",
+        "reconnect_timeout", "per_turn_timeout", "ssl_cert", "ssl_key",
+        "max_buffered_bytes", "max_queued_frames", "max_concurrent_runs",
+        "queue_depth", "overflow_policy", "drain_timeout", "watchdog",
+        "watchdog_timeout", "max_concurrent_runs_per_scope",
+        "preauth_max_connections_per_ip", "max_unauthorized_frames",
+        "api", "liveness", "turn_lock", "control", "attachments",
+        "push", "preflight", "strict_tools", "hooks",
+        # Derived/read-only keys emitted by ``GatewayConfig.to_dict`` so a
+        # round-tripped config stays strict-clean.
+        "ssl_enabled", "scope_policy_enabled", "executor",
+    })
+    _KNOWN_CHANNEL_KEYS = frozenset({
+        "token", "app_token", "routes", "enabled",
+    })
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MultiChannelGatewayConfig":
+    def from_dict(
+        cls, data: Dict[str, Any], *, strict: bool = False
+    ) -> "MultiChannelGatewayConfig":
         """Create from parsed YAML dictionary.
         
         Expected format::
@@ -1389,12 +1510,25 @@ class MultiChannelGatewayConfig:
         
         Args:
             data: Parsed YAML dictionary
+            strict: When True, unknown/misspelled keys raise
+                :class:`ConfigValidationError` with a path-scoped, actionable
+                message. When False (default, backward-compatible) unknown keys
+                are tolerated but logged as a prominent warning so a typo such
+                as ``channels.telegram.tokenn`` surfaces instead of silently
+                no-op'ing (#5723).
             
         Returns:
             Configured MultiChannelGatewayConfig instance
         """
+        # Validate top-level keys first so a misplaced section is caught early.
+        _check_unknown_keys(data, set(cls._KNOWN_TOP_KEYS), "gateway", strict)
+
         # Parse gateway section
         gw_data = data.get("gateway", {})
+        if isinstance(gw_data, dict):
+            _check_unknown_keys(
+                gw_data, set(cls._KNOWN_GATEWAY_KEYS), "gateway", strict
+            )
         
         # Parse session config if provided
         session_config = SessionConfig()
@@ -1497,6 +1631,17 @@ class MultiChannelGatewayConfig:
         channels: Dict[str, ChannelRouteConfig] = {}
         for name, ch_data in data.get("channels", {}).items():
             if isinstance(ch_data, dict):
+                # Channels deliberately pass unrecognised keys through to
+                # ``metadata`` for channel-specific config, so we can't reject
+                # *every* extra key. Instead flag only near-miss typos of the
+                # reserved keys (e.g. ``tokenn`` → ``token``) — the motivating
+                # footgun in #5723 — leaving genuine metadata untouched.
+                _check_typo_keys(
+                    ch_data,
+                    set(cls._KNOWN_CHANNEL_KEYS),
+                    f"channels.{name}",
+                    strict,
+                )
                 channels[name] = ChannelRouteConfig(
                     channel_type=name,
                     token_env=ch_data.get("token", ""),
