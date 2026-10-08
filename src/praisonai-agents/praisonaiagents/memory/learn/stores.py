@@ -14,6 +14,7 @@ Each store handles a specific type of learning data:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -125,9 +126,9 @@ class BaseStore(ABC):
         ensure_dir(base)
         return str(base / f"{self.store_name}.json")
     
-    def _load(self) -> None:
+    def _load(self, *, strict: bool = False) -> None:
         """Load entries from storage using BaseJSONStore."""
-        data = self._store.load()
+        data = self._store._load_strict() if strict else self._store.load()
         self._entries = {
             k: LearnEntry.from_dict(v) for k, v in data.items()
         }
@@ -145,7 +146,7 @@ class BaseStore(ABC):
         # Re-read the current on-disk state before mutating so a concurrent
         # writer sharing the same store (e.g. another agent with the same
         # user_id) isn't silently overwritten by this save.
-        self._load()
+        self._load(strict=True)
         # Deduplication: Check for exact content match
         content_normalized = content.strip().lower()
         for existing_entry in self._entries.values():
@@ -192,28 +193,51 @@ class BaseStore(ABC):
     def get(self, entry_id: str) -> Optional[LearnEntry]:
         """Get entry by ID."""
         return self._entries.get(entry_id)
+
+    def _refresh_for_retrieval(self) -> bool:
+        """Refresh before telemetry writes; use cached entries on backend outage."""
+        try:
+            self._load(strict=True)
+            return True
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # Unreadable source: retain the cache without persisting telemetry.
+            refresh_error = exc
+        except (KeyError, TypeError, ValueError, AttributeError):
+            # Invalid records are data errors, not temporary backend outages.
+            raise
+        except Exception as exc:
+            refresh_error = exc
+        import logging
+        logging.warning("Failed to refresh learning store; using read-only cached entries: %s", refresh_error)
+        return False
     
     def search(self, query: str, limit: int = 10) -> List[LearnEntry]:
         """Simple text search (can be overridden for semantic search)."""
+        # Retrieval persists usage telemetry, so refresh before selecting entries.
+        refreshed = self._refresh_for_retrieval()
         query_lower = query.lower()
         results = [
             entry for entry in self._entries.values()
             if query_lower in entry.content.lower()
         ]
         results = results[:limit]
-        self._touch(results)
+        if refreshed:
+            self._touch(results)
         return results
     
     def list_all(self, limit: int = 100) -> List[LearnEntry]:
         """List all entries."""
+        refreshed = self._refresh_for_retrieval()
         entries = list(self._entries.values())
         entries.sort(key=lambda x: x.updated_at, reverse=True)
         entries = entries[:limit]
-        self._touch(entries)
+        if refreshed:
+            self._touch(entries)
         return entries
     
     def update(self, entry_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[LearnEntry]:
         """Update an existing entry."""
+        self._load(strict=True)
         if entry_id not in self._entries:
             return None
         entry = self._entries[entry_id]
@@ -227,6 +251,7 @@ class BaseStore(ABC):
     
     def delete(self, entry_id: str) -> bool:
         """Delete an entry."""
+        self._load(strict=True)
         if entry_id in self._entries:
             del self._entries[entry_id]
             self._save()
