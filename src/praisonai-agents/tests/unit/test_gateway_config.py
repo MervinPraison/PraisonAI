@@ -716,3 +716,114 @@ class TestDrainWatchdogParity:
             {"gateway": {"watchdog": False}}
         )
         assert m.gateway.watchdog is False
+
+
+class TestStrictKeyValidation:
+    """Strict unknown/typo key validation on load (#5723)."""
+
+    def test_unknown_gateway_key_strict_raises_with_suggestion(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"gateway": {"prt": 9000}}, strict=True
+            )
+        assert exc.value.path == "gateway"
+        assert "prt" in exc.value.keys
+        assert exc.value.suggestion == "port"
+
+    def test_unknown_top_level_key_strict_raises(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"channelz": {}}, strict=True
+            )
+        # A top-level typo must be reported at the root, not misattributed to
+        # the ``gateway`` section it does not live in.
+        assert exc.value.path == "<root>"
+        assert exc.value.suggestion == "channels"
+
+    def test_channel_token_typo_strict_raises(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"channels": {"telegram": {"tokenn": "x"}}}, strict=True
+            )
+        assert exc.value.path == "channels.telegram"
+        assert exc.value.suggestion == "token"
+
+    def test_channel_legit_metadata_passes_through(self):
+        """Genuine channel-specific keys are not flagged as typos."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"channels": {"telegram": {"token": "x", "allowed_updates": ["msg"]}}},
+            strict=True,
+        )
+        assert m.channels["telegram"].metadata["allowed_updates"] == ["msg"]
+
+    def test_non_strict_default_tolerates_unknown_keys(self):
+        """Default (non-strict) stays backward-compatible: no raise."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"prt": 9000}, "channels": {"telegram": {"tokenn": "x"}}}
+        )
+        assert m.gateway.port == 8765
+
+    def test_round_trip_to_dict_is_strict_clean(self):
+        """A config produced by ``to_dict`` re-parses cleanly under strict."""
+        from praisonaiagents.gateway.config import (
+            GatewayConfig,
+            MultiChannelGatewayConfig,
+        )
+
+        payload = {"gateway": GatewayConfig(port=9100).to_dict()}
+        m = MultiChannelGatewayConfig.from_dict(payload, strict=True)
+        assert m.gateway.port == 9100
+
+    def test_non_string_top_level_keys_do_not_crash(self):
+        """Non-string YAML mapping keys are tolerated, not a TypeError (#5725)."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {}, 1: True, "note": "x"}
+        )
+        assert m.gateway.port == 8765
+
+    def test_non_string_top_level_keys_strict_raises_clean(self):
+        """Strict mode reports a clean error even with non-string keys (#5725)."""
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"gateway": {}, 1: True}, strict=True
+            )
+        assert "1" in str(exc.value)
+
+    def test_non_string_channel_key_passes_through(self):
+        """A non-string channel key is treated as metadata, never crashes (#5725)."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"channels": {"telegram": {"token": "x", 1: "y"}}}, strict=True
+        )
+        assert m.channels["telegram"].metadata[1] == "y"

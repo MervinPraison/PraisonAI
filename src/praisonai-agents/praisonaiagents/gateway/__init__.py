@@ -283,6 +283,7 @@ _LAZY_IMPORTS = {
     # Config version stamp + doctor-driven migration (Issue #3841)
     "GATEWAY_CONFIG_VERSION": ("praisonaiagents.gateway.config", "GATEWAY_CONFIG_VERSION"),
     "ConfigVersionError": ("praisonaiagents.gateway.config", "ConfigVersionError"),
+    "ConfigValidationError": ("praisonaiagents.gateway.config", "ConfigValidationError"),
     "LegacyConfigRule": ("praisonaiagents.gateway.config", "LegacyConfigRule"),
     "GATEWAY_CONFIG_RULES": ("praisonaiagents.gateway.config", "GATEWAY_CONFIG_RULES"),
     "is_config_current": ("praisonaiagents.gateway.config", "is_config_current"),
@@ -639,6 +640,7 @@ __all__ = [
     # Config version stamp + doctor-driven migration (Issue #3841)
     "GATEWAY_CONFIG_VERSION",
     "ConfigVersionError",
+    "ConfigValidationError",
     "LegacyConfigRule",
     "GATEWAY_CONFIG_RULES",
     "is_config_current",
