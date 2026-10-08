@@ -299,6 +299,46 @@ class TestSQLiteBackend:
         backend2 = SQLiteBackend(db_path=str(db_path))
         loaded = backend2.load("key1")
         assert loaded["data"] == 1
+    
+    def test_sqlite_backend_schema_failure_closes_connection(self, tmp_path):
+        """Schema init failure must close the opened connection and re-raise."""
+        import sqlite3
+
+        db_path = tmp_path / "test.db"
+
+        # Pre-create a conflicting table WITHOUT the expected ``key`` column so
+        # that index creation in _create_table() raises. The connection is
+        # opened during __init__; the cleanup path must close it and re-raise.
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE praison_storage (other TEXT)")
+        conn.commit()
+        conn.close()
+
+        captured = {}
+        original_create = SQLiteBackend._create_table
+
+        def tracking_create(self):
+            captured["backend"] = self
+            return original_create(self)
+
+        SQLiteBackend._create_table = tracking_create
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                SQLiteBackend(db_path=str(db_path))
+        finally:
+            SQLiteBackend._create_table = original_create
+
+        backend = captured["backend"]
+        # Connection must have been closed by the cleanup path.
+        assert getattr(backend._local, "conn", None) is None
+
+        # Existing data/table must survive untouched (no removal/replacement).
+        verify = sqlite3.connect(str(db_path))
+        tables = verify.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='praison_storage'"
+        ).fetchall()
+        verify.close()
+        assert tables == [("praison_storage",)]
 
     @pytest.mark.parametrize("table_name", ["select", "123", "9table", "praison_storage"])
     def test_sqlite_backend_keyword_and_digit_table_names(self, tmp_path, table_name):
