@@ -300,38 +300,54 @@ class RulesManager:
         frontmatter = {}
         body = content
         
-        # Check for YAML frontmatter (--- ... ---)
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                yaml_content = parts[1].strip()
-                body = parts[2].strip()
-                
-                # Simple YAML parsing (avoid dependency)
-                for line in yaml_content.split("\n"):
-                    line = line.strip()
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        key = key.strip()
-                        value = value.strip()
-                        
-                        # Handle lists
-                        if value.startswith("[") and value.endswith("]"):
-                            # Parse simple list: ["*.py", "*.pyx"]
-                            value = [v.strip().strip('"\'') for v in value[1:-1].split(",") if v.strip()]
-                        # Handle booleans
-                        elif value.lower() in ("true", "false"):
-                            value = value.lower() == "true"
-                        # Handle numbers
-                        elif value.isdigit():
-                            value = int(value)
-                        # Handle quoted strings
-                        elif value.startswith('"') and value.endswith('"'):
-                            value = value[1:-1]
-                        elif value.startswith("'") and value.endswith("'"):
-                            value = value[1:-1]
-                        
-                        frontmatter[key] = value
+        # Delimiters are complete lines, not substrings in metadata values.
+        lines = content.splitlines(keepends=True)
+        if lines and lines[0].rstrip("\r\n \t") == "---":
+            import yaml
+
+            for end in range(1, len(lines)):
+                if lines[end].rstrip("\r\n \t") != "---":
+                    continue
+                # Invalid metadata retains text for explicit use, not automatic selection.
+                frontmatter = {"activation": "manual"}
+                try:
+                    yaml_content = "".join(lines[1:end])
+                    loader = yaml.SafeLoader(yaml_content)
+                    try:
+                        node = loader.get_single_node()
+                        if isinstance(node, yaml.MappingNode):
+                            loader.flatten_mapping(node)
+                            for key, value in node.value:
+                                # These schema fields preserve scalar spellings,
+                                # including leading zeroes and numeric filenames.
+                                if (key.value == "priority" and isinstance(value, yaml.ScalarNode)
+                                        and re.fullmatch(r"[+-]?[0-9]+", value.value)):
+                                    value.tag = "tag:yaml.org,2002:str"
+                                elif key.value == "globs" and isinstance(value, yaml.SequenceNode):
+                                    for item in value.value:
+                                        if isinstance(item, yaml.ScalarNode):
+                                            item.tag = "tag:yaml.org,2002:str"
+                        parsed = loader.construct_document(node) if node is not None else {}
+                    finally:
+                        loader.dispose()
+                    if isinstance(parsed, dict):
+                        if "priority" in parsed:
+                            priority = parsed["priority"]
+                            if isinstance(priority, str) and re.fullmatch(r"[+-]?[0-9]+", priority):
+                                parsed["priority"] = int(priority, 10)
+                            elif type(priority) is not int:
+                                raise ValueError("Rule priority must be an integer")
+                        if "globs" in parsed:
+                            globs = parsed["globs"]
+                            if not isinstance(globs, list) or not all(isinstance(item, str) for item in globs):
+                                raise ValueError("Rule globs must be a list of scalar patterns")
+                            parsed["globs"] = globs
+                        frontmatter = parsed
+                        body = "".join(lines[end + 1:]).strip()
+                except (yaml.YAMLError, ValueError):
+                    # Preserve the original instruction text when metadata is invalid.
+                    pass
+                break
         
         return frontmatter, body
     
@@ -633,7 +649,7 @@ class RulesManager:
                 return rule
 
         # Check all scopes
-        for scope in ["subdir", "workspace", "global"]:
+        for scope in ["subdir", "workspace", "global", "root"]:
             key = f"{scope}:{name}"
             if key in self._rules:
                 return self._rules[key]
@@ -787,20 +803,20 @@ class RulesManager:
         file_path = rules_dir / f"{name}.md"
         
         # Build frontmatter
-        frontmatter_lines = ["---"]
+        import yaml
+
+        metadata = {"activation": activation}
         if description:
-            frontmatter_lines.append(f'description: "{description}"')
+            metadata["description"] = description
         if globs:
-            globs_str = ", ".join(f'"{g}"' for g in globs)
-            frontmatter_lines.append(f"globs: [{globs_str}]")
-        frontmatter_lines.append(f"activation: {activation}")
+            metadata["globs"] = globs
         if priority != 0:
-            frontmatter_lines.append(f"priority: {priority}")
-        frontmatter_lines.append("---")
-        frontmatter_lines.append("")
+            metadata["priority"] = priority
         
         # Write file
-        full_content = "\n".join(frontmatter_lines) + content
+        full_content = "---\n" + yaml.safe_dump(
+            metadata, sort_keys=False, allow_unicode=False
+        ) + "---\n" + content
         file_path.write_text(full_content, encoding="utf-8")
         
         # Create and register rule

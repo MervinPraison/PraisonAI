@@ -127,16 +127,23 @@ class DocsManager:
         remaining = content
         
         # Check for YAML frontmatter
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
+        lines = content.splitlines(keepends=True)
+        if lines and lines[0].rstrip("\r\n \t") == "---":
+            for end in range(1, len(lines)):
+                if lines[end].rstrip("\r\n \t") != "---":
+                    continue
                 try:
                     import yaml
-                    frontmatter = yaml.safe_load(parts[1]) or {}
-                    remaining = parts[2].strip()
+                    parsed = yaml.safe_load("".join(lines[1:end]))
+                    if parsed is None:
+                        parsed = {}
+                    if isinstance(parsed, dict):
+                        frontmatter = parsed
+                        remaining = "".join(lines[end + 1:]).strip()
                 except Exception:
                     # If YAML parsing fails, use content as-is
                     pass
+                break
         
         return frontmatter, remaining
     
@@ -352,14 +359,19 @@ class DocsManager:
         file_path = docs_dir / f"{name}.md"
         
         # Build frontmatter
+        import yaml
+
         frontmatter_lines = ["---"]
         if description:
-            frontmatter_lines.append(f'description: "{description}"')
+            frontmatter_lines.append(yaml.safe_dump(
+                {"description": description}, allow_unicode=False
+            ).rstrip("\n"))
         if priority != 0:
             frontmatter_lines.append(f"priority: {priority}")
         if tags:
-            tags_str = ", ".join(f'"{t}"' for t in tags)
-            frontmatter_lines.append(f"tags: [{tags_str}]")
+            frontmatter_lines.append(yaml.safe_dump(
+                {"tags": tags}, allow_unicode=False
+            ).rstrip("\n"))
         frontmatter_lines.append("---")
         frontmatter_lines.append("")
         
