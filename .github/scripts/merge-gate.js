@@ -378,21 +378,53 @@ function latestClaudeFinishedAtMs(comments) {
   return latest || null;
 }
 
-/** HEAD moved after the latest "Claude finished" — need another FINAL/CI cycle. */
+/**
+ * HEAD moved after the latest "Claude finished" — need another FINAL/CI cycle.
+ * No slack window here: a push even seconds after the finished reply means the
+ * reviewed SHA is stale, so the cooldown must NOT be bypassed.
+ */
 function hasHeadPushAfterLatestClaudeFinish(comments, headPushedAt) {
   const finishMs = latestClaudeFinishedAtMs(comments);
   if (!finishMs || !headPushedAt) return false;
   const headMs = new Date(headPushedAt).getTime();
-  return headMs > finishMs + 60000;
+  return headMs > finishMs;
+}
+
+/** Latest non-noise @claude trigger timestamp (any flavour), or null. */
+function latestClaudeTriggerAtMs(comments) {
+  let latest = 0;
+  for (const c of comments || []) {
+    if (!CLAUDE_TRIGGER_LOGINS.includes(c.user?.login)) continue;
+    if (isClaudeTriggerNoise(c)) continue;
+    if (!(c.body || '').includes('@claude')) continue;
+    latest = Math.max(latest, new Date(c.created_at).getTime());
+  }
+  return latest || null;
+}
+
+/**
+ * A newer @claude request (e.g. a maintainer follow-up) was posted after the
+ * completion we would rely on to bypass. That request may still be queued, so
+ * the cooldown must stay until it also completes.
+ */
+function hasClaudeTriggerAfterLatestFinish(comments) {
+  const finishMs = latestClaudeFinishedAtMs(comments);
+  if (!finishMs) return false;
+  const triggerMs = latestClaudeTriggerAtMs(comments);
+  if (!triggerMs) return false;
+  return triggerMs > finishMs;
 }
 
 /**
  * FINAL @claude cooldown is for in-flight bot work, not an extra 35m wait after
- * FINAL completed on HEAD with green CI prerequisites.
+ * FINAL completed on HEAD with green CI prerequisites. Bypass only when the
+ * completion is on the current SHA AND no newer @claude request is still
+ * awaiting its own completion.
  */
 function canBypassRecentClaudeCooldown(comments, headPushedAt) {
   if (!finalClaudeCompletedOnSha(comments, headPushedAt)) return false;
   if (hasHeadPushAfterLatestClaudeFinish(comments, headPushedAt)) return false;
+  if (hasClaudeTriggerAfterLatestFinish(comments)) return false;
   return true;
 }
 
@@ -1324,6 +1356,11 @@ module.exports = {
   shouldSkipFinalRecovery,
   shouldSkipStaleFinalRecovery,
   isClaudeAutomationLogin,
+  canBypassRecentClaudeCooldown,
+  hasHeadPushAfterLatestClaudeFinish,
+  hasClaudeTriggerAfterLatestFinish,
+  latestClaudeFinishedAtMs,
+  latestClaudeTriggerAtMs,
   isPushSoonAfterLatestFinal,
   countFinalTriggersSince,
   STALE_FINAL_RECOVERY_WINDOW_MS,
