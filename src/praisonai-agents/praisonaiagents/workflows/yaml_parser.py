@@ -1109,7 +1109,12 @@ class YAMLWorkflowParser:
                         agent._yaml_action = item['action']
                     parallel_steps.append(agent)
         
-        return parallel(parallel_steps)
+        # Forward optional fan-out controls so YAML has parity with the Python
+        # API. context defaults to "full" (exact pass-through, no data loss);
+        # opt into token savings with context: truncate|summarize.
+        context_mode = step_data.get('context', 'full')
+        on_failure = step_data.get('on_failure', 'partial_ok')
+        return parallel(parallel_steps, on_failure=on_failure, context=context_mode)
     
     def _parse_loop_step(self, step_data: Dict):
         """
@@ -1165,6 +1170,9 @@ class YAMLWorkflowParser:
         from_file = loop_config.get('from_file')
         var_name = loop_config.get('var_name', 'item')
         parallel_flag = loop_config.get('parallel', False)
+        # context defaults to "full" (exact pass-through); opt into lossy token
+        # savings for parallel iterations with context: truncate.
+        context_mode = loop_config.get('context', 'full')
         max_workers_raw = loop_config.get('max_workers')
         # Ensure max_workers is int (YAML may parse as string or contain template)
         max_workers = None
@@ -1197,7 +1205,8 @@ class YAMLWorkflowParser:
                     var_name=var_name,
                     parallel=parallel_flag, 
                     max_workers=max_workers,
-                    output_variable=output_variable
+                    output_variable=output_variable,
+                    context=context_mode
                 )
         
         # Resolve the step/agent to execute (single step - backward compat)
@@ -1256,7 +1265,8 @@ class YAMLWorkflowParser:
             var_name=var_name,
             parallel=parallel_flag, 
             max_workers=max_workers,
-            output_variable=output_variable
+            output_variable=output_variable,
+            context=context_mode
         )
     
     def _parse_repeat_step(self, step_data: Dict) -> Dict:
