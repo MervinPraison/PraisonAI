@@ -17,7 +17,11 @@ import tempfile
 
 import pytest
 
-from praisonaiagents.session.store import DefaultSessionStore, SessionData
+from praisonaiagents.session.store import (
+    CompactionCheckpoint,
+    DefaultSessionStore,
+    SessionData,
+)
 from praisonaiagents.session import SqliteSessionStore, SqliteTranscriptStore
 
 
@@ -51,6 +55,64 @@ def test_from_dict_skips_non_dict_turns(label, field):
     assert [m.content for m in kept] == (
         ["hi"] if field == "messages" else ["older"]
     )
+
+
+@pytest.mark.parametrize("label", list(MALFORMED))
+def test_from_dict_shifts_compaction_anchor_for_dropped_active_turns(label):
+    """Dropping an active turn before the anchor must shift ``message_index``.
+
+    Greptile P1 (Issue #2741 interaction): ``[bad, old_turn, new_turn]`` with
+    ``message_index=2`` must not become ``[old_turn, new_turn]`` with the anchor
+    still at 2 -- that slices the tail from the end and ``get_working_history``
+    returns only the summary, silently dropping both healthy post-compaction
+    turns. The anchor is decremented by the one entry dropped before it, so the
+    retained tail (``new_turn``) survives.
+    """
+    data = {
+        "session_id": "s1",
+        "messages": [
+            MALFORMED[label],
+            {"role": "assistant", "content": "old_turn"},
+            {"role": "user", "content": "new_turn"},
+        ],
+        "last_compaction": CompactionCheckpoint(
+            summary="SUMMARY", message_index=2
+        ).to_dict(),
+    }
+
+    session = SessionData.from_dict(data)
+
+    # One malformed entry dropped before the anchor -> anchor shifts 2 -> 1.
+    assert session.last_compaction.message_index == 1
+    assert [m.content for m in session.messages] == ["old_turn", "new_turn"]
+
+    history = session.get_working_history()
+    # Summary head + the retained tail turn that would otherwise be lost.
+    assert history[0]["content"] == "SUMMARY"
+    assert any(m.get("content") == "new_turn" for m in history)
+
+
+def test_from_dict_leaves_anchor_when_drop_is_after_boundary():
+    """A malformed turn *after* the anchor leaves ``message_index`` unchanged."""
+    data = {
+        "session_id": "s1",
+        "messages": [
+            {"role": "assistant", "content": "old_turn"},
+            None,
+            {"role": "user", "content": "new_turn"},
+        ],
+        "last_compaction": CompactionCheckpoint(
+            summary="SUMMARY", message_index=1
+        ).to_dict(),
+    }
+
+    session = SessionData.from_dict(data)
+
+    assert session.last_compaction.message_index == 1
+    assert [m.content for m in session.messages] == ["old_turn", "new_turn"]
+    history = session.get_working_history()
+    assert history[0]["content"] == "SUMMARY"
+    assert any(m.get("content") == "new_turn" for m in history)
 
 
 @pytest.mark.parametrize("label", list(MALFORMED))

@@ -301,10 +301,17 @@ class SessionData:
         crashing gateway routing on a single malformed turn. Such entries are
         skipped so a healthy session stays loadable; the original on-disk
         transcript and its index record are left untouched (Issue #5672).
+
+        When a dropped active turn precedes the compaction anchor, the saved
+        ``last_compaction.message_index`` is shifted down by the number of
+        entries removed before it. Without this, ``get_working_history`` would
+        slice the retained tail from the wrong offset and silently drop a
+        healthy post-compaction turn (Issue #2741 interaction).
         """
+        raw_messages = data.get("messages", [])
         messages = [
             SessionMessage.from_dict(m)
-            for m in data.get("messages", [])
+            for m in raw_messages
             if isinstance(m, dict)
         ]
         archived = [
@@ -318,6 +325,17 @@ class SessionData:
             if last_compaction_data
             else None
         )
+        if last_compaction is not None:
+            anchor = last_compaction.message_index
+            dropped_before_anchor = sum(
+                1
+                for m in raw_messages[:anchor]
+                if not isinstance(m, dict)
+            )
+            if dropped_before_anchor:
+                last_compaction.message_index = max(
+                    0, anchor - dropped_before_anchor
+                )
         # Backward compatibility: `to_dict` mirrors select metadata keys to the
         # top level, and older/externally-written session files may carry
         # `model`/`llm` (etc.) only there. Fold those back into `metadata` so
