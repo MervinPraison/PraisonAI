@@ -3219,6 +3219,9 @@ Your Goal: {self.goal}"""
         db_started = time.perf_counter()
         db_output, db_status = None, "error"
         _cancel = None
+        # Reset the per-turn guardrail-block marker so a block from a previous
+        # turn never mislabels this run's status in the finalizer below.
+        self._turn_guardrail_blocked = False
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3241,8 +3244,10 @@ Your Goal: {self.goal}"""
                 self._start_run(prompt if isinstance(prompt, str) else str(prompt))
             result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
             db_output = str(result) if result is not None else None
+            # A guardrail-blocked turn returns a non-None refusal string; it must
+            # be recorded as "error", not "completed" (the answer was rejected).
             db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
-                "error" if result is None else "completed"
+                "error" if result is None or self._turn_guardrail_blocked else "completed"
             )
             if durable_context is not None:
                 outcome = (
@@ -3316,7 +3321,11 @@ Your Goal: {self.goal}"""
         # Initialize session store for JSON-based persistence (lazy)
         # This enables automatic session persistence when session_id is provided
         self._init_session_store()
-        
+
+        # The DB run is now started/ended by the public chat() boundary, but the
+        # prompt string is still needed below for hook input and memory.
+        prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+
         # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, BeforeAgentInput
         if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
@@ -3781,9 +3790,11 @@ Your Goal: {self.goal}"""
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
-                                    # Rollback chat history on guardrail failure
+                                    # Rollback chat history on guardrail failure.
+                                    # The public chat()/achat() finalizer records the
+                                    # blocked turn as "error" (see _guardrail_blocked_message),
+                                    # so the run keeps its output and duration_ms.
                                     self._rollback_chat_history_to(chat_history_length)
-                                    self._end_run(None, "error", {"error": str(e)})
                                     return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
@@ -4020,6 +4031,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         previous_run_id = self._current_run_id
         db_started = time.perf_counter()
         db_output, db_status = None, "error"
+        # Reset the per-turn guardrail-block marker (see sync chat()).
+        self._turn_guardrail_blocked = False
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         _cancel = self._turn_cancel_token(
             cancel_source, explicit=cancel_token is not None
@@ -4045,8 +4058,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 seed=seed, cancel_token=_cancel
             )
             db_output = str(result) if result is not None else None
+            # A guardrail-blocked turn returns a non-None refusal string; record
+            # it as "error", not "completed" (see sync chat()).
             db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
-                "error" if result is None else "completed"
+                "error" if result is None or self._turn_guardrail_blocked else "completed"
             )
             if durable_context is not None:
                 outcome = (
