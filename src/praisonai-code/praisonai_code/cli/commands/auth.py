@@ -37,13 +37,22 @@ app = typer.Typer(help="Manage API credentials")
 # exactly as credentials.py does.
 def _build_provider_env_keys() -> dict:
     try:
-        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+        from praisonai_code.llm.catalogue import (
+            PROVIDER_ENV_CATALOGUE,
+            discovered_providers,
+        )
 
-        return {
+        keys = {
             provider: tuple(env_vars)
             for provider, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items()
             if env_vars
         }
+        # Discovered (Python-registered / entry-point) providers get the
+        # conventional ``<PROVIDER>_API_KEY`` so `auth login/list/status`
+        # recognise their credentials exactly like a built-in provider.
+        for pid in discovered_providers():
+            keys.setdefault(pid, (f"{pid.upper()}_API_KEY",))
+        return keys
     except Exception:
         return {
             "openai": ("OPENAI_API_KEY",),

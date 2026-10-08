@@ -742,7 +742,23 @@ Respond with ONLY a valid JSON tool call in this format:
             return "anthropic"
         if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
             return "gemini"
-        
+
+        # A custom/plugin provider registered via ``add_provider_adapter`` or
+        # the ``praisonai.providers`` entry-point group, addressed explicitly as
+        # ``myprovider/model``, must route to its own adapter rather than silently
+        # falling through to "openai". Lazy + failure-tolerant: discovery never
+        # breaks detection, and built-ins are handled above so this only ever
+        # matches a genuinely custom prefix.
+        if provider_prefix:
+            try:
+                from .adapters import _provider_adapters, load_provider_entry_points
+                if provider_prefix not in _provider_adapters:
+                    load_provider_entry_points()
+                if provider_prefix in _provider_adapters:
+                    return provider_prefix
+            except Exception:  # noqa: BLE001 - detection must never raise
+                pass
+
         # Use existing robust Ollama detection logic first
         if self._is_ollama_provider():
             return "ollama"

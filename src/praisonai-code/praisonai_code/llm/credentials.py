@@ -68,6 +68,18 @@ def inject_credentials_into_env() -> bool:
             "cohere": "COHERE_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
         }
+        # Fold discovered (Python-registered / entry-point) providers in with
+        # their conventional ``<PROVIDER>_API_KEY`` so a stored key for a plugin
+        # provider is actually exported to the environment at run time instead of
+        # silently dropped — otherwise `auth login myprovider` would have no
+        # runtime effect.
+        try:
+            from praisonai_code.llm.catalogue import discovered_providers
+
+            for pid in discovered_providers():
+                env_mappings.setdefault(pid, f"{pid.upper()}_API_KEY")
+        except Exception:
+            pass
 
         for provider in providers:
             env_var = env_mappings.get(provider.lower())
@@ -212,6 +224,19 @@ def _stored_providers_for_vars(vars_: tuple[str, ...]) -> tuple[str, ...]:
             if any(v in vars_ for v in env_vars):
                 if provider not in out:
                     out.append(provider)
+    except Exception:
+        pass
+
+    # Discovered (Python-registered / entry-point) providers use the
+    # conventional ``<PROVIDER>_API_KEY``, so a stored credential for such a
+    # provider satisfies ``is_configured("myprovider/model")`` just like a
+    # catalogued one.
+    try:
+        from praisonai_code.llm.catalogue import discovered_providers
+
+        for pid in discovered_providers():
+            if f"{pid.upper()}_API_KEY" in vars_ and pid not in out:
+                out.append(pid)
     except Exception:
         pass
 
