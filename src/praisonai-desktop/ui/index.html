@@ -3760,6 +3760,24 @@ async function refreshImages(){
   if(!PORT) return;
   imgError.textContent='';
   try{
+    const c=await (await fetch(`http://127.0.0.1:${PORT}/media/capabilities`)).json();
+    const cat=c.image_model_catalog||[];
+    if(imgModel && cat.length){
+      const prev=imgModel.value;
+      imgModel.textContent='';
+      cat.forEach(m=>{
+        const o=document.createElement('option');
+        o.value=m.id;
+        o.textContent=m.display_name+(m.configured?'':' (key needed)');
+        o.disabled=!m.configured;
+        imgModel.appendChild(o);
+      });
+      const keep=cat.find(m=>m.id===prev && m.configured);
+      const first=cat.find(m=>m.configured);
+      imgModel.value=(keep||first||cat[0]).id;
+    }
+  }catch{}
+  try{
     const r=await fetch(`http://127.0.0.1:${PORT}/media/recent?kind=image`);
     const j=await r.json();
     imgRecent.textContent='';

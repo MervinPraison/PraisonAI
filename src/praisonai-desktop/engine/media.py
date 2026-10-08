@@ -12,6 +12,26 @@ import uuid
 
 OUTPUT_ROOT = "media-output"
 
+# Image model catalog. Mirrors VIDEO_MODELS so a new provider plugs in by adding
+# a data entry (id/display_name/provider/env) instead of editing generate_image.
+# `provider` selects the handler in MediaSupervisor._image_providers(); `env`
+# lists the keys that unlock the model so the picker can show a `configured`
+# flag just like the video tab.
+IMAGE_MODELS = [
+    {
+        "id": "dall-e-3",
+        "display_name": "OpenAI DALL·E 3",
+        "provider": "openai",
+        "env": ("OPENAI_API_KEY",),
+    },
+    {
+        "id": "dall-e-2",
+        "display_name": "OpenAI DALL·E 2",
+        "provider": "openai",
+        "env": ("OPENAI_API_KEY",),
+    },
+]
+
 # Video model catalog. Each entry declares the env key that unlocks it, so the
 # desktop can show a model picker instead of the old hardcoded Replicate path.
 # Replicate stays a preset (not the sole path); SDK providers route through
@@ -54,28 +74,40 @@ class MediaSupervisor:
         (self.out / "images").mkdir(exist_ok=True)
         (self.out / "videos").mkdir(exist_ok=True)
 
-    def list_video_models(self) -> list[dict]:
-        """Catalog of video models with `configured` set from available env keys."""
+    @staticmethod
+    def _catalog_models(catalog: list[dict]) -> list[dict]:
+        """Shape a model catalog for the UI, flagging `configured` from env keys."""
         import os
 
-        models = []
-        for m in VIDEO_MODELS:
-            models.append(
-                {
-                    "id": m["id"],
-                    "display_name": m["display_name"],
-                    "provider": m["provider"],
-                    "configured": any(os.environ.get(k) for k in m["env"]),
-                }
-            )
-        return models
+        return [
+            {
+                "id": m["id"],
+                "display_name": m["display_name"],
+                "provider": m["provider"],
+                "configured": any(os.environ.get(k) for k in m["env"]),
+            }
+            for m in catalog
+        ]
+
+    def list_image_models(self) -> list[dict]:
+        """Catalog of image models with `configured` set from available env keys."""
+        return self._catalog_models(IMAGE_MODELS)
+
+    def list_video_models(self) -> list[dict]:
+        """Catalog of video models with `configured` set from available env keys."""
+        return self._catalog_models(VIDEO_MODELS)
 
     def capabilities(self) -> dict:
         import os
 
         return {
             "image": True,
-            "image_models": ["dall-e-3", "dall-e-2"],
+            "image_models": [m["id"] for m in IMAGE_MODELS],
+            "image_model_catalog": self.list_image_models(),
+            "image_hint": (
+                "Set a provider key in ~/.praisonai/.env for image generation "
+                "(OPENAI_API_KEY for DALL·E)."
+            ),
             "video": bool(os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_API_KEY")),
             "video_models": self.list_video_models(),
             "video_hint": (
@@ -93,6 +125,14 @@ class MediaSupervisor:
 
         return str(os.environ.get("OPENAI_API_KEY") or "").strip()
 
+    def _image_providers(self) -> dict:
+        """Map provider name -> handler. New providers register here (mirrors the
+        video tab's `_generate_video_*` dispatch) so generate_image() stays a thin
+        validate-and-route shell instead of a growing if/elif ladder."""
+        return {
+            "openai": self._generate_image_openai,
+        }
+
     def generate_image(
         self,
         prompt: str,
@@ -104,6 +144,38 @@ class MediaSupervisor:
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("prompt is required")
+        model = (model or "dall-e-3").strip()
+        entry = next((m for m in IMAGE_MODELS if m["id"] == model), None)
+        if entry is None:
+            known = ", ".join(sorted(m["id"] for m in IMAGE_MODELS))
+            raise ValueError(f"Unknown image model {model!r}. Choose one of: {known}")
+        handler = self._image_providers().get(entry["provider"])
+        if handler is None:
+            raise ValueError(f"No handler for image provider {entry['provider']!r}")
+        return handler(prompt, settings=settings, model=model, size=size)
+
+    def _save_image(self, file_id: str, *, url: str | None, b64: str | None) -> pathlib.Path:
+        """Persist an image from a base64 body or a provider URL. Shared by every
+        provider handler so URL/base64 handling lives in one place; raises if the
+        provider returned nothing or an empty body (so the UI never reports a
+        saved image that cannot be previewed)."""
+        local_path = self.out / "images" / f"{file_id}.png"
+        if b64:
+            local_path.write_bytes(base64.b64decode(b64))
+        elif url:
+            with urllib.request.urlopen(url, timeout=120) as img:
+                local_path.write_bytes(img.read())
+        else:
+            raise RuntimeError("image API returned no url or b64_json")
+        if not local_path.is_file() or local_path.stat().st_size == 0:
+            if local_path.is_file():
+                local_path.unlink()
+            raise RuntimeError("image generation produced an empty file")
+        return local_path
+
+    def _generate_image_openai(
+        self, prompt: str, *, settings: dict, model: str, size: str
+    ) -> dict:
         api_key = self._openai_key(settings)
         if not api_key:
             raise ValueError("OpenAI API key required (Settings or OPENAI_API_KEY)")
@@ -127,19 +199,14 @@ class MediaSupervisor:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
 
-        item = (payload.get("data") or [{}])[0]
+        data = payload.get("data") if isinstance(payload, dict) else None
+        item = data[0] if isinstance(data, list) and data else {}
+        if not isinstance(item, dict):
+            raise RuntimeError("image API returned a malformed response")
         url = item.get("url")
         b64 = item.get("b64_json")
         file_id = f"img_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        local_path = self.out / "images" / f"{file_id}.png"
-
-        if b64:
-            local_path.write_bytes(base64.b64decode(b64))
-        elif url:
-            with urllib.request.urlopen(url, timeout=120) as img:
-                local_path.write_bytes(img.read())
-        else:
-            raise RuntimeError("image API returned no url or b64_json")
+        local_path = self._save_image(file_id, url=url, b64=b64)
 
         raw = local_path.read_bytes()
         data_url = "data:image/png;base64," + base64.b64encode(raw).decode()

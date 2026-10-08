@@ -18,7 +18,38 @@ class MediaSupervisorTests(unittest.TestCase):
         caps = self.sup.capabilities()
         self.assertTrue(caps["image"])
         self.assertIn("dall-e-3", caps["image_models"])
+        self.assertIn("image_model_catalog", caps)
         self.assertIn("video_models", caps)
+
+    def test_image_models_catalog_shape(self):
+        models = self.sup.list_image_models()
+        self.assertGreater(len(models), 0)
+        ids = {m["id"] for m in models}
+        self.assertIn("dall-e-3", ids)
+        for m in models:
+            self.assertIn("id", m)
+            self.assertIn("display_name", m)
+            self.assertIn("provider", m)
+            self.assertIn("configured", m)
+
+    def test_image_models_configured_reflects_env(self):
+        import os
+
+        old = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            os.environ["OPENAI_API_KEY"] = "sk-test"
+            by_id = {m["id"]: m for m in self.sup.list_image_models()}
+            self.assertTrue(by_id["dall-e-3"]["configured"])
+        finally:
+            os.environ.pop("OPENAI_API_KEY", None)
+            if old is not None:
+                os.environ["OPENAI_API_KEY"] = old
+
+    def test_generate_image_rejects_unknown_model(self):
+        with self.assertRaises(ValueError):
+            self.sup.generate_image(
+                "a cat", settings={"api_key": "sk"}, model="bogus-model"
+            )
 
     def test_video_models_include_multiple_providers(self):
         models = self.sup.list_video_models()
