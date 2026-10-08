@@ -798,19 +798,25 @@ class MCP:
 
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
-        from .mcp_schema_utils import build_tool_signature
+        from .mcp_schema_utils import build_tool_signature, build_openai_tool_dict
 
         input_schema = getattr(tool, 'inputSchema', None) or {}
-        properties = input_schema.get("properties") or {}
-        # Positional arguments map onto schema properties in declaration order
-        param_names = list(properties) if isinstance(properties, dict) else []
         signature = build_tool_signature(input_schema)
+        # Positional arguments map onto the named parameters of the signature,
+        # in declaration order. Non-identifier/keyword property names (``from``,
+        # ``max-results``) are handled through ``**kwargs``, so they are excluded
+        # here to keep positional mapping aligned with the visible parameters.
+        param_names = [
+            name
+            for name, param in signature.parameters.items()
+            if param.kind is not inspect.Parameter.VAR_KEYWORD
+        ]
         param_annotations = {
             name: param.annotation
             for name, param in signature.parameters.items()
             if param.kind is not inspect.Parameter.VAR_KEYWORD
         }
-        
+
         # Create function template to be properly decorated
         def template_function(*args, **kwargs):
             return None
@@ -839,7 +845,19 @@ class MCP:
         
         # Make sure the wrapper has the correct signature for inspection
         wrapper.__signature__ = signature
-        
+        # Expose the server's original schema so schema builders (e.g.
+        # LLM._generate_tool_definition) surface every property instead of
+        # re-deriving from the signature, which omits ``**kwargs`` names
+        # (JSON Schema allows ``from``/``max-results`` that are not valid Python
+        # parameter names). The schema name tracks the wrapper's current
+        # ``__name__`` so it stays in sync after ``with_tool_prefix``.
+        def get_schema():
+            return build_openai_tool_dict(
+                wrapper.__name__, tool.description, input_schema
+            )
+
+        wrapper.get_schema = get_schema
+
         return wrapper
     
     def _initialize_npx_mcp_tools(self, cmd, arguments):

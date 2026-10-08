@@ -145,6 +145,51 @@ def test_stdio_tool_forwards_keyword_named_argument():
     mcp.runner.call_tool.assert_called_once_with("status", CALL_ARGUMENTS)
 
 
+def test_stdio_tool_schema_exposes_non_identifier_property():
+    """Callable-list path (Agent(tools=list(mcp))) must still show ``from`` to the LLM.
+
+    The wrapper keeps ``from`` in ``**kwargs``, which signature-based schema
+    builders drop. ``get_schema`` returns the server's original inputSchema so
+    the model sees every property.
+    """
+    pytest.importorskip("mcp", reason="MCP module not installed")
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = MCP.__new__(MCP)
+    mcp.runner = MagicMock()
+    tool = SimpleNamespace(name="status", description="Account status", inputSchema=STATUS_SCHEMA)
+
+    wrapper = mcp._create_tool_wrapper(tool)
+
+    schema = wrapper.get_schema()
+    assert schema["function"]["name"] == "status"
+    properties = schema["function"]["parameters"]["properties"]
+    assert set(properties) == {"domain", "from", "to"}
+
+
+def test_stdio_tool_positional_arguments_map_to_named_parameters():
+    """Positional calls must follow the visible signature, not raw schema order.
+
+    STATUS_SCHEMA declares ``domain``, ``from``, ``to``; ``from`` is handled via
+    ``**kwargs`` so the signature is ``(domain, to, **kwargs)``. A positional
+    call ``wrapper("example.com", "now")`` must send ``now`` as ``to``.
+    """
+    pytest.importorskip("mcp", reason="MCP module not installed")
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = MCP.__new__(MCP)
+    mcp.runner = MagicMock()
+    mcp.runner.call_tool.return_value = "ok"
+    tool = SimpleNamespace(name="status", description="Account status", inputSchema=STATUS_SCHEMA)
+
+    wrapper = mcp._create_tool_wrapper(tool)
+
+    assert wrapper("example.com", "now") == "ok"
+    mcp.runner.call_tool.assert_called_once_with(
+        "status", {"domain": "example.com", "to": "now"}
+    )
+
+
 @pytest.mark.parametrize(
     "module_name, class_name",
     [
