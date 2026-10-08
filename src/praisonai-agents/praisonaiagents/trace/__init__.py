@@ -65,6 +65,10 @@ __all__ = [
     "get_context_emitter",
     "set_context_emitter",
     "reset_context_emitter",
+    # Last-run pointer (grade the last traced run without manual export)
+    "record_completed_run",
+    "load_last_run_pointer",
+    "last_run_pointer_path",
 ]
 
 
@@ -98,6 +102,11 @@ _LAZY_GROUPS = {
         'get_context_emitter': ('praisonaiagents.trace.context_events', 'get_context_emitter'),
         'set_context_emitter': ('praisonaiagents.trace.context_events', 'set_context_emitter'),
         'reset_context_emitter': ('praisonaiagents.trace.context_events', 'reset_context_emitter'),
+    },
+    'last_run': {
+        'record_completed_run': ('praisonaiagents.trace.last_run', 'record_completed_run'),
+        'load_last_run_pointer': ('praisonaiagents.trace.last_run', 'load_last_run_pointer'),
+        'last_run_pointer_path': ('praisonaiagents.trace.last_run', 'last_run_pointer_path'),
     },
 }
 
