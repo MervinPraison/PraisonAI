@@ -904,6 +904,9 @@ class PluginManager:
                         event=event,
                         func=func,
                         name=f"{name}:{event.value}",
+                        # Delivery policies compose in order: apply a rewrite
+                        # before the next policy, and stop the chain on denial.
+                        sequential=event == PluginHook.MESSAGE_SENDING,
                     )
                     hook_ids.append(hook_id)
                     count += 1
@@ -1205,9 +1208,18 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("after_message"):
         def after_message_hook(data, _p=plugin):
-            new = _p.after_message(_message_payload(data))
+            try:
+                new = _p.after_message(_message_payload(data))
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new)
+            if decision is not None:
+                return decision
             if isinstance(new, dict) and "content" in new and hasattr(data, "content"):
                 data.content = new["content"]
+                # Bot delivery reads the canonical rewrite field on the result,
+                # not just the mutated event payload.
+                return HookResult(modified_input={"content": data.content})
             return HookResult.allow()
         yield HookEvent.MESSAGE_SENDING, after_message_hook
 
