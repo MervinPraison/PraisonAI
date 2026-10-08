@@ -26,3 +26,7 @@ You are working on the PraisonAI project.
 | Lifecycle plugins | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | — | repo tests |
 | Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | — | `nav-check` |
 | npm mirror (read-only for fixes) | [praisonai-js](https://github.com/MervinPraison/praisonai-js) | mirror of `src/praisonai-ts/AGENTS.md` | CI on praisonai-js |
+
+**Routing is a blocking gate (MUST classify before writing code).** Before implementing or approving any change, decide its destination from the table above. If a change belongs in an external repo (Tools, Plugins, Frameworks, Docs), do **not** add it to `praisonaiagents/` or `praisonai/` — route it there instead, even on a PR already open against this monorepo. A routing mistake is a blocking issue, not a style nit.
+
+**Vendor service clients stay external — precedent is not permission.** A concrete third-party vendor integration (a client that calls `api.<vendor>.com` / a specific hosted service) is an **agent-callable tool → PraisonAI-Tools**, never core. The fact that a core aggregator file already inlines similar vendors (e.g. multiple providers in one `*_search`/`*_tools` module) does **not** authorise adding another — judge each change against this table and the lightweight/no-scope-creep rule, not against the nearest inline example. When a core aggregator needs third-party providers, prefer a registry/entry-point seam so vendors register out-of-tree rather than editing core per vendor.
