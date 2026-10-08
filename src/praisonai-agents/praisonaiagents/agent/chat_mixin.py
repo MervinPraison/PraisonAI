@@ -3215,6 +3215,10 @@ Your Goal: {self.goal}"""
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_id = self._current_run_id
+        db_started = time.perf_counter()
+        db_output, db_status = None, "error"
+        _cancel = None
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3232,7 +3236,14 @@ Your Goal: {self.goal}"""
                 durable_context, durable_token = begin_durable_run(
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
+            if self._db is not None:
+                self._init_db_session()
+                self._start_run(prompt if isinstance(prompt, str) else str(prompt))
             result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            db_output = str(result) if result is not None else None
+            db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
+                "error" if result is None else "completed"
+            )
             if durable_context is not None:
                 outcome = (
                     "cancelled"
@@ -3248,11 +3259,17 @@ Your Goal: {self.goal}"""
                 self.execution.resume_run_id = None
             raise
         except InterruptedError:
+            db_status = "cancelled"
             if durable_context is not None:
                 durable_context.finalize("cancelled")
                 self.execution.resume_run_id = None
             raise
         finally:
+            try:
+                if self._current_run_id is not None and self._current_run_id != previous_run_id:
+                    self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
+            finally:
+                self._current_run_id = previous_run_id
             if durable_context is not None:
                 from .durable import end_durable_run
 
@@ -3300,10 +3317,6 @@ Your Goal: {self.goal}"""
         # This enables automatic session persistence when session_id is provided
         self._init_session_store()
         
-        # Start a new run for this chat turn
-        prompt_str = prompt if isinstance(prompt, str) else str(prompt)
-        self._start_run(prompt_str)
-
         # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, BeforeAgentInput
         if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
@@ -3770,6 +3783,7 @@ Your Goal: {self.goal}"""
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
+                                    self._end_run(None, "error", {"error": str(e)})
                                     return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
@@ -3842,13 +3856,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                    self._end_run(validated_response, "completed", {"duration_ms": (time.time() - start_time) * 1000})
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    self._end_run(None, "error", {"error": str(e)})
                                     return self._guardrail_blocked_message(e)
 
                             # Check if we've hit max reflections
@@ -4005,6 +4017,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_id = self._current_run_id
+        db_started = time.perf_counter()
+        db_output, db_status = None, "error"
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         _cancel = self._turn_cancel_token(
             cancel_source, explicit=cancel_token is not None
@@ -4017,6 +4032,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 durable_context, durable_token = await abegin_durable_run(
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
+            if self._db is not None:
+                self._init_db_session()
+                self._start_run(prompt if isinstance(prompt, str) else str(prompt))
             result = await self._achat_impl(
                 prompt=prompt, temperature=temperature, tools=tools,
                 output_json=output_json, output_pydantic=output_pydantic,
@@ -4025,6 +4043,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
                 attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
                 seed=seed, cancel_token=_cancel
+            )
+            db_output = str(result) if result is not None else None
+            db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
+                "error" if result is None else "completed"
             )
             if durable_context is not None:
                 outcome = (
@@ -4041,11 +4063,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self.execution.resume_run_id = None
             raise
         except (InterruptedError, asyncio.CancelledError):
+            db_status = "cancelled"
             if durable_context is not None:
                 await durable_context.afinalize("cancelled")
                 self.execution.resume_run_id = None
             raise
         finally:
+            try:
+                if self._current_run_id is not None and self._current_run_id != previous_run_id:
+                    self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
+            finally:
+                self._current_run_id = previous_run_id
             if durable_context is not None:
                 from .durable import end_durable_run
 

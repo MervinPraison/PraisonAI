@@ -3250,7 +3250,10 @@ Your Goal: {self.goal}
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k in ("_Agent__cache_lock",):
+            if k == "_db_run_context":
+                # A clone starts outside the source agent's active DB turn.
+                continue
+            elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):
                 object.__setattr__(result, k, threading.Lock())

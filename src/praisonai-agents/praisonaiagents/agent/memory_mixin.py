@@ -72,6 +72,24 @@ if TYPE_CHECKING:
 class MemoryMixin:
     """Mixin providing memory methods for the Agent class."""
 
+    @property
+    def _current_run_id(self) -> Optional[str]:
+        run_context = getattr(self, "_db_run_context", None)
+        return run_context.get() if run_context is not None else None
+
+    @_current_run_id.setter
+    def _current_run_id(self, value: Optional[str]) -> None:
+        run_context = getattr(self, "_db_run_context", None)
+        if run_context is None:
+            if value is None:
+                return
+            # Each agent has its own context; concurrent tasks and threads must
+            # not finalize one another's runs. Allocate only for configured DBs.
+            run_context = self.__dict__.setdefault(
+                "_db_run_context", contextvars.ContextVar("praisonai_db_run", default=None)
+            )
+        run_context.set(value)
+
     def _cache_put(self, cache_dict, key, value):
         """Thread-safe LRU cache put operation.
         
