@@ -7,15 +7,18 @@ Requires: ``pip install tenki``
 Environment: ``TENKI_API_KEY`` or ``TENKI_AUTH_TOKEN`` (optionally ``TENKI_WORKSPACE_ID``)
 """
 
-from ._sync_base import SyncComputeProvider
 import base64
 import dataclasses
 import logging
 import os
 import shlex
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from typing import Any, Dict, List
+
+from ._sync_base import SyncComputeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,7 @@ class TenkiCompute(SyncComputeProvider):
         self._workspace_id = workspace_id or os.environ.get("TENKI_WORKSPACE_ID", "")
         self._client = None
         self._sandboxes: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.RLock()
 
     def _get_client(self):
         if self._client is None:
@@ -102,6 +106,8 @@ class TenkiCompute(SyncComputeProvider):
     def _provision_sync(self, config) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
+        if config.auto_shutdown and config.idle_timeout_s <= 0:
+            raise ValueError("idle_timeout_s must be positive when auto_shutdown is enabled")
         client = self._get_client()
         workspace_id = self._resolve_workspace(client)
         instance_id = f"tenki_{uuid.uuid4().hex[:12]}"
@@ -135,31 +141,34 @@ class TenkiCompute(SyncComputeProvider):
                 image = configured
         if image:
             create_kwargs["image"] = image
-        if config.auto_shutdown:
-            create_kwargs["idle_timeout_minutes"] = max(config.idle_timeout_s // 60, 1)
         create_kwargs = {k: v for k, v in create_kwargs.items() if v is not None}
 
         sandbox = client.create(**create_kwargs)
         sandbox_id = self._sandbox_id(sandbox)
 
-        self._sandboxes[instance_id] = {
-            "sandbox": sandbox,
-            "sandbox_id": sandbox_id,
-            "config": config,
-            "created_at": time.time(),
-        }
+        with self._lock:
+            self._sandboxes[instance_id] = {
+                "sandbox": sandbox,
+                "sandbox_id": sandbox_id,
+                "config": config,
+                "created_at": time.time(),
+                "active": 0,
+                "idle_timer": None,
+                "idle_token": None,
+                "lock": threading.RLock(),
+            }
 
-        if config.packages:
+        with self._activity(instance_id):
             try:
-                self._install_packages_sync(sandbox, config.packages)
+                if config.packages:
+                    self._install_packages_sync(sandbox, config.packages)
             except Exception:
                 # A half-provisioned sandbox is useless and still bills — tear it
                 # down and surface the failure instead of returning RUNNING.
                 # Terminate BEFORE dropping the handle so a failed terminate keeps
                 # it tracked (for list_instances / retry) rather than leaking it.
                 try:
-                    sandbox.terminate()
-                    self._sandboxes.pop(instance_id, None)
+                    self._shutdown_sync(instance_id)
                 except Exception as cleanup_err:
                     logger.warning("[tenki_compute] cleanup after failed install: %s", cleanup_err)
                 raise
@@ -174,27 +183,86 @@ class TenkiCompute(SyncComputeProvider):
             created_at=time.time(),
         )
 
-    async def shutdown(self, instance_id: str) -> None:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._shutdown_sync, instance_id)
-
     def _shutdown_sync(self, instance_id: str) -> None:
-        info = self._sandboxes.get(instance_id)
+        with self._lock:
+            info = self._sandboxes.get(instance_id)
         if not info:
             return
-        # Terminate BEFORE dropping the handle: if this raises (transient network /
-        # service error), the sandbox stays tracked so get_status still reports it
-        # and a later shutdown can retry, rather than silently leaking the microVM.
-        info["sandbox"].terminate()
-        self._sandboxes.pop(instance_id, None)
+        from tenki import SessionNotFoundError, SessionTerminatedError
+
+        with info["lock"]:
+            if self._sandboxes.get(instance_id) is not info:
+                return
+            try:
+                info["sandbox"].terminate()
+            except (SessionNotFoundError, SessionTerminatedError):
+                pass
+            except Exception:
+                if not info["active"]:
+                    self._schedule_idle(instance_id, info)
+                raise
+            if info["idle_timer"]:
+                info["idle_timer"].cancel()
+            with self._lock:
+                self._sandboxes.pop(instance_id, None)
         logger.info("[tenki_compute] shutdown: %s", instance_id)
+
+    def _schedule_idle(self, instance_id: str, info: Dict[str, Any]) -> None:
+        if not info["config"].auto_shutdown:
+            return
+        if info["idle_timer"]:
+            info["idle_timer"].cancel()
+        token = object()
+        timer = threading.Timer(
+            info["config"].idle_timeout_s, self._expire_idle, args=(instance_id, token),
+        )
+        timer.daemon = True
+        info["idle_token"] = token
+        info["idle_timer"] = timer
+        timer.start()
+
+    def _expire_idle(self, instance_id: str, token: object) -> None:
+        with self._lock:
+            info = self._sandboxes.get(instance_id)
+        if not info:
+            return
+        with info["lock"]:
+            if info["idle_token"] is not token or info["active"]:
+                return
+            try:
+                self._shutdown_sync(instance_id)
+            except Exception as exc:
+                logger.warning("[tenki_compute] idle shutdown failed: %s", exc)
+
+    @contextmanager
+    def _activity(self, instance_id: str):
+        """Keep idle shutdown outside the lifetime of in-flight SDK operations."""
+        with self._lock:
+            info = self._sandboxes.get(instance_id)
+        if info:
+            with info["lock"]:
+                if self._sandboxes.get(instance_id) is not info:
+                    info = None
+                else:
+                    if info["idle_timer"]:
+                        info["idle_timer"].cancel()
+                    info["idle_token"] = None
+                    info["active"] += 1
+        try:
+            yield info
+        finally:
+            if info:
+                with info["lock"]:
+                    if self._sandboxes.get(instance_id) is info:
+                        info["active"] -= 1
+                        if not info["active"]:
+                            self._schedule_idle(instance_id, info)
 
     @staticmethod
     def _is_running(info: Dict[str, Any]) -> bool:
         """Reconcile against live Tenki state instead of trusting the local map.
 
-        Tenki can terminate a sandbox server-side (e.g. the configured idle
+        Tenki can terminate a sandbox server-side (e.g. its maximum lifetime
         timeout); without a refresh, get_status/list_instances would keep
         reporting RUNNING for a dead sandbox while execute() hits it and fails.
 
@@ -237,56 +305,57 @@ class TenkiCompute(SyncComputeProvider):
     def _execute_sync(
         self, instance_id: str, command: str, timeout: int,
     ) -> Dict[str, Any]:
-        info = self._sandboxes.get(instance_id)
-        if not info:
-            return {"stdout": "", "stderr": "Instance not found", "exit_code": -1}
-
-        sandbox = info["sandbox"]
-        try:
-            result = sandbox.exec("bash", "-lc", command, timeout=timeout)
-            return {
-                "stdout": (result.stdout or b"").decode(errors="replace"),
-                "stderr": (result.stderr or b"").decode(errors="replace"),
-                "exit_code": result.exit_code,
-            }
-        except Exception as e:
-            return {"stdout": "", "stderr": str(e), "exit_code": -1}
+        with self._activity(instance_id) as info:
+            if not info:
+                return {"stdout": "", "stderr": "Instance not found", "exit_code": -1}
+            try:
+                result = info["sandbox"].exec("bash", "-lc", command, timeout=timeout)
+                stderr = (result.stderr or b"").decode(errors="replace")
+                if result.timed_out:
+                    stderr = f"{stderr}\nCommand timed out".lstrip("\n")
+                return {
+                    "stdout": (result.stdout or b"").decode(errors="replace"),
+                    "stderr": stderr,
+                    "exit_code": 124 if result.timed_out else result.exit_code,
+                }
+            except Exception as e:
+                return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
 
     def _upload_sync(self, instance_id: str, local_path: str, remote_path: str) -> bool:
-        info = self._sandboxes.get(instance_id)
-        if not info:
-            return False
-        try:
-            with open(local_path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-            path = shlex.quote(remote_path)
-            result = info["sandbox"].exec(
-                "bash", "-lc", f"mkdir -p \"$(dirname {path})\" && base64 -d > {path}", input=b64, timeout=120,
-            )
-            return result.exit_code == 0
-        except Exception as e:
-            logger.error("[tenki_compute] upload failed: %s", e)
-            return False
+        with self._activity(instance_id) as info:
+            if not info:
+                return False
+            try:
+                with open(local_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                path = shlex.quote(remote_path)
+                result = info["sandbox"].exec(
+                    "bash", "-lc", f"mkdir -p \"$(dirname {path})\" && base64 -d > {path}", input=b64, timeout=120,
+                )
+                return not result.timed_out and result.exit_code == 0
+            except Exception as e:
+                logger.error("[tenki_compute] upload failed: %s", e)
+                return False
 
 
     def _download_sync(self, instance_id: str, remote_path: str, local_path: str) -> bool:
-        info = self._sandboxes.get(instance_id)
-        if not info:
-            return False
-        try:
-            path = shlex.quote(remote_path)
-            result = info["sandbox"].exec("bash", "-lc", f"base64 -w0 {path}", timeout=120)
-            if result.exit_code != 0:
-                logger.error("[tenki_compute] download failed: %s", (result.stderr or b"").decode(errors="replace"))
+        with self._activity(instance_id) as info:
+            if not info:
                 return False
-            data = base64.b64decode((result.stdout or b"").strip())
-            with open(local_path, "wb") as f:
-                f.write(data)
-            return True
-        except Exception as e:
-            logger.error("[tenki_compute] download failed: %s", e)
-            return False
+            try:
+                path = shlex.quote(remote_path)
+                result = info["sandbox"].exec("bash", "-lc", f"base64 -w0 {path}", timeout=120)
+                if result.timed_out or result.exit_code != 0:
+                    logger.error("[tenki_compute] download failed: %s", (result.stderr or b"").decode(errors="replace"))
+                    return False
+                data = base64.b64decode((result.stdout or b"").strip())
+                with open(local_path, "wb") as f:
+                    f.write(data)
+                return True
+            except Exception as e:
+                logger.error("[tenki_compute] download failed: %s", e)
+                return False
 
     async def list_instances(self) -> List[Any]:
         import asyncio
@@ -297,9 +366,11 @@ class TenkiCompute(SyncComputeProvider):
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
         result = []
-        for iid, info in self._sandboxes.items():
+        with self._lock:
+            instances = list(self._sandboxes.items())
+        for iid, info in instances:
             # Only surface sandboxes that are actually alive remotely, matching
-            # the E2B provider (a server-side idle timeout can kill one without
+            # the E2B provider (a server-side lifetime limit can kill one without
             # our local map knowing).
             if not self._is_running(info):
                 continue
@@ -328,7 +399,7 @@ class TenkiCompute(SyncComputeProvider):
             # Log only the count — pip specs can carry private-index URLs/tokens.
             logger.info("[tenki_compute] installing %d pip package(s)", len(pip_pkgs))
             result = sandbox.exec("bash", "-lc", cmd, timeout=300)
-            if result.exit_code != 0:
+            if result.timed_out or result.exit_code != 0:
                 raise RuntimeError(
                     f"pip install failed: {(result.stderr or b'').decode(errors='replace')}"
                 )
@@ -343,7 +414,7 @@ class TenkiCompute(SyncComputeProvider):
             )
             logger.info("[tenki_compute] installing %d npm package(s)", len(npm_pkgs))
             result = sandbox.exec("bash", "-lc", cmd, timeout=300)
-            if result.exit_code != 0:
+            if result.timed_out or result.exit_code != 0:
                 raise RuntimeError(
                     f"npm install failed: {(result.stderr or b'').decode(errors='replace')}"
                 )

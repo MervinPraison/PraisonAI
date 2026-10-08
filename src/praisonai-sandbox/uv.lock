@@ -816,7 +816,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -1737,7 +1737,7 @@ requires-dist = [
     { name = "praisonaiagents", directory = "../praisonai-agents" },
     { name = "rich", specifier = ">=13.7" },
     { name = "sandlock", marker = "extra == 'sandlock'", specifier = ">=0.1.0" },
-    { name = "tenki", marker = "extra == 'tenki'", specifier = ">=0.5.4" },
+    { name = "tenki", marker = "extra == 'tenki'", specifier = ">=1.4.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
 provides-extras = ["docker", "e2b", "sandlock", "ssh", "tenki", "flyio", "modal", "daytona", "novita", "all"]
@@ -2362,16 +2362,16 @@ wheels = [
 
 [[package]]
 name = "tenki"
-version = "1.0.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/10/68/69da5f5bb552fa5899a75be6dfe2da75f116e401bd0540297f5212466ba8/tenki-1.0.0.tar.gz", hash = "sha256:e7210795712a80c7b5700e2cfc534f72e3a7feb88466cfcd2e648739161c1922", size = 230454, upload-time = "2026-08-16T10:45:31.371Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/64/232ea63ec1473c8ee8050881cb547e4176ea63fe1c1591a3bf19e111e379/tenki-1.4.0.tar.gz", hash = "sha256:eec11071341c2da5c439ad4316896c04bf29abe92e8ab4fd229011dd5499930e", size = 288846, upload-time = "2026-09-30T04:51:36.806Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/12/97d2edbabeffe64425fe1e86273b0da74f517bed4f2ab59b7b6a51ace5fa/tenki-1.0.0-py3-none-any.whl", hash = "sha256:63fe85aa1fa7347972e915bd83e71aea1e7feed67b1308ff71e2eb68e7130432", size = 159594, upload-time = "2026-08-16T10:45:29.767Z" },
+    { url = "https://files.pythonhosted.org/packages/28/5b/c435195220f11ee46cb0a585f4abc4770f69a32626211523acb9b1a43798/tenki-1.4.0-py3-none-any.whl", hash = "sha256:8a2c4da58d807313d6f4da7d0bc0aa7c3db4001bbd751f84aac0130437624b2f", size = 198601, upload-time = "2026-09-30T04:51:35.24Z" },
 ]
 
 [[package]]
