@@ -129,6 +129,7 @@ class HTTPStreamMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
     
     def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60):
+        """Store the tool metadata, build its call signature, and remember the session's event loop."""
         self.name = name
         self.__name__ = name  # Required for Agent to recognize it as a tool
         self.__qualname__ = name  # Required for Agent to recognize it as a tool

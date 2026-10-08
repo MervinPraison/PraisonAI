@@ -852,6 +852,7 @@ class MCP:
         # parameter names). The schema name tracks the wrapper's current
         # ``__name__`` so it stays in sync after ``with_tool_prefix``.
         def get_schema():
+            """Return the OpenAI tool schema built from the server's original inputSchema."""
             return build_openai_tool_dict(
                 wrapper.__name__, tool.description, input_schema
             )

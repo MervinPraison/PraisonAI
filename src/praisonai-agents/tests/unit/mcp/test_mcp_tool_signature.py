@@ -32,6 +32,7 @@ CALL_ARGUMENTS = {"domain": "example.com", "from": "7d"}
 
 class TestBuildToolSignature:
     def test_plain_schema_keeps_named_parameters(self):
+        """Ordinary property names stay named parameters with their types and defaults."""
         sig = build_tool_signature({
             "type": "object",
             "properties": {
@@ -48,6 +49,7 @@ class TestBuildToolSignature:
         assert sig.parameters["max_results"].annotation is int
 
     def test_keyword_property_is_accepted_through_kwargs(self):
+        """A Python keyword (``from``) is accepted through ``**kwargs`` instead of failing."""
         sig = build_tool_signature(STATUS_SCHEMA)
 
         assert list(sig.parameters) == ["domain", "to", "kwargs"]
@@ -56,6 +58,7 @@ class TestBuildToolSignature:
         assert bound.arguments["kwargs"] == {"from": "7d"}
 
     def test_non_identifier_property_is_accepted_through_kwargs(self):
+        """A name that is not an identifier (``max-results``) is accepted through ``**kwargs``."""
         sig = build_tool_signature({
             "type": "object",
             "properties": {"max-results": {"type": "integer"}},
@@ -65,6 +68,7 @@ class TestBuildToolSignature:
         sig.bind(**{"max-results": 5})
 
     def test_required_property_after_optional_property(self):
+        """Required properties come first even when the schema lists them after optional ones."""
         sig = build_tool_signature({
             "type": "object",
             "properties": {
@@ -77,6 +81,7 @@ class TestBuildToolSignature:
         assert list(sig.parameters) == ["url", "limit"]
 
     def test_var_keyword_name_does_not_clash_with_a_property(self):
+        """The ``**kwargs`` parameter is renamed when a property is already called ``kwargs``."""
         sig = build_tool_signature({
             "type": "object",
             "properties": {"kwargs": {"type": "object"}, "class": {"type": "string"}},
@@ -90,9 +95,11 @@ class TestBuildToolSignature:
         [None, {}, {"type": "object"}, {"type": "object", "properties": None}],
     )
     def test_schema_without_properties_has_no_parameters(self, schema):
+        """Schemas without properties produce an empty signature."""
         assert len(build_tool_signature(schema).parameters) == 0
 
     def test_null_required_list_means_all_optional(self):
+        """``required: null`` makes every property optional."""
         sig = build_tool_signature({
             "type": "object",
             "properties": {"q": {"type": "string"}},
@@ -111,6 +118,7 @@ class TestBuildToolSignature:
     ],
 )
 def test_remote_tool_forwards_keyword_named_argument(module_name, class_name):
+    """SSE, HTTP-stream, and WebSocket wrappers send keyword-named arguments unchanged."""
     module = importlib.import_module(module_name)
     session = MagicMock()
     session.call_tool = AsyncMock(
@@ -130,6 +138,7 @@ def test_remote_tool_forwards_keyword_named_argument(module_name, class_name):
 
 
 def test_stdio_tool_forwards_keyword_named_argument():
+    """The stdio wrapper sends keyword-named arguments unchanged."""
     pytest.importorskip("mcp", reason="MCP module not installed")
     from praisonaiagents.mcp.mcp import MCP
 
@@ -213,6 +222,7 @@ def test_remote_tool_call_from_worker_thread_runs_on_session_loop(module_name, c
     loop_thread.start()
     try:
         async def create_tool():  # clients create wrappers inside _async_initialize
+            """Create the wrapper on the session loop, as clients do in ``_async_initialize``."""
             return getattr(module, class_name)(
                 name="fetch", description="Fetch a page", session=session,
                 input_schema={"type": "object", "properties": {"url": {"type": "string"}}},
