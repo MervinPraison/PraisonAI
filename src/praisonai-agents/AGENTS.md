@@ -607,7 +607,26 @@ class MyTool(BaseTool):
 > **Agents only recognize parameters.** When creating tools, always expose all options as function parameters—agents cannot discover env vars or config files.
 
 > [!IMPORTANT]
-> **Vendor / third-party API tools:** New integrations (external APIs, datasets, SaaS wrappers) belong in **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)** as optional pip plugins — **not** as new `praisonaiagents/tools/*_tools.py` files in this repo. Core `praisonaiagents/tools/` holds SDK primitives (decorator, registry, schedule, shell, trust, subagent) and a small set of **legacy** bundled tools kept for backward compatibility. Do not treat legacy search tools (e.g. Tavily/Exa) as precedent for adding new vendor modules here.
+> **Vendor / third-party API tools:** New integrations (external APIs, datasets, SaaS wrappers) belong in **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)** as optional pip plugins — **not** as new `praisonaiagents/tools/*_tools.py` files in this repo. Core `praisonaiagents/tools/` holds SDK primitives (decorator, registry, schedule, shell, trust, subagent) and a small set of **legacy** bundled tools kept for backward compatibility. Do not treat legacy search tools (e.g. Tavily/Exa) as precedent for adding new vendor modules here. See §6.1.1 for the full routing test.
+
+#### 6.1.1 Tool routing — third-party API connectors go to PraisonAI-Tools (MUST)
+
+**A new agent-callable integration with a third-party service (an external HTTP/API, SaaS, or DB connector) MUST be added to [MervinPraison/PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools), NOT to `praisonaiagents/tools/`.** The core SDK keeps only the tool *protocols, base classes, decorator, registry, resolver, and trust/fencing machinery* — not the connectors themselves.
+
+> [!WARNING]
+> **Existing in-repo connectors are legacy precedent, not a licence to add more.** `praisonaiagents/tools/` already contains first-party connectors such as `tavily_tools.py`, `exa_tools.py`, `youdotcom_tools.py`, `duckduckgo_tools.py`, `searxng_tools.py`, `spider_tools.py`, `crawl4ai_tools.py`, `github_tools.py`, `jira_tools.py`, and `email_tools.py`. These pre-date this rule and are retained for backward compatibility. **"Same shape as the Tavily/Exa/You.com tools" is NOT sufficient justification to merge a new connector into the core SDK** — matching an existing pattern is a *consistency* check, not a *routing* check. Reviewers must not approve a new connector into `praisonaiagents/tools/` on precedent alone.
+
+**Decision test — does this `*_tools.py` module belong in the core SDK?** A module stays in `praisonaiagents/tools/` only if it is either (a) a tool that operates purely on local state (filesystem, shell, Python, AST, todo, schedule) **or** (b) framework plumbing (delegation, subagent, session, artifact, memory, clarify) — **and** in both cases it uses only stdlib or already-required core deps. The two left-column categories are **alternatives**, not cumulative requirements. If a module instead calls a third-party/remote service, needs service-specific credentials, or is a vendor/product connector, route it to PraisonAI-Tools:
+
+| Keep in core `praisonaiagents/tools/` (local-state tool **or** framework plumbing) | Route to PraisonAI-Tools |
+|---|---|
+| Operates purely on local state (filesystem, shell, Python, AST, todo, schedule) | Calls out to a third-party/remote HTTP API or SaaS |
+| **or** is framework plumbing (delegation, subagent, session, artifact, memory, clarify) | Needs service-specific auth (API key/token) or a service-specific SDK |
+| …and uses only stdlib or already-required core deps | Is a vendor/product connector (search provider, data vendor, CRM, DB, messaging) |
+
+Under this test, a macro/FX market-data API client (e.g. FXMacroData) is a **third-party API connector → PraisonAI-Tools**, even though it uses only stdlib `urllib`, because it depends on a specific external service and service-specific credentials.
+
+**When a connector is correctly placed in PraisonAI-Tools**, it is consumed exactly like any other tool — `Agent(tools=[...])`. Note that package placement or name registration alone does **not** enable external-content fencing: fencing is keyed on the tool name being a known external tool (in `EXTERNAL_TOOL_NAMES`) or explicitly marked EXTERNAL. Unless the name is already known-external, register it with `add_external_tool(tool_name)` (or `ToolTrustLevel.EXTERNAL`) so untrusted results are fenced.
 
 ### 6.2 Hooks & Middleware
 
