@@ -42,6 +42,10 @@ __all__ = [
     "redact_outbound",
     "OutboundRedactor",
     "is_secret_ref",
+    "sentinelize",
+    "desentinelize",
+    "has_sentinel",
+    "EgressGuardProtocol",
 ]
 
 # Valid built-in secret sources. ``exec`` runs a command whose stdout is the
@@ -371,3 +375,102 @@ class OutboundRedactor(Protocol):
     """
 
     def redact(self, text: str) -> str: ...
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Secret sentinelisation — the egress-firewall contract (Issue #5722).
+#
+# Redaction masks a secret *after the fact* (it replaces the plaintext with
+# ``[REDACTED]``, which cannot be substituted back). A gateway driven by
+# untrusted inbound chat needs the opposite: the model must be able to
+# *reference* a credential without the plaintext ever entering model-visible
+# context (prompt, tool arguments, transcript), and the real value must be
+# re-inserted only at the moment a request egresses to an allowlisted host.
+#
+# This core seam owns only the *contract* — a reversible, opaque, per-process
+# sentinel token — and nothing heavy. The wrapper's egress guard implements
+# :class:`EgressGuardProtocol`, deciding (via the existing
+# ``policy.engine.check_network``) whether to substitute the real secret or
+# refuse. Stdlib only, no hot-path cost until a sentinel is actually minted.
+# ────────────────────────────────────────────────────────────────────────────
+
+# Opaque, unguessable per-process prefix. The random suffix keeps a sentinel
+# from colliding with ordinary text and from being forged across processes.
+_SENTINEL_PREFIX = "oc-sent-"
+_sentinel_to_secret: Dict[str, str] = {}
+_secret_to_sentinel: Dict[str, str] = {}
+_sentinel_lock = threading.Lock()
+
+
+def sentinelize(secret: str) -> str:
+    """Return an opaque sentinel token standing in for ``secret``.
+
+    The model only ever sees the returned token; the plaintext is held in a
+    per-process map and never placed in prompts, tool arguments, transcripts or
+    logs. Calling again with the same secret returns the same token (stable
+    within a process). The secret is also registered for log redaction so an
+    accidental leak of the plaintext is still masked.
+
+    A short or empty value is returned verbatim — too small to sentinelise
+    safely without risking collisions with ordinary text.
+    """
+    if not secret or not isinstance(secret, str) or len(secret) < _MIN_REDACT_LEN:
+        return secret
+    with _sentinel_lock:
+        existing = _secret_to_sentinel.get(secret)
+        if existing is not None:
+            return existing
+        import secrets as _stdlib_secrets
+
+        token = f"{_SENTINEL_PREFIX}{_stdlib_secrets.token_hex(16)}"
+        _sentinel_to_secret[token] = secret
+        _secret_to_sentinel[secret] = token
+    register_secret_for_redaction(secret)
+    return token
+
+
+def desentinelize(text: str) -> str:
+    """Substitute every known sentinel in ``text`` back to its real secret.
+
+    Called by an egress guard *only* once a host has been allowlisted, to put
+    the real credential on the wire. Text with no sentinel is returned
+    unchanged, so this is safe to call on every outbound request.
+    """
+    if not text or not isinstance(text, str) or _SENTINEL_PREFIX not in text:
+        return text
+    with _sentinel_lock:
+        items = list(_sentinel_to_secret.items())
+    for token, secret in items:
+        if token in text:
+            text = text.replace(token, secret)
+    return text
+
+
+def has_sentinel(text: str) -> bool:
+    """True if ``text`` contains a minted sentinel token.
+
+    An egress guard uses this to detect that a request carries a credential and
+    must therefore pass the host allowlist before :func:`desentinelize` runs.
+    """
+    if not text or not isinstance(text, str) or _SENTINEL_PREFIX not in text:
+        return False
+    with _sentinel_lock:
+        tokens = list(_sentinel_to_secret.keys())
+    return any(token in text for token in tokens)
+
+
+@runtime_checkable
+class EgressGuardProtocol(Protocol):
+    """Contract for the wrapper's secret-egress firewall.
+
+    The real guard lives in the wrapper (``praisonai``): it inspects an
+    outbound request, decides via the operator host allowlist whether a
+    credential may leave, and either substitutes the sentinel for the real
+    secret (:func:`desentinelize`) or refuses with an audited event. Core owns
+    only this seam — no proxy, no host enforcement, no heavy imports — so a
+    deployment can inject a guard without pulling anything heavy into core.
+    """
+
+    def sentinel_for(self, ref: "SecretRef") -> str: ...
+
+    def allow_egress(self, host: str, ref: "SecretRef") -> bool: ...
