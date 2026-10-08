@@ -345,6 +345,42 @@ class TestSqliteDbPathAlias(unittest.TestCase):
             self.assertEqual(explicit.short_db, f"{tmpdir}/short.db")
             self.assertEqual(explicit.long_db, f"{tmpdir}/long.db")
 
+    def test_memory_config_db_path_reaches_memory_through_agent(self):
+        """The *documented* surface — ``MemoryConfig(backend="sqlite",
+        config={"db_path": ...})`` — must reach the store through the Agent.
+
+        The direct ``Memory(config=...)`` tests above cover the adapter/legacy
+        resolution, but the advertised entry point routes
+        ``MemoryConfig.config`` through ``Agent._init_memory`` (the backend is
+        carried in and the nested ``config`` is flattened to the top level). If
+        that wiring regressed, ``db_path`` would never reach ``self.cfg`` and the
+        fix would be silently bypassed for every real caller. Asserting
+        ``mem.short_db == mem.long_db == db_path`` guards the whole path end to
+        end. Runs in an isolated temp cwd so the default-path fallback is
+        hermetic; no LLM / OPENAI_API_KEY needed.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import MemoryConfig
+        from praisonaiagents.memory import Memory
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                shared = os.path.join(tmpdir, "mem.db")
+                agent = Agent(
+                    name="A",
+                    instructions="x",
+                    memory=MemoryConfig(backend="sqlite", config={"db_path": shared}),
+                )
+                mem = agent._memory_instance
+                self.assertIsInstance(mem, Memory)
+                self.assertEqual(mem.provider, "sqlite")
+                self.assertEqual(mem.short_db, shared)
+                self.assertEqual(mem.long_db, shared)
+            finally:
+                os.chdir(cwd)
+
     def test_db_path_persists_and_recalls_across_instances(self):
         """A turn stored through a shared ``db_path`` is recalled by a second
         Memory pointed at the same file — the end-to-end cross-instance path.
