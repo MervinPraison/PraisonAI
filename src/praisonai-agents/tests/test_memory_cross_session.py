@@ -285,5 +285,156 @@ class TestSqliteUserIdFilter(unittest.TestCase):
             )
 
 
+class TestSqliteDbPathAlias(unittest.TestCase):
+    """Issue #5710: ``MemoryConfig(backend="sqlite", config={"db_path": ...})``
+    must actually use the caller-supplied file for both the short- and
+    long-term stores.
+
+    Previously ``db_path`` was silently dropped by ``Memory._get_adapter_config``
+    (which only read ``short_db``/``long_db``), so the store fell back to the
+    per-user default path and a caller who pointed two Agent instances at one
+    shared file never got cross-instance recall. No LLM / OPENAI_API_KEY needed.
+    """
+
+    def test_db_path_maps_to_short_and_long_db(self):
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shared = f"{tmpdir}/mem.db"
+            mem = Memory(config={"provider": "sqlite", "db_path": shared})
+            adapter_cfg = mem._get_adapter_config_for_provider("sqlite")
+            self.assertEqual(adapter_cfg["short_db"], shared)
+            self.assertEqual(adapter_cfg["long_db"], shared)
+
+    def test_explicit_short_long_db_win_over_db_path(self):
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mem = Memory(config={
+                "provider": "sqlite",
+                "db_path": f"{tmpdir}/ignored.db",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
+            adapter_cfg = mem._get_adapter_config_for_provider("sqlite")
+            self.assertEqual(adapter_cfg["short_db"], f"{tmpdir}/short.db")
+            self.assertEqual(adapter_cfg["long_db"], f"{tmpdir}/long.db")
+
+    def test_db_path_maps_to_legacy_direct_connection_paths(self):
+        """``db_path`` must also drive the legacy direct-SQLite connection
+        attributes (``self.short_db``/``self.long_db``) used by
+        ``_get_stm_conn``/``_get_ltm_conn``. Otherwise a caller using the legacy
+        connection helpers would silently hit the default per-user file instead
+        of the shared ``db_path`` — the same bug this PR fixes, left half-done.
+        An explicit ``short_db``/``long_db`` still wins.
+        """
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shared = f"{tmpdir}/mem.db"
+            mem = Memory(config={"provider": "sqlite", "db_path": shared})
+            self.assertEqual(mem.short_db, shared)
+            self.assertEqual(mem.long_db, shared)
+
+            explicit = Memory(config={
+                "provider": "sqlite",
+                "db_path": f"{tmpdir}/ignored.db",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
+            self.assertEqual(explicit.short_db, f"{tmpdir}/short.db")
+            self.assertEqual(explicit.long_db, f"{tmpdir}/long.db")
+
+    def test_memory_config_db_path_reaches_memory_through_agent(self):
+        """The *documented* surface — ``MemoryConfig(backend="sqlite",
+        config={"db_path": ...})`` — must reach the store through the Agent.
+
+        The direct ``Memory(config=...)`` tests above cover the adapter/legacy
+        resolution, but the advertised entry point routes
+        ``MemoryConfig.config`` through ``Agent._init_memory`` (the backend is
+        carried in and the nested ``config`` is flattened to the top level). If
+        that wiring regressed, ``db_path`` would never reach ``self.cfg`` and the
+        fix would be silently bypassed for every real caller. Asserting
+        ``mem.short_db == mem.long_db == db_path`` guards the whole path end to
+        end. Runs in an isolated temp cwd so the default-path fallback is
+        hermetic; no LLM / OPENAI_API_KEY needed.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import MemoryConfig
+        from praisonaiagents.memory import Memory
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                shared = os.path.join(tmpdir, "mem.db")
+                agent = Agent(
+                    name="A",
+                    instructions="x",
+                    memory=MemoryConfig(backend="sqlite", config={"db_path": shared}),
+                )
+                mem = agent._memory_instance
+                self.assertIsInstance(mem, Memory)
+                self.assertEqual(mem.provider, "sqlite")
+                self.assertEqual(mem.short_db, shared)
+                self.assertEqual(mem.long_db, shared)
+            finally:
+                os.chdir(cwd)
+
+    def test_db_path_persists_and_recalls_across_instances(self):
+        """A turn stored through a shared ``db_path`` is recalled by a second
+        Memory pointed at the same file — the end-to-end cross-instance path.
+
+        The recall must come from the *caller-supplied file*: the shared db
+        exists after the write, and the per-user default fallback path never
+        does. Without the fix ``db_path`` was dropped and both instances used
+        the same default store, so the plain recall assertion alone would still
+        pass while silently ignoring ``db_path`` — these file-location asserts
+        close that gap (Greptile). Runs in an isolated temp cwd so the default
+        path check is hermetic (the default store lives under ``cwd/.praisonai``).
+        """
+        from praisonaiagents.memory import Memory
+        from praisonaiagents.paths import get_project_data_dir
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                shared = os.path.join(tmpdir, "mem.db")
+                default_dir = str(get_project_data_dir())
+                default_long = os.path.join(default_dir, "long_term.db")
+                default_short = os.path.join(default_dir, "short_term.db")
+
+                writer = Memory(config={"provider": "sqlite", "db_path": shared})
+                writer.store_long_term(
+                    "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                    metadata={"user_id": "db-path-user"},
+                )
+
+                self.assertTrue(
+                    os.path.exists(shared),
+                    "db_path file must be created by the write, proving it was used",
+                )
+                self.assertFalse(
+                    os.path.exists(default_long),
+                    "the default long_term.db must not be used when db_path is set",
+                )
+                self.assertFalse(
+                    os.path.exists(default_short),
+                    "the default short_term.db must not be used when db_path is set",
+                )
+
+                reader = Memory(config={"provider": "sqlite", "db_path": shared})
+                hits = reader.search_long_term(
+                    "codename", limit=5, user_id="db-path-user"
+                )
+                self.assertTrue(
+                    any("ORANGE-PANDA" in r.get("text", "") for r in hits),
+                    "second Memory on the same db_path must recall the stored turn",
+                )
+            finally:
+                os.chdir(cwd)
+
+
 if __name__ == "__main__":
     unittest.main()
