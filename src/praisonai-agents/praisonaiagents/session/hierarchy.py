@@ -592,8 +592,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 )
             except OSError as exc:
                 raise OSError(
-                    f"Session {sid} was saved but registration with parent "
-                    f"{parent_id} failed"
+                    f"Session {sid} was saved; registration with parent {parent_id} "
+                    "raised an error and may already be committed"
                 ) from exc
             if not registered:
                 raise OSError(
@@ -676,8 +676,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             )
         except OSError as exc:
             raise OSError(
-                f"Forked session {new_id} was saved but registration with "
-                f"parent {session_id} failed"
+                f"Forked session {new_id} was saved; registration with parent {session_id} "
+                "raised an error and may already be committed"
             ) from exc
         if not registered:
             raise OSError(
