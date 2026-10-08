@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import collections
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -107,33 +108,72 @@ def _isolate_value(value: Any, memo: dict) -> Any:
       -> ``rows``) stays isolated and an in-place mutation cannot leak to a sibling
       branch or loop iteration.
     """
+    # Already isolated under this scope (cross-variable alias): reuse the copy.
+    if id(value) in memo:
+        return memo[id(value)]
+
+    pre_existing = set(memo)
     try:
         return copy.deepcopy(value, memo)
     except Exception:
         pass
-    # deepcopy failed somewhere inside ``value``. Rebuild the known container
-    # types node-by-node so the un-copyable leaves are shared but everything
-    # around them is still isolated. Unknown/atomic objects that raised are
-    # shared by reference (read-only intent) as a last resort.
+    # ``copy.deepcopy`` failed somewhere inside ``value``. A failed deepcopy can
+    # leave *unfinished* copies in ``memo`` (e.g. an empty dict for a container it
+    # had started but not populated before the un-copyable leaf raised). Reusing
+    # those would silently drop nested seed data, so discard everything this
+    # attempt added and rebuild the known container types node-by-node. The
+    # un-copyable leaves are shared by reference; everything around them is still
+    # isolated, and container subclasses (namedtuple, defaultdict, OrderedDict,
+    # subclassed list/set/tuple) keep their type and behaviour.
+    for key in set(memo) - pre_existing:
+        del memo[key]
+    return _rebuild_isolated(value, memo)
+
+
+def _rebuild_isolated(value: Any, memo: dict) -> Any:
+    """Node-by-node fallback copy that shares only the un-copyable leaves.
+
+    Used by :func:`_isolate_value` after a whole-value ``copy.deepcopy`` fails.
+    Rebuilds ``dict``/``list``/``set``/``tuple`` (and their subclasses, so a
+    ``defaultdict`` keeps its factory and a ``namedtuple`` keeps its fields),
+    recursing through :func:`_isolate_value` so each nested child first gets a
+    clean ``deepcopy`` attempt and only genuinely un-copyable nodes are shared.
+    """
+    if id(value) in memo:
+        return memo[id(value)]
+
     if isinstance(value, dict):
-        copied: dict = {}
+        try:
+            copied = value.__class__()  # preserves defaultdict/OrderedDict/...
+        except Exception:
+            copied = {}
+        if isinstance(value, collections.defaultdict):
+            copied.default_factory = value.default_factory
         memo[id(value)] = copied
         for k, v in value.items():
             copied[_isolate_value(k, memo)] = _isolate_value(v, memo)
         return copied
     if isinstance(value, list):
-        copied = []
+        copied = value.__class__()
         memo[id(value)] = copied
         copied.extend(_isolate_value(v, memo) for v in value)
         return copied
     if isinstance(value, set):
-        copied = set()
+        copied = value.__class__()
         memo[id(value)] = copied
         for v in value:
             copied.add(_isolate_value(v, memo))
         return copied
     if isinstance(value, tuple):
-        return tuple(_isolate_value(v, memo) for v in value)
+        items = [_isolate_value(v, memo) for v in value]
+        if hasattr(value, "_fields"):  # namedtuple keeps its type and fields
+            try:
+                return value.__class__(*items)
+            except Exception:
+                return tuple(items)
+        return tuple(items)
+    # Unknown/atomic object that could not be deep-copied: share by reference as
+    # a last resort (read-only intent).
     return value
 
 

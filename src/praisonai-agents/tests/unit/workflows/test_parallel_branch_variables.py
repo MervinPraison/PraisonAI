@@ -426,6 +426,83 @@ def test_cross_variable_aliasing_is_preserved_within_a_branch():
     assert variables.get("after_output") == "AFTER"  # control
 
 
+def test_deeply_nested_seed_data_survives_an_uncopyable_leaf():
+    """Nested seed around an un-copyable leaf must not vanish in a branch.
+
+    A failed ``copy.deepcopy`` leaves *unfinished* copies in its memo. The
+    fallback must discard them and rebuild node-by-node; reusing them dropped the
+    nested data so ``{'outer': {'mid': {'client': lock, 'rows': [...]}}}`` reached
+    a branch as ``{'outer': {}}`` (two-levels-deep regression, #5717 review).
+    """
+    client = _Uncopyable()
+
+    def report(ctx: WorkflowContext) -> StepResult:
+        state = ctx.variables["state"]
+        return StepResult(
+            output="ok",
+            variables={
+                "mid_keys": sorted(state["outer"]["mid"].keys()),
+                "rows_seen": list(state["outer"]["mid"]["rows"]),
+                "sibling_seen": list(state["outer"]["sibling"]),
+            },
+        )
+
+    wf = Workflow(steps=[
+        parallel([Task(name="r", handler=report, max_retries=0)]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"state": {"outer": {
+        "mid": {"client": client, "rows": [1, 2, 3]},
+        "sibling": [9, 9],
+    }}})
+    variables = wf.start("go")["variables"]
+
+    assert variables["mid_keys"] == ["client", "rows"], variables["mid_keys"]
+    assert variables["rows_seen"] == [1, 2, 3]
+    assert variables["sibling_seen"] == [9, 9]
+    assert variables.get("after_output") == "AFTER"  # control
+
+
+def test_uncopyable_fallback_preserves_container_subclass_behaviour():
+    """namedtuple / defaultdict seeds keep their type when a sibling is un-copyable.
+
+    The old fallback flattened container subclasses: a ``namedtuple`` became a
+    plain ``tuple`` (named-field access raised ``AttributeError``) and a
+    ``defaultdict`` lost its factory. The branch must see the original behaviour.
+    """
+    import collections
+
+    Point = collections.namedtuple("Point", ["x", "client"])
+    client = _Uncopyable()
+    point = Point(1, client)
+
+    seed_dd = collections.defaultdict(list)
+    seed_dd["client"] = client
+    seed_dd["rows"].append(1)
+
+    def report(ctx: WorkflowContext) -> StepResult:
+        p = ctx.variables["point"]
+        dd = ctx.variables["bag"]
+        dd["autovivified"].append("ok")  # factory must still fire inside the branch
+        return StepResult(output="ok", variables={
+            "named_field": p.x,                       # AttributeError if flattened
+            "is_namedtuple": hasattr(p, "_fields"),
+            "dd_type_ok": isinstance(dd, collections.defaultdict),
+            "dd_autoviv": list(dd["autovivified"]),
+        })
+
+    wf = Workflow(steps=[
+        parallel([Task(name="r", handler=report, max_retries=0)]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"point": point, "bag": seed_dd})
+    variables = wf.start("go")["variables"]
+
+    assert variables["named_field"] == 1
+    assert variables["is_namedtuple"] is True
+    assert variables["dd_type_ok"] is True
+    assert variables["dd_autoviv"] == ["ok"]
+    assert variables.get("after_output") == "AFTER"  # control
+
+
 def test_untouched_value_with_non_bool_inequality_is_not_a_write(caplog):
     """A carried-through object whose ``!=`` is not a bool must not become a write.
 
