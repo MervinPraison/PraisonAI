@@ -47,6 +47,19 @@ DEFAULT_MAX_PARALLEL_WORKERS = 3
 # summarisation request consumes roughly as many tokens as it saves.
 MIN_BRANCHES_FOR_LLM_SUMMARY = 3
 
+import contextvars
+
+# Generation of the run a branch belongs to. A fail_fast/timeout Parallel block
+# abandons still-running branches (threads cannot be force-killed in Python); if
+# that branch later fails it must NOT scribble "failed" onto a *subsequent* run's
+# shared status. Each run() stamps its generation here; branches capture it via
+# contextvars (propagated into the ThreadPoolExecutor by copy_context_to_callable)
+# and status writes are suppressed once the owning run has moved on. None means
+# "no active run" (e.g. a bare _execute_single_step_internal call in tests).
+_run_generation: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVar(
+    "praisonai_workflow_run_generation", default=None
+)
+
 from .._run_lock import ensure_run_lock
 
 
@@ -279,11 +292,14 @@ class Parallel:
     - "fail_fast": Cancel remaining branches and fail immediately on first error
     - "fail_all": Wait for all branches to complete, then fail if any failed
 
-    timeout: optional per-Parallel wall-clock bound (seconds). If branches are
-    still running after it elapses the block raises WorkflowStepError instead of
-    hanging forever. Threads running user code cannot be force-killed in Python,
-    so a timed-out/cancelled branch may keep running in the background, but the
-    caller is no longer blocked on it.
+    timeout: optional per-Parallel wall-clock bound (seconds). Must be a positive
+    number, or None for no bound (a non-positive value raises ValueError rather
+    than silently disabling the limit). The clock starts when the block begins,
+    including any context-preparation work. If branches are still running after it
+    elapses the block raises WorkflowStepError instead of hanging forever. Threads
+    running user code cannot be force-killed in Python, so a timed-out/cancelled
+    branch may keep running in the background, but the caller is no longer blocked
+    on it and its late failure cannot corrupt a later run's status.
     """
     steps: List = field(default_factory=list)
     max_workers: Optional[int] = None  # None = use system default
@@ -296,6 +312,15 @@ class Parallel:
             raise ValueError(
                 f"Invalid on_failure='{on_failure}'. Must be one of {valid_on_failure}. "
                 "See Parallel docstring for semantics."
+            )
+        # Reject a non-positive timeout: `timeout=0`/negatives are truthiness-false
+        # and would silently disable the bound, letting a hung branch wait forever
+        # even though the caller explicitly asked for a limit. `None` is the only
+        # way to mean "no bound".
+        if timeout is not None and timeout <= 0:
+            raise ValueError(
+                f"Invalid timeout={timeout!r}. Must be a positive number of seconds, "
+                "or None for no wall-clock bound."
             )
         self.steps = steps
         self.max_workers = max_workers
@@ -477,8 +502,9 @@ def parallel(
         max_workers: Optional cap on ThreadPoolExecutor workers. When unset,
             defaults to min(DEFAULT_MAX_PARALLEL_WORKERS, len(steps)).
         on_failure: Failure strategy — "partial_ok" (default), "fail_fast", or "fail_all".
-        timeout: Optional per-Parallel wall-clock bound (seconds); raises instead
-            of hanging if branches are still running when it elapses.
+        timeout: Optional per-Parallel wall-clock bound (seconds); must be positive
+            (or None for no bound). Raises instead of hanging if branches are still
+            running when it elapses.
     """
     return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure, timeout=timeout)
 
@@ -794,6 +820,33 @@ class AgentFlow:
     # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
     # shared Workflow instance cannot be corrupted by concurrent run() calls.
     _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
+    # Monotonic id of the currently-executing run. Bumped at each run() so an
+    # abandoned fail_fast/timeout Parallel branch can tell it outlived its run
+    # and must not mutate a later run's shared status (see _begin_run_generation
+    # and _is_current_run_generation).
+    _current_run_generation: int = field(default=0, repr=False, compare=False)
+
+    def _begin_run_generation(self) -> int:
+        """Stamp a fresh generation for the run starting now and publish it to the
+        current context so branches submitted by this run capture it.
+
+        Returns the new generation id.
+        """
+        self._current_run_generation += 1
+        _run_generation.set(self._current_run_generation)
+        return self._current_run_generation
+
+    def _is_current_run_generation(self) -> bool:
+        """True if the caller still belongs to the instance's live run.
+
+        A branch abandoned by a previous fail_fast/timeout Parallel block carries
+        an older generation (captured via the _run_generation contextvar), so this
+        returns False for it and its late status writes are suppressed. A bare
+        internal call outside any run (generation None) is treated as current to
+        preserve existing single-step behaviour.
+        """
+        gen = _run_generation.get()
+        return gen is None or gen == self._current_run_generation
 
     @property
     def _execution_lock(self):
@@ -1448,6 +1501,11 @@ class AgentFlow:
         
         # Update workflow status
         self.status = "running"
+        # Stamp a fresh generation for this run so a still-running branch from a
+        # previous fail_fast/timeout Parallel block (which cannot be force-killed)
+        # cannot write "failed" onto this run's status. Branches capture this via
+        # the _run_generation contextvar at submit time.
+        self._begin_run_generation()
         
         # Set YAML-approved tools only when caller allows dangerous tools
         _approval_token = None
@@ -2997,8 +3055,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if step_error is not None:
             if hasattr(normalized, 'status'):
                 normalized.status = "failed"
-            self.step_statuses[normalized.name] = "failed"
-            self.status = "failed"
+            # Suppress shared-status writes from a branch that outlived its run: a
+            # fail_fast/timeout Parallel block abandons still-running branches, and
+            # a late failure from one must not corrupt a *subsequent* run's status.
+            if self._is_current_run_generation():
+                self.step_statuses[normalized.name] = "failed"
+                self.status = "failed"
             if getattr(normalized, 'on_error', 'stop') == 'stop':
                 if verbose:
                     print(f"🛑 Step '{normalized.name}' failed (on_error='stop'): {step_error}")
@@ -3436,7 +3498,14 @@ CONCISE SUMMARY:"""
         
         results = []
         outputs = []
-        
+
+        # Start the wall-clock bound *before* any preparation work. The context
+        # summarisation below can make a blocking litellm.completion call, so a
+        # deadline started only at submission time would let a Parallel(timeout=N)
+        # block wait far longer than N before its clock even begins.
+        timeout = getattr(parallel_step, "timeout", None)
+        deadline = (time.monotonic() + timeout) if timeout else None
+
         if verbose:
             print(f"⚡ Running {len(parallel_step.steps)} steps in parallel...")
         
@@ -3476,9 +3545,6 @@ CONCISE SUMMARY:"""
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
         effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
-        # Optional wall-clock bound so one hung branch cannot block forever.
-        timeout = getattr(parallel_step, "timeout", None)
-        deadline = (time.monotonic() + timeout) if timeout else None
 
         # Index-keyed collectors so branches can be consumed in *completion*
         # order (fail_fast must raise as soon as any branch fails, not after
