@@ -169,6 +169,18 @@ def resolve(
 # Array Resolution
 # =============================================================================
 
+def _match_preset_key(value: str, presets: Dict[str, Any]) -> Optional[str]:
+    """Canonical preset lookup for the array forms (``[preset]`` /
+    ``[preset, {overrides}]``), mirroring the string form in ``_resolve_string``
+    and the closed-set guard in ``validate_preset_string``: case-insensitive,
+    whitespace-tolerant, ``-``/``_`` interchangeable.
+    """
+    from .parse_utils import canonical_preset_key
+
+    key = canonical_preset_key(value)
+    return next((k for k in presets if canonical_preset_key(k) == key), None)
+
+
 def _resolve_array(
     value: Union[list, tuple],
     param_name: str,
@@ -231,8 +243,13 @@ def _resolve_array(
                 if scheme and scheme in url_schemes:
                     return _resolve_url(single_value, config_class, url_schemes)
             # Check if single item is a preset
-            if isinstance(single_value, str) and presets and single_value in presets:
-                return _apply_preset(single_value, presets, config_class)
+            matched = (
+                _match_preset_key(single_value, presets)
+                if isinstance(single_value, str) and presets
+                else None
+            )
+            if matched:
+                return _apply_preset(matched, presets, config_class)
             # Single non-preset string - try as URL or return as-is
             if isinstance(single_value, str):
                 if config_class:
@@ -254,9 +271,10 @@ def _resolve_array(
         
         # First item should be a preset string
         if isinstance(first, str):
+            matched = _match_preset_key(first, presets) if presets else None
             # Get base config from preset
-            if presets and first in presets:
-                base_config = _apply_preset(first, presets, config_class)
+            if matched:
+                base_config = _apply_preset(matched, presets, config_class)
             elif presets:
                 # Invalid preset
                 raise make_preset_error(param_name, first, presets.keys())
