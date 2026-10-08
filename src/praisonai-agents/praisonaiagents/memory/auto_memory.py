@@ -272,7 +272,9 @@ class AutoMemory:
             verbose=verbose
         )
         
-        # Track what we've already processed to avoid duplicates
+        # Track what we've already processed to avoid duplicates. The lock keeps
+        # the dedup check and store atomic so overlapping calls (shared agent in
+        # worker threads) with the same interaction store exactly once.
         self._processed_hashes: set = set()
         self._processing_lock = threading.RLock()
         self._pending_memories: Dict[str, List[Dict[str, Any]]] = {}
@@ -329,7 +331,8 @@ class AutoMemory:
         if assistant_response:
             text += "\n" + assistant_response
         
-        # Check if already processed
+        # Previews must not consume dedup, so only the hash is checked (not
+        # recorded) when store is False.
         import hashlib
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         with self._processing_lock:
