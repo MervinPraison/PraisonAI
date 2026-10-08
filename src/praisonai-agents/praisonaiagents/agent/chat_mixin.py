@@ -3648,6 +3648,10 @@ Your Goal: {self.goal}"""
                 use_native_format=use_native_format,
                 memory_prefetch_context=memory_prefetch_context,
             )
+            if attachments:
+                # Model content includes ephemeral files; history and after-turn
+                # memory must receive only the user's text, including hook edits.
+                original_prompt = prompt
             
 
             # Track messages THIS turn appends so a failure rolls back only our

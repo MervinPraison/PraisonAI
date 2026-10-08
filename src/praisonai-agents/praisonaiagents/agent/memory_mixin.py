@@ -31,6 +31,7 @@ _active_turn_owned: "contextvars.ContextVar[Optional[list]]" = contextvars.Conte
 # _live_turns_lock because turns on different threads mutate it concurrently.
 _live_turn_owners: "Dict[int, list]" = {}
 _live_turns_lock = threading.Lock()
+_auto_memory_init_lock = threading.Lock()
 
 
 def _register_live_turn(owned: list) -> None:
@@ -751,12 +752,13 @@ class MemoryMixin:
         try:
             from ..memory.auto_memory import AutoMemory
             # Lazy-create AutoMemory wrapper on first use
-            if not hasattr(self, '_auto_memory_instance') or self._auto_memory_instance is None:
-                self._auto_memory_instance = AutoMemory(
-                    self._memory_instance,
-                    enabled=True,
-                    verbose=1 if getattr(self, 'verbose', False) else 0
-                )
+            with _auto_memory_init_lock:
+                if not hasattr(self, '_auto_memory_instance') or self._auto_memory_instance is None:
+                    self._auto_memory_instance = AutoMemory(
+                        self._memory_instance,
+                        enabled=True,
+                        verbose=1 if getattr(self, 'verbose', False) else 0
+                    )
             self._auto_memory_instance.process_interaction(
                 user_message=str(user_message),
                 assistant_response=str(assistant_response),
