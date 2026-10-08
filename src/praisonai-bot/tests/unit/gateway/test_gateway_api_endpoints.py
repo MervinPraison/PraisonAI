@@ -1135,3 +1135,148 @@ def test_cancel_in_flight_background_run():
 
     data = asyncio.run(_flow())
     assert data["status"] == "cancelled"
+
+
+# ── Issue #5726: client Idempotency-Key on run-create endpoints ────────
+
+
+class _CountingAgent(_FakeAgent):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    async def achat(self, content):
+        self.calls += 1
+        return f"echo:{content}"
+
+
+class _CountingGateway(_FakeGateway):
+    def __init__(self):
+        super().__init__()
+        self._agent = _CountingAgent()
+
+
+def test_responses_idempotency_key_reuses_first_run():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "input": "ping"}
+    headers = {"idempotency-key": "abc"}
+
+    first = asyncio.run(ep.openai_responses(_FakeReq(body, headers=headers)))
+    second = asyncio.run(ep.openai_responses(_FakeReq(body, headers=headers)))
+
+    # Only one agent run; both responses carry the same id/output.
+    assert gw._agent.calls == 1
+    assert _body(first)["id"] == _body(second)["id"]
+    assert _body(second)["output_text"] == "echo:ping"
+
+
+def test_responses_idempotency_key_conflict_on_different_body():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    headers = {"idempotency-key": "abc"}
+
+    asyncio.run(
+        ep.openai_responses(
+            _FakeReq({"model": "assistant", "input": "ping"}, headers=headers)
+        )
+    )
+    conflict = asyncio.run(
+        ep.openai_responses(
+            _FakeReq({"model": "assistant", "input": "PONG"}, headers=headers)
+        )
+    )
+    assert conflict.status_code == 409
+    assert _body(conflict)["error"]["type"] == "invalid_request_error"
+    # The conflicting request never started a second run.
+    assert gw._agent.calls == 1
+
+
+def test_responses_without_idempotency_key_runs_each_time():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "input": "ping"}
+    asyncio.run(ep.openai_responses(_FakeReq(body)))
+    asyncio.run(ep.openai_responses(_FakeReq(body)))
+    # No header -> unchanged behaviour: two independent runs.
+    assert gw._agent.calls == 2
+
+
+def test_responses_idempotency_key_scoped_per_caller():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "input": "ping"}
+    # Same key, different callers (distinct session headers) -> independent runs.
+    asyncio.run(
+        ep.openai_responses(
+            _FakeReq(body, headers={"idempotency-key": "k", "x-session-id": "a"})
+        )
+    )
+    asyncio.run(
+        ep.openai_responses(
+            _FakeReq(body, headers={"idempotency-key": "k", "x-session-id": "b"})
+        )
+    )
+    assert gw._agent.calls == 2
+
+
+def test_background_idempotency_key_reuses_and_reflects_completion():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "input": "ping", "background": True}
+    headers = {"idempotency-key": "bg"}
+
+    async def _flow():
+        first = await ep.openai_responses(_FakeReq(body, headers=headers))
+        rid = _body(first)["id"]
+        await ep._responses[rid]["task"]
+        # Retry after completion: same run id, now reporting completed state.
+        second = await ep.openai_responses(_FakeReq(body, headers=headers))
+        return _body(first), _body(second)
+
+    first, second = asyncio.run(_flow())
+    assert gw._agent.calls == 1
+    assert first["id"] == second["id"]
+    assert second["status"] == "completed"
+    assert second["output_text"] == "echo:ping"
+
+
+def test_chat_idempotency_key_reuses_first_completion():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "messages": [{"role": "user", "content": "hi"}]}
+    headers = {"idempotency-key": "c1"}
+
+    first = asyncio.run(ep.openai_chat(_FakeReq(body, headers=headers)))
+    second = asyncio.run(ep.openai_chat(_FakeReq(body, headers=headers)))
+
+    assert gw._agent.calls == 1
+    assert _body(first)["id"] == _body(second)["id"]
+    assert (
+        _body(second)["choices"][0]["message"]["content"]
+        == _body(first)["choices"][0]["message"]["content"]
+    )
+
+
+def test_chat_idempotency_key_conflict_on_different_body():
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    headers = {"idempotency-key": "c1"}
+    asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "a"}]},
+                headers=headers,
+            )
+        )
+    )
+    conflict = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "b"}]},
+                headers=headers,
+            )
+        )
+    )
+    assert conflict.status_code == 409
+    assert gw._agent.calls == 1

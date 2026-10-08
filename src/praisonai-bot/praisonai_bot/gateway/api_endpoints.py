@@ -26,6 +26,14 @@ def _now() -> int:
     return int(time.time())
 
 
+def _body_of(response: Any) -> dict:
+    """Decode a JSONResponse body back to a dict for idempotent replay storage."""
+    try:
+        return json.loads(response.body.decode())
+    except Exception:  # noqa: BLE001 - never let replay-capture break a request
+        return {}
+
+
 def _msg_content(msg: Any) -> str:
     """Extract the plain-text content from one OpenAI message dict."""
     content = msg.get("content", "") if isinstance(msg, dict) else ""
@@ -108,6 +116,128 @@ class GatewayApiEndpoints:
         # (Greptile P1). When full, the oldest *terminal* (completed/cancelled/
         # failed) entry is evicted first; in-flight runs are never evicted.
         self._responses_max = 1024
+        # Client idempotency for the run-create endpoints (Issue #5726). Maps a
+        # tenant/operator-scoped ``Idempotency-Key`` to the fingerprint of the
+        # originating request and the run it produced, so a retried or
+        # load-balancer-duplicated POST returns the *first* run instead of
+        # starting a second. Dependency-free and bounded like ``_responses``;
+        # it stores only a request fingerprint and the run's public id/status
+        # (never request bodies or credentials). Absent header → unchanged.
+        self._idem: Dict[str, dict] = {}
+        self._idem_max = 1024
+
+    # ── client idempotency (Issue #5726) ───────────────────────────────
+    @staticmethod
+    def _fingerprint(body: Any) -> str:
+        """Hash a canonicalised request body for idempotent-replay detection."""
+        import hashlib
+
+        try:
+            canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            canonical = repr(body)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _idem_scope_key(self, request: Any, key: str) -> str:
+        """Scope a client ``Idempotency-Key`` to the caller so keys never collide
+        across tenants/operators sharing one gateway.
+
+        Stable identities (a session header or bearer token) scope the key to
+        that tenant/operator. Anonymous callers (auth disabled, no session
+        header) get a *fresh* per-request key from ``_caller_key``, which would
+        defeat replay; since they cannot re-identify anyway, the client's own
+        ``Idempotency-Key`` is the only stable handle, so it scopes itself —
+        matching the open posture the no-auth transport already grants ``/v1/*``.
+        """
+        caller = self._caller_key(request)
+        if caller.startswith("anon:"):
+            return f"anon\x00{key}"
+        return f"{caller}\x00{key}"
+
+    def _idem_lookup(self, request: Any, body: Any):
+        """Resolve a prior run for this caller's ``Idempotency-Key``.
+
+        Returns ``(key, verdict, entry)`` where ``verdict`` is:
+          - ``None``  — no header; caller opted out (unchanged behaviour).
+          - ``"new"`` — first use of this key; caller should proceed then call
+            ``_idem_record``.
+          - ``"reuse"`` — same key + equivalent body; ``entry`` is the stored
+            run and its response must be returned unchanged.
+          - ``"conflict"`` — same key, materially different body; a 409 is due.
+        """
+        raw = request.headers.get("idempotency-key") or request.headers.get(
+            "Idempotency-Key"
+        )
+        if not raw:
+            return None, None, None
+        scoped = self._idem_scope_key(request, raw)
+        fp = self._fingerprint(body)
+        existing = self._idem.get(scoped)
+        if existing is None:
+            return scoped, "new", None
+        if existing.get("fingerprint") != fp:
+            return scoped, "conflict", None
+        return scoped, "reuse", existing
+
+    def _idem_record(
+        self,
+        key: Optional[str],
+        body: Any,
+        response_id: str,
+        payload: dict,
+        status_code: int = 200,
+    ) -> None:
+        """Commit the run produced for a first-use ``Idempotency-Key``.
+
+        The stored ``payload`` is the exact response object so a retry replays
+        the first response verbatim, and ``response_id`` lets retention check
+        the live run's terminal state. Bounded like ``_responses``: when full,
+        the oldest entry whose referenced run is terminal (or already evicted)
+        is dropped first so a long-running run is never evicted mid-flight; if
+        every entry is still live, nothing is evicted.
+        """
+        if not key:
+            return
+        while len(self._idem) >= self._idem_max:
+            victim = None
+            for k, e in self._idem.items():
+                run = self._responses.get(e.get("response_id"))
+                status = run.get("status") if run else "completed"
+                if status in ("completed", "cancelled", "failed"):
+                    victim = k
+                    break
+            if victim is None:
+                break
+            del self._idem[victim]
+        self._idem[key] = {
+            "fingerprint": self._fingerprint(body),
+            "response_id": response_id,
+            "payload": payload,
+            "status_code": status_code,
+        }
+
+    def _idem_reuse_response(self, entry: dict):
+        """Return the stored first response for a reused ``Idempotency-Key``.
+
+        A background/stored run is replayed from its *current* persisted state
+        (so a completed run returns its result, not the original ``queued``);
+        a synchronous run replays its stored payload verbatim.
+        """
+        from starlette.responses import JSONResponse
+
+        run = self._responses.get(entry.get("response_id"))
+        if run is not None:
+            return self._stored_response_json(run)
+        return JSONResponse(
+            entry.get("payload") or {}, status_code=entry.get("status_code", 200)
+        )
+
+    def _idem_conflict(self):
+        return self._openai_error(
+            "Idempotency-Key reused with a different request body",
+            409,
+            "invalid_request_error",
+        )
 
     # ── shared dispatch ────────────────────────────────────────────────
     def _resolve_agent(self, requested: Optional[str]):
@@ -432,27 +562,38 @@ class GatewayApiEndpoints:
             include_usage = bool(
                 isinstance(opts, dict) and opts.get("include_usage")
             )
+            # Streaming responses are not replayable, so idempotency applies to
+            # the buffered (non-stream) path only (Issue #5726).
             return self._sse_chat(
                 agent_id, agent, session, content, completion_id, include_usage
             )
 
+        # Client idempotency (Issue #5726): a retried/LB-duplicated POST with the
+        # same ``Idempotency-Key`` returns the first completion instead of
+        # starting a second run; a reused key with a different body is a 409.
+        idem_key, verdict, idem_entry = self._idem_lookup(request, body)
+        if verdict == "reuse":
+            return self._idem_reuse_response(idem_entry)
+        if verdict == "conflict":
+            return self._idem_conflict()
+
         reply, usage = await self._dispatch(session, agent, content)
-        return JSONResponse(
-            {
-                "id": completion_id,
-                "object": "chat.completion",
-                "created": _now(),
-                "model": agent_id,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": reply},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": usage,
-            }
-        )
+        obj = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": _now(),
+            "model": agent_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": usage,
+        }
+        self._idem_record(idem_key, body, completion_id, obj, 200)
+        return JSONResponse(obj)
 
     def _sse_chat(
         self, agent_id, agent, session, content, completion_id, include_usage=False
@@ -570,6 +711,16 @@ class GatewayApiEndpoints:
                 "No agents registered on this gateway", 503, "server_error"
             )
 
+        # Client idempotency (Issue #5726): a retried/LB-duplicated POST with
+        # the same ``Idempotency-Key`` returns the first run instead of starting
+        # a second; a reused key with a different body is a 409. No header →
+        # unchanged behaviour.
+        idem_key, verdict, idem_entry = self._idem_lookup(request, body)
+        if verdict == "reuse":
+            return self._idem_reuse_response(idem_entry)
+        if verdict == "conflict":
+            return self._idem_conflict()
+
         # ``input`` may be a plain string or an OpenAI messages-style array.
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
@@ -582,14 +733,16 @@ class GatewayApiEndpoints:
         # synchronous path below is unchanged and stays the default (Issue
         # #5335), so existing clients see no behaviour change.
         if body.get("background") or body.get("store"):
-            return self._start_background_response(
+            resp, response_id = self._start_background_response(
                 agent_id, agent, session, content, caller
             )
+            self._idem_record(idem_key, body, response_id, _body_of(resp), 202)
+            return resp
 
         reply, usage = await self._dispatch(session, agent, content)
-        return JSONResponse(
-            self._response_object(agent_id, "completed", reply, usage)
-        )
+        obj = self._response_object(agent_id, "completed", reply, usage)
+        self._idem_record(idem_key, body, obj.get("id", ""), obj, 200)
+        return JSONResponse(obj)
 
     @staticmethod
     def _response_object(
@@ -671,6 +824,9 @@ class GatewayApiEndpoints:
         The entry records the submitting ``caller`` so retrieval/cancel can be
         scoped to the owner, and a stable ``message_id`` so repeated retrievals
         of a completed run return the same output-message identity.
+
+        Returns ``(response, response_id)`` so the caller can record the minted
+        id against a client ``Idempotency-Key`` (Issue #5726).
         """
         from starlette.responses import JSONResponse
 
@@ -736,16 +892,19 @@ class GatewayApiEndpoints:
             # the submission never silently drops the turn.
             entry["status"] = "queued"
 
-        return JSONResponse(
-            self._response_object(
-                agent_id,
-                "queued",
-                "",
-                self._zero_usage(),
-                response_id=response_id,
-                created_at=created_at,
+        return (
+            JSONResponse(
+                self._response_object(
+                    agent_id,
+                    "queued",
+                    "",
+                    self._zero_usage(),
+                    response_id=response_id,
+                    created_at=created_at,
+                ),
+                status_code=202,
             ),
-            status_code=202,
+            response_id,
         )
 
     def _lookup_owned(self, request) -> tuple:
