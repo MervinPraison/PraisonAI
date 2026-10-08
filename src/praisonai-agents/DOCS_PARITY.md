@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4112 |
 | ✅ Prompts | 2 | 9 | 2043 |
-| ✅ Providers | 1 | 58 | 8751 |
+| ✅ Providers | 1 | 58 | 8795 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3152 |
 | ✅ Realtime | 2 | 5 | 668 |
