@@ -545,33 +545,31 @@ class AsyncTUI:
             self.messages.append(ChatMessage(role="system", content="Failed to revert."))
 
     def _process_file_mentions(self, prompt: str) -> str:
-        """Process @file mentions and include file contents."""
+        """Process @file mentions and include file contents.
+
+        Delegates to the shared core ``MentionsParser`` so this interactive
+        surface, ``praisonai run``, YAML and Python all expand ``@file``
+        references identically (and share the same workspace-containment and
+        path-traversal gates). The private regex this used to carry drifted
+        from the non-interactive path — the parser is the single source now.
+        """
         import os
-        import re
-        
+
         workspace = self.config.workspace or os.getcwd()
-        
-        # Find all @file mentions
-        pattern = r'@([^\s]+)'
-        matches = re.findall(pattern, prompt)
-        
-        if not matches:
+
+        try:
+            from praisonaiagents.tools.mentions import MentionsParser
+        except ImportError:
             return prompt
-        
-        file_contents = []
-        for match in matches:
-            file_path = os.path.join(workspace, match)
-            if os.path.isfile(file_path):
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                    file_contents.append(f"\n--- Content of {match} ---\n{content}\n--- End of {match} ---\n")
-                except Exception as e:
-                    file_contents.append(f"\n[Error reading {match}: {e}]\n")
-        
-        if file_contents:
-            return prompt + "\n" + "\n".join(file_contents)
-        return prompt
+
+        parser = MentionsParser(workspace_path=workspace)
+        if not parser.has_mentions(prompt):
+            return prompt
+
+        context, cleaned = parser.process(prompt)
+        if not context:
+            return prompt
+        return f"{cleaned}\n\n{context}".rstrip()
     
     # Tool names that can mutate the workspace or run commands. Review turns
     # run with these filtered OUT so a purported read-only review cannot write
