@@ -129,6 +129,39 @@ assert(
   ) === null
 );
 assert(
+  'renamed vendor *_tools.py INTO core blocked (#5729 moved-file gap)',
+  mg.newVendorToolModuleInCoreReason(
+    [{
+      status: 'renamed',
+      filename: 'src/praisonai-agents/praisonaiagents/tools/fxmacrodata_tools.py',
+      previous_filename: 'examples/tools/external/fxmacrodata_tools.py',
+    }],
+    []
+  )?.includes('PraisonAI-Tools')
+);
+assert(
+  'renamed legacy tool WITHIN core tools not blocked',
+  mg.newVendorToolModuleInCoreReason(
+    [{
+      status: 'renamed',
+      filename: 'src/praisonai-agents/praisonaiagents/tools/tavily_tools.py',
+      previous_filename: 'src/praisonai-agents/praisonaiagents/tools/tavily_search_tools.py',
+    }],
+    []
+  ) === null
+);
+assert(
+  'renamed vendor *_tools.py INTO core respects maintainer opt-in',
+  mg.newVendorToolModuleInCoreReason(
+    [{
+      status: 'renamed',
+      filename: 'src/praisonai-agents/praisonaiagents/tools/fxmacrodata_tools.py',
+      previous_filename: 'examples/tools/external/fxmacrodata_tools.py',
+    }],
+    [mg.MAINTAINER_ACCEPT_CORE_TOOLS_LABEL]
+  ) === null
+);
+assert(
   'FINAL prompt mentions 6c vendor tools rule',
   mg.FINAL_CLAUDE_REVIEW_BODY.includes('6c.') &&
     mg.FINAL_CLAUDE_REVIEW_BODY.includes('maintainer-accept-core-tools')

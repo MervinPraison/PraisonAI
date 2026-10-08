@@ -756,8 +756,18 @@ function isExternalExampleOnlyChange(files) {
 /** New third-party vendor modules must land in PraisonAI-Tools, not core (legacy bundled *_tools.py excepted). */
 function listAddedCoreVendorToolModules(files) {
   return (files || [])
-    .filter((f) => f.status === 'added' && f.filename.startsWith(CORE_TOOLS_DIR_PREFIX))
-    .filter((f) => /\/[^/]+_tools\.py$/.test(f.filename))
+    .filter((f) => {
+      if (!f.filename.startsWith(CORE_TOOLS_DIR_PREFIX)) return false;
+      if (!/\/[^/]+_tools\.py$/.test(f.filename)) return false;
+      if (f.status === 'added') return true;
+      // A rename/move INTO core tools from outside the protected directory is a
+      // new core vendor module too (#5729). Renames/moves of files that were
+      // already inside core tools (legacy bundled modules) are not blocked.
+      if (f.status === 'renamed') {
+        return !!f.previous_filename && !f.previous_filename.startsWith(CORE_TOOLS_DIR_PREFIX);
+      }
+      return false;
+    })
     .map((f) => f.filename);
 }
 
