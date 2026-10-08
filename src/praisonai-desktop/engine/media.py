@@ -18,6 +18,31 @@ MINIMAX_IMAGE_ENDPOINTS = {
     "cn_zh": "https://api.minimaxi.com/v1/image_generation",
 }
 
+# Image model catalog. Mirrors VIDEO_MODELS so the desktop can render a
+# data-driven picker (with a `configured` flag) and the engine routes by
+# `provider` instead of branching inside generate_image(). Adding a provider is
+# a catalog entry + a handler in _image_providers() — no dispatch edits.
+IMAGE_MODELS = [
+    {
+        "id": "dall-e-3",
+        "display_name": "DALL·E 3 (OpenAI)",
+        "provider": "openai",
+        "env": ("OPENAI_API_KEY",),
+    },
+    {
+        "id": "dall-e-2",
+        "display_name": "DALL·E 2 (OpenAI)",
+        "provider": "openai",
+        "env": ("OPENAI_API_KEY",),
+    },
+    {
+        "id": MINIMAX_IMAGE_MODEL,
+        "display_name": "MiniMax image-01",
+        "provider": "minimax",
+        "env": ("MINIMAX_API_KEY",),
+    },
+]
+
 # Video model catalog. Each entry declares the env key that unlocks it, so the
 # desktop can show a model picker instead of the old hardcoded Replicate path.
 # Replicate stays a preset (not the sole path); SDK providers route through
@@ -60,28 +85,45 @@ class MediaSupervisor:
         (self.out / "images").mkdir(exist_ok=True)
         (self.out / "videos").mkdir(exist_ok=True)
 
-    def list_video_models(self) -> list[dict]:
-        """Catalog of video models with `configured` set from available env keys."""
+    @staticmethod
+    def _catalog_models(catalog: list[dict]) -> list[dict]:
+        """Project a model catalog to picker entries with a `configured` flag.
+
+        Shared by image and video so both pickers derive availability from env
+        keys the same way; adding a provider never touches this projection.
+        """
         import os
 
-        models = []
-        for m in VIDEO_MODELS:
-            models.append(
-                {
-                    "id": m["id"],
-                    "display_name": m["display_name"],
-                    "provider": m["provider"],
-                    "configured": any(os.environ.get(k) for k in m["env"]),
-                }
-            )
-        return models
+        return [
+            {
+                "id": m["id"],
+                "display_name": m["display_name"],
+                "provider": m["provider"],
+                "configured": any(os.environ.get(k) for k in m["env"]),
+            }
+            for m in catalog
+        ]
+
+    def list_image_models(self) -> list[dict]:
+        """Catalog of image models with `configured` set from available env keys."""
+        return self._catalog_models(IMAGE_MODELS)
+
+    def list_video_models(self) -> list[dict]:
+        """Catalog of video models with `configured` set from available env keys."""
+        return self._catalog_models(VIDEO_MODELS)
 
     def capabilities(self) -> dict:
         import os
 
         return {
             "image": True,
-            "image_models": ["dall-e-3", "dall-e-2", MINIMAX_IMAGE_MODEL],
+            "image_models": [m["id"] for m in IMAGE_MODELS],
+            "image_model_catalog": self.list_image_models(),
+            "image_hint": (
+                "Set a provider key for image generation (OPENAI_API_KEY in "
+                "Settings or ~/.praisonai/.env for DALL·E, MINIMAX_API_KEY for "
+                "MiniMax; MINIMAX_IMAGE_REGION=cn_zh for the China endpoint)."
+            ),
             "video": bool(os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_API_KEY")),
             "video_models": self.list_video_models(),
             "video_hint": (
@@ -99,6 +141,18 @@ class MediaSupervisor:
 
         return str(os.environ.get("OPENAI_API_KEY") or "").strip()
 
+    def _image_providers(self) -> dict:
+        """Map provider name -> request builder + response parser.
+
+        Routing table for generate_image(): a new image provider registers one
+        entry here and adds a catalog row in IMAGE_MODELS — no edits to the
+        dispatch shell or the shared save path.
+        """
+        return {
+            "openai": (self._openai_image_request, self._parse_openai_image),
+            "minimax": (self._minimax_image_request, self._parse_minimax_image),
+        }
+
     def generate_image(
         self,
         prompt: str,
@@ -110,26 +164,13 @@ class MediaSupervisor:
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("prompt is required")
-        is_minimax = model.startswith("minimax/")
-        if is_minimax:
-            req = self._minimax_image_request(prompt, model=model, size=size)
-        else:
-            api_key = self._openai_key(settings)
-            if not api_key:
-                raise ValueError("OpenAI API key required (Settings or OPENAI_API_KEY)")
+        provider = self._image_provider_for(model)
+        builders = self._image_providers()
+        if provider not in builders:
+            raise ValueError(f"No handler for image provider {provider!r}")
+        build_request, parse_response = builders[provider]
 
-            body = json.dumps(
-                {"model": model, "prompt": prompt, "n": 1, "size": size}
-            ).encode()
-            req = urllib.request.Request(
-                "https://api.openai.com/v1/images/generations",
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
+        req = build_request(prompt, model=model, size=size, settings=settings)
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 payload = json.loads(resp.read().decode())
@@ -137,27 +178,28 @@ class MediaSupervisor:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
 
-        if is_minimax:
-            status = payload.get("base_resp") if isinstance(payload, dict) else None
-            if not isinstance(status, dict) or status.get("status_code") != 0:
-                msg = status.get("status_msg") if isinstance(status, dict) else None
-                raise RuntimeError(msg or "MiniMax image generation failed")
-            data = payload.get("data")
-            if not isinstance(data, dict):
-                raise RuntimeError("MiniMax image generation returned no images")
-            urls = data.get("image_urls")
-            b64s = data.get("image_base64")
-            url = urls[0] if isinstance(urls, list) and urls else None
-            b64 = b64s[0] if isinstance(b64s, list) and b64s else None
-            if not url and not b64:
-                raise RuntimeError("MiniMax image generation returned no images")
-        else:
-            item = (payload.get("data") or [{}])[0]
-            url = item.get("url")
-            b64 = item.get("b64_json")
+        url, b64 = parse_response(payload)
+        result = self._save_image(url=url, b64=b64)
+        result.update({"model": model, "prompt": prompt})
+        return result
+
+    def _image_provider_for(self, model: str) -> str:
+        """Resolve a model id to its catalog provider (validates the model)."""
+        for m in IMAGE_MODELS:
+            if m["id"] == model:
+                return m["provider"]
+        known = ", ".join(sorted(m["id"] for m in IMAGE_MODELS))
+        raise ValueError(f"Unknown image model {model!r}. Choose one of: {known}")
+
+    def _save_image(self, *, url: str | None, b64: str | None) -> dict:
+        """Persist an image from a URL or base64 and return the result shape.
+
+        Shared by every image provider so URL/base64 handling and the
+        empty-download guard live in one place — a provider can't report a
+        "saved" image that has no bytes to preview.
+        """
         file_id = f"img_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         local_path = self.out / "images" / f"{file_id}.png"
-
         if b64:
             local_path.write_bytes(base64.b64decode(b64))
         elif url:
@@ -171,18 +213,54 @@ class MediaSupervisor:
             local_path.unlink(missing_ok=True)
             raise RuntimeError("image download was empty")
         data_url = "data:image/png;base64," + base64.b64encode(raw).decode()
+        return {"id": file_id, "path": str(local_path), "url": url, "data_url": data_url}
 
-        return {
-            "id": file_id,
-            "path": str(local_path),
-            "url": url,
-            "data_url": data_url,
-            "model": model,
-            "prompt": prompt,
-        }
+    def _openai_image_request(
+        self, prompt: str, *, model: str, size: str, settings: dict
+    ) -> urllib.request.Request:
+        api_key = self._openai_key(settings)
+        if not api_key:
+            raise ValueError("OpenAI API key required (Settings or OPENAI_API_KEY)")
+        body = json.dumps(
+            {"model": model, "prompt": prompt, "n": 1, "size": size}
+        ).encode()
+        return urllib.request.Request(
+            "https://api.openai.com/v1/images/generations",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    @staticmethod
+    def _parse_openai_image(payload) -> tuple[str | None, str | None]:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        item = data[0] if isinstance(data, list) and data else {}
+        if not isinstance(item, dict):
+            item = {}
+        return item.get("url"), item.get("b64_json")
+
+    @staticmethod
+    def _parse_minimax_image(payload) -> tuple[str | None, str | None]:
+        status = payload.get("base_resp") if isinstance(payload, dict) else None
+        if not isinstance(status, dict) or status.get("status_code") != 0:
+            msg = status.get("status_msg") if isinstance(status, dict) else None
+            raise RuntimeError(msg or "MiniMax image generation failed")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise RuntimeError("MiniMax image generation returned no images")
+        urls = data.get("image_urls")
+        b64s = data.get("image_base64")
+        url = urls[0] if isinstance(urls, list) and urls else None
+        b64 = b64s[0] if isinstance(b64s, list) and b64s else None
+        if not url and not b64:
+            raise RuntimeError("MiniMax image generation returned no images")
+        return url, b64
 
     def _minimax_image_request(
-        self, prompt: str, *, model: str, size: str
+        self, prompt: str, *, model: str, size: str, settings: dict = None  # noqa: ARG002
     ) -> urllib.request.Request:
         import os
 

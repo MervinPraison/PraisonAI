@@ -25,6 +25,38 @@ class MediaSupervisorTests(unittest.TestCase):
         self.assertIn("dall-e-3", caps["image_models"])
         self.assertIn("video_models", caps)
 
+    def test_capabilities_expose_image_model_catalog(self):
+        caps = self.sup.capabilities()
+        self.assertIn("image_model_catalog", caps)
+        self.assertIn("image_hint", caps)
+        cat = caps["image_model_catalog"]
+        ids = {m["id"] for m in cat}
+        self.assertIn("dall-e-3", ids)
+        self.assertIn(media.MINIMAX_IMAGE_MODEL, ids)
+        for m in cat:
+            self.assertIn("id", m)
+            self.assertIn("display_name", m)
+            self.assertIn("provider", m)
+            self.assertIn("configured", m)
+
+    def test_image_models_configured_reflects_env(self):
+        import os
+
+        saved = {k: os.environ.pop(k, None) for k in ("OPENAI_API_KEY",)}
+        try:
+            os.environ["OPENAI_API_KEY"] = "sk-test"
+            by_id = {m["id"]: m for m in self.sup.list_image_models()}
+            self.assertTrue(by_id["dall-e-3"]["configured"])
+        finally:
+            os.environ.pop("OPENAI_API_KEY", None)
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    def test_generate_image_rejects_unknown_model(self):
+        with self.assertRaisesRegex(ValueError, "Unknown image model"):
+            self.sup.generate_image("a cat", settings={}, model="bogus/model")
+
     def test_video_models_include_multiple_providers(self):
         models = self.sup.list_video_models()
         providers = {m["provider"] for m in models}
@@ -272,7 +304,7 @@ class MiniMaxImageTests(unittest.TestCase):
             for size in ("auto", "1x1024", "1025x1024", "4096x1024", "1024x1024x1024"):
                 with self.subTest(size=size), self.assertRaises(ValueError):
                     self.sup.generate_image("a lighthouse", settings={}, model=media.MINIMAX_IMAGE_MODEL, size=size)
-            with self.assertRaisesRegex(ValueError, "Unknown MiniMax image model"):
+            with self.assertRaisesRegex(ValueError, "Unknown image model"):
                 self.sup.generate_image("a lighthouse", settings={}, model="minimax/unknown")
             request.assert_not_called()
 
