@@ -88,24 +88,67 @@ class _WriteTrackingDict(dict):
             self.written_keys.add(key)
         return super().setdefault(key, default)
 
-def _isolate_scope(variables: dict) -> dict:
-    """Shallow-copy the variable scope, deep-copying only values that allow it.
+def _isolate_value(value: Any, memo: dict) -> Any:
+    """Deep-copy ``value`` but degrade to sharing by reference where it can't.
 
-    A parallel branch/iteration needs its own container so concurrent writes are
-    not a data race, and mutable data (lists/dicts) is still deep-copied so a
-    sibling cannot observe another branch's in-place mutation. But a value that
-    cannot be deep-copied (thread lock, DB/HTTP/LLM client, open file, a live
-    Agent, generator, ...) would otherwise abort the whole run with a pickling
-    TypeError even when no branch touches it. Fall back to sharing such values by
-    reference (read-only intent) instead of crashing.
+    This is ``copy.deepcopy`` with two differences that matter for a parallel
+    scope:
+
+    * **Shared memo.** All values in one scope are copied with the *same* ``memo``
+      so cross-variable aliasing survives: if ``variables['records']`` and
+      ``variables['state']['records']`` are the same list, the branch still sees
+      one shared list, exactly as the old whole-scope ``copy.deepcopy`` did. A
+      write through one name is visible through the other within the branch.
+    * **Granular fallback.** A value that cannot be deep-copied (thread lock,
+      DB/HTTP/LLM client, open file, a live Agent, generator, ...) would abort the
+      whole run with a pickling ``TypeError`` even when no branch touches it. Only
+      the *exact* un-copyable node is shared by reference; the containers around it
+      are still copied, so an ordinary mutable sibling (``{'client': c, 'rows': []}``
+      -> ``rows``) stays isolated and an in-place mutation cannot leak to a sibling
+      branch or loop iteration.
     """
-    scope = {}
-    for k, v in variables.items():
-        try:
-            scope[k] = copy.deepcopy(v)
-        except Exception:
-            scope[k] = v
-    return scope
+    try:
+        return copy.deepcopy(value, memo)
+    except Exception:
+        pass
+    # deepcopy failed somewhere inside ``value``. Rebuild the known container
+    # types node-by-node so the un-copyable leaves are shared but everything
+    # around them is still isolated. Unknown/atomic objects that raised are
+    # shared by reference (read-only intent) as a last resort.
+    if isinstance(value, dict):
+        copied: dict = {}
+        memo[id(value)] = copied
+        for k, v in value.items():
+            copied[_isolate_value(k, memo)] = _isolate_value(v, memo)
+        return copied
+    if isinstance(value, list):
+        copied = []
+        memo[id(value)] = copied
+        copied.extend(_isolate_value(v, memo) for v in value)
+        return copied
+    if isinstance(value, set):
+        copied = set()
+        memo[id(value)] = copied
+        for v in value:
+            copied.add(_isolate_value(v, memo))
+        return copied
+    if isinstance(value, tuple):
+        return tuple(_isolate_value(v, memo) for v in value)
+    return value
+
+
+def _isolate_scope(variables: dict) -> dict:
+    """Give a parallel branch/iteration its own copy of the variable scope.
+
+    A branch needs its own container so concurrent writes are not a data race,
+    and mutable data (lists/dicts) is deep-copied so a sibling cannot observe
+    another branch's in-place mutation. Values are copied with one shared
+    ``memo`` so cross-variable aliasing is preserved, and any value that cannot
+    be deep-copied degrades to a by-reference share of only the un-copyable node
+    rather than crashing the run. See ``_isolate_value``.
+    """
+    memo: dict = {}
+    return {k: _isolate_value(v, memo) for k, v in variables.items()}
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""

@@ -310,6 +310,122 @@ def test_equal_valued_write_still_wins_collision_in_declaration_order(caplog):
     )
 
 
+# ---------------------------------------------------------------------------
+# Non-deep-copyable workflow variables (#5715)
+# ---------------------------------------------------------------------------
+
+class _Uncopyable:
+    """A value whose ``__deepcopy__`` raises, standing in for a lock/client."""
+
+    def __deepcopy__(self, memo):
+        raise TypeError("cannot pickle _Uncopyable")
+
+
+@pytest.mark.parametrize("is_parallel", [False, True])
+def test_uncopyable_variable_does_not_crash_parallel_or_loop(is_parallel):
+    """An un-copyable scope variable no branch reads must not abort the run.
+
+    Before the fix, ``_execute_parallel`` / the parallel ``Loop`` seed did an
+    unconditional ``copy.deepcopy(all_variables)`` which raised ``TypeError`` on
+    the un-copyable value, killing the whole workflow even though no branch
+    touched it.
+    """
+    wf = Workflow(steps=[
+        loop(steps=[Task(name="inner",
+                         handler=lambda ctx: StepResult(output=f"X-{ctx.variables.get('item')}"),
+                         output_variable="inner_var", max_retries=0)],
+             over="items", parallel=is_parallel, output_variable="collected"),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"items": ["a", "b"], "client": _Uncopyable()})
+    variables = wf.start("go")["variables"]
+
+    assert variables["collected"] == ["X-a", "X-b"]
+    assert variables.get("after_output") == "AFTER"  # control
+
+
+def test_parallel_block_tolerates_uncopyable_variable():
+    """Same guarantee for a plain ``Parallel`` block, not just a loop."""
+    wf = Workflow(steps=[
+        parallel([
+            Task(name="a", handler=_handler("A"), output_variable="va", max_retries=0),
+            Task(name="b", handler=_handler("B"), output_variable="vb", max_retries=0),
+        ]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"client": _Uncopyable()})
+    variables = wf.start("go")["variables"]
+
+    assert variables["va"] == "A" and variables["vb"] == "B"
+    assert variables.get("after_output") == "AFTER"  # control
+
+
+def test_uncopyable_leaf_is_shared_but_surrounding_container_is_isolated():
+    """A nested mutable sibling of an un-copyable leaf must stay branch-local.
+
+    ``state = {'client': <uncopyable>, 'rows': []}`` cannot be deep-copied as a
+    whole, but the fallback must still copy the surrounding dict and its ``rows``
+    list so one branch appending to ``rows`` is invisible to its sibling. Only
+    the un-copyable ``client`` leaf is shared by reference.
+    """
+    client = _Uncopyable()
+
+    def append_row(label):
+        def run(ctx: WorkflowContext) -> StepResult:
+            ctx.variables["state"]["rows"].append(label)
+            return StepResult(output=label,
+                              variables={f"rows_{label}": list(ctx.variables["state"]["rows"])})
+        return run
+
+    wf = Workflow(steps=[
+        parallel([
+            Task(name="a", handler=append_row("A"), max_retries=0),
+            Task(name="b", handler=append_row("B"), max_retries=0),
+        ], max_workers=2),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"state": {"client": client, "rows": []}})
+    variables = wf.start("go")["variables"]
+
+    # Each branch saw only its own append, never the sibling's.
+    assert variables["rows_A"] == ["A"], variables["rows_A"]
+    assert variables["rows_B"] == ["B"], variables["rows_B"]
+    # The un-copyable client object is shared by reference, not cloned.
+    assert variables["state"]["client"] is client
+    assert variables.get("after_output") == "AFTER"  # control
+
+
+def test_cross_variable_aliasing_is_preserved_within_a_branch():
+    """Two scope variables that alias one object stay aliased inside a branch.
+
+    The old whole-scope ``copy.deepcopy`` used a single memo, so
+    ``records`` and ``state['records']`` pointing at the same list remained one
+    list after copying. Per-value copying would split them; the shared memo keeps
+    them connected, so a write through one name is seen through the other.
+    """
+    shared_list = [1, 2, 3]
+
+    def mutate_and_report(ctx: WorkflowContext) -> StepResult:
+        ctx.variables["records"].append(4)
+        return StepResult(
+            output="ok",
+            variables={"alias_sees_write": ctx.variables["state"]["records"][-1]},
+        )
+
+    wf = Workflow(steps=[
+        parallel([
+            Task(name="mutator", handler=mutate_and_report, max_retries=0),
+        ]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"records": shared_list, "state": {"records": shared_list}})
+    variables = wf.start("go")["variables"]
+
+    assert variables["alias_sees_write"] == 4, (
+        "cross-variable aliasing was broken: the branch's copies of 'records' and "
+        "'state.records' were separate objects"
+    )
+    # Parent's original object is untouched (branch worked on its own copy).
+    assert shared_list == [1, 2, 3]
+    assert variables.get("after_output") == "AFTER"  # control
+
+
 def test_untouched_value_with_non_bool_inequality_is_not_a_write(caplog):
     """A carried-through object whose ``!=`` is not a bool must not become a write.
 
