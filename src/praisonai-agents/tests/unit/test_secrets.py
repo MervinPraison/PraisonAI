@@ -228,9 +228,35 @@ def test_sentinelize_is_stable_per_process():
     assert sentinelize(secret) == sentinelize(secret)
 
 
-def test_sentinelize_short_value_is_verbatim():
-    assert sentinelize("ab") == "ab"
+def test_sentinelize_hides_short_secrets_too():
+    # A short PIN/password must be hidden just like a long key — the opaque,
+    # random token never collides with ordinary text, so there is no minimum
+    # length. Only empty / non-string values pass through verbatim.
+    for short in ("1", "ab", "pin"):
+        token = sentinelize(short)
+        assert token != short
+        assert token.startswith("oc-sent-")
+        assert has_sentinel(f"x={token}") is True
+        assert desentinelize(f"x={token}") == f"x={short}"
     assert sentinelize("") == ""
+
+
+def test_desentinelize_only_touches_tokens_in_the_text():
+    # Minting many secrets must not slow a request that carries just one token:
+    # desentinelize looks up only the token shapes present in the input.
+    kept = [sentinelize(f"many-secret-{i}-5722") for i in range(50)]
+    one = sentinelize("just-this-one-secret-5722")
+    out = desentinelize(f"Authorization: Bearer {one}")
+    assert out == "Authorization: Bearer just-this-one-secret-5722"
+    # Unrelated tokens are not substituted into the text.
+    for other in kept:
+        assert other not in out
+
+
+def test_desentinelize_ignores_unknown_token_shaped_strings():
+    forged = "oc-sent-" + "0" * 32
+    assert desentinelize(f"k={forged}") == f"k={forged}"
+    assert has_sentinel(f"k={forged}") is False
 
 
 def test_desentinelize_round_trips_only_on_egress():

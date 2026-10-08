@@ -400,6 +400,22 @@ _SENTINEL_PREFIX = "oc-sent-"
 _sentinel_to_secret: Dict[str, str] = {}
 _secret_to_sentinel: Dict[str, str] = {}
 _sentinel_lock = threading.Lock()
+_sentinel_re = None
+
+
+def _get_sentinel_re():
+    """Lazily compile the sentinel-token matcher (stdlib ``re`` only).
+
+    Fixed token shape: prefix + 32 hex chars (``token_hex(16)``). Matching this
+    lets egress helpers look up only the sentinels actually present in a
+    request, rather than scanning every token ever minted.
+    """
+    global _sentinel_re
+    if _sentinel_re is None:
+        import re
+
+        _sentinel_re = re.compile(re.escape(_SENTINEL_PREFIX) + r"[0-9a-f]{32}")
+    return _sentinel_re
 
 
 def sentinelize(secret: str) -> str:
@@ -411,10 +427,12 @@ def sentinelize(secret: str) -> str:
     within a process). The secret is also registered for log redaction so an
     accidental leak of the plaintext is still masked.
 
-    A short or empty value is returned verbatim — too small to sentinelise
-    safely without risking collisions with ordinary text.
+    Any non-empty string is sentinelised — the opaque, randomly-minted token
+    never collides with ordinary text, so there is no minimum length (a short
+    PIN or password must be hidden just as a long key is). Only an empty or
+    non-string value is returned verbatim.
     """
-    if not secret or not isinstance(secret, str) or len(secret) < _MIN_REDACT_LEN:
+    if not secret or not isinstance(secret, str):
         return secret
     with _sentinel_lock:
         existing = _secret_to_sentinel.get(secret)
@@ -438,11 +456,13 @@ def desentinelize(text: str) -> str:
     """
     if not text or not isinstance(text, str) or _SENTINEL_PREFIX not in text:
         return text
+    tokens = set(_get_sentinel_re().findall(text))
+    if not tokens:
+        return text
     with _sentinel_lock:
-        items = list(_sentinel_to_secret.items())
-    for token, secret in items:
-        if token in text:
-            text = text.replace(token, secret)
+        mapping = {t: _sentinel_to_secret[t] for t in tokens if t in _sentinel_to_secret}
+    for token, secret in mapping.items():
+        text = text.replace(token, secret)
     return text
 
 
@@ -454,9 +474,11 @@ def has_sentinel(text: str) -> bool:
     """
     if not text or not isinstance(text, str) or _SENTINEL_PREFIX not in text:
         return False
+    candidates = _get_sentinel_re().findall(text)
+    if not candidates:
+        return False
     with _sentinel_lock:
-        tokens = list(_sentinel_to_secret.keys())
-    return any(token in text for token in tokens)
+        return any(token in _sentinel_to_secret for token in candidates)
 
 
 @runtime_checkable
