@@ -606,6 +606,9 @@ class MyTool(BaseTool):
 > [!IMPORTANT]
 > **Agents only recognize parameters.** When creating tools, always expose all options as function parameters—agents cannot discover env vars or config files.
 
+> [!IMPORTANT]
+> **Vendor / third-party API tools:** New integrations (external APIs, datasets, SaaS wrappers) belong in **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)** as optional pip plugins — **not** as new `praisonaiagents/tools/*_tools.py` files in this repo. Core `praisonaiagents/tools/` holds SDK primitives (decorator, registry, schedule, shell, trust, subagent) and a small set of **legacy** bundled tools kept for backward compatibility. Do not treat legacy search tools (e.g. Tavily/Exa) as precedent for adding new vendor modules here.
+
 ### 6.2 Hooks & Middleware
 
 ```python
