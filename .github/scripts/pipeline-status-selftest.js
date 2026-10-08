@@ -78,6 +78,11 @@ assert(
 );
 
 assert(
+  'all label descriptions within GitHub 100-char limit',
+  ps.LABEL_SPECS.every((s) => (s.description || '').length <= 100)
+);
+
+assert(
   'internal link matches upstream base',
   mg.isInternalPullRequestLink(
     { base: { repo: { full_name: 'MervinPraison/PraisonAI' } } },

@@ -46,7 +46,7 @@ const LABEL_SPECS = [
   {
     name: 'pipeline/core-vendor-tool',
     color: 'c2e0c6',
-    description: 'Adds praisonaiagents/tools/*_tools.py vendor module — route to PraisonAI-Tools (maintainer-accept-core-tools to opt in)',
+    description: 'New core vendor tool — route to PraisonAI-Tools; maintainer-accept-core-tools to opt in',
   },
   {
     name: 'pipeline/blocked:wrong-repo',
@@ -297,6 +297,7 @@ module.exports = {
   STAGE_LABELS,
   BLOCKER_LABELS,
   ALL_PIPELINE_LABELS,
+  LABEL_SPECS,
   isUpstreamHeadRepo,
   deriveStage,
   deriveBlockerLabels,
