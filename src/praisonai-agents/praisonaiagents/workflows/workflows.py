@@ -408,13 +408,19 @@ class Parallel:
     running user code cannot be force-killed in Python, so a timed-out/cancelled
     branch may keep running in the background, but the caller is no longer blocked
     on it and its late failure cannot corrupt a later run's status.
+
+    Context strategies (how the upstream step's output reaches each branch):
+    - "full": Pass the exact upstream output to every branch (default, no data loss)
+    - "truncate": Excerpt head+tail to save tokens (lossy; opt-in)
+    - "summarize": LLM-summarise for large fan-outs, else truncate (lossy; opt-in)
     """
     steps: List = field(default_factory=list)
     max_workers: Optional[int] = None  # None = use system default
     on_failure: str = "partial_ok"  # "partial_ok" | "fail_fast" | "fail_all"
     timeout: Optional[float] = None  # None = no wall-clock bound
+    context: str = "full"  # "full" | "truncate" | "summarize"
 
-    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok", timeout: Optional[float] = None):
+    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok", timeout: Optional[float] = None, context: str = "full"):
         valid_on_failure = {"partial_ok", "fail_fast", "fail_all"}
         if on_failure not in valid_on_failure:
             raise ValueError(
@@ -430,10 +436,17 @@ class Parallel:
                 f"Invalid timeout={timeout!r}. Must be a positive number of seconds, "
                 "or None for no wall-clock bound."
             )
+        valid_context = {"full", "truncate", "summarize"}
+        if context not in valid_context:
+            raise ValueError(
+                f"Invalid context='{context}'. Must be one of {valid_context}. "
+                "See Parallel docstring for semantics."
+            )
         self.steps = steps
         self.max_workers = max_workers
         self.on_failure = on_failure
         self.timeout = timeout
+        self.context = context
 
 @dataclass
 class Loop:
@@ -484,7 +497,8 @@ class Loop:
     parallel: bool = False  # Execute iterations in parallel
     max_workers: Optional[int] = None  # Max parallel workers (None = unlimited)
     output_variable: Optional[str] = None  # Store loop results in this variable name
-    
+    context: str = "full"  # "full" | "truncate" — how previous_output reaches parallel iterations
+
     def __init__(
         self, 
         step: Any = None,
@@ -495,7 +509,8 @@ class Loop:
         var_name: str = "item",
         parallel: bool = False,
         max_workers: Optional[int] = None,
-        output_variable: Optional[str] = None
+        output_variable: Optional[str] = None,
+        context: str = "full"
     ):
         # Validation: cannot have both step and steps
         if step is not None and steps is not None:
@@ -506,6 +521,11 @@ class Loop:
         # Validation: steps cannot be empty
         if steps is not None and len(steps) == 0:
             raise ValueError("Loop 'steps' cannot be empty")
+        valid_context = {"full", "truncate"}
+        if context not in valid_context:
+            raise ValueError(
+                f"Invalid context='{context}'. Must be one of {valid_context}."
+            )
         
         self.step = step
         self.steps = steps
@@ -516,6 +536,7 @@ class Loop:
         self.parallel = parallel
         self.max_workers = max_workers
         self.output_variable = output_variable
+        self.context = context
 
 class Discussion:
     """N agents take turns on the same thread until a criterion is met.
@@ -602,6 +623,7 @@ def parallel(
     max_workers: Optional[int] = None,
     on_failure: str = "partial_ok",
     timeout: Optional[float] = None,
+    context: str = "full",
 ) -> Parallel:
     """Execute steps in parallel.
 
@@ -613,14 +635,16 @@ def parallel(
         timeout: Optional per-Parallel wall-clock bound (seconds); must be positive
             (or None for no bound). Raises instead of hanging if branches are still
             running when it elapses.
+        context: How the upstream output reaches each branch — "full" (default,
+            exact pass-through, no data loss), "truncate", or "summarize".
     """
-    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure, timeout=timeout)
+    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure, timeout=timeout, context=context)
 
 def loop(step: Any = None, steps: Optional[List[Any]] = None,
          over: Optional[str] = None, from_csv: Optional[str] = None, 
          from_file: Optional[str] = None, var_name: str = "item",
          parallel: bool = False, max_workers: Optional[int] = None,
-         output_variable: Optional[str] = None) -> Loop:
+         output_variable: Optional[str] = None, context: str = "full") -> Loop:
     """Loop over items executing step(s) for each.
     
     Args:
@@ -633,13 +657,15 @@ def loop(step: Any = None, steps: Optional[List[Any]] = None,
         parallel: If True, execute iterations in parallel (default: False)
         max_workers: Max parallel workers when parallel=True (default: None = unlimited)
         output_variable: Variable name to store all loop outputs (default: None = "loop_outputs")
+        context: How previous_output reaches parallel iterations — "full" (default,
+            exact pass-through, no data loss) or "truncate" (lossy; opt-in)
     
     Returns:
         Loop object configured for iteration
     """
     return Loop(step=step, steps=steps, over=over, from_csv=from_csv, from_file=from_file, 
                 var_name=var_name, parallel=parallel, max_workers=max_workers,
-                output_variable=output_variable)
+                output_variable=output_variable, context=context)
 
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
            max_iterations: int = 10) -> Repeat:
@@ -3641,33 +3667,39 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"⚡ Running {len(parallel_step.steps)} steps in parallel...")
         
-        # Optimize: Use LLM-based summarization before distributing to parallel branches
-        # This prevents rate limits and reduces token waste
+        # Context distribution: by default every branch sees the exact upstream
+        # output (context="full", no data loss). Token-saving excerpting is opt-in
+        # via context="truncate"/"summarize" because silently handing downstream
+        # steps a smaller payload than the upstream produced is a correctness hazard.
         optimized_previous = previous_output
         num_branches = len(parallel_step.steps)
-        if previous_output and len(previous_output) > 3000:
+        context_mode = getattr(parallel_step, "context", "full")
+        if context_mode != "full" and previous_output and len(previous_output) > 3000:
             from ..context.tokens import estimate_tokens_heuristic
             tokens = estimate_tokens_heuristic(previous_output)
             if tokens > 1000:
-                # LLM summarisation only pays off for larger fan-outs; for small
-                # branch counts the extra call costs roughly what it saves, so use
-                # the cheaper truncation fallback instead.
-                if num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
-                    # Try LLM-based summarization first, fall back to truncation
+                if context_mode == "summarize" and num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
+                    # LLM summarisation only pays off for larger fan-outs; for small
+                    # branch counts the extra call costs roughly what it saves, so use
+                    # the cheaper truncation fallback instead.
                     try:
                         optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
                     except Exception:
                         # Fallback to truncation-based summarization
                         optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
-                elif tokens >= 1500:
-                    # Only truncate above the same threshold the LLM summariser uses;
-                    # below it, previous behaviour passed context through unchanged.
+                else:
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
-                
-                if verbose and optimized_previous != previous_output:
+
+                if optimized_previous != previous_output:
                     new_tokens = estimate_tokens_heuristic(optimized_previous)
                     saved = tokens - new_tokens
-                    print(f"  📦 Optimized context for {num_branches} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+                    logger.warning(
+                        f"Parallel context='{context_mode}' reduced upstream output for "
+                        f"{num_branches} branches: {len(previous_output):,} → {len(optimized_previous):,} chars "
+                        f"({tokens:,} → {new_tokens:,} tokens). Middle content is dropped."
+                    )
+                    if verbose:
+                        print(f"  📦 Optimized context for {num_branches} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
         
         # Use ThreadPoolExecutor for parallel execution
         from ..trace.context_events import copy_context_to_callable, get_context_emitter
@@ -3905,19 +3937,27 @@ CONCISE SUMMARY:"""
                 step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
                 print(f"⚡🔁 Parallel looping over {num_items} items{step_info} (max_workers={max_workers})...")
             
-            # Optimize: Aggressively summarize large previous_output before distributing to parallel branches
-            # This reduces token waste and prevents rate limit issues
+            # Context distribution: by default each iteration sees the exact upstream
+            # output (context="full", no data loss). Token-saving excerpting is opt-in
+            # via context="truncate".
             optimized_previous = previous_output
-            if previous_output and len(previous_output) > 3000:
+            context_mode = getattr(loop_step, "context", "full")
+            if context_mode != "full" and previous_output and len(previous_output) > 3000:
                 from ..context.tokens import estimate_tokens_heuristic
                 tokens = estimate_tokens_heuristic(previous_output)
                 # Target: max 800 tokens per branch to stay well under rate limits
                 if tokens > 1000:
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_items)
-                    if verbose and optimized_previous != previous_output:
+                    if optimized_previous != previous_output:
                         new_tokens = estimate_tokens_heuristic(optimized_previous)
                         saved = tokens - new_tokens
-                        print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+                        logger.warning(
+                            f"Loop context='{context_mode}' reduced upstream output for "
+                            f"{num_items} branches: {len(previous_output):,} → {len(optimized_previous):,} chars "
+                            f"({tokens:,} → {new_tokens:,} tokens). Middle content is dropped."
+                        )
+                        if verbose:
+                            print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
             
             # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
             from ..trace.context_events import copy_context_to_callable, get_context_emitter
