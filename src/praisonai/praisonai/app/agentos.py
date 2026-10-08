@@ -385,14 +385,37 @@ class AgentOS:
                 "Uvicorn is required for AgentOS. "
                 "Install with: pip install praisonai[api]"
             )
-        
-        app = self.get_app()
-        
+
+        resolved_host = host or self.config.host
+        resolved_port = port or self.config.port
+        enable_reload = reload or self.config.reload
+
+        if enable_reload:
+            # Uvicorn's reload spawns a fresh worker *process* that re-imports
+            # the target module; it cannot see this parent process's in-memory
+            # state. Because an AgentOS is built programmatically from live
+            # Agent/Team/Flow objects (not an importable module-level app), a
+            # reload worker has no way to reconstruct it — the app factory would
+            # start with no instance and fail. So reload is unsupported for a
+            # programmatically-built AgentOS: warn and serve without it rather
+            # than crash. To get reload, run uvicorn against your own module
+            # that exposes the app, e.g.
+            # ``uvicorn "mymodule:create_app" --factory --reload``.
+            import warnings
+            warnings.warn(
+                "AgentOS.serve(reload=True) is not supported for a "
+                "programmatically-built AgentOS: uvicorn's reload worker runs in "
+                "a separate process and cannot access this instance's live "
+                "agents. Serving without reload. For auto-reload, run uvicorn "
+                "against an importable app factory in your own module "
+                "(e.g. `uvicorn \"mymodule:create_app\" --factory --reload`).",
+                stacklevel=2,
+            )
+
         uvicorn.run(
-            app,
-            host=host or self.config.host,
-            port=port or self.config.port,
-            reload=reload or self.config.reload,
+            self.get_app(),
+            host=resolved_host,
+            port=resolved_port,
             log_level=self.config.log_level,
             **kwargs
         )

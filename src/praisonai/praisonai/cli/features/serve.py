@@ -22,6 +22,34 @@ from typing import Any, Dict, List, Optional
 
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
+# Env var carrying the JSON-serialised {"builder": name, "config": {...}} used by
+# ``_serve_app_factory`` when ``serve --reload`` hands uvicorn an import string
+# instead of a live app object (uvicorn silently drops reload for instances).
+_SERVE_RELOAD_ENV = "PRAISONAI_SERVE_RELOAD_SPEC"
+
+
+def _serve_app_factory() -> Any:
+    """Uvicorn app-factory for ``praisonai serve --reload``.
+
+    Uvicorn requires an import string (not a live app object) to enable reload;
+    passing an instance silently disables it. ``_run_server`` serialises the
+    chosen app-builder + parsed config into :data:`_SERVE_RELOAD_ENV` and hands
+    uvicorn ``"praisonai.cli.features.serve:_serve_app_factory"`` so reload
+    actually works.
+    """
+    import json
+
+    raw = os.environ.get(_SERVE_RELOAD_ENV)
+    if not raw:
+        raise RuntimeError(
+            "_serve_app_factory called without a reload spec; "
+            "_run_server must set it before enabling reload."
+        )
+    spec = json.loads(raw)
+    handler = ServeHandler()
+    builder = getattr(handler, spec["builder"])
+    return builder(spec["config"])
+
 
 def _install_api_key_middleware(
     app: Any,
@@ -239,9 +267,17 @@ Launch PraisonAI servers with unified discovery support.
             print(f"  Endpoint: {parsed['path']}")
             print("  Discovery: /__praisonai__/discovery")
             
-            # Create and run server
-            app = self._create_agents_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], parsed["reload"])
+            # Run server. Pass a lazy builder so the app is built once: the
+            # non-reload path builds it here; the reload path rebuilds it in the
+            # worker process from reload_spec (so we don't build+discard here).
+            self._run_server(
+                None,
+                parsed["host"],
+                parsed["port"],
+                parsed["reload"],
+                reload_spec={"builder": "_create_agents_app", "config": parsed},
+                app_builder=lambda: self._create_agents_app(parsed),
+            )
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -871,8 +907,16 @@ Launch PraisonAI servers with unified discovery support.
             print("  Providers: agents-api, recipe, mcp, a2a, a2u")
             print("  Discovery: /__praisonai__/discovery")
             
-            app = self._create_unified_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], parsed["reload"])
+            # Lazy builder: built once (here when not reloading, or in the reload
+            # worker from reload_spec) instead of building then discarding.
+            self._run_server(
+                None,
+                parsed["host"],
+                parsed["port"],
+                parsed["reload"],
+                reload_spec={"builder": "_create_unified_app", "config": parsed},
+                app_builder=lambda: self._create_unified_app(parsed),
+            )
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -966,13 +1010,55 @@ Launch PraisonAI servers with unified discovery support.
         
         return app
     
-    def _run_server(self, app: Any, host: str, port: int, reload: bool) -> None:
-        """Run the server with uvicorn."""
+    def _run_server(
+        self,
+        app: Any,
+        host: str,
+        port: int,
+        reload: bool,
+        reload_spec: Optional[Dict[str, Any]] = None,
+        app_builder: Optional[Any] = None,
+    ) -> None:
+        """Run the server with uvicorn.
+
+        Args:
+            app: Prebuilt FastAPI app for the non-reload path. Ignored when
+                ``app_builder`` is supplied. Note: a FastAPI/Starlette app is
+                itself an ASGI *callable* (``app(scope, receive, send)``), so the
+                builder must be passed via the explicit ``app_builder`` argument —
+                a built app can never be distinguished from a zero-arg builder by
+                ``callable()`` alone.
+            host, port: Bind address.
+            reload: Enable auto-reload.
+            reload_spec: ``{"builder": <ServeHandler method name>, "config": {...}}``
+                describing how to rebuild the app. Required to honour ``reload``:
+                uvicorn needs an import string (not a live instance) to enable
+                reload, so without a spec a reload request is silently dropped.
+            app_builder: Optional zero-arg callable that builds the app on demand.
+                When given, the parent builds the app only on the non-reload path
+                (the reload worker rebuilds it from ``reload_spec`` in its own
+                process), avoiding a redundant build (and double YAML parse).
+        """
+        import json
         import os
         import uvicorn
 
         os.environ["PRAISONAI_CALL_BIND_HOST"] = host
-        uvicorn.run(app, host=host, port=port, reload=reload)
+
+        if reload and reload_spec is not None:
+            os.environ[_SERVE_RELOAD_ENV] = json.dumps(reload_spec)
+            uvicorn.run(
+                "praisonai.cli.features.serve:_serve_app_factory",
+                factory=True,
+                host=host,
+                port=port,
+                reload=True,
+            )
+            return
+
+        # Non-reload path: build the app now if a lazy builder was passed.
+        resolved_app = app_builder() if app_builder is not None else app
+        uvicorn.run(resolved_app, host=host, port=port, reload=reload)
 
 
 def handle_serve_command(args: List[str]) -> int:
