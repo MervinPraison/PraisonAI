@@ -825,16 +825,32 @@ class AgentFlow:
     # and must not mutate a later run's shared status (see _begin_run_generation
     # and _is_current_run_generation).
     _current_run_generation: int = field(default=0, repr=False, compare=False)
+    # Reset token for the _run_generation contextvar captured at run() start and
+    # consumed in run()'s finally to restore the caller's generation (nested runs).
+    _run_generation_token: Any = field(default=None, repr=False, compare=False)
 
-    def _begin_run_generation(self) -> int:
+    def _begin_run_generation(self) -> Any:
         """Stamp a fresh generation for the run starting now and publish it to the
         current context so branches submitted by this run capture it.
 
-        Returns the new generation id.
+        Returns the contextvar reset token for the *previous* generation. The
+        caller MUST pass it to :meth:`_end_run_generation` in a ``finally`` so a
+        nested ``Workflow.run()`` (e.g. an ``Include`` step launching another
+        flow) restores the outer run's generation on the way out instead of
+        leaving its own value stamped on the outer thread's context -- otherwise
+        a later task in the outer flow would be judged against the wrong
+        generation and have its failure silently suppressed.
         """
         self._current_run_generation += 1
-        _run_generation.set(self._current_run_generation)
-        return self._current_run_generation
+        return _run_generation.set(self._current_run_generation)
+
+    def _end_run_generation(self, token: Any) -> None:
+        """Restore the generation the context carried before :meth:`_begin_run_generation`.
+
+        A no-op when ``token`` is None so callers can guard unconditionally.
+        """
+        if token is not None:
+            _run_generation.reset(token)
 
     def _is_current_run_generation(self) -> bool:
         """True if the caller still belongs to the instance's live run.
@@ -1326,6 +1342,11 @@ class AgentFlow:
                 finally:
                     self._active_shared_compute = None
         finally:
+            # Restore the generation the caller's context carried before this
+            # run stamped its own, so a nested Workflow.run() (Include) does not
+            # leave a stale generation on the outer run's thread.
+            token, self._run_generation_token = self._run_generation_token, None
+            self._end_run_generation(token)
             self._execution_lock.release()
 
     def to_mermaid(self) -> str:
@@ -1504,8 +1525,11 @@ class AgentFlow:
         # Stamp a fresh generation for this run so a still-running branch from a
         # previous fail_fast/timeout Parallel block (which cannot be force-killed)
         # cannot write "failed" onto this run's status. Branches capture this via
-        # the _run_generation contextvar at submit time.
-        self._begin_run_generation()
+        # the _run_generation contextvar at submit time. The reset token is kept
+        # on the instance so run()'s finally can restore the context the caller
+        # had -- critical for nested Workflow.run() (Include), which must not
+        # leave its own generation stamped on the outer run's thread.
+        self._run_generation_token = self._begin_run_generation()
         
         # Set YAML-approved tools only when caller allows dangerous tools
         _approval_token = None
