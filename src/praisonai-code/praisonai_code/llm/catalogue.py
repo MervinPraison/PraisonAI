@@ -285,6 +285,79 @@ def env_vars_for_provider(provider: str) -> tuple:
     return row[0] if row else ()
 
 
+def _default_cache_dir() -> Path:
+    """Return the canonical cache directory for the model catalogue.
+
+    Routes through the wrapper's path helpers so the catalogue cache lives under
+    the canonical ``~/.praisonai/cache`` home (honouring ``PRAISONAI_HOME`` /
+    ``XDG``) rather than the historical ``~/.praison/cache``. Falls back to the
+    canonical literal if the helper is unavailable (standalone install).
+    """
+    try:
+        from praisonai_code.cli.configuration.paths import get_cache_dir
+
+        return get_cache_dir()
+    except Exception:
+        return Path.home() / ".praisonai" / "cache"
+
+
+# Substrings that mark a clearly weaker / cheaper representative we should
+# de-prioritise when choosing a capable zero-config default. Matched on the
+# bare model id so e.g. ``gpt-4o-mini`` ranks below ``gpt-4o``.
+_WEAK_MODEL_MARKERS = ("mini", "nano", "small", "lite", "haiku", "flash", "3.5-turbo")
+
+# Substrings that mark a model that is *not* a general chat/completion model
+# (embeddings, rerankers, speech, image, moderation, …). These must never be
+# chosen as a zero-config chat default — picking e.g. ``cohere/embed-v4.0``
+# would make the user's first request fail. Matched as substrings on the id.
+_NON_CHAT_MARKERS = (
+    "embed", "embedding", "rerank", "parse", "whisper", "tts", "stt",
+    "speech", "audio", "transcribe", "dall-e", "stable-diffusion", "image",
+    "moderation", "guard", "vision-encoder", "clip",
+)
+
+# Substrings that mark an unstable / non-canonical id — preview/beta/experimental
+# builds, dated snapshots, and meta "auto" routers. A zero-config default should
+# be a *stable* flagship, so these sort below an otherwise-equal stable id
+# rather than being excluded outright (a provider may only expose such ids).
+_UNSTABLE_MODEL_MARKERS = (
+    "preview", "experimental", "-exp", "beta", "alpha", "/auto", "auto-",
+    "-auto", "snapshot", "nightly", "draft",
+)
+
+
+def _is_chat_model(model: "ModelInfo") -> bool:
+    """Return ``True`` unless the id clearly denotes a non-chat model.
+
+    Keeps embeddings/rerankers/speech/image/moderation models out of the
+    zero-config chat-default ranking so selection never lands on a model the
+    runtime cannot actually chat with.
+    """
+    mid = (model.id or "").lower()
+    return not any(marker in mid for marker in _NON_CHAT_MARKERS)
+
+
+def _rank_score(model: "ModelInfo") -> tuple:
+    """Capability score for ranking (higher sorts first).
+
+    Prefers tool-use (essential for agentic/coding work), de-prioritises
+    unstable preview/experimental/dated ids and clearly weaker ``-mini``/nano
+    class ids, then a large context window, so the out-of-the-box default is a
+    *stable, capable* flagship rather than the cheapest or a preview build.
+    """
+    mid = (model.id or "").lower()
+    is_weak = any(marker in mid for marker in _WEAK_MODEL_MARKERS)
+    is_unstable = any(marker in mid for marker in _UNSTABLE_MODEL_MARKERS)
+    return (
+        1 if model.supports_tools else 0,
+        0 if is_unstable else 1,
+        0 if is_weak else 1,
+        model.max_context or 0,
+        1 if model.supports_reasoning else 0,
+        1 if model.supports_vision else 0,
+    )
+
+
 class ModelCatalogue:
     """
     Model catalogue with litellm integration and caching.
@@ -298,7 +371,7 @@ class ModelCatalogue:
             cache_dir: Directory for caching model data
             cache_ttl: Cache TTL in seconds (default: 1 hour)
         """
-        self.cache_dir = cache_dir or Path.home() / ".praison" / "cache"
+        self.cache_dir = cache_dir or _default_cache_dir()
         self.cache_file = self.cache_dir / "models.json"
         self.cache_ttl = cache_ttl
         self._models: Optional[List[ModelInfo]] = None
@@ -405,8 +478,8 @@ class ModelCatalogue:
         except Exception:
             return None
     
-    def _save_to_cache(self, models: List[ModelInfo]) -> None:
-        """Save models to cache."""
+    def _save_to_cache(self, models: List[ModelInfo]) -> bool:
+        """Save models to cache. Returns ``True`` on a successful write."""
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             
@@ -417,10 +490,11 @@ class ModelCatalogue:
             
             with open(self.cache_file, 'w') as f:
                 json.dump(data, f, indent=2)
+            return True
                 
         except Exception:
             # Ignore cache write errors
-            pass
+            return False
     
     def _get_models(self) -> List[ModelInfo]:
         """
@@ -476,7 +550,65 @@ class ModelCatalogue:
             models = [m for m in models if search_lower in m.id.lower()]
         
         return [m.to_dict() for m in models]
-    
+
+    def rank_models(self, provider: Optional[str] = None) -> List[ModelInfo]:
+        """Return catalogued models ordered best-first for an agentic default.
+
+        Ranking is capability-weighted (tool-use, context size, reasoning,
+        vision) with unstable preview/experimental ids and weaker
+        ``-mini``/nano-class ids de-prioritised, and non-chat models
+        (embeddings/rerankers/speech/…) excluded so the default is always a
+        usable chat model. When ``provider`` is given, only that provider's
+        models are considered.
+        """
+        models = self._get_models()
+        if provider:
+            # ``litellm`` labels Gemini models under the ``google`` provider
+            # while the credential catalogue uses ``gemini`` (and vice-versa);
+            # treat the two as aliases so a ``GEMINI_API_KEY``-only run still
+            # ranks Gemini models instead of falling back to the fixed default.
+            wanted = {provider.lower()}
+            if "gemini" in wanted or "google" in wanted:
+                wanted |= {"gemini", "google"}
+            models = [m for m in models if (m.provider or "").lower() in wanted]
+        chat_models = [m for m in models if _is_chat_model(m)]
+        if chat_models:
+            models = chat_models
+        return sorted(models, key=_rank_score, reverse=True)
+
+    def best_available(self, provider: str) -> Optional[str]:
+        """Return the best-ranked model id for ``provider``, or ``None``.
+
+        Used to replace a fixed, often-weak per-provider representative with the
+        most *capable* model reachable from the present credential, using the
+        capability metadata the catalogue already loads.
+        """
+        ranked = self.rank_models(provider=provider)
+        return ranked[0].id if ranked else None
+
+    def refresh(self) -> Dict[str, Any]:
+        """Rebuild the capability catalogue cache from litellm on demand.
+
+        Bypasses the TTL so a newly released flagship model is recognised
+        without waiting an hour or bumping the installed litellm version.
+
+        Returns a result dict ``{"cached": bool, "models": [...]}`` so callers
+        can report accurately: ``cached`` is ``True`` only when litellm data was
+        loaded *and* written to disk. When litellm is unavailable (or loading
+        fails) the static fallback table is returned with ``cached`` ``False``
+        and the on-disk cache is left untouched, so the CLI never claims a
+        successful cache write that did not happen.
+        """
+        self._models = None
+        models = self._load_from_litellm()
+        cached = False
+        if models:
+            cached = self._save_to_cache(models)
+        else:
+            models = list(FALLBACK_MODELS)
+        self._models = models
+        return {"cached": cached, "models": [m.to_dict() for m in models]}
+
     def list_providers(self) -> List[str]:
         """
         List distinct provider ids known to the catalogue, sorted.

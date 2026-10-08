@@ -158,6 +158,48 @@ def list_models(
         raise typer.Exit(1)
 
 
+@app.command(name="refresh")
+def refresh_models(
+    json_output: bool = typer.Option(False, "--json", help="Output refreshed models as JSON"),
+):
+    """
+    Rebuild the model capability catalogue cache on demand.
+
+    Re-reads capabilities from litellm and rewrites the cache now, so a newly
+    released model is recognised without waiting for the cache TTL or bumping
+    the installed litellm version.
+
+    Examples:
+        praisonai models refresh
+    """
+    output = get_output_controller()
+
+    try:
+        from praisonai_code.llm.catalogue import ModelCatalogue
+        catalogue = ModelCatalogue()
+        result = catalogue.refresh()
+        models = result["models"]
+
+        if json_output:
+            output.print(json.dumps(models, indent=2))
+            return
+
+        if result["cached"]:
+            output.print_success(f"Refreshed catalogue: {len(models)} models cached")
+        else:
+            output.print_warning(
+                f"litellm unavailable — showing {len(models)} built-in models; "
+                "cache not updated. Install litellm to refresh: "
+                "pip install 'praisonai[litellm]'"
+            )
+    except ImportError:
+        output.print_warning("Model catalogue not available. Install litellm to refresh:")
+        output.print("  pip install 'praisonai[litellm]'")
+    except Exception as e:
+        output.print_error(f"Error refreshing models: {e}")
+        raise typer.Exit(1) from e
+
+
 @app.command(name="describe")
 def describe_model(
     model: str = typer.Argument(..., help="Model ID to describe (e.g., gpt-4o, claude-3-5-sonnet)"),
