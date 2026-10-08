@@ -13,25 +13,6 @@ import os
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
 
-_LIVE_INSTANCE: Optional["AgentOS"] = None
-
-
-def _agentos_factory() -> Any:
-    """Uvicorn app-factory used by :meth:`AgentOS.serve` when ``reload=True``.
-
-    Uvicorn requires an import string (not a live app object) to enable
-    ``reload``/``workers``; passing an instance silently disables reload. This
-    factory lets ``serve`` hand uvicorn the import string
-    ``"praisonai.app.agentos:_agentos_factory"`` so reload actually works.
-    """
-    if _LIVE_INSTANCE is None:
-        raise RuntimeError(
-            "AgentOS._agentos_factory called without a live instance; "
-            "AgentOS.serve() must set the module-level instance first."
-        )
-    return _LIVE_INSTANCE.get_app()
-
-
 def _run_to_dict(record: Any) -> Dict[str, Any]:
     """A RunRecord as JSON. Uses whatever the record exposes rather than
     assuming a shape, so a ledger with extra fields is not silently truncated."""
@@ -410,28 +391,34 @@ class AgentOS:
         enable_reload = reload or self.config.reload
 
         if enable_reload:
-            # Uvicorn needs an import string (not a live app object) to enable
-            # reload; passing the instance silently drops reload. Expose this
-            # instance via the module-level factory and hand uvicorn the string.
-            global _LIVE_INSTANCE
-            _LIVE_INSTANCE = self
-            uvicorn.run(
-                "praisonai.app.agentos:_agentos_factory",
-                factory=True,
-                host=resolved_host,
-                port=resolved_port,
-                reload=True,
-                log_level=self.config.log_level,
-                **kwargs
+            # Uvicorn's reload spawns a fresh worker *process* that re-imports
+            # the target module; it cannot see this parent process's in-memory
+            # state. Because an AgentOS is built programmatically from live
+            # Agent/Team/Flow objects (not an importable module-level app), a
+            # reload worker has no way to reconstruct it — the app factory would
+            # start with no instance and fail. So reload is unsupported for a
+            # programmatically-built AgentOS: warn and serve without it rather
+            # than crash. To get reload, run uvicorn against your own module
+            # that exposes the app, e.g.
+            # ``uvicorn "mymodule:create_app" --factory --reload``.
+            import warnings
+            warnings.warn(
+                "AgentOS.serve(reload=True) is not supported for a "
+                "programmatically-built AgentOS: uvicorn's reload worker runs in "
+                "a separate process and cannot access this instance's live "
+                "agents. Serving without reload. For auto-reload, run uvicorn "
+                "against an importable app factory in your own module "
+                "(e.g. `uvicorn \"mymodule:create_app\" --factory --reload`).",
+                stacklevel=2,
             )
-        else:
-            uvicorn.run(
-                self.get_app(),
-                host=resolved_host,
-                port=resolved_port,
-                log_level=self.config.log_level,
-                **kwargs
-            )
+
+        uvicorn.run(
+            self.get_app(),
+            host=resolved_host,
+            port=resolved_port,
+            log_level=self.config.log_level,
+            **kwargs
+        )
 
 
 # Verify protocol compliance

@@ -267,10 +267,11 @@ Launch PraisonAI servers with unified discovery support.
             print(f"  Endpoint: {parsed['path']}")
             print("  Discovery: /__praisonai__/discovery")
             
-            # Create and run server
-            app = self._create_agents_app(parsed)
+            # Run server. Pass a lazy builder so the app is built once: the
+            # non-reload path builds it here; the reload path rebuilds it in the
+            # worker process from reload_spec (so we don't build+discard here).
             self._run_server(
-                app,
+                lambda: self._create_agents_app(parsed),
                 parsed["host"],
                 parsed["port"],
                 parsed["reload"],
@@ -905,9 +906,10 @@ Launch PraisonAI servers with unified discovery support.
             print("  Providers: agents-api, recipe, mcp, a2a, a2u")
             print("  Discovery: /__praisonai__/discovery")
             
-            app = self._create_unified_app(parsed)
+            # Lazy builder: built once (here when not reloading, or in the reload
+            # worker from reload_spec) instead of building then discarding.
             self._run_server(
-                app,
+                lambda: self._create_unified_app(parsed),
                 parsed["host"],
                 parsed["port"],
                 parsed["reload"],
@@ -1017,7 +1019,11 @@ Launch PraisonAI servers with unified discovery support.
         """Run the server with uvicorn.
 
         Args:
-            app: Prebuilt FastAPI app (used when ``reload`` is False).
+            app: FastAPI app for the non-reload path. May be a prebuilt app or a
+                zero-arg callable that builds one on demand — when ``reload`` is
+                enabled the reload worker rebuilds the app from ``reload_spec`` in
+                its own process, so the parent never needs (and never calls) this
+                builder, avoiding a redundant second build (and double YAML parse).
             host, port: Bind address.
             reload: Enable auto-reload.
             reload_spec: ``{"builder": <ServeHandler method name>, "config": {...}}``
@@ -1042,7 +1048,9 @@ Launch PraisonAI servers with unified discovery support.
             )
             return
 
-        uvicorn.run(app, host=host, port=port, reload=reload)
+        # Non-reload path: build the app now if a lazy builder was passed.
+        resolved_app = app() if callable(app) else app
+        uvicorn.run(resolved_app, host=host, port=port, reload=reload)
 
 
 def handle_serve_command(args: List[str]) -> int:
