@@ -317,6 +317,63 @@ class TestArrayParsing:
         assert result.stream is True  # Override
         assert result.markdown is False  # Override
     
+    def test_preset_override_array_accepts_canonical_spellings(self):
+        """Array form must accept the same spellings as the string form.
+
+        ``_resolve_string`` normalises the preset name (case, whitespace and
+        -/_) before the lookup; the array branch compared raw strings, so
+        ``output=["VERBOSE"]`` raised "Invalid output value: 'VERBOSE'. Did you
+        mean 'verbose'?" -- rejecting a spelling the error itself suggested.
+        """
+        from praisonaiagents.config.param_resolver import resolve
+
+        presets = {
+            "verbose": MockOutputConfig(verbose=True, markdown=True, stream=False),
+            "fast_track": MockExecutionConfig(max_iter=5, max_retry_limit=1),
+        }
+
+        for raw in ("VERBOSE", " verbose ", "verbose"):
+            result = resolve(
+                value=[raw],
+                param_name="output",
+                config_class=MockOutputConfig,
+                presets=presets,
+                array_mode="preset_override",
+            )
+            assert result.verbose is True, raw
+
+        # '-' and '_' are interchangeable; the canonical key is preserved.
+        result = resolve(
+            value=["fast-track", {"max_iter": 9}],
+            param_name="execution",
+            config_class=MockExecutionConfig,
+            presets=presets,
+            array_mode="preset_override",
+        )
+        assert result.max_retry_limit == 1  # From the 'fast_track' preset
+        assert result.max_iter == 9  # Override
+
+    def test_single_or_list_array_preset_is_not_silently_dropped(self):
+        """A non-canonical preset in a single-item array must still resolve.
+
+        The raw ``in presets`` check missed, and the branch then fell through to
+        ``config_class()``: ``memory=["SQLITE"]`` silently returned the default
+        ``backend='file'`` instead of raising or selecting the sqlite preset.
+        """
+        from praisonaiagents.config.param_resolver import resolve
+
+        presets = {"sqlite": MockMemoryConfig(backend="sqlite")}
+
+        for raw in ("sqlite", "SQLITE", " sqlite "):
+            result = resolve(
+                value=[raw],
+                param_name="memory",
+                config_class=MockMemoryConfig,
+                presets=presets,
+                array_mode="single_or_list",
+            )
+            assert result.backend == "sqlite", raw
+
     def test_sources_list_array(self):
         """Array of strings should be treated as sources list."""
         from praisonaiagents.config.param_resolver import resolve
