@@ -28,7 +28,7 @@ class RealtimeEvent:
 
 
 def realtime_connect(
-    model: str = "gpt-4o-realtime-preview",
+    model: str = "gpt-realtime",
     modalities: Optional[List[str]] = None,
     instructions: Optional[str] = None,
     voice: str = "alloy",
@@ -94,7 +94,7 @@ def realtime_connect(
 
 
 async def arealtime_connect(
-    model: str = "gpt-4o-realtime-preview",
+    model: str = "gpt-realtime",
     modalities: Optional[List[str]] = None,
     instructions: Optional[str] = None,
     voice: str = "alloy",
