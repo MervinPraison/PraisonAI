@@ -200,22 +200,11 @@ class ParallelExecutor:
         Returns:
             List of results
         """
-        try:
-            # Try to get the running loop - if this succeeds, we're in async context
-            loop = asyncio.get_running_loop()
-            # If already in async context, create new loop
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.execute(tasks))
-                return future.result()
-        except RuntimeError:
-            # No running loop, safe to create/get one and run
-            try:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(self.execute(tasks))
-            except RuntimeError:
-                # No event loop, create one
-                return asyncio.run(self.execute(tasks))
+        # Shared bridge: copies contextvars and surfaces errors unchanged,
+        # whether or not an event loop is already running on this thread.
+        from ...utils.async_bridge import run_coroutine_from_any_context
+
+        return run_coroutine_from_any_context(self.execute(tasks), timeout=None)
     
     def close(self) -> None:
         """Close the executor and release resources."""
@@ -308,20 +297,13 @@ class ParallelSearchCoordinator:
         Returns:
             List of results
         """
-        try:
-            # Try to get the running loop - if this succeeds, we're in async context
-            loop = asyncio.get_running_loop()
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.execute_turn(batch))
-                return future.result()
-        except RuntimeError:
-            # No running loop, safe to create/get one and run
-            try:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(self.execute_turn(batch))
-            except RuntimeError:
-                return asyncio.run(self.execute_turn(batch))
+        # Shared bridge: copies contextvars and surfaces errors unchanged,
+        # whether or not an event loop is already running on this thread.
+        from ...utils.async_bridge import run_coroutine_from_any_context
+
+        return run_coroutine_from_any_context(
+            self.execute_turn(batch), timeout=None
+        )
     
     def close(self) -> None:
         """Close resources."""

@@ -5,8 +5,6 @@ Provides reusable async-to-sync bridging logic to prevent code duplication
 across the approval system.
 """
 
-import asyncio
-import concurrent.futures
 import hashlib
 import json
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
@@ -238,34 +236,10 @@ def run_coroutine_safely(
         TimeoutError: If the operation times out
         Any exception raised by the coroutine
     """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    
-    if loop and loop.is_running():
-        # We're in an async context - use thread pool to avoid RuntimeError
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        
-        # Wrap the coroutine with timeout handling inside the thread
-        def run_with_timeout():
-            if timeout is not None and timeout > 0:
-                return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
-            else:
-                return asyncio.run(coro)
-        
-        future = pool.submit(run_with_timeout)
-        try:
-            # Don't use timeout on Future.result() since we handle timeout
-            # inside the coroutine via asyncio.wait_for
-            result = future.result(timeout=None if timeout is None or timeout == 0 else timeout)
-            return result
-        finally:
-            # Properly shut down the executor without waiting for threads
-            pool.shutdown(wait=False, cancel_futures=True)
-    else:
-        # No running event loop - use asyncio.run directly
-        if timeout is not None and timeout > 0:
-            return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
-        else:
-            return asyncio.run(coro)
+    # Delegate to the single shared bridge, which copies contextvars across the
+    # worker thread, surfaces the coroutine's errors unchanged, and enforces the
+    # timeout consistently. ``timeout <= 0`` here means "no timeout".
+    from ..utils.async_bridge import run_coroutine_from_any_context
+
+    effective_timeout = timeout if (timeout is not None and timeout > 0) else None
+    return run_coroutine_from_any_context(coro, timeout=effective_timeout)

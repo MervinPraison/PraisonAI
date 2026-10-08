@@ -294,22 +294,12 @@ def _resolve_coroutine_sync(coro):
 
     ``astart`` dispatches sync-marked tasks through the sync ``run_task`` path
     (in an executor), so an ``async def`` handler still lands here. Rather than
-    stringifying the coroutine, drive it to completion on a private loop.
+    stringifying the coroutine, drive it to completion via the shared bridge,
+    which copies contextvars and surfaces the coroutine's errors unchanged.
     """
-    import asyncio
+    from ..utils.async_bridge import run_coroutine_from_any_context
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop in this thread — safe to use asyncio.run.
-        return asyncio.run(coro)
-
-    # A loop is already running in this thread; run the coroutine on a fresh
-    # loop in a worker thread so we don't re-enter the active loop.
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    return run_coroutine_from_any_context(coro, timeout=None)
 
 
 def _execute_task_handler(agents_instance, task_id):
