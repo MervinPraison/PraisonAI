@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import collections
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -87,6 +88,113 @@ class _WriteTrackingDict(dict):
         if key not in self:
             self.written_keys.add(key)
         return super().setdefault(key, default)
+
+def _isolate_value(value: Any, memo: dict) -> Any:
+    """Deep-copy ``value`` but degrade to sharing by reference where it can't.
+
+    This is ``copy.deepcopy`` with two differences that matter for a parallel
+    scope:
+
+    * **Shared memo.** All values in one scope are copied with the *same* ``memo``
+      so cross-variable aliasing survives: if ``variables['records']`` and
+      ``variables['state']['records']`` are the same list, the branch still sees
+      one shared list, exactly as the old whole-scope ``copy.deepcopy`` did. A
+      write through one name is visible through the other within the branch.
+    * **Granular fallback.** A value that cannot be deep-copied (thread lock,
+      DB/HTTP/LLM client, open file, a live Agent, generator, ...) would abort the
+      whole run with a pickling ``TypeError`` even when no branch touches it. Only
+      the *exact* un-copyable node is shared by reference; the containers around it
+      are still copied, so an ordinary mutable sibling (``{'client': c, 'rows': []}``
+      -> ``rows``) stays isolated and an in-place mutation cannot leak to a sibling
+      branch or loop iteration.
+    """
+    # Already isolated under this scope (cross-variable alias): reuse the copy.
+    if id(value) in memo:
+        return memo[id(value)]
+
+    pre_existing = set(memo)
+    try:
+        return copy.deepcopy(value, memo)
+    except Exception:
+        pass
+    # ``copy.deepcopy`` failed somewhere inside ``value``. A failed deepcopy can
+    # leave *unfinished* copies in ``memo`` (e.g. an empty dict for a container it
+    # had started but not populated before the un-copyable leaf raised). Reusing
+    # those would silently drop nested seed data, so discard everything this
+    # attempt added and rebuild the known container types node-by-node. The
+    # un-copyable leaves are shared by reference; everything around them is still
+    # isolated, and container subclasses (namedtuple, defaultdict, OrderedDict,
+    # subclassed list/set/tuple) keep their type and behaviour.
+    for key in set(memo) - pre_existing:
+        del memo[key]
+    return _rebuild_isolated(value, memo)
+
+
+def _rebuild_isolated(value: Any, memo: dict) -> Any:
+    """Node-by-node fallback copy that shares only the un-copyable leaves.
+
+    Used by :func:`_isolate_value` after a whole-value ``copy.deepcopy`` fails.
+    Rebuilds ``dict``/``list``/``set``/``tuple`` (and their subclasses, so a
+    ``defaultdict`` keeps its factory and a ``namedtuple`` keeps its fields),
+    recursing through :func:`_isolate_value` so each nested child first gets a
+    clean ``deepcopy`` attempt and only genuinely un-copyable nodes are shared.
+    """
+    if id(value) in memo:
+        return memo[id(value)]
+
+    if isinstance(value, dict):
+        try:
+            copied = value.__class__()  # preserves defaultdict/OrderedDict/...
+        except Exception:
+            copied = {}
+        if isinstance(value, collections.defaultdict):
+            copied.default_factory = value.default_factory
+        memo[id(value)] = copied
+        for k, v in value.items():
+            copied[_isolate_value(k, memo)] = _isolate_value(v, memo)
+        return copied
+    if isinstance(value, list):
+        try:
+            copied = value.__class__()  # preserves a list subclass where possible
+        except Exception:
+            copied = []  # subclass constructor requires args: fall back to list
+        memo[id(value)] = copied
+        copied.extend(_isolate_value(v, memo) for v in value)
+        return copied
+    if isinstance(value, set):
+        try:
+            copied = value.__class__()  # preserves a set subclass where possible
+        except Exception:
+            copied = set()  # subclass constructor requires args: fall back to set
+        memo[id(value)] = copied
+        for v in value:
+            copied.add(_isolate_value(v, memo))
+        return copied
+    if isinstance(value, tuple):
+        items = [_isolate_value(v, memo) for v in value]
+        if hasattr(value, "_fields"):  # namedtuple keeps its type and fields
+            try:
+                return value.__class__(*items)
+            except Exception:
+                return tuple(items)
+        return tuple(items)
+    # Unknown/atomic object that could not be deep-copied: share by reference as
+    # a last resort (read-only intent).
+    return value
+
+
+def _isolate_scope(variables: dict) -> dict:
+    """Give a parallel branch/iteration its own copy of the variable scope.
+
+    A branch needs its own container so concurrent writes are not a data race,
+    and mutable data (lists/dicts) is deep-copied so a sibling cannot observe
+    another branch's in-place mutation. Values are copied with one shared
+    ``memo`` so cross-variable aliasing is preserved, and any value that cannot
+    be deep-copied degrades to a by-reference share of only the un-copyable node
+    rather than crashing the run. See ``_isolate_value``.
+    """
+    memo: dict = {}
+    return {k: _isolate_value(v, memo) for k, v in variables.items()}
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
@@ -3476,7 +3584,7 @@ CONCISE SUMMARY:"""
                 # output_variable writes are not thrown away, and untouched keys are
                 # not merged as per-branch clones. Keys present at construction seed
                 # the scope and are not counted as writes.
-                branch_vars = _WriteTrackingDict(copy.deepcopy(all_variables))
+                branch_vars = _WriteTrackingDict(_isolate_scope(all_variables))
 
                 def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
@@ -3679,7 +3787,7 @@ CONCISE SUMMARY:"""
                     # variables are seeded at construction time and are therefore
                     # deliberately not counted as writes.
                     control = self._loop_control_variables(loop_step, item, idx)
-                    seed = copy.deepcopy(all_variables)
+                    seed = _isolate_scope(all_variables)
                     seed.update(control)
                     loop_vars = _WriteTrackingDict(seed)
                     
