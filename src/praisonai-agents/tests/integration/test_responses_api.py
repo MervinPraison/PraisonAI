@@ -342,6 +342,21 @@ class TestResponsesAPIParamBuilder:
         assert items[1]["name"] == "get_weather"
         assert items[1]["arguments"] == '{"city":"NYC"}'
 
+    def test_assistant_empty_name_tool_call_skipped(self):
+        """Tool calls with an empty function name are skipped — the API rejects them."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "", "arguments": "{}"}}],
+        }])
+        items = params["input"]
+
+        assert all(i.get("type") != "function_call" for i in items)
+        assert items == [{"role": "assistant", "content": "Checking"}]
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -698,6 +713,21 @@ class TestOpenAIClientResponsesAPI:
         assert items[1]["call_id"] == "call_sdk"
         assert items[1]["name"] == "get_weather"
         assert items[1]["arguments"] == '{"city":"NYC"}'
+
+    def test_build_responses_input_empty_name_tool_call_skipped(self):
+        """Tool calls with an empty function name are skipped — the API rejects them."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "", "arguments": "{}"}}],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert all(i.get("type") != "function_call" for i in items)
+        assert items == [{"role": "assistant", "content": "Checking"}]
 
     def test_build_responses_input_maps_chat_multimodal_parts(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
