@@ -26,7 +26,8 @@ class GuardrailBlocked(Exception):
     A ``POLICY``/``GUARDRAIL`` plugin can raise this from any ``before_*``
     method (``before_tool``, ``before_llm``, ``before_agent``,
     ``before_message``) to stop the tool call / LLM request / agent run /
-    inbound message. It may also be raised from ``after_tool`` to block
+    inbound message. Raising it from ``after_message`` cancels final channel
+    delivery. It may also be raised from ``after_tool`` to block
     *propagation* of a tool result (e.g. secret/PII detected) — the tool has
     already run, but the output is suppressed before it reaches the model.
     The plugin bridge converts it into a denying ``HookResult`` so the
@@ -45,7 +46,8 @@ class PluginDecision:
     This is an alternative to returning a full ``HookResult`` (which requires
     importing from ``hooks.types``) or raising :class:`GuardrailBlocked`. Return
     ``PluginDecision.deny(reason)`` or ``PluginDecision.block(reason)`` from a
-    ``before_*`` method to stop the action; the bridge forwards it to the
+    ``before_*`` method to stop the action, or from ``after_message`` to cancel
+    final channel delivery; the bridge forwards it to the
     runtime's block enforcement. Returning ``allow()`` (or the usual
     ``dict``/``str``/``tuple``/``None``) keeps today's rewrite/no-op semantics.
     """
@@ -209,8 +211,16 @@ class Plugin(ABC):
         """
         return message
     
-    def after_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Called after message is processed. Can modify message."""
+    def after_message(
+        self, message: Dict[str, Any]
+    ) -> Union[Dict[str, Any], "PluginDecision", None]:
+        """Called before final channel delivery (MESSAGE_SENDING).
+
+        Return a message dict with modified ``content`` to rewrite the reply,
+        a ``PluginDecision.deny/block`` or ``HookResult`` to cancel delivery,
+        or ``None`` for no-op. Raising :class:`GuardrailBlocked` also cancels.
+        This hook does not cover progressive drafts or direct transport sends.
+        """
         return message
 
     def message_sent(self, message: Dict[str, Any]) -> None:
