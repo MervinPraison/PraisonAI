@@ -405,23 +405,27 @@ class MemoryMixin:
         if self._db is None or self._db_initialized:
             return
 
-        self._ensure_db_session_id()
+        with self._get_db_session_init_lock().sync():
+            if self._db_initialized:
+                return
+            self._ensure_db_session_id()
+            try:
+                history = self._db.on_agent_start(
+                    agent_name=self.name,
+                    session_id=self._session_id,
+                    user_id=self.user_id,
+                    metadata={"role": self.role, "goal": self.goal}
+                )
+                self._restore_db_history(history)
+            except Exception as e:
+                logging.warning(f"Failed to initialize DB session: {e}")
+            self._db_initialized = True
+            self._current_run_id = None
 
-        # Call db adapter's on_agent_start to get previous messages
-        try:
-            history = self._db.on_agent_start(
-                agent_name=self.name,
-                session_id=self._session_id,
-                user_id=self.user_id,
-                metadata={"role": self.role, "goal": self.goal}
-            )
+    def _get_db_session_init_lock(self):
+        from .async_safety import DualLock
 
-            self._restore_db_history(history)
-        except Exception as e:
-            logging.warning(f"Failed to initialize DB session: {e}")
-
-        self._db_initialized = True
-        self._current_run_id = None  # Track current run
+        return self.__dict__.setdefault("_db_session_init_lock", DualLock())
 
     def _ensure_db_session_id(self) -> None:
         """Share session allocation between sync and async adapter callbacks."""
@@ -487,10 +491,7 @@ class MemoryMixin:
         if callback is None:
             self._init_db_session()
             return
-        import asyncio
-
-        lock = self.__dict__.setdefault("_db_session_init_lock", asyncio.Lock())
-        async with lock:
+        async with self._get_db_session_init_lock().async_lock():
             if self._db_initialized:
                 return
             self._ensure_db_session_id()
@@ -655,10 +656,26 @@ class MemoryMixin:
         kwargs = self._db_run_end_kwargs(output_content, status, metrics)
         if kwargs is None:
             return
+        import asyncio
+
+        async def save():
+            try:
+                await callback(**kwargs)
+            except Exception as exc:
+                logging.warning(f"Failed to end run: {exc}")
+
+        pending = asyncio.create_task(save())
         try:
-            await callback(**kwargs)
-        except Exception as exc:
-            logging.warning(f"Failed to end run: {exc}")
+            await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            # Finish the terminal write before propagating caller cancellation.
+            while not pending.done():
+                try:
+                    await asyncio.shield(pending)
+                except asyncio.CancelledError:
+                    continue
+            pending.result()
+            raise
         finally:
             self._current_run_id = None
 

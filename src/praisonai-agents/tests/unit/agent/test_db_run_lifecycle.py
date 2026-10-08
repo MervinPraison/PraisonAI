@@ -4,6 +4,9 @@ import asyncio
 import copy
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -313,6 +316,80 @@ def test_async_adapter_callbacks_restore_history_and_finish_run(recorded_agent, 
     assert db.starts[0]["run_id"] == db.ends[0]["run_id"]
     assert db.ends[0]["status"] == "completed"
     assert agent._current_run_id is None
+
+
+def test_first_async_calls_from_different_loops_initialize_once(recorded_agent, monkeypatch):
+    agent, db = recorded_agent
+    entered, second_waiting, release = threading.Event(), threading.Event(), threading.Event()
+
+    async def load(**kwargs):
+        db.sessions.append(kwargs)
+        entered.set()
+        assert await asyncio.to_thread(release.wait, 5)
+        return []
+
+    async def respond(**kwargs):
+        return "answer"
+
+    monkeypatch.setattr(db, "aon_agent_start", load, raising=False)
+    monkeypatch.setattr(agent, "_achat_impl", respond)
+
+    def run(second=False):
+        async def scenario():
+            if second:
+                asyncio.get_running_loop().call_soon(second_waiting.set)
+            return await asyncio.wait_for(agent.achat("question"), timeout=3)
+
+        return asyncio.run(scenario(), debug=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(run)
+        try:
+            assert entered.wait(3)
+            second = pool.submit(run, True)
+            assert second_waiting.wait(3)
+        finally:
+            release.set()
+        assert first.result(timeout=5) == second.result(timeout=5) == "answer"
+    assert len(db.sessions) == 1
+    assert len(db.starts) == len(db.ends) == 2
+
+
+def test_cancellation_during_final_save_finishes_record_and_cleanup(recorded_agent, monkeypatch):
+    agent, db = recorded_agent
+    token = SimpleNamespace(is_set=lambda: False, was_cancelled=lambda: False, close=Mock())
+    emitter = Mock()
+    monkeypatch.setattr(agent, "_turn_cancel_token", lambda *a, **kw: token)
+    monkeypatch.setattr("praisonaiagents.trace.context_events.get_context_emitter", lambda: emitter)
+
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def save(**kwargs):
+            entered.set()
+            await release.wait()
+            db.ends.append(kwargs)
+
+        async def respond(**kwargs):
+            return "answer"
+
+        monkeypatch.setattr(db, "aon_run_end", save, raising=False)
+        monkeypatch.setattr(agent, "_achat_impl", respond)
+        task = asyncio.create_task(agent.achat("question"))
+        await entered.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    assert len(db.starts) == len(db.ends) == 1
+    assert db.starts[0]["run_id"] == db.ends[0]["run_id"]
+    assert db.ends[0]["status"] == "completed"
+    assert agent._active_turn_token is None
+    emitter.agent_end.assert_called_once_with(agent.name)
+    token.close.assert_called_once()
 
 
 @pytest.mark.live

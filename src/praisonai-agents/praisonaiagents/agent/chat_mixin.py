@@ -4086,18 +4086,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     await self._aend_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
             finally:
                 self._restore_db_run_state(previous_run_state)
-            if durable_context is not None:
-                from .durable import end_durable_run
+                try:
+                    if durable_context is not None:
+                        from .durable import end_durable_run
 
-                end_durable_run(durable_token)
-                await durable_context.aclose()
-            try:
-                _trace_emitter.agent_end(self.name)
-            finally:
-                if getattr(self, "_active_turn_token", None) is _cancel:
-                    self._active_turn_token = None
-                if _cancel is not None:
-                    _cancel.close()
+                        end_durable_run(durable_token)
+                        await durable_context.aclose()
+                finally:
+                    try:
+                        _trace_emitter.agent_end(self.name)
+                    finally:
+                        if getattr(self, "_active_turn_token", None) is _cancel:
+                            self._active_turn_token = None
+                        if _cancel is not None:
+                            _cancel.close()
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
