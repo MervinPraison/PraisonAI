@@ -399,6 +399,7 @@ Multi-Agent Safe:
 | Backward compatible | Public API changes require deprecation cycle |
 | Safe defaults | New features are opt-in, not opt-out |
 | Deterministic tests | Tests must not depend on timing or external state |
+| Vendor clients stay external | Third-party vendor *service* clients (search/API providers hitting `api.<vendor>.com`) go to **PraisonAI-Tools**, not core — even when a core aggregator (e.g. `tools/web_search.py`) already inlines similar providers. Precedent is not permission; judge each against routing + scope-creep, not the nearest inline example. |
 
 ### 4.7 Concurrency Model
 
