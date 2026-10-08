@@ -1876,7 +1876,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:816",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:799",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [
@@ -2714,7 +2714,7 @@
           "PraisonAIAgents",
           "Agents"
         ],
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:813",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:803",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2463",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2453",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -3329,7 +3329,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:333",
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326",
         "resolved_class": "FileTracker"
       },
       "ts_only": [],
