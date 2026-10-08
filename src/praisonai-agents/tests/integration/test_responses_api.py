@@ -316,6 +316,32 @@ class TestResponsesAPIParamBuilder:
             assert len(items) == 1, f"content={empty!r} should emit only the call"
             assert items[0]["type"] == "function_call"
 
+    def test_assistant_sdk_tool_call_object_preserves_name_and_args(self):
+        """SDK ChatCompletionMessageToolCall objects expose name/args under .function."""
+        from praisonaiagents.llm.llm import LLM
+
+        class _Fn:
+            name = "get_weather"
+            arguments = '{"city":"NYC"}'
+
+        class _ToolCall:
+            id = "call_sdk"
+            function = _Fn()
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [_ToolCall()],
+        }])
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_sdk"
+        assert items[1]["name"] == "get_weather"
+        assert items[1]["arguments"] == '{"city":"NYC"}'
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -646,6 +672,32 @@ class TestOpenAIClientResponsesAPI:
 
             assert len(items) == 1, f"content={empty!r} should emit only the call"
             assert items[0]["type"] == "function_call"
+
+    def test_build_responses_input_sdk_tool_call_object_preserves_name_and_args(self):
+        """SDK ChatCompletionMessageToolCall objects expose name/args under .function."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        class _Fn:
+            name = "get_weather"
+            arguments = '{"city":"NYC"}'
+
+        class _ToolCall:
+            id = "call_sdk"
+            function = _Fn()
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [_ToolCall()],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_sdk"
+        assert items[1]["name"] == "get_weather"
+        assert items[1]["arguments"] == '{"city":"NYC"}'
 
     def test_build_responses_input_maps_chat_multimodal_parts(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
