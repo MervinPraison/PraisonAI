@@ -314,17 +314,22 @@ class DocsManager:
             
             section = f"{header}\n{doc_text}\n"
             
-            if total_chars + len(section) <= max_chars:
+            # The join separator is part of the output budget too.
+            remaining = max_chars - total_chars - 1
+            if len(section) <= remaining:
                 parts.append(section)
-                total_chars += len(section)
+                total_chars += 1 + len(section)
             else:
-                # Truncate last doc
-                remaining = max_chars - total_chars
-                if remaining > 100:
-                    parts.append(section[:remaining] + "\n... (truncated)")
+                # Preserve the complete header and truncation notice.
+                marker = "\n... (truncated)"
+                prefix = f"{header}\n"
+                body_budget = remaining - len(prefix) - len(marker)
+                if body_budget > 0:
+                    parts.append(prefix + doc_text[:body_budget] + marker)
                 break
         
-        return "\n".join(parts)
+        # A heading without a documentation section is not useful context.
+        return "\n".join(parts) if len(parts) > 1 else ""
     
     def create_doc(
         self,
