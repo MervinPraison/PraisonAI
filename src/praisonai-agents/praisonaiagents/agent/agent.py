@@ -267,6 +267,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         "rate_limiter": None,           # -> execution=ExecutionConfig(rate_limiter=obj)
         "verification_hooks": None,     # -> autonomy=AutonomyConfig(verification_hooks=[...])
         "cli_backend": None,            # -> runtime=
+        "retrieval_config": None,       # RAG tuning, merged into the knowledge= config
     }
 
     @property
@@ -713,6 +714,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 - bool: True enables defaults
                 - List[str]: File paths, URLs, or text content
                 - KnowledgeConfig: Custom configuration
+            retrieval_config: Optional RAG tuning merged on top of the config
+                derived from ``knowledge=``. Accepts a dict or RetrievalConfig
+                (e.g. ``retrieval_config={"citations": True, "top_k": 5}``).
             planning: Planning mode. Accepts:
                 - bool: True enables with defaults
                 - PlanningConfig: Custom configuration
@@ -908,6 +912,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         rate_limiter = legacy_kwargs.get("rate_limiter", _legacy_defaults["rate_limiter"])
         verification_hooks = legacy_kwargs.get("verification_hooks", _legacy_defaults["verification_hooks"])
         cli_backend = legacy_kwargs.get("cli_backend", _legacy_defaults["cli_backend"])
+        _user_retrieval_config = legacy_kwargs.get("retrieval_config", _legacy_defaults["retrieval_config"])
 
         # ── where does this agent run? ───────────────────────────────────────
         # Resolved before anything else is built so a contradiction fails at the
@@ -1745,6 +1750,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 knowledge = _knowledge_config
         elif knowledge is False:
             knowledge = None
+
+        # Explicit retrieval_config= (the RAG tuning surface shown in the docs
+        # and docstring examples) is merged on top of whatever the knowledge=
+        # param derived. A dict overrides the derived keys; a RetrievalConfig
+        # instance (or when no knowledge= was given) replaces it wholesale so
+        # the downstream RetrievalConfig resolver (below) receives it unchanged.
+        if _user_retrieval_config is not None:
+            if isinstance(_user_retrieval_config, dict) and isinstance(retrieval_config, dict):
+                retrieval_config.update(_user_retrieval_config)
+            else:
+                retrieval_config = _user_retrieval_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param - FAST PATH
@@ -2256,8 +2272,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             _wants_embeddings = (retrieval_config is not None
                                  or embedder_config is not None
                                  or memory not in (None, False))
-            if _wants_embeddings and not embedder_config and not (
-                    retrieval_config or {}).get('embedder_config'):
+            # retrieval_config may be a dict (knowledge=-derived or user dict) or a
+            # RetrievalConfig instance (passed explicitly); read embedder_config
+            # from either shape without assuming .get() exists.
+            _rc_embedder = (
+                retrieval_config.get('embedder_config')
+                if isinstance(retrieval_config, dict)
+                else getattr(retrieval_config, 'embedder_config', None))
+            if _wants_embeddings and not embedder_config and not _rc_embedder:
                 from ..local import (local_embedder_config as _local_embedder,
                                      select_embedding_model as _select_embed)
                 _embed_model = _select_embed(
@@ -2285,8 +2307,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                                 _cfg["embedding_dims"] = _dims
                         except Exception:  # noqa: BLE001 -- a missing width must not break setup
                             pass
-                    if retrieval_config is not None:
+                    if isinstance(retrieval_config, dict):
                         retrieval_config.setdefault('embedder_config', embedder_config)
+                    elif retrieval_config is not None and getattr(
+                            retrieval_config, 'embedder_config', None) is None:
+                        retrieval_config.embedder_config = embedder_config
                 else:
                     logging.warning(
                         "llm=%r resolved a local model, but %s serves no embedding "
