@@ -328,8 +328,17 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # compatible).
         suffix = self._path_safe_suffix(self.cfg.get("user_id"))
 
-        config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
-        config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
+        # ``db_path`` is a documented single-file alias for the sqlite backend
+        # (MemoryConfig(backend="sqlite", config={"db_path": ...})). Without this
+        # it was silently dropped and both agents fell back to the per-user
+        # default paths, so a caller-supplied shared file never took effect and
+        # cross-instance recall failed. An explicit short_db/long_db still wins.
+        db_path = self.cfg.get("db_path")
+        default_short = db_path or os.path.join(project_data, f"short_term{suffix}.db")
+        default_long = db_path or os.path.join(project_data, f"long_term{suffix}.db")
+
+        config["short_db"] = self.cfg.get("short_db", default_short)
+        config["long_db"] = self.cfg.get("long_db", default_long)
         config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, f"chroma_db{suffix}"))
         config["collection_name"] = self.cfg.get("collection_name", f"memory_store{suffix}")
         config["verbose"] = self.verbose

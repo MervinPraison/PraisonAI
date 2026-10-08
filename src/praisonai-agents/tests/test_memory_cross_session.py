@@ -285,5 +285,63 @@ class TestSqliteUserIdFilter(unittest.TestCase):
             )
 
 
+class TestSqliteDbPathAlias(unittest.TestCase):
+    """Issue #5710: ``MemoryConfig(backend="sqlite", config={"db_path": ...})``
+    must actually use the caller-supplied file for both the short- and
+    long-term stores.
+
+    Previously ``db_path`` was silently dropped by ``Memory._get_adapter_config``
+    (which only read ``short_db``/``long_db``), so the store fell back to the
+    per-user default path and a caller who pointed two Agent instances at one
+    shared file never got cross-instance recall. No LLM / OPENAI_API_KEY needed.
+    """
+
+    def test_db_path_maps_to_short_and_long_db(self):
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shared = f"{tmpdir}/mem.db"
+            mem = Memory(config={"provider": "sqlite", "db_path": shared})
+            adapter_cfg = mem._get_adapter_config_for_provider("sqlite")
+            self.assertEqual(adapter_cfg["short_db"], shared)
+            self.assertEqual(adapter_cfg["long_db"], shared)
+
+    def test_explicit_short_long_db_win_over_db_path(self):
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mem = Memory(config={
+                "provider": "sqlite",
+                "db_path": f"{tmpdir}/ignored.db",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
+            adapter_cfg = mem._get_adapter_config_for_provider("sqlite")
+            self.assertEqual(adapter_cfg["short_db"], f"{tmpdir}/short.db")
+            self.assertEqual(adapter_cfg["long_db"], f"{tmpdir}/long.db")
+
+    def test_db_path_persists_and_recalls_across_instances(self):
+        """A turn stored through a shared ``db_path`` is recalled by a second
+        Memory pointed at the same file — the end-to-end cross-instance path."""
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shared = f"{tmpdir}/mem.db"
+            writer = Memory(config={"provider": "sqlite", "db_path": shared})
+            writer.store_long_term(
+                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                metadata={"user_id": "db-path-user"},
+            )
+
+            reader = Memory(config={"provider": "sqlite", "db_path": shared})
+            hits = reader.search_long_term(
+                "codename", limit=5, user_id="db-path-user"
+            )
+            self.assertTrue(
+                any("ORANGE-PANDA" in r.get("text", "") for r in hits),
+                "second Memory on the same db_path must recall the stored turn",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
