@@ -2724,9 +2724,6 @@ Your Goal: {self.goal}
         # _apply_guardrail_with_retry / the guardrail_retry_count property).
         self._guardrail_retry_count = 0
         self._last_guardrail_error = None
-        # Per-turn marker: set by _guardrail_blocked_message() and consumed by
-        # the public chat()/achat() finalizer to record a blocked run as "error".
-        self._turn_guardrail_blocked = False
         self._guardrail_fn = None
         self._setup_guardrail()
         
@@ -7143,14 +7140,10 @@ Answer:"""
         it stays auditable without reaching the caller. The rejection is also
         exposed programmatically via :attr:`last_guardrail_error`.
         """
+        self._mark_db_run_error()
         reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
         if reason:
             logging.info(f"Agent {self.name}: guardrail block reason: {reason}")
-        # Mark this turn as guardrail-blocked so the public chat()/achat()
-        # finalizer records the DB run as "error" (the blocked message is a
-        # refusal, not a successful answer) while still persisting the returned
-        # message and duration. Reset at the start of each turn by the finalizer.
-        self._turn_guardrail_blocked = True
         return "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
 
     def _process_guardrail(self, task_output):

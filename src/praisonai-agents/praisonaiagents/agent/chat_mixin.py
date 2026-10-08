@@ -3215,13 +3215,11 @@ Your Goal: {self.goal}"""
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_state = self._get_db_run_state()
         previous_run_id = self._current_run_id
         db_started = time.perf_counter()
         db_output, db_status = None, "error"
         _cancel = None
-        # Reset the per-turn guardrail-block marker so a block from a previous
-        # turn never mislabels this run's status in the finalizer below.
-        self._turn_guardrail_blocked = False
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3247,7 +3245,7 @@ Your Goal: {self.goal}"""
             # A guardrail-blocked turn returns a non-None refusal string; it must
             # be recorded as "error", not "completed" (the answer was rejected).
             db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
-                "error" if result is None or self._turn_guardrail_blocked else "completed"
+                "error" if result is None else "completed"
             )
             if durable_context is not None:
                 outcome = (
@@ -3274,7 +3272,7 @@ Your Goal: {self.goal}"""
                 if self._current_run_id is not None and self._current_run_id != previous_run_id:
                     self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
             finally:
-                self._current_run_id = previous_run_id
+                self._restore_db_run_state(previous_run_state)
             if durable_context is not None:
                 from .durable import end_durable_run
 
@@ -4028,11 +4026,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_state = self._get_db_run_state()
         previous_run_id = self._current_run_id
         db_started = time.perf_counter()
         db_output, db_status = None, "error"
-        # Reset the per-turn guardrail-block marker (see sync chat()).
-        self._turn_guardrail_blocked = False
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         _cancel = self._turn_cancel_token(
             cancel_source, explicit=cancel_token is not None
@@ -4061,7 +4058,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # A guardrail-blocked turn returns a non-None refusal string; record
             # it as "error", not "completed" (see sync chat()).
             db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
-                "error" if result is None or self._turn_guardrail_blocked else "completed"
+                "error" if result is None else "completed"
             )
             if durable_context is not None:
                 outcome = (
@@ -4088,7 +4085,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if self._current_run_id is not None and self._current_run_id != previous_run_id:
                     self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
             finally:
-                self._current_run_id = previous_run_id
+                self._restore_db_run_state(previous_run_state)
             if durable_context is not None:
                 from .durable import end_durable_run
 

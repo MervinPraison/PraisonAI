@@ -74,8 +74,22 @@ class MemoryMixin:
 
     @property
     def _current_run_id(self) -> Optional[str]:
+        state = self._get_db_run_state()
+        return state["run_id"] if state is not None else None
+
+    def _get_db_run_state(self) -> Optional[dict]:
         run_context = getattr(self, "_db_run_context", None)
         return run_context.get() if run_context is not None else None
+
+    def _restore_db_run_state(self, state: Optional[dict]) -> None:
+        run_context = getattr(self, "_db_run_context", None)
+        if run_context is not None:
+            run_context.set(state)
+
+    def _mark_db_run_error(self) -> None:
+        state = self._get_db_run_state()
+        if state is not None:
+            state["status"] = "error"
 
     @_current_run_id.setter
     def _current_run_id(self, value: Optional[str]) -> None:
@@ -88,7 +102,7 @@ class MemoryMixin:
             run_context = self.__dict__.setdefault(
                 "_db_run_context", contextvars.ContextVar("praisonai_db_run", default=None)
             )
-        run_context.set(value)
+        run_context.set({"run_id": value, "status": None} if value is not None else None)
 
     def _cache_put(self, cache_dict, key, value):
         """Thread-safe LRU cache put operation.
@@ -557,6 +571,9 @@ class MemoryMixin:
         """End the current run (turn)."""
         if self._db is None or self._current_run_id is None:
             return
+        state = self._get_db_run_state()
+        if status == "completed" and state is not None and state.get("status") == "error":
+            status = "error"
         
         try:
             if hasattr(self._db, 'on_run_end'):
@@ -1074,4 +1091,3 @@ class MemoryMixin:
             logging.warning(f"Failed to save output to file '{self._output_file}': {e}")
             print(f"⚠️ Failed to save output to {self._output_file}: {e}")
             return False
-

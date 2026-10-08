@@ -99,9 +99,11 @@ def test_async_cancellation_finalizes_run(recorded_agent, monkeypatch):
     assert db.ends[0]["status"] == "cancelled"
 
 
-def test_concurrent_async_turns_keep_input_output_pairs(recorded_agent, monkeypatch):
+@pytest.mark.parametrize("block_first", [False, True])
+def test_concurrent_async_turns_keep_input_output_pairs(recorded_agent, monkeypatch, block_first):
     agent, db = recorded_agent
     agent._init_db_session()
+    outputs = {}
 
     async def scenario():
         first_entered, second_entered = asyncio.Event(), asyncio.Event()
@@ -111,6 +113,8 @@ def test_concurrent_async_turns_keep_input_output_pairs(recorded_agent, monkeypa
             if prompt == "first":
                 first_entered.set()
                 await second_entered.wait()
+                if block_first:
+                    return agent._guardrail_blocked_message(ValueError("unsafe output"))
             else:
                 second_entered.set()
                 await first_finished.wait()
@@ -120,16 +124,37 @@ def test_concurrent_async_turns_keep_input_output_pairs(recorded_agent, monkeypa
         first = asyncio.create_task(agent.achat("first"))
         await first_entered.wait()
         second = asyncio.create_task(agent.achat("second"))
-        assert await first == "answer to first"
+        outputs["first"] = await first
+        assert outputs["first"]
         first_finished.set()
-        assert await second == "answer to second"
+        outputs["second"] = await second
+        assert outputs["second"] == "answer to second"
 
     asyncio.run(scenario())
     assert len(db.starts) == len(db.ends) == 2
     starts = {row["run_id"]: row["input_content"] for row in db.starts}
     assert len(starts) == 2
     for end in db.ends:
-        assert end["output_content"] == f"answer to {starts[end['run_id']]}"
+        prompt = starts[end["run_id"]]
+        assert end["output_content"] == outputs[prompt]
+        assert end["status"] == ("error" if prompt == "first" and block_first else "completed")
+
+
+def test_before_agent_hook_receives_prompt_and_finalizes_block(recorded_agent):
+    from praisonaiagents.hooks import HookEvent, HookResult
+
+    agent, db = recorded_agent
+    seen = []
+
+    def block(data):
+        seen.append(data.prompt)
+        return HookResult.block("not approved")
+
+    agent._hook_runner.registry.register_function(HookEvent.BEFORE_AGENT, block)
+    assert agent.chat("review this prompt") is None
+    assert seen == ["review this prompt"]
+    assert len(db.starts) == len(db.ends) == 1
+    assert db.ends[0]["status"] == "error"
 
 
 def test_nested_turn_restores_outer_run(recorded_agent, monkeypatch):
@@ -188,6 +213,26 @@ def test_async_database_hooks_preserve_adapter_thread(recorded_agent, monkeypatc
 
 
 @pytest.mark.parametrize("async_turn", [False, True])
+def test_guardrail_rejection_records_blocked_output(recorded_agent, monkeypatch, async_turn):
+    agent, db = recorded_agent
+
+    def respond(*args, **kwargs):
+        return agent._guardrail_blocked_message(ValueError("unsafe output"))
+
+    async def arespond(**kwargs):
+        return respond()
+
+    monkeypatch.setattr(agent, "_chat_impl", respond)
+    monkeypatch.setattr(agent, "_achat_impl", arespond)
+    result = asyncio.run(agent.achat("question")) if async_turn else agent.chat("question")
+    assert len(db.starts) == len(db.ends) == 1
+    assert db.ends[0]["status"] == "error"
+    assert db.ends[0]["output_content"] == result
+    assert db.ends[0]["metrics"]["duration_ms"] >= 0
+    assert "unsafe output" not in result
+
+
+@pytest.mark.parametrize("async_turn", [False, True])
 def test_database_failure_does_not_replace_response(recorded_agent, monkeypatch, async_turn):
     agent, db = recorded_agent
 
@@ -229,11 +274,14 @@ def test_async_turn_restores_database_history(recorded_agent, monkeypatch):
 
 @pytest.mark.live
 def test_real_agent_turns_record_final_outputs(tmp_path, monkeypatch):
+    model = os.getenv("PRAISONAI_TEST_MODEL")
+    if not model:
+        pytest.skip("Set PRAISONAI_TEST_MODEL to select the live test provider")
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     db = RunRecorder()
     agent = Agent(name="live-recorded", instructions="Reply in one short sentence.",
                   memory=MemoryConfig(db=db, user_id="live-test"), reflection=False, rules=False, output="silent",
-                  model={"model": os.getenv("PRAISONAI_TEST_MODEL", "gpt-4o-mini"), "max_tokens": 96})
+                  model={"model": model, "max_tokens": 96})
     first = agent.start("Say hello.")
     second = asyncio.run(agent.achat("Say goodbye."))
     print(first)
