@@ -271,11 +271,12 @@ Launch PraisonAI servers with unified discovery support.
             # non-reload path builds it here; the reload path rebuilds it in the
             # worker process from reload_spec (so we don't build+discard here).
             self._run_server(
-                lambda: self._create_agents_app(parsed),
+                None,
                 parsed["host"],
                 parsed["port"],
                 parsed["reload"],
                 reload_spec={"builder": "_create_agents_app", "config": parsed},
+                app_builder=lambda: self._create_agents_app(parsed),
             )
             
         except ImportError as e:
@@ -909,11 +910,12 @@ Launch PraisonAI servers with unified discovery support.
             # Lazy builder: built once (here when not reloading, or in the reload
             # worker from reload_spec) instead of building then discarding.
             self._run_server(
-                lambda: self._create_unified_app(parsed),
+                None,
                 parsed["host"],
                 parsed["port"],
                 parsed["reload"],
                 reload_spec={"builder": "_create_unified_app", "config": parsed},
+                app_builder=lambda: self._create_unified_app(parsed),
             )
             
         except ImportError as e:
@@ -1015,21 +1017,27 @@ Launch PraisonAI servers with unified discovery support.
         port: int,
         reload: bool,
         reload_spec: Optional[Dict[str, Any]] = None,
+        app_builder: Optional[Any] = None,
     ) -> None:
         """Run the server with uvicorn.
 
         Args:
-            app: FastAPI app for the non-reload path. May be a prebuilt app or a
-                zero-arg callable that builds one on demand — when ``reload`` is
-                enabled the reload worker rebuilds the app from ``reload_spec`` in
-                its own process, so the parent never needs (and never calls) this
-                builder, avoiding a redundant second build (and double YAML parse).
+            app: Prebuilt FastAPI app for the non-reload path. Ignored when
+                ``app_builder`` is supplied. Note: a FastAPI/Starlette app is
+                itself an ASGI *callable* (``app(scope, receive, send)``), so the
+                builder must be passed via the explicit ``app_builder`` argument —
+                a built app can never be distinguished from a zero-arg builder by
+                ``callable()`` alone.
             host, port: Bind address.
             reload: Enable auto-reload.
             reload_spec: ``{"builder": <ServeHandler method name>, "config": {...}}``
                 describing how to rebuild the app. Required to honour ``reload``:
                 uvicorn needs an import string (not a live instance) to enable
                 reload, so without a spec a reload request is silently dropped.
+            app_builder: Optional zero-arg callable that builds the app on demand.
+                When given, the parent builds the app only on the non-reload path
+                (the reload worker rebuilds it from ``reload_spec`` in its own
+                process), avoiding a redundant build (and double YAML parse).
         """
         import json
         import os
@@ -1049,7 +1057,7 @@ Launch PraisonAI servers with unified discovery support.
             return
 
         # Non-reload path: build the app now if a lazy builder was passed.
-        resolved_app = app() if callable(app) else app
+        resolved_app = app_builder() if app_builder is not None else app
         uvicorn.run(resolved_app, host=host, port=port, reload=reload)
 
 
