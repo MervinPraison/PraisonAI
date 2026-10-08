@@ -4043,8 +4043,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
             if self._db is not None:
-                self._init_db_session()
-                self._start_run(prompt if isinstance(prompt, str) else str(prompt))
+                await self._ainit_db_session()
+                await self._astart_run(prompt if isinstance(prompt, str) else str(prompt))
             result = await self._achat_impl(
                 prompt=prompt, temperature=temperature, tools=tools,
                 output_json=output_json, output_pydantic=output_pydantic,
@@ -4083,7 +4083,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         finally:
             try:
                 if self._current_run_id is not None and self._current_run_id != previous_run_id:
-                    self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
+                    await self._aend_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
             finally:
                 self._restore_db_run_state(previous_run_state)
             if durable_context is not None:

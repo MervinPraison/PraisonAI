@@ -275,6 +275,46 @@ def test_async_turn_restores_database_history(recorded_agent, monkeypatch):
     assert db.ends[0]["output_content"] == "new answer"
 
 
+def test_async_adapter_callbacks_restore_history_and_finish_run(recorded_agent, monkeypatch):
+    from praisonaiagents.db.protocol import DbMessage
+
+    agent, db = recorded_agent
+    calls = []
+
+    def sync_hook(**kwargs):
+        raise AssertionError("sync callback must not run for an async-capable adapter")
+
+    async def begin_session(**kwargs):
+        calls.append("session")
+        await asyncio.sleep(0)
+        return [DbMessage(role="assistant", content="saved answer")]
+
+    async def begin_run(**kwargs):
+        calls.append("start")
+        db.starts.append(kwargs)
+        await asyncio.sleep(0)
+
+    async def end_run(**kwargs):
+        calls.append("end")
+        db.ends.append(kwargs)
+        await asyncio.sleep(0)
+
+    for name, callback in [("agent_start", begin_session), ("run_start", begin_run), ("run_end", end_run)]:
+        monkeypatch.setattr(db, f"on_{name}", sync_hook)
+        monkeypatch.setattr(db, f"aon_{name}", callback, raising=False)
+
+    async def respond(**kwargs):
+        assert agent.chat_history == [{"role": "assistant", "content": "saved answer"}]
+        return "new answer"
+
+    monkeypatch.setattr(agent, "_achat_impl", respond)
+    assert asyncio.run(agent.achat("question")) == "new answer"
+    assert calls == ["session", "start", "end"]
+    assert db.starts[0]["run_id"] == db.ends[0]["run_id"]
+    assert db.ends[0]["status"] == "completed"
+    assert agent._current_run_id is None
+
+
 @pytest.mark.live
 def test_real_agent_turns_record_final_outputs(tmp_path, monkeypatch):
     model = os.getenv("PRAISONAI_TEST_MODEL")
