@@ -743,10 +743,14 @@ class TestStrictKeyValidation:
             MultiChannelGatewayConfig,
         )
 
-        with pytest.raises(ConfigValidationError):
+        with pytest.raises(ConfigValidationError) as exc:
             MultiChannelGatewayConfig.from_dict(
                 {"channelz": {}}, strict=True
             )
+        # A top-level typo must be reported at the root, not misattributed to
+        # the ``gateway`` section it does not live in.
+        assert exc.value.path == "<root>"
+        assert exc.value.suggestion == "channels"
 
     def test_channel_token_typo_strict_raises(self):
         import pytest

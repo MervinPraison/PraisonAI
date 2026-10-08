@@ -1541,7 +1541,9 @@ class MultiChannelGatewayConfig:
             Configured MultiChannelGatewayConfig instance
         """
         # Validate top-level keys first so a misplaced section is caught early.
-        _check_unknown_keys(data, set(cls._KNOWN_TOP_KEYS), "gateway", strict)
+        # Use a distinct "<root>" path so a top-level typo (e.g. ``channelz``)
+        # is not misreported under the ``gateway`` section it does not live in.
+        _check_unknown_keys(data, set(cls._KNOWN_TOP_KEYS), "<root>", strict)
 
         # Parse gateway section
         gw_data = data.get("gateway", {})
