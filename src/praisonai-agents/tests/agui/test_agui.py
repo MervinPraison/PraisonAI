@@ -146,12 +146,17 @@ class TestAGUIIntegration:
         agui = AGUI(agent=agent)
         
         app = FastAPI()
-        app.include_router(agui.get_router())
+        router = agui.get_router()
+        app.include_router(router)
         
-        # Check app has routes
-        route_paths = [route.path for route in app.routes]
-        assert "/agui" in route_paths
-        assert "/status" in route_paths
+        # Starlette nests included routers, so app.routes may expose an
+        # internal router wrapper rather than flat child paths. Exercise the
+        # app directly to verify the included AG-UI endpoints are reachable.
+        from fastapi.testclient import TestClient
+        
+        client = TestClient(app)
+        assert client.get("/status").status_code == 200
+        assert client.post("/agui", json={"message": "hi"}).status_code != 404
 
 
 class TestAGUIName:
