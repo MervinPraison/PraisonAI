@@ -912,6 +912,7 @@ class TestOpenAIClientResponsesAPI:
         client._sync_client = None
         client._async_client = None
         client._async_client_loop = None
+        client._async_client_owned = False
 
         _ = client.async_client
         assert client._async_client_loop is None

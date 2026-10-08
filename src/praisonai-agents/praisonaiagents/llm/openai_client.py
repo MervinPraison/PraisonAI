@@ -396,6 +396,10 @@ class OpenAIClient:
         # it from a different/closed loop raises "Event loop is closed", so we
         # recreate the client when the running loop changes.
         self._async_client_loop = None
+        # Whether the cached async client was created by ``async_client`` itself.
+        # Externally injected clients (e.g. a stubbed transport in tests) are
+        # never dropped on a loop change, since we did not bind them to a loop.
+        self._async_client_owned = False
         
         # Set up logging
         self.logger = get_logger(__name__)
@@ -454,17 +458,17 @@ class OpenAIClient:
         except RuntimeError:
             running_loop = None
         # Drop a client bound to a different (often already closed) loop so we
-        # never call into a transport whose loop is gone.
+        # never call into a transport whose loop is gone. Only clients we built
+        # here are loop-bound; an externally injected client (e.g. a stubbed
+        # transport in tests) is left untouched.
         if (
             self._async_client is not None
+            and self._async_client_owned
             and running_loop is not None
             and self._async_client_loop is not None
             and self._async_client_loop is not running_loop
         ):
-            # Only discard SDK clients; tests inject SimpleNamespace transports.
-            _, AsyncOpenAI = _get_openai_classes()
-            if isinstance(self._async_client, AsyncOpenAI):
-                self._async_client = None
+            self._async_client = None
         if self._async_client is None:
             _, AsyncOpenAI = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
@@ -472,7 +476,12 @@ class OpenAIClient:
                 client_kwargs["max_retries"] = self.max_retries
             self._async_client = AsyncOpenAI(**client_kwargs)
             self._async_client_loop = running_loop
-        elif running_loop is not None and self._async_client_loop is None:
+            self._async_client_owned = True
+        elif (
+            self._async_client_owned
+            and running_loop is not None
+            and self._async_client_loop is None
+        ):
             # The client was first built with no running loop (e.g. sync-path
             # construction). Bind it to the first loop that actually uses it so
             # a later loop change is detected and the stale client is dropped.
