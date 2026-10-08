@@ -21,6 +21,7 @@ const EXTERNAL_EXAMPLE_LABEL = 'pipeline/external-example';
 const MAINTAINER_ACCEPT_EXAMPLE_LABEL = 'maintainer-accept-example';
 const CORE_TOOLS_DIR_PREFIX = 'src/praisonai-agents/praisonaiagents/tools/';
 const MAINTAINER_ACCEPT_CORE_TOOLS_LABEL = 'maintainer-accept-core-tools';
+const CORE_VENDOR_TOOL_LABEL = 'pipeline/core-vendor-tool';
 const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
 const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/', 'src/praisonai-ts/'];
 const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
@@ -761,10 +762,16 @@ function listAddedCoreVendorToolModules(files) {
     .map((f) => f.filename);
 }
 
+function shouldTagCoreVendorToolMisroute(files, labels = []) {
+  return (
+    listAddedCoreVendorToolModules(files).length > 0 &&
+    !labels.includes(MAINTAINER_ACCEPT_CORE_TOOLS_LABEL)
+  );
+}
+
 function newVendorToolModuleInCoreReason(files, labels = []) {
-  if (labels.includes(MAINTAINER_ACCEPT_CORE_TOOLS_LABEL)) return null;
+  if (!shouldTagCoreVendorToolMisroute(files, labels)) return null;
   const added = listAddedCoreVendorToolModules(files);
-  if (!added.length) return null;
   return `new vendor tool module in core (${added.join(', ')}) — belongs in PraisonAI-Tools (add ${MAINTAINER_ACCEPT_CORE_TOOLS_LABEL} to opt in)`;
 }
 
@@ -1273,6 +1280,9 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
       if (labels.includes(EXTERNAL_EXAMPLE_LABEL) && !labels.includes(MAINTAINER_ACCEPT_EXAMPLE_LABEL)) {
         return false;
       }
+      if (labels.includes(CORE_VENDOR_TOOL_LABEL) && !labels.includes(MAINTAINER_ACCEPT_CORE_TOOLS_LABEL)) {
+        return false;
+      }
       return true;
     })
     .map((issue) => issue.number)
@@ -1413,11 +1423,13 @@ module.exports = {
   EXTERNAL_EXAMPLE_LABEL,
   MAINTAINER_ACCEPT_EXAMPLE_LABEL,
   listAddedCoreVendorToolModules,
+  shouldTagCoreVendorToolMisroute,
   newVendorToolModuleInCoreReason,
   wrongFinalApprovalForVendorToolInCoreReason,
   looksLikeFinalApproveForMerge,
   CORE_TOOLS_DIR_PREFIX,
   MAINTAINER_ACCEPT_CORE_TOOLS_LABEL,
+  CORE_VENDOR_TOOL_LABEL,
   isInternalPullRequestLink,
   resolvePrNumberFromLinkedPullRequests,
   resolvePrNumberFromHeadBranch,

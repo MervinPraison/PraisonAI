@@ -22,6 +22,7 @@ const BLOCKER_LABELS = [
   'pipeline/blocked:cooldown',
   'pipeline/blocked:stale-final',
   'pipeline/blocked:no-final',
+  'pipeline/blocked:wrong-repo',
 ];
 const ALL_PIPELINE_LABELS = [...STAGE_LABELS, ...BLOCKER_LABELS];
 
@@ -42,6 +43,16 @@ const LABEL_SPECS = [
     color: 'bfd4f2',
     description: 'Diff only under examples/tools/external/ — not merge-ready without maintainer-accept-example',
   },
+  {
+    name: 'pipeline/core-vendor-tool',
+    color: 'c2e0c6',
+    description: 'Adds praisonaiagents/tools/*_tools.py vendor module — route to PraisonAI-Tools (maintainer-accept-core-tools to opt in)',
+  },
+  {
+    name: 'pipeline/blocked:wrong-repo',
+    color: '5319e7',
+    description: 'Blocked: belongs in PraisonAI-Tools / external repo, not core SDK',
+  },
 ];
 
 // PRs with pipeline/external-example cannot reach pipeline/merge-ready unless
@@ -57,6 +68,13 @@ function deriveStage(comments, evalResult) {
 
 function reasonToBlockerLabel(reason) {
   const r = (reason || '').toLowerCase();
+  if (
+    r.includes('vendor tool module in core') ||
+    r.includes('wrong verdict') ||
+    r.includes('external example only')
+  ) {
+    return 'pipeline/blocked:wrong-repo';
+  }
   if (r.includes('ci not green') || r.includes('sdk code changed but no ci')) return 'pipeline/blocked:ci';
   if (
     r.includes('conflict') ||
@@ -69,17 +87,13 @@ function reasonToBlockerLabel(reason) {
     r.includes('first-time contributor') ||
     r.includes('maintainer-only author') ||
     r.includes('auto-merge disabled') ||
-    r.includes('vendor tool module in core') ||
-    r.includes('wrong verdict') ||
-    r.includes('external example only') ||
     r.includes('sensitive path') ||
     r.includes('no-auto-merge') ||
     r.includes('manual-only label') ||
     r.includes('without test') ||
     r.includes('files changed') ||
     r.includes('possible secret') ||
-    r.includes('agent.py') ||
-    r.includes('external example only')
+    r.includes('agent.py')
   ) return 'pipeline/blocked:manual-review';
   if (r.includes('recent @claude') || r.includes('post-push buffer')) return 'pipeline/blocked:cooldown';
   if (r.includes('stale final')) return 'pipeline/blocked:stale-final';
@@ -150,9 +164,13 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
   );
   const { stage, blockers, all } = computePipelineLabels(ctx.comments, evalResult);
   const pullFiles = await mergeGate.listPullFiles(github, owner, repo, prNumber);
-  const auxiliary = mergeGate.isExternalExampleOnlyChange(pullFiles)
-    ? [mergeGate.EXTERNAL_EXAMPLE_LABEL]
-    : [];
+  const auxiliary = [];
+  if (mergeGate.isExternalExampleOnlyChange(pullFiles)) {
+    auxiliary.push(mergeGate.EXTERNAL_EXAMPLE_LABEL);
+  }
+  if (mergeGate.shouldTagCoreVendorToolMisroute(pullFiles, ctx.labels)) {
+    auxiliary.push(mergeGate.CORE_VENDOR_TOOL_LABEL);
+  }
   const labelSet = [...all, ...auxiliary];
 
   const current = ctx.labels.filter((l) => l.startsWith(PIPELINE_PREFIX));
