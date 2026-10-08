@@ -52,12 +52,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5958 |
 | ✅ Loops | 4 | 5 | 1478 |
 | ✅ MCP | 1 | 64 | 15149 |
-| ✅ Memory | 6 | 21 | 8386 |
+| ✅ Memory | 6 | 21 | 8411 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1289 |
-| ✅ Parallel Execution | 3 | 2 | 528 |
+| ✅ Parallel Execution | 3 | 2 | 532 |
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4112 |
 | ✅ Prompts | 2 | 9 | 2043 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 10 | 1303 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2822 |
-| ✅ Workflows | 5 | 21 | 8933 |
+| ✅ Workflows | 5 | 21 | 9036 |
 
 ## Documentation Without Features
 
