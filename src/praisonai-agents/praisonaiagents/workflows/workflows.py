@@ -154,12 +154,18 @@ def _rebuild_isolated(value: Any, memo: dict) -> Any:
             copied[_isolate_value(k, memo)] = _isolate_value(v, memo)
         return copied
     if isinstance(value, list):
-        copied = value.__class__()
+        try:
+            copied = value.__class__()  # preserves a list subclass where possible
+        except Exception:
+            copied = []  # subclass constructor requires args: fall back to list
         memo[id(value)] = copied
         copied.extend(_isolate_value(v, memo) for v in value)
         return copied
     if isinstance(value, set):
-        copied = value.__class__()
+        try:
+            copied = value.__class__()  # preserves a set subclass where possible
+        except Exception:
+            copied = set()  # subclass constructor requires args: fall back to set
         memo[id(value)] = copied
         for v in value:
             copied.add(_isolate_value(v, memo))

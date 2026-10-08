@@ -503,6 +503,57 @@ def test_uncopyable_fallback_preserves_container_subclass_behaviour():
     assert variables.get("after_output") == "AFTER"  # control
 
 
+def test_required_arg_container_subclass_with_uncopyable_leaf_does_not_crash():
+    """A list/set subclass whose constructor needs args must not abort the run.
+
+    The fallback rebuilt containers via ``value.__class__()``; a subclass whose
+    ``__init__`` requires arguments raised *inside* the fallback, aborting the
+    ``Parallel`` block before any branch ran - the very crash class this PR fixes
+    (#5717 merge-gate P1). The ``dict`` branch already guarded this; ``list`` and
+    ``set`` must too. On constructor failure the fallback degrades to a plain
+    ``list``/``set`` (still isolated) rather than raising.
+    """
+    client = _Uncopyable()
+
+    class _RequiredArgList(list):
+        def __init__(self, required):  # no zero-arg form
+            super().__init__()
+            self.required = required
+
+    class _RequiredArgSet(set):
+        def __init__(self, required):  # no zero-arg form
+            super().__init__()
+            self.required = required
+
+    # The un-copyable client sits *inside* each subclass, so ``copy.deepcopy``
+    # raises and the node-by-node fallback runs - which is where the unguarded
+    # ``value.__class__()`` constructor would have raised.
+    bad_list = _RequiredArgList("x")
+    bad_list.extend([client, 1, 2])
+    bad_set = _RequiredArgSet("y")
+    bad_set.update({client, 1, 2})
+
+    def report(ctx: WorkflowContext) -> StepResult:
+        return StepResult(output="ok", variables={
+            "list_vals": sorted(v for v in ctx.variables["bad_list"] if v is not client),
+            "list_has_client": any(v is client for v in ctx.variables["bad_list"]),
+            "set_vals": sorted(v for v in ctx.variables["bad_set"] if v is not client),
+            "set_has_client": any(v is client for v in ctx.variables["bad_set"]),
+        })
+
+    wf = Workflow(steps=[
+        parallel([Task(name="r", handler=report, max_retries=0)]),
+        Task(name="after", handler=_handler("AFTER"), max_retries=0),
+    ], variables={"bad_list": bad_list, "bad_set": bad_set})
+    variables = wf.start("go")["variables"]
+
+    assert variables["list_vals"] == [1, 2]
+    assert variables["list_has_client"] is True  # un-copyable leaf shared by ref
+    assert variables["set_vals"] == [1, 2]
+    assert variables["set_has_client"] is True
+    assert variables.get("after_output") == "AFTER"  # control
+
+
 def test_untouched_value_with_non_bool_inequality_is_not_a_write(caplog):
     """A carried-through object whose ``!=`` is not a bool must not become a write.
 
