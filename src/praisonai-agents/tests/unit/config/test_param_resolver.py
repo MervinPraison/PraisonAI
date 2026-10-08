@@ -353,6 +353,29 @@ class TestArrayParsing:
         assert result.max_retry_limit == 1  # From the 'fast_track' preset
         assert result.max_iter == 9  # Override
 
+    def test_preset_override_array_rejects_unknown_preset(self):
+        """An unknown preset in a preset_override array must raise, not fall through.
+
+        The normalisation widens accepted spellings; it must not widen the
+        *closed set*. A genuinely unknown name has no canonical match and must
+        surface the same helpful error the string form raises.
+        """
+        from praisonaiagents.config.param_resolver import resolve
+
+        presets = {
+            "verbose": MockOutputConfig(verbose=True, markdown=True, stream=False),
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            resolve(
+                value=["unknown"],
+                param_name="output",
+                config_class=MockOutputConfig,
+                presets=presets,
+                array_mode="preset_override",
+            )
+        assert "unknown" in str(exc_info.value)
+
     def test_single_or_list_array_preset_is_not_silently_dropped(self):
         """A non-canonical preset in a single-item array must still resolve.
 
