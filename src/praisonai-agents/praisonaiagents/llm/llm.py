@@ -7187,6 +7187,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["tool_choice"] = "auto"
 
         # ── Scalar params ───────────────────────────────────────────────
+        if temperature is None:
+            temperature = self.temperature
         if temperature is not None:
             params["temperature"] = temperature
         if self.max_tokens:
@@ -7246,6 +7248,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # Match Chat Completions after merging overrides: reasoning models
+        # must not regain unsupported sampling parameters through either path.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(params["model"]):
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
 
         return params
 
