@@ -660,6 +660,84 @@ class MemoryMixin:
             self._persist_message, role, content, tool_calls, tool_call_id
         )
 
+    def _persist_assistant_delta(self, content: str, *, force: bool = False) -> None:
+        """Persist the in-progress streamed assistant turn (Issue #5407).
+
+        Streamed output is only persisted after a turn completes, so an
+        interrupt mid-generation loses the whole partial turn. This flushes the
+        latest partial text to the session store via
+        ``upsert_partial_assistant_message`` so the store always reflects the
+        current turn. Writes are debounced (time-based) so per-token streaming
+        does not hammer the disk; ``force=True`` bypasses the debounce.
+
+        Degrades to a no-op when the store does not support partial upserts
+        (the terminal :meth:`_persist_message` write then preserves existing
+        per-turn behaviour).
+        """
+        store = getattr(self, "_session_store", None)
+        session_id = getattr(self, "_session_id", None)
+        if store is None or session_id is None:
+            return
+        upsert = getattr(store, "upsert_partial_assistant_message", None)
+        if upsert is None:
+            return
+        if not force:
+            import time as _time
+            now = _time.monotonic()
+            last = getattr(self, "_partial_persist_last", 0.0)
+            # ~5 writes/sec ceiling keeps disk I/O bounded for long turns.
+            if now - last < 0.2:
+                return
+            self._partial_persist_last = now
+        try:
+            upsert(session_id, content)
+        except Exception as e:
+            logging.debug(f"Partial assistant persist skipped: {e}")
+
+    def _finalize_assistant_turn(self, content: str) -> None:
+        """Finalize the streamed assistant turn, promoting the partial record.
+
+        Clears the partial flag on the trailing assistant message so resume
+        sees a normal completed turn. When the store has no partial-upsert
+        support this falls back to :meth:`_persist_message` so the assistant
+        turn is still persisted once at the end (backward compatible).
+        """
+        store = getattr(self, "_session_store", None)
+        session_id = getattr(self, "_session_id", None)
+        self._partial_persist_last = 0.0
+        if store is not None and session_id is not None:
+            upsert = getattr(store, "upsert_partial_assistant_message", None)
+            if upsert is not None:
+                try:
+                    upsert(session_id, content, finalize=True)
+                    self._persist_session_stats()
+                    return
+                except Exception as e:
+                    logging.debug(f"Finalize assistant turn skipped: {e}")
+        # Fallback: no partial support — persist once terminally.
+        if content:
+            self._persist_message("assistant", content)
+
+    def _discard_partial_assistant_turn(self) -> None:
+        """Drop any in-progress partial assistant record for this session.
+
+        Used when the authoritative assistant turn is persisted through another
+        path (e.g. a streamed tool-call turn) so a stale partial does not linger
+        in the store (Issue #5407). No-op for stores without partial support.
+        """
+        store = getattr(self, "_session_store", None)
+        session_id = getattr(self, "_session_id", None)
+        self._partial_persist_last = 0.0
+        if store is None or session_id is None:
+            return
+        discard = getattr(store, "discard_partial_assistant_message", None)
+        if discard is None:
+            return
+        try:
+            discard(session_id)
+        except Exception as e:
+            logging.debug(f"Discard partial assistant turn skipped: {e}")
+
     def _add_message_with_tool_fields(self, role, content, **tool_fields):
         """Add a message carrying tool fields, tolerating stores without them.
 

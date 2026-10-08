@@ -1551,7 +1551,143 @@ class DefaultSessionStore:
     ) -> bool:
         """Add an assistant message to a session."""
         return self.add_message(session_id, "assistant", content, metadata)
-    
+
+    def upsert_partial_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        finalize: bool = False,
+    ) -> bool:
+        """Create or update the single in-progress assistant turn (Issue #5407).
+
+        Streamed output is only persisted today after a turn completes, so an
+        interrupt mid-generation (Ctrl-C / crash) loses the whole partial turn.
+        This writes the latest known partial text to a single trailing
+        assistant message tagged ``metadata={"partial": True}`` and overwrites
+        it on each flush instead of appending a new message per token, keeping
+        the write cheap.
+
+        When ``finalize`` is True the partial flag is dropped, promoting the
+        trailing message to a normal assistant turn. If there is no partial
+        message to finalize and ``content`` is non-empty, a normal assistant
+        message is appended (the fallback path when no partial was ever
+        flushed).
+
+        Args:
+            session_id: The session ID.
+            content: The full assistant text known so far.
+            finalize: When True, mark the turn complete (clear the partial flag).
+
+        Returns:
+            True if the store was updated successfully.
+        """
+        # Short-circuit: finalizing with no text and a *confirmed* absent
+        # partial is a no-op, so avoid a needless read-modify-write. An
+        # ambiguous read failure (None) falls through to the locked RMW, which
+        # re-reads under the lock rather than guessing (Issue #5407).
+        if finalize and not content and self._has_trailing_partial(session_id) is False:
+            return True
+
+        # Capture the finalized message so it can be mirrored after the write
+        # succeeds, without re-reading the session.
+        finalized_holder: Dict[str, Any] = {}
+
+        def _apply(session: SessionData) -> None:
+            trailing = session.messages[-1] if session.messages else None
+            is_partial = (
+                trailing is not None
+                and trailing.role == "assistant"
+                and bool((trailing.metadata or {}).get("partial"))
+            )
+            if is_partial:
+                if finalize and not content:
+                    # Interrupted with no text ever produced: drop the empty
+                    # placeholder rather than leaving a blank partial turn.
+                    session.messages.pop()
+                else:
+                    trailing.content = content
+                    trailing.timestamp = time.time()
+                    if finalize:
+                        trailing.metadata.pop("partial", None)
+                        if trailing.metadata is None:
+                            trailing.metadata = {}
+                        finalized_holder["message"] = trailing
+            else:
+                if finalize and not content:
+                    return
+                message = SessionMessage(
+                    role="assistant",
+                    content=content,
+                    timestamp=time.time(),
+                    metadata={} if finalize else {"partial": True},
+                )
+                session.messages.append(message)
+                if finalize:
+                    finalized_holder["message"] = message
+
+        # Route through the transactional read-modify-write seam so SQLite-
+        # backed stores write their authoritative row (not a stray JSON file),
+        # concurrent turns stay serialized, failed writes propagate (and spill
+        # for recovery), and search indexes refresh on finalize — rather than
+        # re-implementing a FileLock+JSON write that only the default store
+        # honours (Issue #5407).
+        if not self._modify_session_locked(
+            session_id, _apply, error_label="upsert partial assistant message"
+        ):
+            return False
+
+        # Only a finalized turn is a completed record the mirror should carry;
+        # per-token partials are intentionally local until finalize.
+        if finalize and finalized_holder.get("message") is not None:
+            self._mirror_append(session_id, [finalized_holder["message"]])
+        return True
+
+    def _has_trailing_partial(self, session_id: str) -> Optional[bool]:
+        """Return the trailing-partial state, or ``None`` if it can't be read.
+
+        ``True``/``False`` report a successful check; ``None`` signals the read
+        itself failed, so callers must not treat an ambiguous failure as a
+        confirmed absence (which would silently skip a needed discard).
+        """
+        try:
+            session = self._read_session_fresh(session_id)
+        except Exception:
+            return None
+        trailing = session.messages[-1] if session.messages else None
+        return (
+            trailing is not None
+            and trailing.role == "assistant"
+            and bool((trailing.metadata or {}).get("partial"))
+        )
+
+    def discard_partial_assistant_message(self, session_id: str) -> bool:
+        """Drop a trailing in-progress assistant turn, if any (Issue #5407).
+
+        Used when the authoritative assistant turn is written through another
+        path (e.g. a tool-call turn) so a stale partial record does not linger.
+        No-op when the trailing message is not a partial.
+        """
+        # Only skip the read-modify-write when we can *confirm* there is no
+        # trailing partial. An ambiguous read failure (None) must fall through
+        # to the locked RMW — which re-reads under the lock — so a stale partial
+        # is never left behind on a transient read error (Issue #5407).
+        if self._has_trailing_partial(session_id) is False:
+            return True
+
+        def _apply(session: SessionData) -> None:
+            trailing = session.messages[-1] if session.messages else None
+            if (
+                trailing is not None
+                and trailing.role == "assistant"
+                and bool((trailing.metadata or {}).get("partial"))
+            ):
+                session.messages.pop()
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="discard partial assistant message"
+        )
+
     def get_chat_history(
         self,
         session_id: str,

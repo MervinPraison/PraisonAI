@@ -217,6 +217,59 @@ class SessionStoreProtocol(Protocol):
 
 
 @runtime_checkable
+class IncrementalSessionStoreProtocol(Protocol):
+    """Optional protocol for incremental streamed-turn persistence (Issue #5407).
+
+    Streamed assistant output is only persisted after a turn completes, so an
+    interrupt mid-generation (Ctrl-C, crash, dropped connection) loses the whole
+    in-progress turn. A store that implements this protocol lets the agent flush
+    the growing partial assistant turn as tokens arrive, so ``--continue`` /
+    ``--session`` can recover whatever was produced.
+
+    The seam is deliberately tiny and purely additive: the agent feature-detects
+    these methods and falls back to the single terminal
+    ``add_assistant_message`` write when a store does not implement them, so
+    existing stores keep working unchanged.
+
+    Example::
+
+        store.upsert_partial_assistant_message("s1", "Hello")       # flush
+        store.upsert_partial_assistant_message("s1", "Hello world") # overwrite
+        store.upsert_partial_assistant_message("s1", "Hello world", finalize=True)
+    """
+
+    def upsert_partial_assistant_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        finalize: bool = False,
+    ) -> bool:
+        """Create or overwrite the single in-progress assistant turn.
+
+        Args:
+            session_id: The session to write to.
+            content: The full assistant text known so far.
+            finalize: When True, mark the turn complete (clear the partial flag).
+
+        Returns:
+            True if the store was updated successfully.
+        """
+        ...
+
+    def discard_partial_assistant_message(self, session_id: str) -> bool:
+        """Drop a trailing in-progress assistant turn, if any.
+
+        Args:
+            session_id: The session to update.
+
+        Returns:
+            True if the store is now free of a trailing partial turn.
+        """
+        ...
+
+
+@runtime_checkable
 class PortableSessionStoreProtocol(Protocol):
     """Protocol for portable backup / restore / migration of sessions.
 
