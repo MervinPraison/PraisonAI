@@ -661,6 +661,20 @@ class SurvivingARestart(unittest.TestCase):
         self.first.command_builder = _script("print('done')")
         run = self.first.start(self.config, "run-done")
         self.assertTrue(_wait(lambda: run.state in training.TERMINAL), run.state)
+        import json
+
+        state_file = pathlib.Path(self.home, "runs", "run-done", "run.json")
+
+        def ending_is_persisted():
+            try:
+                saved = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return False
+            return saved.get("state") == training.DONE
+
+        # finish() publishes the in-memory state before the supervisor writes
+        # run.json. Restart only once that asynchronous write has completed.
+        self.assertTrue(_wait(ending_is_persisted), "the completed run was not persisted")
         second = training.Trainer(self.home, sys.executable)
         self.assertEqual(second.get("run-done").state, training.DONE)
         self.assertIsNone(second.current, "a finished run was adopted as live")
