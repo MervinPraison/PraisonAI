@@ -103,11 +103,55 @@ assert('external contributor blocked', mg.maintainerOnlyAuthorReason({
 assert('first-time contributor blocked', mg.maintainerOnlyAuthorReason({
   user: { login: 'new-dev' },
   author_association: 'FIRST_TIME_CONTRIBUTOR',
-})?.includes('FIRST_TIME_CONTRIBUTOR'));
+})?.includes('first-time contributor'));
 assert('maintainer login allowed', mg.maintainerOnlyAuthorReason({
   user: { login: 'MervinPraison' },
   author_association: 'OWNER',
 }) === null);
+
+const fxmacroFile = {
+  status: 'added',
+  filename: 'src/praisonai-agents/praisonaiagents/tools/fxmacrodata_tools.py',
+};
+assert(
+  'new vendor *_tools.py blocked for merge gate',
+  mg.newVendorToolModuleInCoreReason([fxmacroFile], [])?.includes('PraisonAI-Tools')
+);
+assert(
+  'maintainer-accept-core-tools opts in',
+  mg.newVendorToolModuleInCoreReason([fxmacroFile], [mg.MAINTAINER_ACCEPT_CORE_TOOLS_LABEL]) === null
+);
+assert(
+  'modified legacy tool file not blocked',
+  mg.newVendorToolModuleInCoreReason(
+    [{ status: 'modified', filename: 'src/praisonai-agents/praisonaiagents/tools/tavily_tools.py' }],
+    []
+  ) === null
+);
+assert(
+  'FINAL prompt mentions 6c vendor tools rule',
+  mg.FINAL_CLAUDE_REVIEW_BODY.includes('6c.') &&
+    mg.FINAL_CLAUDE_REVIEW_BODY.includes('maintainer-accept-core-tools')
+);
+assert(
+  'FINAL Phase 3 forbids approve on routing fail',
+  mg.FINAL_CLAUDE_REVIEW_BODY.includes('Never') &&
+    mg.FINAL_CLAUDE_REVIEW_BODY.includes('6b/6c')
+);
+const fx5661Finished = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: '**Claude finished @MervinPraison\'s task**\nVerdict: ✅ Approve for merge.',
+  created_at: '2026-10-07T09:40:28Z',
+};
+assert(
+  '#5661-style wrong FINAL approval blocked',
+  mg.wrongFinalApprovalForVendorToolInCoreReason(
+    [fx5661Finished],
+    '2026-10-07T09:00:00Z',
+    [fxmacroFile],
+    []
+  )?.includes('wrong verdict')
+);
 
 const coreGreenRuns = [
   { name: 'test-core', status: 'completed', conclusion: 'success' },

@@ -19,6 +19,8 @@ const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
 const EXTERNAL_EXAMPLE_PATH_PREFIX = 'examples/tools/external/';
 const EXTERNAL_EXAMPLE_LABEL = 'pipeline/external-example';
 const MAINTAINER_ACCEPT_EXAMPLE_LABEL = 'maintainer-accept-example';
+const CORE_TOOLS_DIR_PREFIX = 'src/praisonai-agents/praisonaiagents/tools/';
+const MAINTAINER_ACCEPT_CORE_TOOLS_LABEL = 'maintainer-accept-core-tools';
 const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
 const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/', 'src/praisonai-ts/'];
 const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
@@ -106,10 +108,18 @@ function isAutoMergeAuthor(user) {
   return login.endsWith('[bot]') && login.toLowerCase().includes('praisonai-triage');
 }
 
+function isFirstTimeContributor(pr) {
+  return pr?.author_association === 'FIRST_TIME_CONTRIBUTOR';
+}
+
+/** Human / external authors not on the triage auto-merge allowlist. */
 function maintainerOnlyAuthorReason(pr) {
   if (!pr?.user?.login) return 'maintainer-only author (missing login)';
   // Trusted automation first — GitHub often marks bots as CONTRIBUTOR.
   if (isAutoMergeAuthor(pr.user)) return null;
+  if (isFirstTimeContributor(pr)) {
+    return `auto-merge disabled: first-time contributor (@${pr.user.login})`;
+  }
   if (MAINTAINER_ONLY_ASSOCIATIONS.has(pr.author_association)) {
     return `maintainer-only author (@${pr.user.login}, ${pr.author_association})`;
   }
@@ -458,7 +468,7 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
 }
 
 const FINAL_CLAUDE_REVIEW_BODY =
-  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**MANDATORY READ (before reviewing):**\n- Always read src/praisonai-agents/AGENTS.md\n- If this PR touches src/praisonai-ts/, also read src/praisonai-ts/AGENTS.md §2.1.2 (TS triage + PR review checklist)\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n6b. **External tool examples (`examples/tools/external/**`):** If the diff is confined to that path, mark **SDK value** ❌ for monorepo merge — redirect the contributor to PraisonAI-Tools; do **not** Approve for merge unless the PR has the `maintainer-accept-example` label.\n\n**MANDATORY COMMENT FORMAT — include this Phase 1 table in your review comment:**\n#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|\n| Protocol-driven / no heavy impl in core | ✅ or ❌ + one-line rationale |\n| Backward compatible | ✅ or ❌ + one-line rationale |\n| Performance (hot path) | ✅ or ❌ + one-line rationale |\n| **SDK value** | ✅ or ❌ + one-line rationale (explicitly judge whether the change strengthens the SDK) |\n| No Agent param bloat | ✅ or ❌ + one-line rationale |\n| Repo routing | ✅ or ❌ + one-line rationale |\n\nFor TypeScript PRs (src/praisonai-ts/), also add:\n| TS types / parity / tests | ✅ or ❌ + one-line rationale (npm run build && npm test) |\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
+  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**MANDATORY READ (before reviewing):**\n- Always read src/praisonai-agents/AGENTS.md\n- If this PR touches src/praisonai-ts/, also read src/praisonai-ts/AGENTS.md §2.1.2 (TS triage + PR review checklist)\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n6b. **External tool examples (`examples/tools/external/**`):** If the diff is confined to that path, mark **SDK value** ❌ for monorepo merge — redirect the contributor to PraisonAI-Tools; do **not** Approve for merge unless the PR has the `maintainer-accept-example` label.\n6c. **New vendor `*_tools.py` in core (`src/praisonai-agents/praisonaiagents/tools/`):** If the PR **adds** a new `*_tools.py` for a third-party API/SaaS/dataset (e.g. FXMacroData), mark **Repo routing** ❌ and **SDK value** ❌ — redirect to MervinPraison/PraisonAI-Tools. Do **not** Approve because legacy bundled tools (Tavily/Exa/You.com/etc.) already in core are **not** precedent for new vendor modules. Request changes or recommend closing unless the PR has `maintainer-accept-core-tools`.\n\n**MANDATORY COMMENT FORMAT — include this Phase 1 table in your review comment:**\n#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|\n| Protocol-driven / no heavy impl in core | ✅ or ❌ + one-line rationale |\n| Backward compatible | ✅ or ❌ + one-line rationale |\n| Performance (hot path) | ✅ or ❌ + one-line rationale |\n| **SDK value** | ✅ or ❌ + one-line rationale (explicitly judge whether the change strengthens the SDK) |\n| No Agent param bloat | ✅ or ❌ + one-line rationale |\n| Repo routing | ✅ or ❌ + one-line rationale |\n\nFor TypeScript PRs (src/praisonai-ts/), also add:\n| TS types / parity / tests | ✅ or ❌ + one-line rationale (npm run build && npm test) |\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. **Never** Approve or write “Approve for merge” if any Phase 1 row is ❌, if rule 6b/6c applies, or if the change belongs in PraisonAI-Tools/PraisonAI-Plugins. Use **Request changes**, redirect to the external repo, and recommend closing the monorepo PR when routing is wrong.\n12. Approve only when every Phase 1 row is ✅ (including **Repo routing** and **SDK value**) and blocking issues are resolved; otherwise request changes with clear action items';
 
 async function getMergeState(github, owner, repo, prNumber) {
   const query = `
@@ -694,6 +704,11 @@ async function shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core, 
     return true;
   }
   const ctx = await loadPrContext(github, owner, repo, prNumber);
+  const authorBlock = maintainerOnlyAuthorReason(ctx.pr);
+  if (authorBlock) {
+    core?.info?.(`Skip merge gate dispatch for PR #${prNumber}: ${authorBlock}`);
+    return true;
+  }
   const pendingRuns = await countPendingMergeGateRuns(github, owner, repo);
   const reason = mergeGateDispatchBlockedReason({
     labels: ctx.labels,
@@ -736,6 +751,57 @@ function isCiOnlyChange(files) {
 function isExternalExampleOnlyChange(files) {
   if (!files.length) return false;
   return files.every((f) => f.filename.startsWith(EXTERNAL_EXAMPLE_PATH_PREFIX));
+}
+
+/** New third-party vendor modules must land in PraisonAI-Tools, not core (legacy bundled *_tools.py excepted). */
+function listAddedCoreVendorToolModules(files) {
+  return (files || [])
+    .filter((f) => f.status === 'added' && f.filename.startsWith(CORE_TOOLS_DIR_PREFIX))
+    .filter((f) => /\/[^/]+_tools\.py$/.test(f.filename))
+    .map((f) => f.filename);
+}
+
+function newVendorToolModuleInCoreReason(files, labels = []) {
+  if (labels.includes(MAINTAINER_ACCEPT_CORE_TOOLS_LABEL)) return null;
+  const added = listAddedCoreVendorToolModules(files);
+  if (!added.length) return null;
+  return `new vendor tool module in core (${added.join(', ')}) — belongs in PraisonAI-Tools (add ${MAINTAINER_ACCEPT_CORE_TOOLS_LABEL} to opt in)`;
+}
+
+function latestClaudeFinishedCommentOnHead(comments, headPushedAt) {
+  if (!headPushedAt) return null;
+  const headTime = new Date(headPushedAt).getTime();
+  let latest = null;
+  let latestTime = 0;
+  for (const c of comments || []) {
+    if (!isClaudeFinalReplyComment(c)) continue;
+    const t = new Date(c.created_at).getTime();
+    if (t < headTime - 60000) continue;
+    if (t > latestTime) {
+      latestTime = t;
+      latest = c;
+    }
+  }
+  return latest;
+}
+
+function looksLikeFinalApproveForMerge(body) {
+  const b = (body || '').toLowerCase();
+  if (b.includes('request changes')) return false;
+  if (b.includes('repo routing | ❌') || b.includes('repo routing| ❌')) return false;
+  return (
+    b.includes('approve for merge') ||
+    b.includes('verdict: ✅ approve') ||
+    b.includes('verdict: approve')
+  );
+}
+
+/** Catches cases like #5661 where FINAL approved despite new vendor *_tools.py in core. */
+function wrongFinalApprovalForVendorToolInCoreReason(comments, headPushedAt, files, labels = []) {
+  if (!newVendorToolModuleInCoreReason(files, labels)) return null;
+  const finished = latestClaudeFinishedCommentOnHead(comments, headPushedAt);
+  if (!finished || !looksLikeFinalApproveForMerge(finished.body)) return null;
+  return 'FINAL approved vendor tool in core (wrong verdict) — re-trigger FINAL after routing rules';
 }
 
 function isInternalPullRequestLink(link, owner, repo) {
@@ -1056,6 +1122,10 @@ async function loadPrContext(github, owner, repo, prNumber) {
   const headCommitDate = await getHeadCommitDate(github, owner, repo, prNumber);
   const headPushedAt = headCommitDate || pr.updated_at;
 
+  if (issue.author_association && !pr.author_association) {
+    pr.author_association = issue.author_association;
+  }
+
   return {
     pr,
     issue,
@@ -1140,6 +1210,17 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
       'external example only — belongs in PraisonAI-Tools (add maintainer-accept-example to opt in)'
     );
   }
+
+  const vendorToolReason = newVendorToolModuleInCoreReason(pullFiles, ctx.labels);
+  if (vendorToolReason) reasons.push(vendorToolReason);
+
+  const wrongFinalVendor = wrongFinalApprovalForVendorToolInCoreReason(
+    ctx.comments,
+    ctx.headPushedAt,
+    pullFiles,
+    ctx.labels
+  );
+  if (wrongFinalVendor) reasons.push(wrongFinalVendor);
 
   const agentChange = getAgentPyChangeFromFiles(pullFiles);
   const agentManual = manualReviewReasonForAgentPy(agentChange);
@@ -1331,6 +1412,12 @@ module.exports = {
   EXTERNAL_EXAMPLE_PATH_PREFIX,
   EXTERNAL_EXAMPLE_LABEL,
   MAINTAINER_ACCEPT_EXAMPLE_LABEL,
+  listAddedCoreVendorToolModules,
+  newVendorToolModuleInCoreReason,
+  wrongFinalApprovalForVendorToolInCoreReason,
+  looksLikeFinalApproveForMerge,
+  CORE_TOOLS_DIR_PREFIX,
+  MAINTAINER_ACCEPT_CORE_TOOLS_LABEL,
   isInternalPullRequestLink,
   resolvePrNumberFromLinkedPullRequests,
   resolvePrNumberFromHeadBranch,

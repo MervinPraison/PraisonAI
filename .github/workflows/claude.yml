@@ -302,7 +302,7 @@ jobs:
 
 
             STEP 1 — READ GUIDELINES:
-            Read AGENTS.md to understand the architecture rules.
+            Read src/praisonai-agents/AGENTS.md (especially §6.1 vendor tools → PraisonAI-Tools) and root AGENTS.md routing table.
             SCOPE: Python SDK (praisonaiagents, praisonai) and TypeScript SDK (src/praisonai-ts/) live in this monorepo. Do NOT modify src/praisonai-rust. For TS issues read src/praisonai-ts/AGENTS.md.
             AIM: This package must stay LIGHTWEIGHT AND POWERFUL. Do a CRITICAL REVIEW at each stage (issue triage, fix planning, PR review/implementation) and reject scope creep for the sake of adding features. Prefer existing Agent capabilities (instructions/backstory/tools/hooks/memory) over new params/modules/exports. Even when fixing a raised issue, keep the fix minimal and lightweight — do NOT expand the surface area or add knobs with no live consumer.
 
@@ -311,7 +311,7 @@ jobs:
             - CORE vs WRAPPER vs TOOLS vs DOCS vs PLUGINS ROUTING:
               1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-              3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, API/DB connectors). Do NOT implement in praisonaiagents/ — use STEP 3-ALT.
+              3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, API/DB connectors, new vendor APIs). Do NOT add new `praisonaiagents/tools/*_tools.py` modules in this repo — legacy bundled search tools (Tavily/Exa/You.com) are not precedent. Use STEP 3-ALT.
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
               5. Plugins → MervinPraison/PraisonAI-Plugins: framework lifecycle extensions (tracing, logging, metrics, hooks, guardrails). Not agent tools — use STEP 3-ALT.
               6. Sandbox backends (optional/niche, e.g. Capsule) → PraisonAI-Plugins via `praisonai.sandbox` entry point; core keeps protocol/config/manager only.
