@@ -14,6 +14,11 @@ import {
   TERMINAL_REASON_PRECEDENCE,
   RunOutcome,
   classifyFinishReason,
+  RunTerminal,
+  isSticky,
+  mergeRunTerminal,
+  collapse,
+  type TerminalKind,
 } from '../../../src/agent/run-outcome';
 
 describe('AgentRunStatus / TerminationReason', () => {
@@ -293,5 +298,86 @@ describe('RunOutcome (agent/run_outcome.py)', () => {
     ])('finish=%p refusal=%p -> %p', (finish, refusal, expected) => {
       expect(classifyFinishReason(finish as any, refusal)).toBe(expected);
     });
+  });
+});
+
+describe('RunTerminal / mergeRunTerminal / isSticky / collapse', () => {
+  it('RunTerminal is frozen and round-trips through toDict/fromDict', () => {
+    const t = new RunTerminal({ kind: 'timeout', source: 'run_budget', detail: 'slow' });
+    expect(t.kind).toBe('timeout');
+    expect(t.source).toBe('run_budget');
+    expect(t.detail).toBe('slow');
+    expect(Object.isFrozen(t)).toBe(true);
+    expect(() => { (t as any).kind = 'ok'; }).toThrow();
+    expect(t.toDict()).toEqual({ kind: 'timeout', source: 'run_budget', detail: 'slow' });
+    expect(new RunTerminal({ kind: 'ok', source: 'completion' }).toDict()).toEqual({
+      kind: 'ok', source: 'completion', detail: null,
+    });
+    const round = RunTerminal.fromDict(t.toDict());
+    expect(round.toDict()).toEqual(t.toDict());
+  });
+
+  it('isSticky is true only for external/run_budget/superseded', () => {
+    expect(isSticky(new RunTerminal({ kind: 'aborted', source: 'external' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'timeout', source: 'run_budget' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'ok', source: 'superseded' }))).toBe(true);
+    expect(isSticky(new RunTerminal({ kind: 'ok', source: 'completion' }))).toBe(false);
+    expect(isSticky(new RunTerminal({ kind: 'timeout', source: 'idle' }))).toBe(false);
+    expect(isSticky(new RunTerminal({ kind: 'failed', source: 'provider' }))).toBe(false);
+  });
+
+  // test_collapse_covers_all_kinds
+  it('collapse covers all kinds', () => {
+    const table: Array<[TerminalKind, string]> = [
+      ['ok', 'success'],
+      ['failed', 'failure'],
+      ['timeout', 'timeout'],
+      ['aborted', 'cancelled'],
+    ];
+    for (const [kind, status] of table) {
+      expect(collapse(new RunTerminal({ kind, source: 'completion' }))).toBe(status);
+    }
+  });
+
+  it('mergeRunTerminal seeds from null/undefined', () => {
+    const obs = new RunTerminal({ kind: 'ok', source: 'completion' });
+    expect(mergeRunTerminal(null, obs)).toBe(obs);
+    expect(mergeRunTerminal(undefined, obs)).toBe(obs);
+  });
+
+  it('mergeRunTerminal refines toward a stronger kind but never downgrades', () => {
+    const ok = new RunTerminal({ kind: 'ok', source: 'completion' });
+    const failed = new RunTerminal({ kind: 'failed', source: 'provider' });
+    const timeout = new RunTerminal({ kind: 'timeout', source: 'idle' });
+    expect(mergeRunTerminal(ok, failed)).toBe(failed);
+    expect(mergeRunTerminal(failed, timeout)).toBe(timeout);
+    // weaker later observation does not downgrade
+    expect(mergeRunTerminal(timeout, failed)).toBe(timeout);
+    expect(mergeRunTerminal(failed, ok)).toBe(failed);
+  });
+
+  it('a sticky current is never overwritten', () => {
+    const sticky = new RunTerminal({ kind: 'aborted', source: 'external' });
+    const stronger = new RunTerminal({ kind: 'aborted', source: 'provider' });
+    expect(mergeRunTerminal(sticky, stronger)).toBe(sticky);
+    expect(mergeRunTerminal(sticky, new RunTerminal({ kind: 'timeout', source: 'run_budget' }))).toBe(sticky);
+  });
+
+  it('equal rank promotes to a sticky observation (order-independence)', () => {
+    const idle = new RunTerminal({ kind: 'timeout', source: 'idle' });
+    const budget = new RunTerminal({ kind: 'timeout', source: 'run_budget' });
+    // idle then budget -> promote to sticky budget
+    expect(mergeRunTerminal(idle, budget)).toBe(budget);
+    // budget then idle -> budget is sticky, stays
+    expect(mergeRunTerminal(budget, idle)).toBe(budget);
+  });
+
+  // test_cancel_not_overwritten_by_late_error
+  it('cancel is not overwritten by a late error and collapses to cancelled', () => {
+    const cancel = new RunTerminal({ kind: 'aborted', source: 'external' });
+    const lateError = new RunTerminal({ kind: 'failed', source: 'provider' });
+    const merged = mergeRunTerminal(cancel, lateError);
+    expect(merged).toBe(cancel);
+    expect(collapse(merged)).toBe('cancelled');
   });
 });
