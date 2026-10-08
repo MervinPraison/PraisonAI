@@ -400,6 +400,10 @@ class OpenAIClient:
         # Externally injected clients (e.g. a stubbed transport in tests) are
         # never dropped on a loop change, since we did not bind them to a loop.
         self._async_client_owned = False
+        # Guards the loop-change drop/rebuild of the async client so concurrent
+        # sync callers (each on its own ``asyncio.run`` loop) cannot observe a
+        # half-swapped client or a transient ``None``.
+        self._async_client_lock = threading.Lock()
         
         # Set up logging
         self.logger = get_logger(__name__)
@@ -457,36 +461,49 @@ class OpenAIClient:
             running_loop = asyncio.get_running_loop()
         except RuntimeError:
             running_loop = None
-        # Drop a client bound to a different (often already closed) loop so we
-        # never call into a transport whose loop is gone. Only clients we built
-        # here are loop-bound; an externally injected client (e.g. a stubbed
-        # transport in tests) is left untouched.
-        if (
-            self._async_client is not None
-            and self._async_client_owned
-            and running_loop is not None
-            and self._async_client_loop is not None
-            and self._async_client_loop is not running_loop
-        ):
-            self._async_client = None
-        if self._async_client is None:
-            _, AsyncOpenAI = _get_openai_classes()
-            client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
-            if self.max_retries is not None:
-                client_kwargs["max_retries"] = self.max_retries
-            self._async_client = AsyncOpenAI(**client_kwargs)
-            self._async_client_loop = running_loop
-            self._async_client_owned = True
-        elif (
-            self._async_client_owned
-            and running_loop is not None
-            and self._async_client_loop is None
-        ):
-            # The client was first built with no running loop (e.g. sync-path
-            # construction). Bind it to the first loop that actually uses it so
-            # a later loop change is detected and the stale client is dropped.
-            self._async_client_loop = running_loop
-        return self._async_client
+        # Serialise the drop/rebuild so concurrent sync callers (each on their
+        # own ``asyncio.run`` loop) cannot observe a transient ``None`` or a
+        # half-swapped client. Clients built via ``__new__`` in tests may lack
+        # the lock, so fall back to a throwaway lock.
+        lock = getattr(self, "_async_client_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._async_client_lock = lock
+        with lock:
+            # Drop a client bound to a different (often already closed) loop so
+            # we never call into a transport whose loop is gone. Only clients we
+            # built here are loop-bound; an externally injected client (e.g. a
+            # stubbed transport in tests) is left untouched.
+            if (
+                self._async_client is not None
+                and self._async_client_owned
+                and running_loop is not None
+                and self._async_client_loop is not None
+                and self._async_client_loop is not running_loop
+            ):
+                self._async_client = None
+            if self._async_client is None:
+                _, AsyncOpenAI = _get_openai_classes()
+                client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
+                if self.max_retries is not None:
+                    client_kwargs["max_retries"] = self.max_retries
+                self._async_client = AsyncOpenAI(**client_kwargs)
+                self._async_client_loop = running_loop
+                self._async_client_owned = True
+            elif (
+                self._async_client_owned
+                and running_loop is not None
+                and self._async_client_loop is None
+            ):
+                # The client was first built with no running loop (e.g.
+                # sync-path construction). Bind it to the first loop that
+                # actually uses it so a later loop change is detected and the
+                # stale client is dropped.
+                self._async_client_loop = running_loop
+            # Return a local reference taken under the lock so a concurrent
+            # drop on another thread cannot turn the caller's result into None.
+            client = self._async_client
+        return client
     
     def build_messages(
         self, 
