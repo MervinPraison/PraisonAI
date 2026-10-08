@@ -392,6 +392,7 @@ class PraisonAI:
                 'approval',
                 'approve_all_tools',
                 'approval_timeout',
+                'permissions_config',
                 'output',
                 'max_tokens',
                 '_max_tokens_explicit',
@@ -2063,6 +2064,9 @@ class PraisonAI:
         approval_timeout = getattr(self.args, 'approval_timeout', None)
         if approval_timeout is not None:
             cli_config['approval_timeout'] = approval_timeout
+        permissions_config = getattr(self.args, 'permissions_config', None)
+        if permissions_config:
+            cli_config['permissions_config'] = permissions_config
             
         # Extract streaming configuration for YAML CLI parity
         stream = getattr(self.args, 'stream', False)

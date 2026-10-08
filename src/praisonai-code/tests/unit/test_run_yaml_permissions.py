@@ -38,6 +38,9 @@ class _RecordingOutput:
     def emit_error(self, message=None, data=None):
         pass
 
+    def emit_start(self, *args, **kwargs):
+        """Accept the CLI's initial execution event."""
+
 
 class _FakePraisonAI:
     """Captures the ``args`` object threaded onto the YAML engine."""
@@ -69,25 +72,32 @@ def _patch_engine(monkeypatch):
     _FakePraisonAI.last_instance = None
 
 
-def test_explicit_approval_is_threaded_into_yaml_args():
-    run_cmd._run_from_file(
+@pytest.mark.parametrize("profiled", [False, True])
+def test_explicit_approval_is_threaded_into_yaml_args(profiled):
+    """Both YAML execution routes preserve explicit approval settings."""
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    runner(
         "workflow.yaml",
         no_save=True,
-        approval="console",
+        approval="plan",
         approve_all_tools=True,
         approval_timeout="30",
+        permissions_config={"bash:rm *": "deny"},
     )
     args = _FakePraisonAI.last_instance.args
     assert args is not None
-    assert args.approval == "console"
+    assert args.approval == "plan"
     assert args.approve_all_tools is True
     assert args.approval_timeout == "30"
 
 
-def test_permission_patterns_default_to_console_backend():
+@pytest.mark.parametrize("profiled", [False, True])
+def test_permission_patterns_default_to_console_backend(profiled):
+    """Both YAML execution routes activate approval for permission patterns."""
     # --allow/--deny rules (permissions_config) with no explicit --approval must
     # still activate a console backend so deny/ask patterns are enforced.
-    run_cmd._run_from_file(
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    runner(
         "workflow.yaml",
         no_save=True,
         permissions_config={"bash:rm *": "deny"},
@@ -97,22 +107,60 @@ def test_permission_patterns_default_to_console_backend():
     assert args.approval == "console"
 
 
-def test_no_permission_flags_leaves_approval_unset():
+@pytest.mark.parametrize("profiled", [False, True])
+def test_no_permission_flags_leaves_approval_unset(profiled):
+    """Profiling preserves the default without adding an approval override."""
     # Backward compatible: a plain --no-save YAML run with no session and no
     # permission flags threads no args at all, so the legacy engine's
     # getattr(..., 'approval', None) default preserves prior behaviour exactly.
-    run_cmd._run_from_file("workflow.yaml", no_save=True)
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    runner("workflow.yaml", no_save=True)
     assert _FakePraisonAI.last_instance.args is None
 
 
-def test_session_run_without_permission_flags_has_no_approval():
+@pytest.mark.parametrize("profiled", [False, True])
+def test_session_run_without_permission_flags_has_no_approval(profiled):
+    """Auto-save alone does not select an approval backend on either route."""
     # A session run builds an args object for continuity, but must not carry an
     # approval override when no approval/permission flags were supplied.
-    run_cmd._run_from_file("workflow.yaml")  # no_save defaults False -> auto_save
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    runner("workflow.yaml")  # no_save defaults False -> auto_save
     args = _FakePraisonAI.last_instance.args
     assert args is not None
     assert not hasattr(args, "approval")
     assert not hasattr(args, "approve_all_tools")
+
+
+@pytest.mark.parametrize("profile_flag", ["--profile", "--profile-deep"])
+@pytest.mark.parametrize("source", ["cli", "project"])
+def test_profiled_cli_resolves_yaml_permissions(monkeypatch, tmp_path, profile_flag, source):
+    """The parsed CLI carries resolved project and invocation rules to profiling."""
+    import typer
+    from typer.testing import CliRunner
+
+    import praisonai_code.llm.credentials as credentials
+
+    monkeypatch.setattr(credentials, "ensure_configured_or_onboard", lambda *a, **k: "gpt-4o")
+    monkeypatch.setattr(run_cmd, "_auto_checkpoint", lambda *a, **k: None)
+    monkeypatch.setattr(run_cmd, "_record_session_usage", lambda *a, **k: None)
+    pattern = "bash:rm *"
+    rules = {pattern: "deny"}
+    monkeypatch.setattr(
+        run_cmd, "_apply_config_defaults",
+        lambda mcp, env, permissions: (mcp, env, rules if source == "project" else permissions, []),
+    )
+    captured = []
+    monkeypatch.setattr(run_cmd, "_run_from_file_profiled", lambda *a, **k: captured.append(k))
+    yaml_path = tmp_path / "workflow.yaml"
+    yaml_path.write_text("framework: praisonai\nroles: {}\n")
+    app = typer.Typer()
+    app.command()(run_cmd.run_main)
+    argv = [str(yaml_path), profile_flag, "--no-save"]
+    if source == "cli":
+        argv.extend(["--deny", pattern])
+    result = CliRunner().invoke(app, argv)
+    assert result.exit_code == 0, result.output
+    assert captured[0]["permissions_config"] == rules
 
 
 class _PreservedArgs:
@@ -221,3 +269,45 @@ def test_profiled_yaml_path_forwards_output_mode(monkeypatch):
     args = _FakePraisonAI.last_instance.args
     assert args is not None
     assert args.output == "stream-json"
+
+
+@pytest.mark.parametrize("profiled", [False, True])
+@pytest.mark.parametrize("section", ["roles", "agents"])
+@pytest.mark.parametrize("action", ["deny", "allow"])
+def test_yaml_rules_reach_approval_decision(monkeypatch, tmp_path, profiled, section, action):
+    """Resolved rules survive reparse, YAML merge and actual backend decisions."""
+    import asyncio
+    import logging
+
+    from praisonai.agents_generator import AgentsGenerator
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+    from praisonai_code.cli.legacy.praison_ai import PraisonAI
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.chdir(tmp_path)
+    runner = run_cmd._run_from_file_profiled if profiled else run_cmd._run_from_file
+    rules = {"audit_probe:*": action}
+    runner("workflow.yaml", no_save=True, permissions_config=rules)
+    with monkeypatch.context() as parsing_patch:
+        args = _run_main_preserving(parsing_patch, _FakePraisonAI.last_instance.args)
+    legacy = PraisonAI.__new__(PraisonAI)
+    legacy.args = args
+    cli_config = legacy._extract_cli_config_for_yaml()
+    generator = AgentsGenerator.__new__(AgentsGenerator)
+    generator.logger = logging.getLogger(__name__)
+    config = {section: {"reviewer": {}}}
+    generator._merge_cli_config(config, cli_config)
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+    approval = adapter._resolve_agent_approval(config[section]["reviewer"], config)
+
+    def unexpected_prompt(request):
+        """A matched declarative rule must decide without an interactive fallback."""
+        pytest.fail("resolved rule was lost before tool approval")
+
+    monkeypatch.setattr(approval.backend, "_prompt_user", unexpected_prompt)
+    decision = asyncio.run(approval.backend.request_approval(
+        ApprovalRequest(tool_name="audit_probe", arguments={}, risk_level="low")
+    ))
+    assert decision.approved is (action == "allow")
+    assert decision.approver == "permission_rule"
+    assert approval.permissions == rules

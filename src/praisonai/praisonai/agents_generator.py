@@ -982,6 +982,8 @@ class AgentsGenerator:
             spec = ApprovalSpec.from_cli(MockArgs(cli_config))
             if spec.enabled:
                 agent_overrides['approval'] = spec.to_dict()
+                if cli_config.get('permissions_config'):
+                    agent_overrides['approval']['permissions'] = dict(cli_config['permissions_config'])
             
         # Handle guardrail separately
         if 'guardrail' in cli_config:
