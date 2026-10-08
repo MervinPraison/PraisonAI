@@ -342,7 +342,7 @@ def _direct_prompt_needs_wrapper(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> bool:
-    """True when a text prompt run uses the wrapper-only handle_direct_prompt path.
+    """True when a text prompt run takes the wrapper's handle_direct_prompt path.
 
     Structured modes (``_IN_PROCESS_OUTPUT_MODES``) always run in-process via the
     Agent path, so they never need the wrapper. Human-readable text modes
@@ -450,6 +450,97 @@ def _require_wrapper_for_default_run(
         "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
     raise typer.Exit(1)
+
+
+def _wire_run_agent_config(
+    agent_config: Dict[str, Any],
+    *,
+    model: Optional[str],
+    max_tokens: Optional[int],
+    tools: Optional[str],
+    toolset: Optional[str],
+    mcp: Optional[str],
+    mcp_env: Optional[str],
+    mcp_servers: Optional[List[dict]],
+    memory: bool = False,
+    approval: Optional[str],
+    approve_all_tools: bool,
+    approval_timeout: Optional[str],
+    permissions_config: Optional[dict],
+    session_id: Optional[str],
+    auto_save_name: Optional[str],
+    no_rules: bool,
+    instructions: Optional[List[str]],
+    verbose: Any,
+) -> None:
+    """Wire the shared agent surface (tools/MCP/session/instructions/approval).
+
+    Shared by the ``--output actions`` fast path and the standalone text run
+    (both served by the same in-process Agent branch of ``_run_prompt``) so a
+    standalone ``praisonai-code`` install reaches full parity: ``--tools``/
+    ``--toolset``, configured MCP servers, ``--session``/``--continue``
+    continuity, and explicitly selected ``--instructions`` all reach the agent
+    instead of being silently dropped.
+    """
+    from ..state.project_sessions import build_cli_memory_config
+
+    agent_config["llm"] = _llm_spec_with_max_tokens(
+        agent_config.get("llm") or model, model, max_tokens
+    )
+
+    # Resolve approval backend if specified. A permission policy
+    # (--allow/--deny/--permissions) with no explicit --approval derives the
+    # console backend so the patterns are enforced instead of silently dropped
+    # (same derivation the YAML path makes).
+    effective_approval = approval
+    implicit_console = False
+    if effective_approval is None and permissions_config:
+        effective_approval = "console"
+        implicit_console = True
+    if effective_approval:
+        import sys as _sys
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        # When the console backend is derived implicitly (no explicit
+        # --approval) on a non-TTY, fail closed: an unmatched ``ask`` rule must
+        # deny rather than block on input()/read a piped stdin as if it were
+        # operator consent. An explicit --approval is left to the backend's own
+        # interactive handling.
+        non_interactive = implicit_console and not _sys.stdin.isatty()
+        agent_config["approval"] = resolve_approval_config(
+            effective_approval, all_tools=approve_all_tools, timeout=approval_timeout,
+            non_interactive=non_interactive,
+            permissions_config=permissions_config,
+        )
+
+    memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
+    if memory_cfg is not None:
+        agent_config["memory"] = memory_cfg
+    elif memory:
+        # --memory without session flags: honour it as a plain cross-session
+        # memory rather than silently dropping the flag (the wrapper text path
+        # sets MemoryConfig for it).
+        agent_config["memory"] = True
+
+    if mcp or mcp_servers:
+        mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
+        if mcp_tools:
+            agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
+
+    selected_tools = _resolve_tools_arg(tools, verbose=verbose)
+    if toolset:
+        from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
+        toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
+        if toolset_names:
+            selected_tools.extend(_resolve_toolsets(toolset_names))
+    selected_tools.extend(
+        _auto_discover_project_tools(selected_tools, verbose=verbose)
+    )
+    if selected_tools:
+        agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
+
+    _wire_subtree_context_hook(
+        agent_config, no_rules=no_rules, instructions=instructions
+    )
 
 
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
@@ -2412,7 +2503,7 @@ def _run_prompt(
             or _text_run_renders_in_process(output_mode, image=image)
         ) and not image:
             from praisonaiagents import Agent
-            from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
+            from ..state.project_sessions import apply_cli_session_continuity
 
             agent_config = {
                 "name": "RunAgent",
@@ -2428,73 +2519,31 @@ def _run_prompt(
             }
             if model:
                 agent_config["llm"] = model
-            agent_config["llm"] = _llm_spec_with_max_tokens(
-                agent_config.get("llm"), model, max_tokens
-            )
-            
-            # Resolve approval backend if specified. A permission policy
-            # (--allow/--deny/--permissions) with no explicit --approval derives
-            # the console backend so the patterns are enforced instead of
-            # silently dropped (same derivation the YAML path makes).
-            effective_approval = approval
-            implicit_console = False
-            if effective_approval is None and permissions_config:
-                effective_approval = "console"
-                implicit_console = True
-            if effective_approval:
-                import sys as _sys
-                from praisonai_code.cli.features._approval_bridge import resolve_approval_config
-                # When the console backend is derived implicitly (no explicit
-                # --approval) on a non-TTY, fail closed: an unmatched ``ask``
-                # rule must deny rather than block on input()/read a piped
-                # stdin as if it were operator consent. An explicit --approval
-                # is left to the backend's own interactive handling.
-                non_interactive = implicit_console and not _sys.stdin.isatty()
-                agent_config["approval"] = resolve_approval_config(
-                    effective_approval, all_tools=approve_all_tools, timeout=approval_timeout,
-                    non_interactive=non_interactive,
-                    permissions_config=permissions_config,
-                )
-            
-            # Add session support to Agent if needed
-            # NOTE: build_cli_memory_config / apply_cli_session_continuity are
-            # imported above from ..state.project_sessions. Do NOT re-import them
-            # from ..utils.project here — that stale version lacks the auto_save
-            # kwarg and would shadow the correct implementation.
-            memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
-            if memory_cfg is not None:
-                agent_config["memory"] = memory_cfg
-            elif memory:
-                # --memory without session flags: honour it as a plain
-                # cross-session memory rather than silently dropping the flag
-                # (the wrapper text path sets MemoryConfig for it).
-                agent_config["memory"] = True
-
-            # Wire all configured MCP servers (ad-hoc --mcp + config local/remote).
-            if mcp or mcp_servers:
-                mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
-                if mcp_tools:
-                    agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
-
-            # Wire --tools (names or file) and --toolset so actions mode reaches
-            # parity with the default/YAML/Python surfaces (previously dropped).
-            selected_tools = _resolve_tools_arg(tools, verbose=verbose)
-            if toolset:
-                from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
-                toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
-                if toolset_names:
-                    selected_tools.extend(_resolve_toolsets(toolset_names))
-            # Auto-discover project-local .praisonai/tools/*.py (additive;
-            # explicit --tools take precedence). Gated by the shared
-            # PRAISONAI_ALLOW_LOCAL_TOOLS opt-in in the safe loader.
-            selected_tools.extend(
-                _auto_discover_project_tools(selected_tools, verbose=verbose)
-            )
-            if selected_tools:
-                agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
-
-            _wire_subtree_context_hook(
-                agent_config, no_rules=no_rules, instructions=instructions
+            # Wire the shared agent surface (llm/tools/--toolset/MCP, session
+            # memory, approval, --instructions) via _wire_run_agent_config.
+            # This single branch serves both the structured --output modes and
+            # the standalone text run (wrapper absent), so a standalone
+            # praisonai-code install reaches the same parity instead of
+            # silently dropping these inputs.
+            _wire_run_agent_config(
+                agent_config,
+                model=model,
+                max_tokens=max_tokens,
+                tools=tools,
+                toolset=toolset,
+                mcp=mcp,
+                mcp_env=mcp_env,
+                mcp_servers=mcp_servers,
+                memory=memory,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                permissions_config=permissions_config,
+                session_id=session_id,
+                auto_save_name=auto_save_name,
+                no_rules=no_rules,
+                instructions=instructions,
+                verbose=verbose,
             )
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
@@ -2655,19 +2704,33 @@ def _run_prompt(
         args.no_tools = False
         args.approval = approval
         args.thinking_budget = thinking_budget
-        
+        # Carry the remaining standalone-render inputs so the in-process renderer
+        # reaches parity with the wrapper/actions paths (explicit --instructions
+        # and the full approval surface would otherwise be dropped).
+        args.instructions = instructions
+        args.approve_all_tools = approve_all_tools
+        args.approval_timeout = approval_timeout
+        args.permissions_config = permissions_config
+
         praison.args = args
 
+        # This fallback is only reached when the wrapper is installed (a
+        # standalone text run is served in-process by the branch above, and a
+        # standalone ``--image`` run is gated earlier by
+        # ``_require_wrapper_for_default_run``), so delegate to the wrapper's
+        # richer ``handle_direct_prompt`` (full feature surface incl. vision) —
+        # existing users see no change.
         result = praison.handle_direct_prompt(prompt)
-        
+
         _record_session_usage(session_id or auto_save_name, model, output)
-        if not _run_succeeded(result):
+        succeeded = _run_succeeded(result)
+        if not succeeded:
             _report_run_failure(output)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
         )
-        
+
         if result and not output.is_json_mode:
             print(result)
     

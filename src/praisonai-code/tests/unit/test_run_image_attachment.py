@@ -33,7 +33,14 @@ class _RecordingOutput:
 
 
 def _install_fake_praisonai(monkeypatch):
-    """Install a fake PraisonAI that records the args it receives and returns."""
+    """Install a fake PraisonAI that records the args it receives and returns.
+
+    ``--image`` is a wrapper-only feature (it routes through the wrapper's
+    vision ImageHandler via ``handle_direct_prompt``), so these tests exercise
+    the wrapper delegation path: pretend the wrapper is installed so the default
+    run delegates instead of taking the standalone in-process renderer added in
+    #5644.
+    """
     captured = {}
 
     class _FakePraisonAI:
@@ -49,6 +56,9 @@ def _install_fake_praisonai(monkeypatch):
     fake_main = types.ModuleType("praisonai_code.cli.main")
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
     return captured
 
 

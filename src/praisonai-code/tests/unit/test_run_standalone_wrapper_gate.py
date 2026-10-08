@@ -14,8 +14,11 @@ gate (no wrapper imports in the hot-path files) is unaffected: the in-process
 text render imports ``praisonaiagents`` lazily inside the run, exactly like the
 structured modes already do.
 
-The valuable fix from #2839 preserved here is the corrected error hint, which
-now cites `praisonai-code run --output actions` instead of `praisonai`.
+`_require_wrapper_for_default_run` therefore only fails for genuinely
+wrapper-only features (currently `--image`, which routes through the wrapper's
+vision ImageHandler). `_direct_prompt_needs_wrapper` still reports that text
+modes use the wrapper *path* (so an installed wrapper keeps delegating to its
+richer `handle_direct_prompt`).
 """
 
 import pytest
@@ -258,3 +261,12 @@ def test_image_command_run_gates_without_wrapper(no_wrapper, monkeypatch):
 
     assert messages
     assert "--image" in messages[0]
+
+
+# NOTE: the standalone text run is served by the *same* in-process Agent branch
+# of ``_run_prompt`` that the structured ``--output`` modes use (it is selected
+# by ``_text_run_renders_in_process`` when the wrapper is absent). The real
+# CLI-path coverage — that a wrapper-absent default run reaches that branch,
+# renders in-process (no wrapper import), prints once, and propagates the
+# agent's stop reason to exit 2 — lives with the other ``_run_prompt`` in-process
+# tests in ``test_run_outcome_exit.py`` so it exercises the actual dispatch.
