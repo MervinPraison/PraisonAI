@@ -369,6 +369,33 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   return { skip: false, reason: '' };
 }
 
+function latestClaudeFinishedAtMs(comments) {
+  let latest = 0;
+  for (const c of comments) {
+    if (!isClaudeFinalReplyComment(c)) continue;
+    latest = Math.max(latest, new Date(c.created_at).getTime());
+  }
+  return latest || null;
+}
+
+/** HEAD moved after the latest "Claude finished" — need another FINAL/CI cycle. */
+function hasHeadPushAfterLatestClaudeFinish(comments, headPushedAt) {
+  const finishMs = latestClaudeFinishedAtMs(comments);
+  if (!finishMs || !headPushedAt) return false;
+  const headMs = new Date(headPushedAt).getTime();
+  return headMs > finishMs + 60000;
+}
+
+/**
+ * FINAL @claude cooldown is for in-flight bot work, not an extra 35m wait after
+ * FINAL completed on HEAD with green CI prerequisites.
+ */
+function canBypassRecentClaudeCooldown(comments, headPushedAt) {
+  if (!finalClaudeCompletedOnSha(comments, headPushedAt)) return false;
+  if (hasHeadPushAfterLatestClaudeFinish(comments, headPushedAt)) return false;
+  return true;
+}
+
 function finalClaudeCompletedOnSha(comments, headPushedAt) {
   if (!hasFinalClaudeReviewTrigger(comments)) return false;
   if (isStaleFinalAfterPush(comments, headPushedAt)) return false;
@@ -1043,7 +1070,8 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   }
   if (!skipRecentClaudeCooldown && hasRecentClaudeTrigger(ctx.comments, 35)) {
     const verdictOnHead = findMergeGateVerdict(ctx.comments, null, ctx.headPushedAt) !== null;
-    if (!verdictOnHead) reasons.push('recent @claude within 35min');
+    const bypassCooldown = canBypassRecentClaudeCooldown(ctx.comments, ctx.headPushedAt);
+    if (!verdictOnHead && !bypassCooldown) reasons.push('recent @claude within 35min');
   }
 
   if (!skipGlobalClaudeRunCheck && (await hasInProgressClaudeAssistant(github, owner, repo, prNumber))) {
