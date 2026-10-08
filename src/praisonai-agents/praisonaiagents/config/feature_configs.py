@@ -1841,30 +1841,6 @@ def resolve_autonomy(value: AutonomyParam) -> Optional["AutonomyConfig"]:
     return _resolve(value, AutonomyConfig)
 
 
-def resolve_tool_search(value: ToolSearchParam) -> Optional["ToolSearchConfig"]:
-    """
-    Resolve tool_search= parameter following precedence ladder.
-    
-    NOTE: This resolver has zero references in the codebase but is kept
-    for backward compatibility. Consider removing in a future version.
-    """
-    # Simple implementation since it's unused
-    if value is None or value is False:
-        return None
-    # Lazy-load ToolSearchConfig only when tool search is actually configured,
-    # so the tools subsystem is not imported on the `import Agent` path.
-    ToolSearchConfig = _resolve_tool_search_config()
-    if value is True:
-        return ToolSearchConfig()
-    if isinstance(value, str):
-        return ToolSearchConfig(enabled=value)
-    if isinstance(value, dict):
-        return ToolSearchConfig(**value)
-    if isinstance(value, ToolSearchConfig):
-        return value
-    return value
-
-
 def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
     """Resolve tools= parameter following precedence ladder."""
     if value is None or value is False:
@@ -2085,7 +2061,6 @@ __all__ = [
     "resolve_web",
     "resolve_caching",
     "resolve_autonomy",
-    "resolve_tool_search",
     "resolve_tools",
     "resolve_runtime",
     "canonical_runtime_name",
