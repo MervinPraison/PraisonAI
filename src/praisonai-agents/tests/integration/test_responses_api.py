@@ -852,6 +852,139 @@ class TestOpenAIClientResponsesAPI:
         assert OpenAIClient._normalise_instruction_content("plain") == "plain"
         assert OpenAIClient._normalise_instruction_content(None) == ""
 
+    def test_build_responses_input_drops_orphan_tool_output(self):
+        """A tool result whose call_id has no matching function_call must be
+        dropped so the Responses API does not 400 with "No tool call found for
+        function call output"."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {"role": "tool", "tool_call_id": "call_orphan", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        assert not any(
+            item.get("type") == "function_call_output"
+            for item in params["input"]
+        )
+
+    def test_build_responses_input_keeps_paired_tool_output(self):
+        """A tool result with a matching function_call is preserved."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":19,"b":23}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        call_items = [i for i in params["input"] if i.get("type") == "function_call"]
+        output_items = [i for i in params["input"] if i.get("type") == "function_call_output"]
+        assert len(call_items) == 1 and call_items[0]["call_id"] == "call_1"
+        assert len(output_items) == 1 and output_items[0]["call_id"] == "call_1"
+
+    def test_async_client_rebinds_loop_after_unbound_first_use(self):
+        """A client first read outside any running loop records ``None`` as its
+        loop. The first in-loop use must bind it so a later loop change drops
+        the stale client instead of reusing a transport on a closed loop."""
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from praisonaiagents.llm import openai_client as openai_client_module
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        client.model = "gpt-4o-mini"
+        client.api_key = "sk-test"
+        client.base_url = None
+        client.max_retries = None
+        client._sync_client = None
+        client._async_client = None
+        client._async_client_loop = None
+        client._async_client_owned = False
+        client._async_client_lock = threading.Lock()
+
+        # This test only exercises client/loop bookkeeping — it never sends a
+        # request — so stub the model-request guard. Without this it raises
+        # ModelRequestBlocked under PRAISONAI_ALLOW_MODEL_REQUESTS=0 before the
+        # test can check loop rebinding.
+        with patch.object(openai_client_module, "check_model_request"):
+            _ = client.async_client
+            assert client._async_client_loop is None
+            first_client = client._async_client
+
+            async def _use():
+                got = client.async_client
+                return got, client._async_client_loop
+
+            bound_client, bound_loop = asyncio.run(_use())
+            assert bound_client is first_client
+            assert bound_loop is not None
+
+            second_client, second_loop = asyncio.run(_use())
+            assert second_client is not first_client
+            assert second_loop is not bound_loop
+
+    def test_async_client_never_returns_none_under_concurrency(self):
+        """Concurrent sync callers, each on their own ``asyncio.run`` loop, must
+        always receive a client — never a transient ``None`` from another
+        thread's loop-change drop/rebuild."""
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from praisonaiagents.llm import openai_client as openai_client_module
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        client.model = "gpt-4o-mini"
+        client.api_key = "sk-test"
+        client.base_url = None
+        client.max_retries = None
+        client._sync_client = None
+        client._async_client = None
+        client._async_client_loop = None
+        client._async_client_owned = False
+        client._async_client_lock = threading.Lock()
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                got = asyncio.run(_read())
+                results.append(got)
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        async def _read():
+            return client.async_client
+
+        with patch.object(openai_client_module, "check_model_request"):
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert not errors
+        assert len(results) == 8
+        assert all(r is not None for r in results)
+
     def test_responses_to_chat_completion(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
 
