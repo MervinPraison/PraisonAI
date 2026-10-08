@@ -2230,7 +2230,7 @@ class OpenAIClient:
                         history_sink=deferred_history_sink,
                     )
                     try:
-                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                     except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
@@ -2604,7 +2604,7 @@ class OpenAIClient:
                         history_sink=deferred_history_sink,
                     )
                     try:
-                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                     except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
@@ -2833,7 +2833,7 @@ class OpenAIClient:
                         # sync/async non-streaming loops' (TypeError, ValueError)
                         # fallback.
                         try:
-                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                            results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                         except (TypeError, ValueError):
                             tool_result = {"result": str(tool_result)}
                             results_str = json.dumps(tool_result)
