@@ -461,7 +461,10 @@ class OpenAIClient:
             and self._async_client_loop is not None
             and self._async_client_loop is not running_loop
         ):
-            self._async_client = None
+            # Only discard SDK clients; tests inject SimpleNamespace transports.
+            _, AsyncOpenAI = _get_openai_classes()
+            if isinstance(self._async_client, AsyncOpenAI):
+                self._async_client = None
         if self._async_client is None:
             _, AsyncOpenAI = _get_openai_classes()
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
@@ -744,7 +747,10 @@ class OpenAIClient:
         if not self._supports_responses_api(model):
             return False
         try:
-            return hasattr(self.sync_client, 'responses')
+            responses = getattr(self.sync_client, "responses", None)
+            return responses is not None and callable(
+                getattr(responses, "create", None)
+            )
         except Exception:
             return False
 
