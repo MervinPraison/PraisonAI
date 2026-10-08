@@ -38,7 +38,7 @@ async def build_app(monkeypatch, tmp_path, scopes):
     config = GatewayConfig(auth_token=TOKEN, auth_scopes=None if scopes is None else {TOKEN: scopes})
     gateway = WebSocketGateway(config=config)
     await gateway.start()
-    return server.app, manager
+    return server.app, manager, config
 
 
 @pytest.mark.parametrize("scopes, expected", [
@@ -47,7 +47,7 @@ async def build_app(monkeypatch, tmp_path, scopes):
 ])
 def test_pending_queue_requires_approval_scope(monkeypatch, tmp_path, scopes, expected):
     async def scenario():
-        app, manager = await build_app(monkeypatch, tmp_path, scopes)
+        app, manager, _ = await build_app(monkeypatch, tmp_path, scopes)
         request_id, future = await manager.register(
             tool_name="send_report", arguments={"report": "private planning notes"}, agent_name="planner",
         )
@@ -69,12 +69,15 @@ def test_pending_queue_requires_approval_scope(monkeypatch, tmp_path, scopes, ex
 
 def test_denied_polling_does_not_exhaust_approval_budget(monkeypatch, tmp_path):
     async def scenario():
-        app, _ = await build_app(monkeypatch, tmp_path, ["read"])
+        app, _, config = await build_app(monkeypatch, tmp_path, ["read"])
         headers = {"Authorization": f"Bearer {TOKEN}"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://gateway") as client:
             for _ in range(12):
                 response = await client.get("/api/approval/pending", headers=headers)
                 assert response.status_code == 403
+            config.auth_scopes[TOKEN] = ["approvals"]
+            response = await client.get("/api/approval/pending", headers=headers)
+            assert response.status_code == 200
 
     asyncio.run(scenario())
 
@@ -93,7 +96,7 @@ def test_generated_report_requires_approval_scope(monkeypatch, tmp_path):
     assert isinstance(report, str) and report.strip()
 
     async def scenario():
-        app, manager = await build_app(monkeypatch, tmp_path, ["read"])
+        app, manager, config = await build_app(monkeypatch, tmp_path, ["read"])
         request_id, future = await manager.register(
             tool_name="send_report", arguments={"report": report}, agent_name=agent.name,
         )
@@ -102,6 +105,10 @@ def test_generated_report_requires_approval_scope(monkeypatch, tmp_path):
             denied = await client.get("/api/approval/pending", headers=headers)
             assert denied.status_code == 403
             assert report not in denied.text
+            config.auth_scopes[TOKEN] = ["approvals"]
+            allowed = await client.get("/api/approval/pending", headers=headers)
+            assert allowed.status_code == 200
+            assert allowed.json()["pending"][0]["arguments"] == {"report": report}
         manager.resolve(request_id, Resolution(approved=False, reason="cleanup"))
         await future
 
