@@ -475,11 +475,12 @@ def _wire_run_agent_config(
 ) -> None:
     """Wire the shared agent surface (tools/MCP/session/instructions/approval).
 
-    Extracted from the ``--output actions`` fast path so the standalone
-    in-process renderer (``_render_default_prompt_in_process``) reaches parity:
-    ``--tools``/``--toolset``, configured MCP servers, ``--session``/``--continue``
-    continuity, and explicitly selected ``--instructions`` all reach the agent in
-    both paths instead of being silently dropped on a standalone install.
+    Shared by the ``--output actions`` fast path and the standalone text run
+    (both served by the same in-process Agent branch of ``_run_prompt``) so a
+    standalone ``praisonai-code`` install reaches full parity: ``--tools``/
+    ``--toolset``, configured MCP servers, ``--session``/``--continue``
+    continuity, and explicitly selected ``--instructions`` all reach the agent
+    instead of being silently dropped.
     """
     from ..state.project_sessions import build_cli_memory_config
 
@@ -540,112 +541,6 @@ def _wire_run_agent_config(
     _wire_subtree_context_hook(
         agent_config, no_rules=no_rules, instructions=instructions
     )
-
-
-def _render_default_prompt_in_process(prompt, args, output) -> tuple:
-    """Run a default/plain/verbose/silent text prompt without the wrapper.
-
-    Reuses the same in-process ``Agent`` surface the ``--output actions`` fast
-    path builds (via ``_wire_run_agent_config``) so a standalone
-    ``praisonai-code`` install delivers the default human-readable run on its own
-    — no ``pip install praisonai`` required, and with full parity on
-    ``--tools``/``--toolset``/MCP, ``--session``/``--continue`` continuity, and
-    explicit ``--instructions``. ``praisonaiagents`` is imported function-locally
-    to keep the C7 hot path free of a module-level Agent import.
-
-    The verbosity ladder mirrors the wrapper renderer: ``-qq`` is silent
-    (exit code only), ``-q`` prints the result text only, ``-v``/``-vv`` enable
-    the SDK status/trace output, and the default shows clean inline status.
-
-    Returns ``(result, agent, printed)`` so the caller can consult
-    ``agent.last_stop_reason`` for provider block/length/step-limit cutoffs
-    (an incomplete run must exit 2, not be reported as a clean completion) and
-    knows whether the final answer was already printed here — avoiding a
-    duplicate print when the status/trace layer already surfaced it.
-    """
-    from praisonaiagents import Agent
-
-    verbose = getattr(args, "verbose", 0) or 0
-    quiet = getattr(args, "quiet", 0) or 0
-    session_id = getattr(args, "resume_session", None)
-    auto_save_name = getattr(args, "auto_save", None)
-
-    agent_config = {
-        "name": "RunAgent",
-        "role": "Assistant",
-        "goal": "Complete the given task",
-        "backstory": "You are a helpful AI assistant",
-        "output": "verbose" if verbose >= 1 else "minimal",
-    }
-    _wire_run_agent_config(
-        agent_config,
-        model=getattr(args, "llm", None),
-        max_tokens=getattr(args, "max_tokens", None),
-        tools=getattr(args, "tools", None),
-        toolset=getattr(args, "toolset", None),
-        mcp=getattr(args, "mcp", None),
-        mcp_env=getattr(args, "mcp_env", None),
-        mcp_servers=getattr(args, "mcp_servers", None),
-        memory=getattr(args, "memory", False),
-        approval=getattr(args, "approval", None),
-        approve_all_tools=getattr(args, "approve_all_tools", False),
-        approval_timeout=getattr(args, "approval_timeout", None),
-        permissions_config=getattr(args, "permissions_config", None),
-        session_id=session_id,
-        auto_save_name=auto_save_name,
-        no_rules=getattr(args, "no_rules", False),
-        instructions=getattr(args, "instructions", None),
-        verbose=verbose,
-    )
-
-    agent = Agent(**agent_config)
-    if getattr(args, "thinking_budget", None) is not None:
-        agent.thinking_budget = args.thinking_budget
-    if session_id or auto_save_name:
-        from ..state.project_sessions import apply_cli_session_continuity
-        apply_cli_session_continuity(
-            agent, session_id or auto_save_name, auto_save=auto_save_name
-        )
-
-    run = agent.start if hasattr(agent, "start") else agent.chat
-
-    if quiet >= 2:
-        return run(prompt), agent, True
-    if quiet >= 1:
-        result = run(prompt)
-        text = getattr(result, "output", None) or (str(result) if result else None)
-        if text:
-            print(text)
-        return result, agent, True
-    if verbose >= 2:
-        try:
-            from praisonaiagents.output.trace import (
-                enable_trace_output,
-                disable_trace_output,
-            )
-
-            enable_trace_output(use_markdown=True)
-            try:
-                return run(prompt), agent, True
-            finally:
-                disable_trace_output()
-        except ImportError:
-            return run(prompt), agent, False
-    try:
-        from praisonaiagents.output.status import (
-            enable_status_output,
-            disable_status_output,
-        )
-
-        enable_status_output(
-            show_timestamps=verbose >= 1, show_metrics=verbose >= 1
-        )
-        try:
-            return run(prompt), agent, True
-        finally:
-            disable_status_output()
-    except ImportError:
-        return run(prompt), agent, False
 
 
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
@@ -2625,10 +2520,11 @@ def _run_prompt(
             if model:
                 agent_config["llm"] = model
             # Wire the shared agent surface (llm/tools/--toolset/MCP, session
-            # memory, approval, --instructions). Extracted into
-            # _wire_run_agent_config so the standalone in-process renderer
-            # (_render_default_prompt_in_process) reaches the same parity
-            # instead of silently dropping these inputs.
+            # memory, approval, --instructions) via _wire_run_agent_config.
+            # This single branch serves both the structured --output modes and
+            # the standalone text run (wrapper absent), so a standalone
+            # praisonai-code install reaches the same parity instead of
+            # silently dropping these inputs.
             _wire_run_agent_config(
                 agent_config,
                 model=model,
@@ -2818,52 +2714,24 @@ def _run_prompt(
 
         praison.args = args
 
-        # When the wrapper is installed, delegate to its richer
-        # handle_direct_prompt (full feature surface) so existing users see no
-        # change. On a standalone install the wrapper is absent; render the
-        # default human-readable run in-process from the same Agent the
-        # structured modes already use, so `pip install praisonai-code` alone
-        # delivers the default run. --image already gated above as wrapper-only.
-        from praisonai_code._wrapper_bridge import wrapper_available
-
-        # ``render_agent`` is the Agent the standalone renderer built; it carries
-        # ``last_stop_reason`` so a provider block/length cutoff or step-limit
-        # truncation is reported as an incomplete run (exit 2) rather than a
-        # clean completion. ``render_printed`` says whether the renderer already
-        # emitted the final answer, so the caller's human-text print below does
-        # not duplicate it. Both stay ``None``/``False`` on the wrapper path,
-        # which owns its own rendering/outcome.
-        render_agent = None
-        render_printed = False
-        if wrapper_available():
-            result = praison.handle_direct_prompt(prompt)
-        else:
-            result, render_agent, render_printed = _render_default_prompt_in_process(
-                prompt, args, output
-            )
+        # This fallback is only reached when the wrapper is installed (a
+        # standalone text run is served in-process by the branch above, and a
+        # standalone ``--image`` run is gated earlier by
+        # ``_require_wrapper_for_default_run``), so delegate to the wrapper's
+        # richer ``handle_direct_prompt`` (full feature surface incl. vision) —
+        # existing users see no change.
+        result = praison.handle_direct_prompt(prompt)
 
         _record_session_usage(session_id or auto_save_name, model, output)
         succeeded = _run_succeeded(result)
-        block_reason = _run_block_reason(render_agent)
-        truncated = succeeded and _run_was_truncated(render_agent)
-        # A provider block/refusal/truncation wins over a generic empty-result
-        # failure so the specific, actionable reason (and exit 2) is not masked.
-        if block_reason:
-            _report_run_blocked(output, result, block_reason)
         if not succeeded:
             _report_run_failure(output)
-        if truncated:
-            _report_run_truncated(output, result)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
         )
 
-        # Only the caller owns the final human-text print on the wrapper path.
-        # On the standalone path the renderer's status/trace layer already
-        # surfaced the answer (render_printed), so reprinting here would emit it
-        # twice.
-        if result and not output.is_json_mode and not render_printed:
+        if result and not output.is_json_mode:
             print(result)
     
     except typer.Exit:

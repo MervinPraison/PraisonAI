@@ -657,3 +657,60 @@ def test_inprocess_no_memory_flag_leaves_memory_unset(monkeypatch):
     run_cmd._run_prompt("no memory", output_mode="json", no_save=True)
 
     assert "memory" not in _CapturingAgent.last_config
+
+
+# --- standalone default text run renders in-process (issue #5644) -----------
+# These drive the *actual* CLI dispatch (`_run_prompt`) with the wrapper absent,
+# so they exercise the branch supported-text runs really take — not a helper
+# called in isolation (Greptile #5687 "tests miss the CLI path").
+
+
+@pytest.mark.parametrize("mode", [None, "plain", "silent"])
+def test_standalone_default_text_run_renders_in_process(monkeypatch, mode, capsys):
+    """A wrapper-absent default/plain/silent run renders from the in-process
+    Agent and prints the answer once — never delegating to the wrapper.
+
+    ``_install_inprocess_agent_stubs`` installs a wrapper whose
+    ``handle_direct_prompt`` *raises*, so reaching this assertion also proves the
+    run did not fall through to the wrapper delegation path.
+    """
+    _CapturingAgent.last_prompt = None
+    _install_inprocess_agent_stubs(monkeypatch, _CapturingAgent)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
+    )
+    _make_output(monkeypatch, json_mode=False)
+
+    run_cmd._run_prompt("explain this", output_mode=mode, no_save=True)
+
+    # The in-process Agent actually ran (the model path, not the wrapper).
+    assert _CapturingAgent.last_prompt == "explain this"
+    # Silent-style presets leave rendering to the CLI, which prints exactly once.
+    assert capsys.readouterr().out.strip() == "the answer"
+
+
+def test_standalone_text_run_surfaces_stop_reason_exit_two(monkeypatch):
+    """A standalone text run inherits the exit-2 contract for a cutoff run.
+
+    The real CLI branch consults ``_run_was_truncated(agent)`` on the live
+    in-process Agent, so a step-limit cutoff must exit 2 rather than report a
+    clean completion.
+    """
+
+    class _TruncatedAgent(_CapturingAgent):
+        last_stop_reason = "max_steps"
+
+        def start(self, prompt):
+            type(self).last_prompt = prompt
+            return "partial summary"
+
+    _install_inprocess_agent_stubs(monkeypatch, _TruncatedAgent)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: False
+    )
+    _make_output(monkeypatch, json_mode=False)
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._run_prompt("big task", output_mode=None, no_save=True)
+
+    assert exc.value.exit_code == 2
