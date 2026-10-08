@@ -482,6 +482,58 @@ assert('substantive dispatches still counted', mg.countSubstantiveMergeGateRuns(
 assert('countSubstantiveMergeGateRuns null-safe', mg.countSubstantiveMergeGateRuns(null) === 0);
 assert('rate limit threshold is 200', mg.MIN_CORE_RATE_LIMIT_REMAINING === 200);
 
+// --- canBypassRecentClaudeCooldown (PR #5728) ---
+const finalTrigger = {
+  user: { login: 'MervinPraison' },
+  body: '@claude FINAL architecture reviewer',
+  created_at: '2026-06-12T08:00:00Z',
+};
+const finishedOnHeadReply = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: "**Claude finished @MervinPraison's task**",
+  created_at: '2026-06-12T08:20:00Z',
+};
+// Bypass allowed: FINAL done on HEAD, no later push, no newer trigger.
+assert(
+  'bypass when FINAL completed on HEAD',
+  mg.canBypassRecentClaudeCooldown([finalTrigger, finishedOnHeadReply], '2026-06-12T08:10:00Z')
+);
+// No bypass: HEAD pushed after the finished reply (stale reviewed SHA).
+assert(
+  'no bypass when head pushed after finish',
+  !mg.canBypassRecentClaudeCooldown([finalTrigger, finishedOnHeadReply], '2026-06-12T08:25:00Z')
+);
+// No bypass: a newer @claude request posted after the finish is still pending.
+const newerClaudeRequest = {
+  user: { login: 'MervinPraison' },
+  body: '@claude please also handle edge case',
+  created_at: '2026-06-12T08:30:00Z',
+};
+assert(
+  'no bypass when newer @claude trigger after finish',
+  !mg.canBypassRecentClaudeCooldown(
+    [finalTrigger, finishedOnHeadReply, newerClaudeRequest],
+    '2026-06-12T08:10:00Z'
+  )
+);
+// Bypass restored once the newer request also completes.
+const newerClaudeReply = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: "**Claude finished @MervinPraison's task**",
+  created_at: '2026-06-12T08:40:00Z',
+};
+assert(
+  'bypass restored after newer request completes',
+  mg.canBypassRecentClaudeCooldown(
+    [finalTrigger, finishedOnHeadReply, newerClaudeRequest, newerClaudeReply],
+    '2026-06-12T08:10:00Z'
+  )
+);
+assert(
+  'no bypass without any FINAL completion',
+  !mg.canBypassRecentClaudeCooldown([newerClaudeRequest], '2026-06-12T08:10:00Z')
+);
+
 (async () => {
   const skipLow = await mg.shouldSkipMergeGateDispatch(
     {

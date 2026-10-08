@@ -86,7 +86,9 @@ jobs:
     name: test-core (${{ matrix.shard }})
     needs: test-core-collect
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # agents-core runs the full praisonai-agents unit tree and often nears 30m;
+    # GitHub cancels at the limit and forces a full rerun (+ stale-FINAL churn).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
