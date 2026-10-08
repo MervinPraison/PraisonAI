@@ -252,6 +252,17 @@ def _resolve_array(
                 return _apply_preset(matched, presets, config_class)
             # Single non-preset string - try as URL or return as-is
             if isinstance(single_value, str):
+                # Mirror the string branch: an unsupported scheme must raise
+                # rather than fall through to config_class(). For memory= that
+                # default is the local file backend, so ["redis://..."] used to
+                # silently store to a file the caller never asked for.
+                scheme = detect_url_scheme(single_value)
+                if scheme and url_schemes and scheme not in url_schemes:
+                    valid_schemes = ", ".join(sorted(url_schemes.keys()))
+                    raise ValueError(
+                        f"Unsupported URL scheme '{scheme}' for {param_name}. "
+                        f"Supported: {valid_schemes}"
+                    )
                 if config_class:
                     return config_class()
                 return single_value
