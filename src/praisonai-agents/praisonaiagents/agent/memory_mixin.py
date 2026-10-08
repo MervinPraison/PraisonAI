@@ -11,7 +11,7 @@ import inspect
 import logging
 import threading
 import contextvars
-from typing import Optional, Dict
+from typing import Any, Awaitable, Callable, Optional, Dict
 
 # Per-turn ownership of appended chat-history messages. Each chat()/achat() turn
 # runs in its own thread (sync) or task (async); both get an isolated copy of
@@ -72,6 +72,38 @@ if TYPE_CHECKING:
 
 class MemoryMixin:
     """Mixin providing memory methods for the Agent class."""
+
+    @property
+    def _current_run_id(self) -> Optional[str]:
+        state = self._get_db_run_state()
+        return state["run_id"] if state is not None else None
+
+    def _get_db_run_state(self) -> Optional[dict]:
+        run_context = getattr(self, "_db_run_context", None)
+        return run_context.get() if run_context is not None else None
+
+    def _restore_db_run_state(self, state: Optional[dict]) -> None:
+        run_context = getattr(self, "_db_run_context", None)
+        if run_context is not None:
+            run_context.set(state)
+
+    def _mark_db_run_error(self) -> None:
+        state = self._get_db_run_state()
+        if state is not None:
+            state["status"] = "error"
+
+    @_current_run_id.setter
+    def _current_run_id(self, value: Optional[str]) -> None:
+        run_context = getattr(self, "_db_run_context", None)
+        if run_context is None:
+            if value is None:
+                return
+            # Each agent has its own context; concurrent tasks and threads must
+            # not finalize one another's runs. Allocate only for configured DBs.
+            run_context = self.__dict__.setdefault(
+                "_db_run_context", contextvars.ContextVar("praisonai_db_run", default=None)
+            )
+        run_context.set({"run_id": value, "status": None} if value is not None else None)
 
     def _cache_put(self, cache_dict, key, value):
         """Thread-safe LRU cache put operation.
@@ -373,7 +405,31 @@ class MemoryMixin:
         """Initialize DB session if db adapter is provided (lazy, first chat only)."""
         if self._db is None or self._db_initialized:
             return
-        
+
+        with self._get_db_session_init_lock().sync():
+            if self._db_initialized:
+                return
+            self._ensure_db_session_id()
+            try:
+                history = self._db.on_agent_start(
+                    agent_name=self.name,
+                    session_id=self._session_id,
+                    user_id=self.user_id,
+                    metadata={"role": self.role, "goal": self.goal}
+                )
+                self._restore_db_history(history)
+            except Exception as e:
+                logging.warning(f"Failed to initialize DB session: {e}")
+            self._db_initialized = True
+            self._current_run_id = None
+
+    def _get_db_session_init_lock(self):
+        from .async_safety import DualLock
+
+        return self.__dict__.setdefault("_db_session_init_lock", DualLock())
+
+    def _ensure_db_session_id(self) -> None:
+        """Share session allocation between sync and async adapter callbacks."""
         # Generate session_id if not provided: default to per-hour ID (YYYYMMDDHH-agentname)
         # Protected by history lock to prevent race condition between concurrent chat() calls
         if self._session_id is None:
@@ -399,42 +455,57 @@ class MemoryMixin:
                         agent_hash = hashlib.sha256((self.name or "agent").encode()).hexdigest()[:6]
                         # per-instance suffix so same-named agents can never collide
                         self._session_id = f"{hour_str}-{agent_hash}-{uuid.uuid4().hex[:8]}"
-        
-        # Call db adapter's on_agent_start to get previous messages
-        try:
-            history = self._db.on_agent_start(
-                agent_name=self.name,
-                session_id=self._session_id,
-                user_id=self.user_id,
-                metadata={"role": self.role, "goal": self.goal}
-            )
-            
-            # Restore chat history from previous session. Rebuild the full LLM
-            # message shape so a resumed tool-using session hands the model the
-            # same transcript it saw before — assistant turns keep their
-            # ``tool_calls`` and tool-result turns keep their ``tool_call_id``
-            # (Issue #3089 parity for the DB path). Plain turns stay minimal.
-            if history:
-                for msg in history:
-                    entry = {"role": msg.role, "content": msg.content}
-                    tool_calls = getattr(msg, "tool_calls", None)
-                    if tool_calls:
-                        # ``DbMessage.tool_calls`` may arrive as provider-shaped
-                        # dicts (OpenAI format, the way _persist_message stores
-                        # them) or as ``DbToolCall`` dataclasses from an adapter
-                        # that follows the declared field type. Normalise to the
-                        # provider shape so the next model request always gets a
-                        # valid, serialisable tool-call list (Issue #5075).
-                        entry["tool_calls"] = self._normalize_restored_tool_calls(tool_calls)
-                    if getattr(msg, "tool_call_id", None):
-                        entry["tool_call_id"] = msg.tool_call_id
-                    self.chat_history.append(entry)
-                logging.info(f"Resumed session {self._session_id} with {len(history)} messages")
-        except Exception as e:
-            logging.warning(f"Failed to initialize DB session: {e}")
-        
-        self._db_initialized = True
-        self._current_run_id = None  # Track current run
+
+    def _restore_db_history(self, history) -> None:
+        # Restore chat history from previous session. Rebuild the full LLM
+        # message shape so a resumed tool-using session hands the model the
+        # same transcript it saw before — assistant turns keep their
+        # ``tool_calls`` and tool-result turns keep their ``tool_call_id``
+        # (Issue #3089 parity for the DB path). Plain turns stay minimal.
+        if history:
+            for msg in history:
+                entry = {"role": msg.role, "content": msg.content}
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    # ``DbMessage.tool_calls`` may arrive as provider-shaped
+                    # dicts (OpenAI format, the way _persist_message stores
+                    # them) or as ``DbToolCall`` dataclasses from an adapter
+                    # that follows the declared field type. Normalise to the
+                    # provider shape so the next model request always gets a
+                    # valid, serialisable tool-call list (Issue #5075).
+                    entry["tool_calls"] = self._normalize_restored_tool_calls(tool_calls)
+                if getattr(msg, "tool_call_id", None):
+                    entry["tool_call_id"] = msg.tool_call_id
+                self.chat_history.append(entry)
+            logging.info(f"Resumed session {self._session_id} with {len(history)} messages")
+
+    def _async_db_hook(self, name: str) -> Optional[Callable[..., Awaitable[Any]]]:
+        """Use adapter-provided async hooks without changing sync-only adapters."""
+        callback = getattr(self._db, f"a{name}", None)
+        return callback if inspect.iscoroutinefunction(callback) else None
+
+    async def _ainit_db_session(self) -> None:
+        """Await session reads when the adapter supplies an async callback."""
+        if self._db is None or self._db_initialized:
+            return
+        callback = self._async_db_hook("on_agent_start")
+        if callback is None:
+            self._init_db_session()
+            return
+        async with self._get_db_session_init_lock().async_lock():
+            if self._db_initialized:
+                return
+            self._ensure_db_session_id()
+            try:
+                history = await callback(
+                    agent_name=self.name, session_id=self._session_id,
+                    user_id=self.user_id, metadata={"role": self.role, "goal": self.goal},
+                )
+                self._restore_db_history(history)
+            except Exception as exc:
+                logging.warning(f"Failed to initialize DB session: {exc}")
+                return
+            self._db_initialized = True
 
     @staticmethod
     def _normalize_restored_tool_calls(tool_calls):
@@ -517,44 +588,97 @@ class MemoryMixin:
         
         self._session_store_initialized = True
 
+    def _prepare_db_run(self, input_content: str) -> dict:
+        import uuid
+
+        self._current_run_id = f"run-{uuid.uuid4().hex[:12]}"
+        return {
+            "session_id": self._session_id,
+            "run_id": self._current_run_id,
+            "input_content": input_content,
+            "metadata": {"agent_name": self.name},
+        }
+
     def _start_run(self, input_content: str):
         """Start a new run (turn) for persistence tracking."""
         if self._db is None:
             return
-        
-        import uuid
-        self._current_run_id = f"run-{uuid.uuid4().hex[:12]}"
-        
+        kwargs = self._prepare_db_run(input_content)
         try:
-            if hasattr(self._db, 'on_run_start'):
-                self._db.on_run_start(
-                    session_id=self._session_id,
-                    run_id=self._current_run_id,
-                    input_content=input_content,
-                    metadata={"agent_name": self.name}
-                )
-        except Exception as e:
-            logging.warning(f"Failed to start run: {e}")
+            if hasattr(self._db, "on_run_start"):
+                self._db.on_run_start(**kwargs)
+        except Exception as exc:
+            logging.warning(f"Failed to start run: {exc}")
+
+    async def _astart_run(self, input_content: str) -> None:
+        callback = self._async_db_hook("on_run_start")
+        if callback is None:
+            self._start_run(input_content)
+            return
+        kwargs = self._prepare_db_run(input_content)
+        try:
+            await callback(**kwargs)
+        except Exception as exc:
+            logging.warning(f"Failed to start run: {exc}")
+
+    def _db_run_end_kwargs(self, output_content, status, metrics) -> Optional[dict]:
+        if self._db is None or self._current_run_id is None:
+            return None
+        state = self._get_db_run_state()
+        if status == "completed" and state is not None and state.get("status") == "error":
+            status = "error"
+        return {
+            "session_id": self._session_id,
+            "run_id": self._current_run_id,
+            "output_content": output_content,
+            "status": status,
+            "metrics": metrics or {},
+            "metadata": {"agent_name": self.name},
+        }
 
     def _end_run(self, output_content: str, status: str = "completed", metrics: dict = None):
         """End the current run (turn)."""
-        if self._db is None or self._current_run_id is None:
+        kwargs = self._db_run_end_kwargs(output_content, status, metrics)
+        if kwargs is None:
             return
-        
         try:
-            if hasattr(self._db, 'on_run_end'):
-                self._db.on_run_end(
-                    session_id=self._session_id,
-                    run_id=self._current_run_id,
-                    output_content=output_content,
-                    status=status,
-                    metrics=metrics or {},
-                    metadata={"agent_name": self.name}
-                )
-        except Exception as e:
-            logging.warning(f"Failed to end run: {e}")
-        
-        self._current_run_id = None
+            if hasattr(self._db, "on_run_end"):
+                self._db.on_run_end(**kwargs)
+        except Exception as exc:
+            logging.warning(f"Failed to end run: {exc}")
+        finally:
+            self._current_run_id = None
+
+    async def _aend_run(self, output_content: Optional[str], status: str = "completed", metrics: Optional[dict] = None) -> None:
+        callback = self._async_db_hook("on_run_end")
+        if callback is None:
+            self._end_run(output_content, status, metrics)
+            return
+        kwargs = self._db_run_end_kwargs(output_content, status, metrics)
+        if kwargs is None:
+            return
+        import asyncio
+
+        async def save():
+            try:
+                await callback(**kwargs)
+            except Exception as exc:
+                logging.warning(f"Failed to end run: {exc}")
+
+        pending = asyncio.create_task(save())
+        try:
+            await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            # Finish the terminal write before propagating caller cancellation.
+            while not pending.done():
+                try:
+                    await asyncio.shield(pending)
+                except asyncio.CancelledError:
+                    continue
+            pending.result()
+            raise
+        finally:
+            self._current_run_id = None
 
     def _persist_message(
         self,
@@ -1136,4 +1260,3 @@ class MemoryMixin:
             logging.warning(f"Failed to save output to file '{self._output_file}': {e}")
             print(f"⚠️ Failed to save output to {self._output_file}: {e}")
             return False
-
