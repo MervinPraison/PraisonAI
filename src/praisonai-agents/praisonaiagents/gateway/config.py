@@ -68,7 +68,9 @@ class ConfigValidationError(ValueError):
         self.path = path
         self.keys = list(keys)
         self.suggestion = suggestion
-        shown = ", ".join(sorted(self.keys))
+        # Keys may be non-string YAML scalars; render by string form so the
+        # error message never raises while formatting itself.
+        shown = ", ".join(sorted(str(k) for k in self.keys))
         msg = f"{path}: unknown key(s): {shown}"
         if suggestion:
             msg += f" (did you mean '{suggestion}'?)"
@@ -76,7 +78,14 @@ class ConfigValidationError(ValueError):
 
 
 def _closest_known_key(unknown: str, known: Set[str]) -> Optional[str]:
-    """Return the closest known key to ``unknown`` for a "did you mean" hint."""
+    """Return the closest known key to ``unknown`` for a "did you mean" hint.
+
+    ``unknown`` may be any YAML scalar (e.g. a numeric/boolean mapping key), so
+    only string keys are matched — difflib expects strings and a non-string key
+    cannot be a typo of a reserved string key.
+    """
+    if not isinstance(unknown, str):
+        return None
     import difflib
 
     matches = difflib.get_close_matches(unknown, sorted(known), n=1, cutoff=0.6)
@@ -95,7 +104,13 @@ def _check_unknown_keys(
     behaviour) a prominent warning is logged for each unknown key so the
     misconfiguration surfaces before a future release makes it a hard failure.
     """
-    unknown = sorted(set(data) - known)
+    # Keys may be any YAML scalar (numeric/boolean mapping keys), so compare as
+    # strings and sort by string form to avoid a TypeError on mixed types —
+    # preserving today's tolerance (those extras were silently dropped) rather
+    # than crashing config loading.
+    unknown = sorted(
+        (k for k in data if k not in known), key=lambda k: str(k)
+    )
     if not unknown:
         return
     suggestion = _closest_known_key(unknown[0], known)
@@ -130,6 +145,11 @@ def _check_typo_keys(
 
     for key in data:
         if key in reserved:
+            continue
+        # Only a string key can be a typo of a reserved string key; a
+        # non-string key (numeric/boolean YAML scalar) passes through to
+        # metadata untouched, as before.
+        if not isinstance(key, str):
             continue
         match = difflib.get_close_matches(key, sorted(reserved), n=1, cutoff=0.8)
         if match:

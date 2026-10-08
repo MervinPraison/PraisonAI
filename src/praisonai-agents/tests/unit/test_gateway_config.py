@@ -791,3 +791,35 @@ class TestStrictKeyValidation:
         payload = {"gateway": GatewayConfig(port=9100).to_dict()}
         m = MultiChannelGatewayConfig.from_dict(payload, strict=True)
         assert m.gateway.port == 9100
+
+    def test_non_string_top_level_keys_do_not_crash(self):
+        """Non-string YAML mapping keys are tolerated, not a TypeError (#5725)."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {}, 1: True, "note": "x"}
+        )
+        assert m.gateway.port == 8765
+
+    def test_non_string_top_level_keys_strict_raises_clean(self):
+        """Strict mode reports a clean error even with non-string keys (#5725)."""
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigValidationError,
+            MultiChannelGatewayConfig,
+        )
+
+        with pytest.raises(ConfigValidationError) as exc:
+            MultiChannelGatewayConfig.from_dict(
+                {"gateway": {}, 1: True}, strict=True
+            )
+        assert "1" in str(exc.value)
+
+    def test_non_string_channel_key_passes_through(self):
+        """A non-string channel key is treated as metadata, never crashes (#5725)."""
+        from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+        m = MultiChannelGatewayConfig.from_dict(
+            {"channels": {"telegram": {"token": "x", 1: "y"}}}, strict=True
+        )
+        assert m.channels["telegram"].metadata[1] == "y"
