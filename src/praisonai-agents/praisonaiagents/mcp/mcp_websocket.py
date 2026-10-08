@@ -20,14 +20,13 @@ import asyncio
 import json
 from praisonaiagents._logging import get_logger
 import threading
-import inspect
 import re
 from typing import Any, Dict, Optional, List
 
 logger = get_logger("mcp-websocket")
 
 # Import shared utilities for thread-safe event loop and schema fixing
-from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict
+from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict, build_tool_signature, get_running_loop_or_none
 
 def is_websocket_url(url: str) -> bool:
     """
@@ -277,45 +276,9 @@ class WebSocketMCPTool:
         self.timeout = timeout
         
         # Build function signature from input schema
-        self.__signature__ = self._build_signature()
-    
-    def _build_signature(self) -> inspect.Signature:
-        """Build function signature from input schema."""
-        params = []
-        
-        if self.input_schema and 'properties' in self.input_schema:
-            required = self.input_schema.get('required', [])
-            
-            for param_name, prop_schema in self.input_schema['properties'].items():
-                # Determine type annotation
-                prop_type = prop_schema.get('type', 'string') if isinstance(prop_schema, dict) else 'string'
-                annotation = self._json_type_to_python(prop_type)
-                
-                # Determine default value
-                default = inspect.Parameter.empty if param_name in required else None
-                
-                params.append(
-                    inspect.Parameter(
-                        name=param_name,
-                        kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        default=default,
-                        annotation=annotation
-                    )
-                )
-        
-        return inspect.Signature(params)
-    
-    def _json_type_to_python(self, json_type: str) -> type:
-        """Convert JSON Schema type to Python type."""
-        type_map = {
-            'string': str,
-            'integer': int,
-            'number': float,
-            'boolean': bool,
-            'array': list,
-            'object': dict
-        }
-        return type_map.get(json_type, Any)
+        self.__signature__ = build_tool_signature(self.input_schema)
+        # The client creates this wrapper on the loop that owns ``session``
+        self._loop = get_running_loop_or_none()
     
     def __call__(self, **kwargs):
         """
@@ -325,7 +288,8 @@ class WebSocketMCPTool:
         """
         logger.debug(f"Tool {self.name} called with args: {kwargs}")
         
-        loop = get_event_loop()
+        # Run on the session's loop; the caller's thread-local loop is not running
+        loop = self._loop or get_event_loop()
         future = asyncio.run_coroutine_threadsafe(self._async_call(**kwargs), loop)
         
         try:

@@ -798,67 +798,25 @@ class MCP:
 
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
-        # Determine parameter names from the schema
-        param_names = []
-        param_annotations = {}
-        required_params = []
-        
-        if hasattr(tool, 'inputSchema') and tool.inputSchema:
-            properties = tool.inputSchema.get("properties", {})
-            required = tool.inputSchema.get("required", [])
-            
-            for name, prop in properties.items():
-                param_names.append(name)
-                
-                # Set annotation based on property type
-                prop_type = prop.get("type", "string")
-                if prop_type == "string":
-                    param_annotations[name] = str
-                elif prop_type == "integer":
-                    param_annotations[name] = int
-                elif prop_type == "number":
-                    param_annotations[name] = float
-                elif prop_type == "boolean":
-                    param_annotations[name] = bool
-                elif prop_type == "array":
-                    param_annotations[name] = list
-                elif prop_type == "object":
-                    param_annotations[name] = dict
-                else:
-                    param_annotations[name] = Any
-                
-                if name in required:
-                    required_params.append(name)
-        
-        # Create the function signature
-        # Separate required and optional parameters to ensure proper ordering
-        # (required parameters must come before optional parameters)
-        required_param_objects = []
-        optional_param_objects = []
-        
-        for name in param_names:
-            is_required = name in required_params
-            param = inspect.Parameter(
-                name=name,
-                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=inspect.Parameter.empty if is_required else None,
-                annotation=param_annotations.get(name, Any)
-            )
-            
-            if is_required:
-                required_param_objects.append(param)
-            else:
-                optional_param_objects.append(param)
-        
-        # Combine parameters with required first, then optional
-        params = required_param_objects + optional_param_objects
+        from .mcp_schema_utils import build_tool_signature
+
+        input_schema = getattr(tool, 'inputSchema', None) or {}
+        properties = input_schema.get("properties") or {}
+        # Positional arguments map onto schema properties in declaration order
+        param_names = list(properties) if isinstance(properties, dict) else []
+        signature = build_tool_signature(input_schema)
+        param_annotations = {
+            name: param.annotation
+            for name, param in signature.parameters.items()
+            if param.kind is not inspect.Parameter.VAR_KEYWORD
+        }
         
         # Create function template to be properly decorated
         def template_function(*args, **kwargs):
             return None
         
         # Create a proper function with the correct signature
-        template_function.__signature__ = inspect.Signature(params)
+        template_function.__signature__ = signature
         template_function.__annotations__ = param_annotations
         template_function.__name__ = tool.name
         template_function.__qualname__ = tool.name
@@ -880,7 +838,7 @@ class MCP:
             return self.runner.call_tool(tool.name, all_args)
         
         # Make sure the wrapper has the correct signature for inspection
-        wrapper.__signature__ = inspect.Signature(params)
+        wrapper.__signature__ = signature
         
         return wrapper
     
