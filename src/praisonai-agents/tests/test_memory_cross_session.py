@@ -322,25 +322,57 @@ class TestSqliteDbPathAlias(unittest.TestCase):
 
     def test_db_path_persists_and_recalls_across_instances(self):
         """A turn stored through a shared ``db_path`` is recalled by a second
-        Memory pointed at the same file — the end-to-end cross-instance path."""
+        Memory pointed at the same file — the end-to-end cross-instance path.
+
+        The recall must come from the *caller-supplied file*: the shared db
+        exists after the write, and the per-user default fallback path never
+        does. Without the fix ``db_path`` was dropped and both instances used
+        the same default store, so the plain recall assertion alone would still
+        pass while silently ignoring ``db_path`` — these file-location asserts
+        close that gap (Greptile). Runs in an isolated temp cwd so the default
+        path check is hermetic (the default store lives under ``cwd/.praisonai``).
+        """
         from praisonaiagents.memory import Memory
+        from praisonaiagents.paths import get_project_data_dir
 
+        cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmpdir:
-            shared = f"{tmpdir}/mem.db"
-            writer = Memory(config={"provider": "sqlite", "db_path": shared})
-            writer.store_long_term(
-                "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
-                metadata={"user_id": "db-path-user"},
-            )
+            os.chdir(tmpdir)
+            try:
+                shared = os.path.join(tmpdir, "mem.db")
+                default_dir = str(get_project_data_dir())
+                default_long = os.path.join(default_dir, "long_term.db")
+                default_short = os.path.join(default_dir, "short_term.db")
 
-            reader = Memory(config={"provider": "sqlite", "db_path": shared})
-            hits = reader.search_long_term(
-                "codename", limit=5, user_id="db-path-user"
-            )
-            self.assertTrue(
-                any("ORANGE-PANDA" in r.get("text", "") for r in hits),
-                "second Memory on the same db_path must recall the stored turn",
-            )
+                writer = Memory(config={"provider": "sqlite", "db_path": shared})
+                writer.store_long_term(
+                    "User: Remember codename ORANGE-PANDA.\nAssistant: Acknowledged.",
+                    metadata={"user_id": "db-path-user"},
+                )
+
+                self.assertTrue(
+                    os.path.exists(shared),
+                    "db_path file must be created by the write, proving it was used",
+                )
+                self.assertFalse(
+                    os.path.exists(default_long),
+                    "the default long_term.db must not be used when db_path is set",
+                )
+                self.assertFalse(
+                    os.path.exists(default_short),
+                    "the default short_term.db must not be used when db_path is set",
+                )
+
+                reader = Memory(config={"provider": "sqlite", "db_path": shared})
+                hits = reader.search_long_term(
+                    "codename", limit=5, user_id="db-path-user"
+                )
+                self.assertTrue(
+                    any("ORANGE-PANDA" in r.get("text", "") for r in hits),
+                    "second Memory on the same db_path must recall the stored turn",
+                )
+            finally:
+                os.chdir(cwd)
 
 
 if __name__ == "__main__":
