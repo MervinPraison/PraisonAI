@@ -148,3 +148,88 @@ class HistoryOnlyStore:
 
     def get_chat_history(self, session_id, max_messages=None):
         return self._histories.get(session_id, [])
+
+
+class FakeAgent:
+    """Lightweight chat agent (no session-isolation surface) for WS/chat tests."""
+
+    def __init__(self, name="assistant"):
+        self.name = name
+
+    def chat(self, message):
+        return f"echo:{message}"
+
+
+class FakeTeam:
+    def __init__(self, name="team1"):
+        self.name = name
+
+    def run(self, message):
+        return f"team:{message}"
+
+
+class FakeFlow:
+    def __init__(self, name="flow1"):
+        self.name = name
+
+    async def astart(self, message):
+        return f"flow:{message}"
+
+
+class TestTeamsAndFlows:
+    """The constructor accepts teams/flows and `/` reports their counts, so a
+    POST to invoke them must exist (and 404 on an unknown name)."""
+
+    def test_team_run_returns_result(self):
+        client = _client(teams=[FakeTeam("team1")])
+        body = client.post("/api/teams/team1/run", json={"message": "hi"}).json()
+        assert body["result"] == "team:hi"
+
+    def test_unknown_team_is_404(self):
+        client = _client(teams=[FakeTeam("team1")])
+        assert client.post("/api/teams/nope/run", json={"message": "hi"}).status_code == 404
+
+    def test_flow_run_uses_async_entry_point(self):
+        client = _client(flows=[FakeFlow("flow1")])
+        body = client.post("/api/flows/flow1/run", json={"message": "go"}).json()
+        assert body["result"] == "flow:go"
+
+    def test_unknown_flow_is_404(self):
+        client = _client(flows=[FakeFlow("flow1")])
+        assert client.post("/api/flows/nope/run", json={"message": "x"}).status_code == 404
+
+
+class TestWebSocketChat:
+    def test_stream_echoes_response_then_done(self):
+        client = _client(agents=[FakeAgent("assistant")])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"response": "echo:hi"}
+            assert ws.receive_json() == {"done": True}
+
+    def test_unknown_agent_is_reported(self):
+        client = _client(agents=[FakeAgent("assistant")])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi", "agent_name": "ghost"})
+            assert "not found" in ws.receive_json()["error"]
+
+    def test_configured_key_rejects_unauthenticated_socket(self):
+        # When a launch token is configured, the HTTP middleware never runs on
+        # the WS handshake -- the socket must reject a tokenless client itself.
+        from praisonaiagents import AgentOSConfig
+        from starlette.websockets import WebSocketDisconnect
+
+        os_ = AgentOS(agents=[FakeAgent("assistant")], config=AgentOSConfig(api_key="secret"))
+        client = TestClient(os_.get_app())
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/chat/stream") as ws:
+                ws.receive_json()
+
+    def test_configured_key_accepts_authenticated_socket(self):
+        from praisonaiagents import AgentOSConfig
+
+        os_ = AgentOS(agents=[FakeAgent("assistant")], config=AgentOSConfig(api_key="secret"))
+        client = TestClient(os_.get_app())
+        with client.websocket_connect("/api/chat/stream?api_key=secret") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"response": "echo:hi"}

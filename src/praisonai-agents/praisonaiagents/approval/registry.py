@@ -235,6 +235,30 @@ class ApprovalRegistry:
                 return level
         return self._risk_levels.get(tool_name)
 
+    def list_requirements(self) -> List[Dict[str, Optional[str]]]:
+        """Public, stable view of every approval requirement.
+
+        Returns one entry per (tool, agent) pair -- ``agent`` is ``None`` for a
+        global requirement -- so callers (e.g. an HTTP ``/approvals`` surface)
+        can enumerate requirements without reaching into private fields. Keeps
+        the internal storage shape free to change without breaking consumers.
+        """
+        requirements: List[Dict[str, Optional[str]]] = []
+        for tool_name in sorted(self._required_tools):
+            requirements.append({
+                "tool": tool_name,
+                "agent": None,
+                "risk_level": self.get_risk_level(tool_name),
+            })
+        for agent_name, tools in self._agent_required_tools.items():
+            for tool_name in sorted(tools):
+                requirements.append({
+                    "tool": tool_name,
+                    "agent": agent_name,
+                    "risk_level": self.get_risk_level(tool_name, agent_name),
+                })
+        return requirements
+
     # ── Per-tool auto-approval (G-A fix) ─────────────────────────────────
 
     def auto_approve_tool(self, tool_name: str, agent_name: str) -> None:
