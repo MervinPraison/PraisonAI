@@ -399,6 +399,8 @@ Multi-Agent Safe:
 | Backward compatible | Public API changes require deprecation cycle |
 | Safe defaults | New features are opt-in, not opt-out |
 | Deterministic tests | Tests must not depend on timing or external state |
+| Precedent is not permission | Judge changes against the rules, not the nearest existing example; a prior inline implementation is not a licence to add more |
+| Routing is a blocking gate | A mis-routed change is blocking on its own merits — relocate it before approving, regardless of code quality |
 
 ### 4.7 Concurrency Model
 
