@@ -13,6 +13,25 @@ import os
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
 
+_LIVE_INSTANCE: Optional["AgentOS"] = None
+
+
+def _agentos_factory() -> Any:
+    """Uvicorn app-factory used by :meth:`AgentOS.serve` when ``reload=True``.
+
+    Uvicorn requires an import string (not a live app object) to enable
+    ``reload``/``workers``; passing an instance silently disables reload. This
+    factory lets ``serve`` hand uvicorn the import string
+    ``"praisonai.app.agentos:_agentos_factory"`` so reload actually works.
+    """
+    if _LIVE_INSTANCE is None:
+        raise RuntimeError(
+            "AgentOS._agentos_factory called without a live instance; "
+            "AgentOS.serve() must set the module-level instance first."
+        )
+    return _LIVE_INSTANCE.get_app()
+
+
 def _run_to_dict(record: Any) -> Dict[str, Any]:
     """A RunRecord as JSON. Uses whatever the record exposes rather than
     assuming a shape, so a ledger with extra fields is not silently truncated."""
@@ -385,17 +404,34 @@ class AgentOS:
                 "Uvicorn is required for AgentOS. "
                 "Install with: pip install praisonai[api]"
             )
-        
-        app = self.get_app()
-        
-        uvicorn.run(
-            app,
-            host=host or self.config.host,
-            port=port or self.config.port,
-            reload=reload or self.config.reload,
-            log_level=self.config.log_level,
-            **kwargs
-        )
+
+        resolved_host = host or self.config.host
+        resolved_port = port or self.config.port
+        enable_reload = reload or self.config.reload
+
+        if enable_reload:
+            # Uvicorn needs an import string (not a live app object) to enable
+            # reload; passing the instance silently drops reload. Expose this
+            # instance via the module-level factory and hand uvicorn the string.
+            global _LIVE_INSTANCE
+            _LIVE_INSTANCE = self
+            uvicorn.run(
+                "praisonai.app.agentos:_agentos_factory",
+                factory=True,
+                host=resolved_host,
+                port=resolved_port,
+                reload=True,
+                log_level=self.config.log_level,
+                **kwargs
+            )
+        else:
+            uvicorn.run(
+                self.get_app(),
+                host=resolved_host,
+                port=resolved_port,
+                log_level=self.config.log_level,
+                **kwargs
+            )
 
 
 # Verify protocol compliance

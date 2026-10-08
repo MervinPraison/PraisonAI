@@ -22,6 +22,34 @@ from typing import Any, Dict, List, Optional
 
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
+# Env var carrying the JSON-serialised {"builder": name, "config": {...}} used by
+# ``_serve_app_factory`` when ``serve --reload`` hands uvicorn an import string
+# instead of a live app object (uvicorn silently drops reload for instances).
+_SERVE_RELOAD_ENV = "PRAISONAI_SERVE_RELOAD_SPEC"
+
+
+def _serve_app_factory() -> Any:
+    """Uvicorn app-factory for ``praisonai serve --reload``.
+
+    Uvicorn requires an import string (not a live app object) to enable reload;
+    passing an instance silently disables it. ``_run_server`` serialises the
+    chosen app-builder + parsed config into :data:`_SERVE_RELOAD_ENV` and hands
+    uvicorn ``"praisonai.cli.features.serve:_serve_app_factory"`` so reload
+    actually works.
+    """
+    import json
+
+    raw = os.environ.get(_SERVE_RELOAD_ENV)
+    if not raw:
+        raise RuntimeError(
+            "_serve_app_factory called without a reload spec; "
+            "_run_server must set it before enabling reload."
+        )
+    spec = json.loads(raw)
+    handler = ServeHandler()
+    builder = getattr(handler, spec["builder"])
+    return builder(spec["config"])
+
 
 def _install_api_key_middleware(
     app: Any,
@@ -241,7 +269,13 @@ Launch PraisonAI servers with unified discovery support.
             
             # Create and run server
             app = self._create_agents_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], parsed["reload"])
+            self._run_server(
+                app,
+                parsed["host"],
+                parsed["port"],
+                parsed["reload"],
+                reload_spec={"builder": "_create_agents_app", "config": parsed},
+            )
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -872,7 +906,13 @@ Launch PraisonAI servers with unified discovery support.
             print("  Discovery: /__praisonai__/discovery")
             
             app = self._create_unified_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], parsed["reload"])
+            self._run_server(
+                app,
+                parsed["host"],
+                parsed["port"],
+                parsed["reload"],
+                reload_spec={"builder": "_create_unified_app", "config": parsed},
+            )
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -966,12 +1006,42 @@ Launch PraisonAI servers with unified discovery support.
         
         return app
     
-    def _run_server(self, app: Any, host: str, port: int, reload: bool) -> None:
-        """Run the server with uvicorn."""
+    def _run_server(
+        self,
+        app: Any,
+        host: str,
+        port: int,
+        reload: bool,
+        reload_spec: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Run the server with uvicorn.
+
+        Args:
+            app: Prebuilt FastAPI app (used when ``reload`` is False).
+            host, port: Bind address.
+            reload: Enable auto-reload.
+            reload_spec: ``{"builder": <ServeHandler method name>, "config": {...}}``
+                describing how to rebuild the app. Required to honour ``reload``:
+                uvicorn needs an import string (not a live instance) to enable
+                reload, so without a spec a reload request is silently dropped.
+        """
+        import json
         import os
         import uvicorn
 
         os.environ["PRAISONAI_CALL_BIND_HOST"] = host
+
+        if reload and reload_spec is not None:
+            os.environ[_SERVE_RELOAD_ENV] = json.dumps(reload_spec)
+            uvicorn.run(
+                "praisonai.cli.features.serve:_serve_app_factory",
+                factory=True,
+                host=host,
+                port=port,
+                reload=True,
+            )
+            return
+
         uvicorn.run(app, host=host, port=port, reload=reload)
 
 
