@@ -22,7 +22,9 @@ You are working on the PraisonAI project.
 | Python core SDK | `src/praisonai-agents/praisonaiagents/` | `src/praisonai-agents/AGENTS.md` | `pytest` in `src/praisonai-agents/tests/` |
 | Python wrapper / CLI | `src/praisonai/`, `src/praisonai-code/`, etc. | `src/praisonai-agents/AGENTS.md` | `pytest` under `src/praisonai/tests/` |
 | **TypeScript / JavaScript SDK** | **`src/praisonai-ts/`** | **`src/praisonai-ts/AGENTS.md`** | `cd src/praisonai-ts && npm run build && npm test` |
-| Agent-callable tools | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) | — | repo tests |
+| Agent-callable tools (incl. third-party vendor service clients) | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) | — | repo tests |
 | Lifecycle plugins | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | — | repo tests |
 | Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | — | `nav-check` |
 | npm mirror (read-only for fixes) | [praisonai-js](https://github.com/MervinPraison/praisonai-js) | mirror of `src/praisonai-ts/AGENTS.md` | CI on praisonai-js |
+
+> **Precedent is not permission.** A new third-party vendor *service* client (e.g. a search/API provider hitting `api.<vendor>.com`) belongs in **PraisonAI-Tools**, even when a core aggregator file (e.g. `tools/web_search.py`) already inlines similar providers. The existence of an earlier inlined vendor is **not** a licence to add more inline — judge each against the global routing + §4.6 scope-creep rule, never against the nearest local precedent. If keyless providers must stay reachable from a core helper without an install, add a provider entry-point seam rather than editing core per vendor.
