@@ -278,12 +278,19 @@ class Parallel:
     - "partial_ok": Continue with partial results if some branches fail (default)
     - "fail_fast": Cancel remaining branches and fail immediately on first error
     - "fail_all": Wait for all branches to complete, then fail if any failed
+
+    timeout: optional per-Parallel wall-clock bound (seconds). If branches are
+    still running after it elapses the block raises WorkflowStepError instead of
+    hanging forever. Threads running user code cannot be force-killed in Python,
+    so a timed-out/cancelled branch may keep running in the background, but the
+    caller is no longer blocked on it.
     """
     steps: List = field(default_factory=list)
     max_workers: Optional[int] = None  # None = use system default
     on_failure: str = "partial_ok"  # "partial_ok" | "fail_fast" | "fail_all"
-    
-    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok"):
+    timeout: Optional[float] = None  # None = no wall-clock bound
+
+    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok", timeout: Optional[float] = None):
         valid_on_failure = {"partial_ok", "fail_fast", "fail_all"}
         if on_failure not in valid_on_failure:
             raise ValueError(
@@ -293,6 +300,7 @@ class Parallel:
         self.steps = steps
         self.max_workers = max_workers
         self.on_failure = on_failure
+        self.timeout = timeout
 
 @dataclass
 class Loop:
@@ -460,6 +468,7 @@ def parallel(
     steps: List,
     max_workers: Optional[int] = None,
     on_failure: str = "partial_ok",
+    timeout: Optional[float] = None,
 ) -> Parallel:
     """Execute steps in parallel.
 
@@ -468,8 +477,10 @@ def parallel(
         max_workers: Optional cap on ThreadPoolExecutor workers. When unset,
             defaults to min(DEFAULT_MAX_PARALLEL_WORKERS, len(steps)).
         on_failure: Failure strategy — "partial_ok" (default), "fail_fast", or "fail_all".
+        timeout: Optional per-Parallel wall-clock bound (seconds); raises instead
+            of hanging if branches are still running when it elapses.
     """
-    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure)
+    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure, timeout=timeout)
 
 def loop(step: Any = None, steps: Optional[List[Any]] = None,
          over: Optional[str] = None, from_csv: Optional[str] = None, 
@@ -3465,8 +3476,22 @@ CONCISE SUMMARY:"""
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
         effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = []
+        # Optional wall-clock bound so one hung branch cannot block forever.
+        timeout = getattr(parallel_step, "timeout", None)
+        deadline = (time.monotonic() + timeout) if timeout else None
+
+        # Index-keyed collectors so branches can be consumed in *completion*
+        # order (fail_fast must raise as soon as any branch fails, not after
+        # every earlier-declared branch finishes) while the final merge below
+        # still rebuilds results/outputs/branch_deltas in declaration order -
+        # so parallel_outputs[idx] alignment and fail_all ordering are unchanged.
+        succeeded = {}   # idx -> {"result": {...}, "delta": {...}, "stop": bool}
+        failed = {}      # idx -> {"error": e, "delta": {...} | None, "stop": bool}
+        parallel_stopped = False
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
+        try:
+            future_to_idx = {}
             for idx, step in enumerate(parallel_step.steps):
                 # Wrap execution to propagate context and set branch_id for parallel tracking
                 # Each branch writes into its OWN deep copy: concurrent writes to
@@ -3487,85 +3512,124 @@ CONCISE SUMMARY:"""
                         )
                     finally:
                         emitter.clear_branch()
-                
+
                 future = executor.submit(copy_context_to_callable(execute_with_branch))
-                futures.append((idx, future))
-            
-            errors = []
-            parallel_stopped = False
-            for idx, future in futures:
-                try:
-                    step_result = future.result()
-                except Exception as e:
-                    # A branch that raised before _apply_step_policies could catch
-                    # it (e.g. a pattern-level error). Treat like a branch failure.
-                    branch_error = e
-                    step_result = None
-                else:
-                    # A nested step that failed now surfaces its error via the
-                    # result dict instead of raising (so on_error can be honored),
-                    # so the future resolves successfully. Detect that here so the
-                    # Parallel on_failure modes still fire instead of silently
-                    # treating the exception text as a real branch output.
-                    branch_error = step_result.get("error")
-                    # A branch step with on_error="stop" (Task default) requests a
-                    # workflow-wide halt. Capture it so the enclosing workflow stops
-                    # after this parallel block, matching Loop/Route/Repeat/If.
-                    if step_result.get("stop"):
-                        parallel_stopped = True
+                future_to_idx[future] = idx
 
-                if branch_error is None:
-                    results.append({"step": step_result["step"], "output": step_result["output"]})
-                    outputs.append(step_result["output"])
-                    branch_deltas.append(
-                        (idx, self._branch_variable_delta(step_result.get("variables")))
-                    )
-                    continue
-
-                logger.error(f"Parallel branch {idx} failed: {branch_error}")
-                errors.append({"step": idx, "error": branch_error})
-                # The whole run has a failed branch regardless of on_failure mode.
-                self.status = "failed"
-                if parallel_step.on_failure == "fail_fast":
-                    # Cancel remaining futures
-                    for _, f in futures:
+            pending = set(future_to_idx)
+            fail_fast_error = None  # (idx, branch_error) of the first fail_fast failure
+            while pending:
+                remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                done, pending = concurrent.futures.wait(
+                    pending, timeout=remaining,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                if not done:
+                    # Timed out with branches still running. Cancel what we can and
+                    # stop blocking the caller on threads that cannot be interrupted.
+                    for f in pending:
                         f.cancel()
-                    # Only chain a real exception; nested steps surface the error
-                    # as a string, so guard against `raise ... from <str>` which
-                    # would itself raise TypeError and mask the failure.
-                    cause = branch_error if isinstance(branch_error, BaseException) else None
+                    self.status = "failed"
                     raise WorkflowStepError(
-                        f"Parallel branch {idx} failed", cause=cause, errors=errors
-                    ) from cause
-                elif parallel_step.on_failure == "partial_ok":
-                    # Record the failure but continue with other branches. Do not
-                    # fold the exception text into outputs as if it were data.
-                    results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
-                    # "partial_ok" means partial results are kept, so the variables
-                    # the branch's *completed* steps wrote are kept too. (The failed
-                    # step itself never reaches the output_variable write, so nothing
-                    # from it can leak in here.) fail_fast/fail_all raise instead, so
-                    # nothing from a failed branch is merged under those modes.
-                    if step_result is not None:
-                        branch_deltas.append(
-                            (idx, self._branch_variable_delta(step_result.get("variables")))
-                        )
-                    # Keep `outputs` index-aligned with parallel_step.steps so a
-                    # downstream reader of parallel_outputs[idx] cannot silently
-                    # receive a later branch's result once an earlier one fails.
-                    outputs.append(None)
-                    # A failed branch whose step requested on_error="stop" halts the
-                    # enclosing workflow even under partial_ok.
-                    if step_result is not None and step_result.get("stop"):
-                        parallel_stopped = True
-            
-            # Check if we should fail after all branches completed
-            if errors and parallel_step.on_failure == "fail_all":
-                first_error = errors[0]["error"]
-                cause = first_error if isinstance(first_error, BaseException) else None
+                        f"{len(pending)} parallel branch(es) timed out after {timeout}s",
+                        errors=[{"step": future_to_idx[f], "error": "timeout"} for f in pending],
+                    )
+
+                for future in done:
+                    idx = future_to_idx[future]
+                    try:
+                        step_result = future.result()
+                    except Exception as e:
+                        # A branch that raised before _apply_step_policies could catch
+                        # it (e.g. a pattern-level error). Treat like a branch failure.
+                        branch_error = e
+                        step_result = None
+                    else:
+                        # A nested step that failed now surfaces its error via the
+                        # result dict instead of raising (so on_error can be honored),
+                        # so the future resolves successfully. Detect that here so the
+                        # Parallel on_failure modes still fire instead of silently
+                        # treating the exception text as a real branch output.
+                        branch_error = step_result.get("error")
+
+                    branch_stop = bool(step_result and step_result.get("stop"))
+
+                    if branch_error is None:
+                        succeeded[idx] = {
+                            "result": {"step": step_result["step"], "output": step_result["output"]},
+                            "output": step_result["output"],
+                            "delta": self._branch_variable_delta(step_result.get("variables")),
+                            "stop": branch_stop,
+                        }
+                        continue
+
+                    logger.error(f"Parallel branch {idx} failed: {branch_error}")
+                    # The whole run has a failed branch regardless of on_failure mode.
+                    self.status = "failed"
+                    failed[idx] = {
+                        "error": branch_error,
+                        # partial_ok keeps the variables the branch's *completed*
+                        # steps wrote; fail_fast/fail_all raise, so nothing from a
+                        # failed branch is merged under those modes.
+                        "delta": self._branch_variable_delta(step_result.get("variables")) if step_result is not None else None,
+                        "stop": branch_stop,
+                    }
+                    if parallel_step.on_failure == "fail_fast":
+                        # Record the first failure, stop waiting, cancel the rest,
+                        # and raise immediately without blocking on running threads.
+                        fail_fast_error = (idx, branch_error)
+                        for f in pending:
+                            f.cancel()
+                        pending = set()
+                        break
+
+            if fail_fast_error is not None:
+                idx, branch_error = fail_fast_error
+                # Only chain a real exception; nested steps surface the error
+                # as a string, so guard against `raise ... from <str>` which
+                # would itself raise TypeError and mask the failure.
+                cause = branch_error if isinstance(branch_error, BaseException) else None
                 raise WorkflowStepError(
-                    f"{len(errors)} parallel branches failed", errors=errors, cause=cause
+                    f"Parallel branch {idx} failed", cause=cause,
+                    errors=[{"step": idx, "error": branch_error}],
                 ) from cause
+        finally:
+            # Do not block the caller on branches that cannot be interrupted.
+            # shutdown(wait=True) (the `with` default) is what held the fail_fast
+            # raise until the slowest sibling finished.
+            executor.shutdown(wait=False)
+
+        # Rebuild results/outputs/branch_deltas in declaration order so
+        # parallel_outputs[idx] alignment and fail_all ordering are preserved
+        # regardless of the order branches completed in.
+        errors = []
+        for idx in range(len(parallel_step.steps)):
+            if idx in succeeded:
+                info = succeeded[idx]
+                results.append(info["result"])
+                outputs.append(info["output"])
+                branch_deltas.append((idx, info["delta"]))
+                if info["stop"]:
+                    parallel_stopped = True
+            elif idx in failed:
+                info = failed[idx]
+                errors.append({"step": idx, "error": info["error"]})
+                # partial_ok: record the failure but keep going; fold neither the
+                # exception text into outputs nor skip the index alignment.
+                results.append({"step": f"parallel_{idx}", "output": None, "error": str(info["error"])})
+                if info["delta"] is not None:
+                    branch_deltas.append((idx, info["delta"]))
+                outputs.append(None)
+                if info["stop"]:
+                    parallel_stopped = True
+
+        # Check if we should fail after all branches completed
+        if errors and parallel_step.on_failure == "fail_all":
+            first_error = errors[0]["error"]
+            cause = first_error if isinstance(first_error, BaseException) else None
+            raise WorkflowStepError(
+                f"{len(errors)} parallel branches failed", errors=errors, cause=cause
+            ) from cause
         
         # Merge each branch's variable writes back into the shared scope. Without
         # this every `output_variable` set inside a Parallel block was written to a
