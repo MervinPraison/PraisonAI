@@ -26,9 +26,41 @@ from praisonaiagents.session import SqliteSessionStore, SqliteTranscriptStore
 
 
 @pytest.fixture
-def tmp_dir():
-    with tempfile.TemporaryDirectory() as d:
-        yield d
+def tmp_dir(monkeypatch):
+    """Temp dir that closes any SQLite store connection before cleanup.
+
+    On Windows an open SQLite connection keeps ``sessions.db`` /
+    ``sessions_index.db`` locked, so ``TemporaryDirectory`` teardown raises
+    ``WinError 32`` ("file in use"). Track every ``SqliteSessionStore`` /
+    ``SqliteTranscriptStore`` created during the test and close its live
+    ``_conn`` in a ``finally`` block before the directory is removed. This is a
+    test-only safeguard -- production source is untouched.
+    """
+    created = []
+    for cls in (SqliteSessionStore, SqliteTranscriptStore):
+        original_init = cls.__init__
+
+        def _tracking_init(self, *args, _orig=original_init, **kwargs):
+            _orig(self, *args, **kwargs)
+            created.append(self)
+
+        monkeypatch.setattr(cls, "__init__", _tracking_init)
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            try:
+                yield d
+            finally:
+                for store in created:
+                    conn = getattr(store, "_conn", None)
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        store._conn = None
+    finally:
+        created.clear()
 
 
 MALFORMED = {"null": None, "string": "oops", "number": 42}
